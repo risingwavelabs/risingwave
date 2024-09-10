@@ -16,7 +16,7 @@ use rand::{Rng, SeedableRng};
 
 use crate::array::stream_chunk::Op;
 use crate::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder};
-use crate::buffer::Bitmap;
+use crate::bitmap::Bitmap;
 
 pub fn gen_legal_stream_chunk(
     bitmap: &Bitmap,

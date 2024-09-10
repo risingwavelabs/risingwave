@@ -14,7 +14,7 @@
 
 mod managed_lru;
 pub use managed_lru::*;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::iter_util::ZipEqFast;
 
 /// Returns whether we're unsure about the fressness of the cache after the scaling from the
@@ -38,7 +38,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 ///
 /// This brings a problem when scaling in after a while. Some partitions may be reassigned back to
 /// the current executor, while the cache entries of these partitions are still unevicted. So it's
-/// possible that these entries have been updated by other executors on other parallel units, and
+/// possible that these entries have been updated by other executors on other workers, and
 /// the content is now stale! The executor must evict these entries which are not in the
 /// **previous** partition before further processing.
 pub(super) fn cache_may_stale(

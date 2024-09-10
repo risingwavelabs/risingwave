@@ -1,4 +1,5 @@
 import sys
+import json
 import importlib
 from google.protobuf.source_context_pb2 import SourceContext
 from confluent_kafka import Producer
@@ -55,6 +56,7 @@ def send_to_kafka(
         producer.produce(
             topic=topic,
             partition=0,
+            key=json.dumps({"id": i}), # RisingWave does not handle key schema, so we use json
             value=serializer(user, SerializationContext(topic, MessageField.VALUE)),
             on_delivery=delivery_report,
         )

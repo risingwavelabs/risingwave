@@ -13,10 +13,31 @@
 // limitations under the License.
 
 use risingwave_common::types::{DatumRef, ScalarRefImpl, Timestamptz};
-use risingwave_pb::connector_service::CdcMessage;
+use risingwave_pb::connector_service::{cdc_message, CdcMessage};
 
 use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
+
+#[derive(Clone, Debug)]
+pub enum CdcMessageType {
+    Unspecified,
+    Heartbeat,
+    Data,
+    TransactionMeta,
+    SchemaChange,
+}
+
+impl From<cdc_message::CdcMessageType> for CdcMessageType {
+    fn from(msg_type: cdc_message::CdcMessageType) -> Self {
+        match msg_type {
+            cdc_message::CdcMessageType::Data => CdcMessageType::Data,
+            cdc_message::CdcMessageType::Heartbeat => CdcMessageType::Heartbeat,
+            cdc_message::CdcMessageType::TransactionMeta => CdcMessageType::TransactionMeta,
+            cdc_message::CdcMessageType::SchemaChange => CdcMessageType::SchemaChange,
+            cdc_message::CdcMessageType::Unspecified => CdcMessageType::Unspecified,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct DebeziumCdcMeta {
@@ -25,11 +46,11 @@ pub struct DebeziumCdcMeta {
     pub full_table_name: String,
     // extracted from `payload.source.ts_ms`, the time that the change event was made in the database
     pub source_ts_ms: i64,
-    // Whether the message is a transaction metadata
-    pub is_transaction_meta: bool,
+    pub msg_type: CdcMessageType,
 }
 
 impl DebeziumCdcMeta {
+    // These `extract_xxx` methods are used to support the `INCLUDE TIMESTAMP/DATABASE_NAME/TABLE_NAME` feature
     pub fn extract_timestamp(&self) -> DatumRef<'_> {
         Some(ScalarRefImpl::Timestamptz(
             Timestamptz::from_millis(self.source_ts_ms).unwrap(),
@@ -48,20 +69,25 @@ impl DebeziumCdcMeta {
         ))
     }
 
-    pub fn new(full_table_name: String, source_ts_ms: i64, is_transaction_meta: bool) -> Self {
+    pub fn new(
+        full_table_name: String,
+        source_ts_ms: i64,
+        msg_type: cdc_message::CdcMessageType,
+    ) -> Self {
         // full_table_name is in the format of `database_name.table_name`
         let db_name_prefix_len = full_table_name.as_str().find('.').unwrap_or(0);
         Self {
             db_name_prefix_len,
             full_table_name,
             source_ts_ms,
-            is_transaction_meta,
+            msg_type: msg_type.into(),
         }
     }
 }
 
 impl From<CdcMessage> for SourceMessage {
     fn from(message: CdcMessage) -> Self {
+        let msg_type = message.get_msg_type().expect("invalid message type");
         SourceMessage {
             key: if message.key.is_empty() {
                 None // only data message has key
@@ -78,7 +104,7 @@ impl From<CdcMessage> for SourceMessage {
             meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                 message.full_table_name,
                 message.source_ts_ms,
-                message.is_transaction_meta,
+                msg_type,
             )),
         }
     }

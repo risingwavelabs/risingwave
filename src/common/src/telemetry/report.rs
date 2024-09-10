@@ -14,14 +14,16 @@
 
 use std::sync::Arc;
 
+pub use risingwave_telemetry_event::{
+    current_timestamp, post_telemetry_report_pb, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
+};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
-use super::{Result, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL};
+use super::{Result, TELEMETRY_REPORT_INTERVAL};
 use crate::telemetry::pb_compatible::TelemetryToProtobuf;
-use crate::telemetry::post_telemetry_report_pb;
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
@@ -74,6 +76,13 @@ where
                 return;
             }
         };
+        TELEMETRY_TRACKING_ID
+            .set(tracking_id.clone())
+            .unwrap_or_else(|_| {
+                tracing::warn!(
+                    "Telemetry failed to set tracking_id, event reporting will be disabled"
+                )
+            });
 
         loop {
             tokio::select! {

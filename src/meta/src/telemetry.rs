@@ -17,12 +17,14 @@ use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
-    current_timestamp, telemetry_cluster_type_from_env_var, SystemData, TelemetryNodeType,
-    TelemetryReportBase, TelemetryResult,
+    current_timestamp, report_event_common, telemetry_cluster_type_from_env_var, SystemData,
+    TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::telemetry::PbTelemetryClusterType;
+use risingwave_pb::telemetry::{
+    PbTelemetryClusterType, PbTelemetryDatabaseObject, PbTelemetryEventStage,
+};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -30,6 +32,25 @@ use crate::manager::MetadataManager;
 use crate::model::ClusterId;
 
 const TELEMETRY_META_REPORT_TYPE: &str = "meta";
+
+pub(crate) fn report_event(
+    event_stage: PbTelemetryEventStage,
+    event_name: &str,
+    catalog_id: i64,
+    connector_name: Option<String>,
+    component: Option<PbTelemetryDatabaseObject>,
+    attributes: Option<jsonbb::Value>, // any json string
+) {
+    report_event_common(
+        event_stage,
+        event_name,
+        catalog_id,
+        connector_name,
+        component,
+        attributes,
+        TELEMETRY_META_REPORT_TYPE.to_string(),
+    );
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NodeCount {
@@ -71,6 +92,7 @@ pub struct MetaTelemetryReport {
 
     // Get the ENV from key `TELEMETRY_CLUSTER_TYPE`
     cluster_type: PbTelemetryClusterType,
+    object_store_media_type: &'static str,
 }
 
 impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
@@ -117,6 +139,7 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             stream_job_count: self.streaming_job_count as u32,
             stream_jobs: self.job_desc.into_iter().map(|job| job.into()).collect(),
             cluster_type: self.cluster_type as i32,
+            object_store_media_type: self.object_store_media_type.to_string(),
         };
         pb_report.encode_to_vec()
     }
@@ -143,13 +166,19 @@ impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
 pub struct MetaReportCreator {
     metadata_manager: MetadataManager,
     meta_backend: MetaBackend,
+    object_store_media_type: &'static str,
 }
 
 impl MetaReportCreator {
-    pub fn new(metadata_manager: MetadataManager, meta_backend: MetaBackend) -> Self {
+    pub fn new(
+        metadata_manager: MetadataManager,
+        meta_backend: MetaBackend,
+        object_store_media_type: &'static str,
+    ) -> Self {
         Self {
             metadata_manager,
             meta_backend,
+            object_store_media_type,
         }
     }
 }
@@ -204,6 +233,7 @@ impl TelemetryReportCreator for MetaReportCreator {
             meta_backend: self.meta_backend,
             job_desc: stream_job_desc,
             cluster_type: telemetry_cluster_type_from_env_var(),
+            object_store_media_type: self.object_store_media_type,
         })
     }
 
@@ -255,6 +285,7 @@ mod test {
             },
             job_desc: vec![],
             cluster_type: PbTelemetryClusterType::Unspecified,
+            object_store_media_type: "s3",
         };
 
         let pb_bytes = report.to_pb_bytes();

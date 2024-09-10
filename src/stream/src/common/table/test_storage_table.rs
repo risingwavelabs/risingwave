@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
@@ -77,6 +79,9 @@ async fn test_storage_table_value_indices() {
         value_indices.into_iter().map(|v| v as usize).collect_vec(),
     );
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -110,6 +115,9 @@ async fn test_storage_table_value_indices() {
     ]));
 
     epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -197,6 +205,9 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.init_epoch(epoch);
 
     let table = StorageTable::for_test(
@@ -223,6 +234,9 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     ]));
 
     epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -310,6 +324,9 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         value_indices,
     );
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![Some(1_i32.into()), None, None]));
@@ -326,6 +343,9 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         Some(222_i32.into()),
     ]));
     epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -415,6 +435,9 @@ async fn test_batch_scan_with_value_indices() {
         value_indices,
     );
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -437,6 +460,9 @@ async fn test_batch_scan_with_value_indices() {
     ]));
 
     epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -513,6 +539,9 @@ async fn test_batch_scan_chunk_with_value_indices() {
         value_indices.clone(),
     );
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.init_epoch(epoch);
 
     let gen_row = |i: i32, is_update: bool| {
@@ -554,6 +583,9 @@ async fn test_batch_scan_chunk_with_value_indices() {
         .collect_vec();
 
     epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 

@@ -36,7 +36,7 @@ pub struct EtcdElectionClient {
 
 #[async_trait::async_trait]
 impl ElectionClient for EtcdElectionClient {
-    async fn is_leader(&self) -> bool {
+    fn is_leader(&self) -> bool {
         *self.is_leader_sender.borrow()
     }
 
@@ -404,7 +404,7 @@ mod tests {
 
         let leader = new_followers.into_iter().next().unwrap();
 
-        assert!(leader.1.is_leader().await);
+        assert!(leader.1.is_leader());
     }
 
     #[tokio::test]
@@ -434,7 +434,7 @@ mod tests {
         let mut leaders = vec![];
         let mut followers = vec![];
         for (sender, client) in clients {
-            if client.is_leader().await {
+            if client.is_leader() {
                 leaders.push((sender, client));
             } else {
                 followers.push((sender, client));
@@ -476,7 +476,7 @@ mod tests {
         }
 
         for client in &clients {
-            assert!(!client.1.is_leader().await);
+            assert!(!client.1.is_leader());
         }
 
         for (stop_sender, client) in &clients {

@@ -30,7 +30,7 @@ mod utils;
 
 /// Defining the RisingWave SQL function from a Rust function.
 ///
-/// [Online version of this doc.](https://risingwavelabs.github.io/risingwave/risingwave_expr_macro/attr.function.html)
+/// [Online version of this doc.](https://risingwavelabs.github.io/risingwave/rustdoc/risingwave_expr_macro/attr.function.html)
 ///
 /// # Table of Contents
 ///
@@ -70,8 +70,8 @@ mod utils;
 /// name ( [arg_types],* [...] ) [ -> [setof] return_type ]
 /// ```
 ///
-/// Where `name` is the function name in `snake_case`, which must match the function name defined
-/// in `prost`.
+/// Where `name` is the function name in `snake_case`, which must match the function name (in `UPPER_CASE`) defined
+/// in `proto/expr.proto`.
 ///
 /// `arg_types` is a comma-separated list of argument types. The allowed data types are listed in
 /// in the `name` column of the appendix's [type matrix]. Wildcards or `auto` can also be used, as
@@ -98,7 +98,7 @@ mod utils;
 /// }
 /// ```
 ///
-/// ## Type Expansion
+/// ## Type Expansion with `*`
 ///
 /// Types can be automatically expanded to multiple types using wildcards. Here are some examples:
 ///
@@ -115,13 +115,17 @@ mod utils;
 /// #[function("cast(varchar) -> int64")]
 /// ```
 ///
-/// Please note the difference between `*` and `any`. `*` will generate a function for each type,
+/// Please note the difference between `*` and `any`: `*` will generate a function for each type,
 /// whereas `any` will only generate one function with a dynamic data type `Scalar`.
+/// This is similar to `impl T` and `dyn T` in Rust. The performance of using `*` would be much better than `any`.
+/// But we do not always prefer `*` due to better performance. In some cases, using `any` is more convenient.
+/// For example, in array functions, the element type of `ListValue` is `Scalar(Ref)Impl`.
+/// It is unnecessary to convert it from/into various `T`.
 ///
-/// ## Automatic Type Inference
+/// ## Automatic Type Inference with `auto`
 ///
 /// Correspondingly, the return type can be denoted as `auto` to be automatically inferred based on
-/// the input types. It will be inferred as the smallest type that can accommodate all input types.
+/// the input types. It will be inferred as the _smallest type_ that can accommodate all input types.
 ///
 /// For example, `#[function("add(*int, *int) -> auto")]` will be expanded to:
 ///
@@ -142,10 +146,10 @@ mod utils;
 /// #[function("neg(int64) -> int64")]
 /// ```
 ///
-/// ## Custom Type Inference Function
+/// ## Custom Type Inference Function with `type_infer`
 ///
 /// A few functions might have a return type that dynamically changes based on the input argument
-/// types, such as `unnest`.
+/// types, such as `unnest`. This is mainly for composite types like `anyarray`, `struct`, and `anymap`.
 ///
 /// In such cases, the `type_infer` option can be used to specify a function to infer the return
 /// type based on the input argument types. Its function signature is
@@ -163,7 +167,7 @@ mod utils;
 /// )]
 /// ```
 ///
-/// This type inference function will be invoked at the frontend.
+/// This type inference function will be invoked at the frontend (`infer_type_with_sigmap`).
 ///
 /// # Rust Function Signature
 ///
@@ -182,8 +186,9 @@ mod utils;
 ///
 /// ## Nullable Arguments
 ///
-/// The functions above will only be called when all arguments are not null. If null arguments need
-/// to be considered, the `Option` type can be used:
+/// The functions above will only be called when all arguments are not null.
+/// It will return null if any argument is null.
+/// If null arguments need to be considered, the `Option` type can be used:
 ///
 /// ```ignore
 /// #[function("trim_array(anyarray, int32) -> anyarray")]
@@ -192,11 +197,11 @@ mod utils;
 ///
 /// This function will be called when `n` is null, but not when `array` is null.
 ///
-/// ## Return Value
+/// ## Return `NULL`s and Errors
 ///
 /// Similarly, the return value type can be one of the following:
 ///
-/// - `T`: Indicates that a non-null value is always returned, and errors will not occur.
+/// - `T`: Indicates that a non-null value is always returned (for non-null inputs), and errors will not occur.
 /// - `Option<T>`: Indicates that a null value may be returned, but errors will not occur.
 /// - `Result<T>`: Indicates that an error may occur, but a null value will not be returned.
 /// - `Result<Option<T>>`: Indicates that a null value may be returned, and an error may also occur.
@@ -419,6 +424,16 @@ pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
+/// Different from `#[function]`, which implements the `Expression` trait for a rust scalar function,
+/// `#[build_function]` is used when you already implemented `Expression` manually.
+///
+/// The expected input is a "build" function:
+/// ```ignore
+/// fn(data_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>
+/// ```
+///
+/// It generates the function descriptor using the "build" function and
+/// registers the description to the `FUNC_SIG_MAP`.
 #[proc_macro_attribute]
 pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
@@ -637,6 +652,8 @@ pub fn capture_context(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
         let attr: CaptureContextAttr = syn::parse(attr)?;
         let user_fn: ItemFn = syn::parse(item)?;
+
+        // Generate captured function
         generate_captured_function(attr, user_fn)
     }
     match inner(attr, item) {

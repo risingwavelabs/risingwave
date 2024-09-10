@@ -19,11 +19,11 @@ use std::time::{Duration, Instant, SystemTime};
 use fail::fail_point;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compact::statistics_compact_task;
+use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
-    SubscribeCompactionEventResponse,
+    CancelCompactTask, CompactTaskAssignment, CompactTaskProgress, SubscribeCompactionEventResponse,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -156,7 +156,7 @@ impl CompactorManagerInner {
         };
         // Initialize heartbeat for existing tasks.
         task_assignment.into_iter().for_each(|assignment| {
-            manager.initiate_task_heartbeat(assignment.compact_task.unwrap());
+            manager.initiate_task_heartbeat(CompactTask::from(assignment.compact_task.unwrap()));
         });
         Ok(manager)
     }
@@ -302,7 +302,7 @@ impl CompactorManagerInner {
                         task.target_level,
                         task.base_level,
                         task.target_sub_level_id,
-                        task.task_type,
+                        task.task_type.as_str_name(),
                         compact_task_statistics
                 );
             }

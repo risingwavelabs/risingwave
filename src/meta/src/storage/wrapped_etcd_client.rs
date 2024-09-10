@@ -90,6 +90,22 @@ impl EtcdRefreshClient {
     }
 }
 
+#[easy_ext::ext(KvClientUnlimitedExt)]
+impl etcd_client::Client {
+    /// Gets a KV client with message size limit removed.
+    ///
+    /// Check the background at <https://github.com/risingwavelabs/risingwave/pull/11277>.
+    fn kv_client_unlimited(&self) -> etcd_client::KvClient {
+        #[cfg(madsim)]
+        return self.kv_client();
+
+        #[cfg(not(madsim))]
+        self.kv_client()
+            .max_decoding_message_size(usize::MAX)
+            .max_encoding_message_size(usize::MAX)
+    }
+}
+
 macro_rules! impl_etcd_client_command_proxy {
     ($func:ident, $client:ident, ($($arg:ident : $sig:ty),+), $result:ty) => {
         impl WrappedEtcdClient {
@@ -131,10 +147,10 @@ macro_rules! impl_etcd_client_command_proxy {
     }
 }
 
-impl_etcd_client_command_proxy!(get, kv_client, (key: impl Into<Vec<u8>> + Clone, opts: Option<GetOptions>), GetResponse);
-impl_etcd_client_command_proxy!(put, kv_client, (key: impl Into<Vec<u8>> + Clone, value: impl Into<Vec<u8>> + Clone, opts: Option<PutOptions>), PutResponse);
-impl_etcd_client_command_proxy!(delete, kv_client, (key: impl Into<Vec<u8>> + Clone, opts: Option<DeleteOptions>), DeleteResponse);
-impl_etcd_client_command_proxy!(txn, kv_client, (txn: Txn), TxnResponse);
+impl_etcd_client_command_proxy!(get, kv_client_unlimited, (key: impl Into<Vec<u8>> + Clone, opts: Option<GetOptions>), GetResponse);
+impl_etcd_client_command_proxy!(put, kv_client_unlimited, (key: impl Into<Vec<u8>> + Clone, value: impl Into<Vec<u8>> + Clone, opts: Option<PutOptions>), PutResponse);
+impl_etcd_client_command_proxy!(delete, kv_client_unlimited, (key: impl Into<Vec<u8>> + Clone, opts: Option<DeleteOptions>), DeleteResponse);
+impl_etcd_client_command_proxy!(txn, kv_client_unlimited, (txn: Txn), TxnResponse);
 impl_etcd_client_command_proxy!(
     grant,
     lease_client,

@@ -150,6 +150,7 @@ impl LocalQueryExecution {
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
         let timeout = self.timeout;
+        let meta_client = self.front_env.meta_client_ref();
 
         let sender1 = sender.clone();
         let exec = async move {
@@ -171,7 +172,7 @@ impl LocalQueryExecution {
         use risingwave_expr::expr_context::TIME_ZONE;
 
         use crate::expr::function_impl::context::{
-            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER,
+            AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
         };
 
         // box is necessary, otherwise the size of `exec` will double each time it is nested.
@@ -181,6 +182,7 @@ impl LocalQueryExecution {
         let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
+        let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
 
         if let Some(timeout) = timeout {
             let exec = async move {
@@ -400,6 +402,45 @@ impl LocalQueryExecution {
                         };
                         sources.push(exchange_source);
                     }
+                } else if let Some(file_scan_info) = &second_stage.file_scan_info {
+                    let chunk_size = (file_scan_info.file_location.len() as f32
+                        / (self.worker_node_manager.schedule_unit_count()) as f32)
+                        .ceil() as usize;
+                    for (id, files) in file_scan_info.file_location.chunks(chunk_size).enumerate() {
+                        let second_stage_plan_node = self.convert_plan_node(
+                            &second_stage.root,
+                            &mut None,
+                            Some(PartitionInfo::File(files.to_vec())),
+                            next_executor_id.clone(),
+                        )?;
+                        let second_stage_plan_fragment = PlanFragment {
+                            root: Some(second_stage_plan_node),
+                            exchange_info: Some(ExchangeInfo {
+                                mode: DistributionMode::Single as i32,
+                                ..Default::default()
+                            }),
+                        };
+                        let local_execute_plan = LocalExecutePlan {
+                            plan: Some(second_stage_plan_fragment),
+                            epoch: Some(self.snapshot.batch_query_epoch()),
+                            tracing_context: tracing_context.clone(),
+                        };
+                        // NOTE: select a random work node here.
+                        let worker_node = self.worker_node_manager.next_random_worker()?;
+                        let exchange_source = ExchangeSource {
+                            task_output_id: Some(TaskOutputId {
+                                task_id: Some(PbTaskId {
+                                    task_id: id as u64,
+                                    stage_id: exchange_source_stage_id,
+                                    query_id: self.query.query_id.id.clone(),
+                                }),
+                                output_id: 0,
+                            }),
+                            host: Some(worker_node.host.as_ref().unwrap().clone()),
+                            local_execute_plan: Some(Plan(local_execute_plan)),
+                        };
+                        sources.push(exchange_source);
+                    }
                 } else {
                     let second_stage_plan_node = self.convert_plan_node(
                         &second_stage.root,
@@ -459,7 +500,7 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_table()
                                 .expect("PartitionInfo should be TablePartitionInfo here");
-                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                             scan_node.scan_ranges = partition.scan_ranges;
                         }
                     }
@@ -481,7 +522,7 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_table()
                                 .expect("PartitionInfo should be TablePartitionInfo here");
-                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                         }
                     }
                     _ => unreachable!(),
@@ -493,9 +534,27 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchSource
-            | PlanNodeType::BatchKafkaScan
-            | PlanNodeType::BatchIcebergScan => {
+            PlanNodeType::BatchFileScan => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::FileScan(ref mut file_scan_node) => {
+                        if let Some(partition) = partition {
+                            let partition = partition
+                                .into_file()
+                                .expect("PartitionInfo should be FilePartitionInfo here");
+                            file_scan_node.file_location = partition;
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(PbPlanNode {
+                    children: vec![],
+                    identity,
+                    node_body: Some(node_body),
+                })
+            }
+            PlanNodeType::BatchSource | PlanNodeType::BatchKafkaScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::Source(ref mut source_node) => {
@@ -504,6 +563,29 @@ impl LocalQueryExecution {
                                 .into_source()
                                 .expect("PartitionInfo should be SourcePartitionInfo here");
                             source_node.split = partition
+                                .into_iter()
+                                .map(|split| split.encode_to_bytes().into())
+                                .collect_vec();
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(PbPlanNode {
+                    children: vec![],
+                    identity,
+                    node_body: Some(node_body),
+                })
+            }
+            PlanNodeType::BatchIcebergScan => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::IcebergScan(ref mut iceberg_scan_node) => {
+                        if let Some(partition) = partition {
+                            let partition = partition
+                                .into_source()
+                                .expect("PartitionInfo should be SourcePartitionInfo here");
+                            iceberg_scan_node.split = partition
                                 .into_iter()
                                 .map(|split| split.encode_to_bytes().into())
                                 .collect_vec();
@@ -530,7 +612,7 @@ impl LocalQueryExecution {
                             self.get_fragment_id(&side_table_desc.table_id.into())?,
                         )?;
 
-                        // TODO: should we use `pb::ParallelUnitMapping` here?
+                        // TODO: should we use `pb::WorkerSlotMapping` here?
                         node.inner_side_vnode_mapping =
                             mapping.to_expanded().into_iter().map(u64::from).collect();
                         node.worker_nodes = self.worker_node_manager.manager.list_worker_nodes();
@@ -578,7 +660,7 @@ impl LocalQueryExecution {
     fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         let reader = self.front_env.catalog_reader().read_guard();
         reader
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map(|table| table.fragment_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
@@ -591,7 +673,7 @@ impl LocalQueryExecution {
         let guard = self.front_env.catalog_reader().read_guard();
 
         let table = guard
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
 
         let fragment_id = match table.dml_fragment_id.as_ref() {

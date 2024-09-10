@@ -28,6 +28,7 @@ message RowSeqScanNode {
 
   // The pushed down `batch_limit`. Max rows needed to return.
   optional uint64 limit = 6;
+  optional plan_common.AsOf as_of = 7;
 }
 
 message SysRowSeqScanNode {
@@ -63,6 +64,33 @@ message SourceNode {
   repeated bytes split = 4;
   catalog.StreamSourceInfo info = 5;
   map<string, secret.SecretRef> secret_refs = 6;
+}
+
+message IcebergScanNode {
+  repeated plan_common.ColumnCatalog columns = 1;
+  map<string, string> with_properties = 2;
+  repeated bytes split = 3;
+  map<string, secret.SecretRef> secret_refs = 4;
+}
+
+message FileScanNode {
+  enum FileFormat {
+    FILE_FORMAT_UNSPECIFIED = 0;
+    PARQUET = 1;
+  }
+
+  enum StorageType {
+    STORAGE_TYPE_UNSPECIFIED = 0;
+    S3 = 1;
+  }
+
+  repeated plan_common.ColumnDesc columns = 1;
+  FileFormat file_format = 2;
+  StorageType storage_type = 3;
+  string s3_region = 4;
+  string s3_access_key = 5;
+  string s3_secret_key = 6;
+  repeated string file_location = 7;
 }
 
 message ProjectNode {
@@ -279,6 +307,7 @@ message LocalLookupJoinNode {
   // Null safe means it treats `null = null` as true.
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 11;
+  optional plan_common.AsOf as_of = 12;
 }
 
 // RFC: A new schedule way for distributed lookup join
@@ -295,6 +324,7 @@ message DistributedLookupJoinNode {
   // Null safe means it treats `null = null` as true.
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 9;
+  optional plan_common.AsOf as_of = 10;
 }
 
 message UnionNode {}
@@ -341,6 +371,8 @@ message PlanNode {
     SortOverWindowNode sort_over_window = 35;
     MaxOneRowNode max_one_row = 36;
     LogRowSeqScanNode log_row_seq_scan = 37;
+    FileScanNode file_scan = 38;
+    IcebergScanNode iceberg_scan = 39;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

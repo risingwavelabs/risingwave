@@ -25,7 +25,7 @@ use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
@@ -39,8 +39,8 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, prefixed_range_with_vnode, range_of_prefix,
-    start_bound_of_excluded_prefix, TableKey, TableKeyRange,
+    end_bound_of_prefix, prefixed_range_with_vnode, start_bound_of_excluded_prefix, TableKey,
+    TableKeyRange,
 };
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_pb::catalog::Table;
@@ -57,25 +57,22 @@ use risingwave_storage::store::{
     ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{deserialize_log_stream, KeyedRow, TableDistribution};
+use risingwave_storage::table::{
+    deserialize_log_stream, ChangeLogRow, KeyedRow, TableDistribution,
+};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
 
-use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
-use crate::common::cache::{StateCache, StateCacheFiller};
+use crate::common::state_cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
-/// This num is arbitrary and we may want to improve this choice in the future.
-const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
 /// Mostly watermark operators will have inserts (append-only).
 /// So this number should not need to be very large.
 /// But we may want to improve this choice in the future.
 const WATERMARK_CACHE_ENTRIES: usize = 16;
-
-type DefaultWatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
 
 /// This macro is used to mark a point where we want to randomly discard the operation and early
 /// return, only in insane mode.
@@ -95,12 +92,10 @@ pub struct StateTableInner<
     S,
     SD = BasicSerde,
     const IS_REPLICATED: bool = false,
-    W = DefaultWatermarkBufferStrategy,
     const USE_WATERMARK_CACHE: bool = false,
 > where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
 {
     /// Id for this table.
     table_id: TableId,
@@ -136,15 +131,11 @@ pub struct StateTableInner<
 
     value_indices: Option<Vec<usize>>,
 
-    /// Strategy to buffer watermark for lazy state cleaning.
-    watermark_buffer_strategy: W,
-    /// State cleaning watermark. Old states will be cleaned under this watermark when committing.
-    state_clean_watermark: Option<ScalarImpl>,
-
-    /// Watermark of the last committed state cleaning.
-    prev_cleaned_watermark: Option<ScalarImpl>,
-
-    /// Watermark cache
+    /// Pending watermark for state cleaning. Old states below this watermark will be cleaned when committing.
+    pending_watermark: Option<ScalarImpl>,
+    /// Last committed watermark for state cleaning. Will be restored on state table recovery.
+    committed_watermark: Option<ScalarImpl>,
+    /// Cache for the top-N primary keys for reducing unnecessary range deletion.
     watermark_cache: StateTableWatermarkCache,
 
     /// Data Types
@@ -174,17 +165,15 @@ pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
 /// `WatermarkCacheStateTable` caches the watermark column.
 /// It will reduce state cleaning overhead.
-pub type WatermarkCacheStateTable<S> =
-    StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, true>;
+pub type WatermarkCacheStateTable<S> = StateTableInner<S, BasicSerde, false, true>;
 pub type WatermarkCacheParameterizedStateTable<S, const USE_WATERMARK_CACHE: bool> =
-    StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, USE_WATERMARK_CACHE>;
+    StateTableInner<S, BasicSerde, false, USE_WATERMARK_CACHE>;
 
 // initialize
-impl<S, SD, W, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
+impl<S, SD, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
 {
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     /// async interface only used for replicated state table,
@@ -195,12 +184,10 @@ where
 }
 
 // initialize
-impl<S, SD, W, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, false, W, USE_WATERMARK_CACHE>
+impl<S, SD, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, false, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
 {
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     /// No need to `wait_for_epoch`, so it should complete immediately.
@@ -268,12 +255,11 @@ pub enum StateTableOpConsistencyLevel {
 // FIXME(kwannoel): Enforce that none of the constructors here
 // should be used by replicated state table.
 // Apart from from_table_catalog_inner.
-impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
 {
     /// Create state table from table catalog and store.
     ///
@@ -451,6 +437,36 @@ where
             row_serde.kind().is_column_aware()
         );
 
+        // Restore persisted table watermark.
+        let prefix_deser = if pk_indices.is_empty() {
+            None
+        } else {
+            Some(pk_serde.prefix(1))
+        };
+        let max_watermark_of_vnodes = distribution
+            .vnodes()
+            .iter_vnodes()
+            .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
+            .max();
+        let committed_watermark = if let Some(deser) = prefix_deser
+            && let Some(max_watermark) = max_watermark_of_vnodes
+        {
+            let deserialized = deser
+                .deserialize(&max_watermark)
+                .ok()
+                .and_then(|row| row[0].clone());
+            if deserialized.is_none() {
+                tracing::error!(
+                    vnodes = ?distribution.vnodes(),
+                    watermark = ?max_watermark,
+                    "Failed to deserialize persisted watermark from state store.",
+                );
+            }
+            deserialized
+        } else {
+            None
+        };
+
         let watermark_cache = if USE_WATERMARK_CACHE {
             StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
         } else {
@@ -497,9 +513,8 @@ where
             prefix_hint_len,
             table_option,
             value_indices,
-            watermark_buffer_strategy: W::default(),
-            state_clean_watermark: None,
-            prev_cleaned_watermark: None,
+            pending_watermark: None,
+            committed_watermark,
             watermark_cache,
             data_types,
             output_indices,
@@ -664,11 +679,15 @@ where
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
+        // TODO: let's not restore watermark in unit tests for now, to avoid complexity.
+        let committed_watermark = None;
+
         let watermark_cache = if USE_WATERMARK_CACHE {
             StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
         } else {
             StateTableWatermarkCache::new(0)
         };
+
         Self {
             table_id,
             local_store: local_state_store,
@@ -680,9 +699,8 @@ where
             prefix_hint_len: 0,
             table_option: Default::default(),
             value_indices,
-            watermark_buffer_strategy: W::default(),
-            state_clean_watermark: None,
-            prev_cleaned_watermark: None,
+            pending_watermark: None,
+            committed_watermark,
             watermark_cache,
             data_types,
             output_indices: vec![],
@@ -750,7 +768,7 @@ where
     }
 
     fn is_dirty(&self) -> bool {
-        self.local_store.is_dirty() || self.state_clean_watermark.is_some()
+        self.local_store.is_dirty() || self.pending_watermark.is_some()
     }
 
     pub fn is_consistent_op(&self) -> bool {
@@ -762,11 +780,10 @@ where
     }
 }
 
-impl<S, SD, W, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
+impl<S, SD, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
 {
     /// Create replicated state table from table catalog with output indices
     pub async fn from_table_catalog_with_output_column_ids(
@@ -787,13 +804,8 @@ where
 }
 
 // point get
-impl<
-        S,
-        SD,
-        const IS_REPLICATED: bool,
-        W: WatermarkBufferStrategy,
-        const USE_WATERMARK_CACHE: bool,
-    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -893,7 +905,7 @@ where
         let cache_may_stale = cache_may_stale(self.vnodes(), &new_vnodes);
 
         if cache_may_stale {
-            self.state_clean_watermark = None;
+            self.pending_watermark = None;
             if USE_WATERMARK_CACHE {
                 self.watermark_cache.clear();
             }
@@ -907,13 +919,8 @@ where
 }
 
 // write
-impl<
-        S,
-        SD,
-        const IS_REPLICATED: bool,
-        W: WatermarkBufferStrategy,
-        const USE_WATERMARK_CACHE: bool,
-    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1129,12 +1136,15 @@ where
     /// # Arguments
     ///
     /// * `watermark` - Latest watermark received.
-    /// * `eager_cleaning` - Whether to clean up the state table eagerly.
-    pub fn update_watermark(&mut self, watermark: ScalarImpl, eager_cleaning: bool) {
+    pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
-        if self.watermark_buffer_strategy.apply() || eager_cleaning {
-            self.state_clean_watermark = Some(watermark);
-        }
+        self.pending_watermark = Some(watermark);
+    }
+
+    /// Get the committed watermark of the state table. Watermarks should be fed into the state
+    /// table through `update_watermark` method.
+    pub fn get_committed_watermark(&self) -> Option<&ScalarImpl> {
+        self.committed_watermark.as_ref()
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -1147,6 +1157,13 @@ where
         op_consistency_level: StateTableOpConsistencyLevel,
     ) -> StreamExecutorResult<()> {
         if self.op_consistency_level != op_consistency_level {
+            info!(
+                ?new_epoch,
+                prev_op_consistency_level = ?self.op_consistency_level,
+                ?op_consistency_level,
+                table_id = self.table_id.table_id,
+                "switch to new op consistency level"
+            );
             self.commit_inner(new_epoch, Some(op_consistency_level))
                 .await
         } else {
@@ -1178,9 +1195,7 @@ where
             epoch = ?self.epoch(),
             "commit state table"
         );
-        // Tick the watermark buffer here because state table is expected to be committed once
-        // per epoch.
-        self.watermark_buffer_strategy.tick();
+
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
             self.local_store.seal_current_epoch(
@@ -1199,7 +1214,7 @@ where
 
         // Refresh watermark cache if it is out of sync.
         if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
-            if let Some(ref watermark) = self.prev_cleaned_watermark {
+            if let Some(ref watermark) = self.committed_watermark {
                 let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
                     (Included(once(Some(watermark.clone()))), Unbounded);
                 // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
@@ -1254,7 +1269,7 @@ where
         next_epoch: u64,
         switch_op_consistency_level: Option<OpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
-        let watermark = self.state_clean_watermark.take();
+        let watermark = self.pending_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
         });
@@ -1326,7 +1341,7 @@ where
                 ));
             }
         }
-        self.prev_cleaned_watermark = watermark;
+        self.committed_watermark = watermark;
 
         // Clear the watermark cache and force a resync.
         // TODO(kwannoel): This can be further optimized:
@@ -1366,13 +1381,8 @@ impl<'a, T> KeyedRowStream<'a> for T where
 }
 
 // Iterator functions
-impl<
-        S,
-        SD,
-        const IS_REPLICATED: bool,
-        W: WatermarkBufferStrategy,
-        const USE_WATERMARK_CACHE: bool,
-    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1567,64 +1577,14 @@ where
             .map_err(StreamExecutorError::from)
     }
 
-    /// Returns:
-    /// false: the provided pk prefix is absent in state store.
-    /// true: the provided pk prefix may or may not be present in state store.
-    pub async fn may_exist(&self, pk_prefix: impl Row) -> StreamExecutorResult<bool> {
-        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
-        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
-
-        // We assume that all usages of iterating the state table only access a single vnode.
-        // If this assertion fails, then something must be wrong with the operator implementation or
-        // the distribution derivation from the optimizer.
-        let vnode = self.compute_prefix_vnode(&pk_prefix);
-        let table_key_range = prefixed_range_with_vnode(encoded_key_range, vnode);
-
-        // Construct prefix hint for prefix bloom filter.
-        if self.prefix_hint_len != 0 {
-            debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
-        }
-        let prefix_hint = {
-            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
-                panic!();
-            } else {
-                let encoded_prefix_len = self
-                    .pk_serde
-                    .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
-
-                Some(Bytes::copy_from_slice(
-                    &encoded_prefix[..encoded_prefix_len],
-                ))
-            }
-        };
-
-        let read_options = ReadOptions {
-            prefix_hint,
-            table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CacheContext::Default),
-            ..Default::default()
-        };
-
-        self.local_store
-            .may_exist(table_key_range, read_options)
-            .await
-            .map_err(Into::into)
-    }
-
     #[cfg(test)]
     pub fn get_watermark_cache(&self) -> &StateTableWatermarkCache {
         &self.watermark_cache
     }
 }
 
-impl<
-        S,
-        SD,
-        const IS_REPLICATED: bool,
-        W: WatermarkBufferStrategy,
-        const USE_WATERMARK_CACHE: bool,
-    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1634,7 +1594,7 @@ where
         vnode: VirtualNode,
         epoch_range: (u64, u64),
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
-    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_> {
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<ChangeLogRow>> + '_> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
         Ok(deserialize_log_stream(

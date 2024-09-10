@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use futures::future::{select, Either};
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryStreamExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkParam};
@@ -153,7 +153,7 @@ impl CoordinatorWorker {
                 "one sink writer stream reaches the end before initialize"
             )),
             Either::Right((Some(Err(e)), _)) => {
-                Err(anyhow!(e).context("unable to poll from one sink writer stream"))
+                Err(anyhow!(e).context("unable to poll one sink writer stream"))
             }
             Either::Right((None, _)) => unreachable!("request_streams must not be empty"),
         }
@@ -267,8 +267,9 @@ impl CoordinatorWorker {
                         ));
                     }
                     Err(e) => {
-                        return Err(anyhow!(e)
-                            .context("failed to poll from one of the writer request streams"));
+                        return Err(
+                            anyhow!(e).context("failed to poll one of the writer request streams")
+                        );
                     }
                 },
                 Either::Right((None, _)) => {

@@ -18,7 +18,8 @@ use std::time::Duration;
 
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
+use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
@@ -156,19 +157,12 @@ impl WorkerNodeManager {
 
         let guard = self.inner.read().unwrap();
 
-        let worker_slot_index: HashMap<_, _> = guard
-            .worker_nodes
-            .iter()
-            .flat_map(|worker| {
-                (0..worker.parallel_units.len())
-                    .map(move |i| (WorkerSlotId::new(worker.id, i), worker))
-            })
-            .collect();
+        let worker_index: HashMap<_, _> = guard.worker_nodes.iter().map(|w| (w.id, w)).collect();
 
         let mut workers = Vec::with_capacity(worker_slot_ids.len());
 
         for worker_slot_id in worker_slot_ids {
-            match worker_slot_index.get(worker_slot_id) {
+            match worker_index.get(&worker_slot_id.worker_id()) {
                 Some(worker) => workers.push((*worker).clone()),
                 None => bail!(
                     "No worker node found for worker slot id: {}",
@@ -220,10 +214,20 @@ impl WorkerNodeManager {
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
         let mut guard = self.inner.write().unwrap();
-        guard
-            .streaming_fragment_vnode_mapping
-            .remove(fragment_id)
-            .unwrap();
+
+        let res = guard.streaming_fragment_vnode_mapping.remove(fragment_id);
+        match &res {
+            Some(_) => {}
+            None if OBJECT_ID_PLACEHOLDER == *fragment_id => {
+                // Do nothing for placeholder fragment.
+            }
+            None => {
+                panic!(
+                    "Streaming vnode mapping not found for fragment_id: {}",
+                    fragment_id
+                )
+            }
+        };
     }
 
     /// Returns fragment's vnode mapping for serving.
@@ -335,10 +339,7 @@ impl WorkerNodeSelector {
         } else {
             self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
-        worker_nodes
-            .iter()
-            .map(|node| node.parallel_units.len())
-            .sum()
+        worker_nodes.iter().map(|node| node.parallelism()).sum()
     }
 
     pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
@@ -373,7 +374,9 @@ impl WorkerNodeSelector {
             };
             // 2. Temporary mapping that filters out unavailable workers.
             let new_workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
-            let masked_mapping = place_vnode(hint.as_ref(), &new_workers, parallelism);
+            // TODO(var-vnode): use vnode count from config
+            let masked_mapping =
+                place_vnode(hint.as_ref(), &new_workers, parallelism, VirtualNode::COUNT);
             masked_mapping.ok_or_else(|| BatchError::EmptyWorkerNodes)
         }
     }
@@ -424,11 +427,12 @@ mod tests {
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
-                parallel_units: vec![],
+                parallelism: 0,
                 property: Some(Property {
                     is_unschedulable: false,
                     is_serving: true,
                     is_streaming: true,
+                    internal_rpc_host_addr: "".to_string(),
                 }),
                 transactional_id: Some(1),
                 ..Default::default()
@@ -438,11 +442,12 @@ mod tests {
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
-                parallel_units: vec![],
+                parallelism: 0,
                 property: Some(Property {
                     is_unschedulable: false,
                     is_serving: true,
                     is_streaming: false,
+                    internal_rpc_host_addr: "".to_string(),
                 }),
                 transactional_id: Some(2),
                 ..Default::default()

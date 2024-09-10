@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::aggregate::{AggArgs, AggKind};
+use risingwave_expr::aggregate::{AggArgs, PbAggKind};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
 use risingwave_stream::executor::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 
@@ -85,14 +85,14 @@ async fn test_over_window() {
     let calls = vec![
         // lag(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
             args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
         },
         // lead(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
             args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
@@ -185,7 +185,7 @@ async fn test_over_window() {
 async fn test_over_window_aggregate() {
     let store = MemoryStateStore::new();
     let calls = vec![WindowFuncCall {
-        kind: WindowFuncKind::Aggregate(AggKind::Sum),
+        kind: WindowFuncKind::Aggregate(PbAggKind::Sum.into()),
         args: AggArgs::from_iter([(DataType::Int32, 3)]),
         return_type: DataType::Int64,
         frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Following(1)),

@@ -12,24 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 use std::sync::Arc;
 
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
 use futures_util::pin_mut;
-use itertools::Itertools;
 use prometheus::Histogram;
-use risingwave_common::array::DataChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::{DataChunk, Op};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, KeyedRow, TableDistribution};
+use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -48,22 +48,22 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
     metrics: Option<BatchMetricsWithTaskLabels>,
 
     table: StorageTable<S>,
-    old_epoch: BatchQueryEpoch,
-    new_epoch: BatchQueryEpoch,
+    old_epoch: u64,
+    new_epoch: u64,
 }
 
 impl<S: StateStore> LogRowSeqScanExecutor<S> {
     pub fn new(
         table: StorageTable<S>,
-        old_epoch: BatchQueryEpoch,
-        new_epoch: BatchQueryEpoch,
+        old_epoch: u64,
+        new_epoch: u64,
         chunk_size: usize,
         identity: String,
         metrics: Option<BatchMetricsWithTaskLabels>,
     ) -> Self {
         let mut schema = table.schema().clone();
         schema.fields.push(Field::with_name(
-            risingwave_common::types::DataType::Int16,
+            risingwave_common::types::DataType::Varchar,
             "op",
         ));
         Self {
@@ -107,18 +107,33 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
             Some(vnodes) => Some(Bitmap::from(vnodes).into()),
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            None => Some(TableDistribution::all_vnodes()),
+            // TODO(var-vnode): use vnode count from table desc
+            None => Some(Bitmap::ones(VirtualNode::COUNT).into()),
         };
 
         let chunk_size = source.context.get_config().developer.chunk_size as u32;
         let metrics = source.context().batch_metrics();
 
+        let Some(BatchQueryEpoch {
+            epoch: Some(batch_query_epoch::Epoch::Committed(old_epoch)),
+        }) = &log_store_seq_scan_node.old_epoch
+        else {
+            unreachable!("invalid old epoch: {:?}", log_store_seq_scan_node.old_epoch)
+        };
+
+        let Some(BatchQueryEpoch {
+            epoch: Some(batch_query_epoch::Epoch::Committed(new_epoch)),
+        }) = &log_store_seq_scan_node.new_epoch
+        else {
+            unreachable!("invalid new epoch: {:?}", log_store_seq_scan_node.new_epoch)
+        };
+
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
             Ok(Box::new(LogRowSeqScanExecutor::new(
                 table,
-                log_store_seq_scan_node.old_epoch.clone().unwrap(),
-                log_store_seq_scan_node.new_epoch.clone().unwrap(),
+                *old_epoch,
+                *new_epoch,
                 chunk_size as usize,
                 source.plan_node().get_identity().clone(),
                 metrics,
@@ -166,8 +181,8 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         //       it can consume too much memory if there're too many ranges.
         let stream = Self::execute_range(
             table.clone(),
-            old_epoch.clone(),
-            new_epoch.clone(),
+            old_epoch,
+            new_epoch,
             chunk_size,
             histogram.clone(),
             Arc::new(schema.clone()),
@@ -182,51 +197,35 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn execute_range(
         table: Arc<StorageTable<S>>,
-        old_epoch: BatchQueryEpoch,
-        new_epoch: BatchQueryEpoch,
+        old_epoch: u64,
+        new_epoch: u64,
         chunk_size: usize,
         histogram: Option<impl Deref<Target = Histogram>>,
         schema: Arc<Schema>,
     ) {
-        let pk_prefix = OwnedRow::default();
-
-        let order_type = table.pk_serializer().get_order_types()[pk_prefix.len()];
         // Range Scan.
         let iter = table
-            .batch_iter_log_with_pk_bounds(
-                old_epoch.into(),
-                new_epoch.into(),
-                &pk_prefix,
-                (
-                    if order_type.nulls_are_first() {
-                        // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
-                        Bound::Excluded(OwnedRow::new(vec![None]))
-                    } else {
-                        // Both start and end are unbounded, so we need to select all rows.
-                        Bound::Unbounded
-                    },
-                    if order_type.nulls_are_last() {
-                        // `NULL`s are at the end bound side, we should exclude them to meet SQL semantics.
-                        Bound::Excluded(OwnedRow::new(vec![None]))
-                    } else {
-                        // Both start and end are unbounded, so we need to select all rows.
-                        Bound::Unbounded
-                    },
-                ),
-            )
+            .batch_iter_log_with_pk_bounds(old_epoch, new_epoch)
             .await?
-            .map(|r| match r {
-                Ok((op, value)) => {
-                    let (k, row) = value.into_owned_row_key();
-                    // Todo! To avoid create a full row.
-                    let full_row = row
-                        .into_iter()
-                        .chain(vec![Some(ScalarImpl::Int16(op.to_i16()))])
-                        .collect_vec();
-                    let row = OwnedRow::new(full_row);
-                    Ok(KeyedRow::<_>::new(k, row))
-                }
-                Err(e) => Err(e),
+            .flat_map(|r| {
+                futures::stream::iter(std::iter::from_coroutine(
+                    #[coroutine]
+                    move || {
+                        match r {
+                            Ok(change_log_row) => {
+                                fn with_op(op: Op, row: impl Row) -> impl Row {
+                                    row.chain([Some(ScalarImpl::Utf8(op.to_varchar().into()))])
+                                }
+                                for (op, row) in change_log_row.into_op_value_iter() {
+                                    yield Ok(with_op(op, row));
+                                }
+                            }
+                            Err(e) => {
+                                yield Err(e);
+                            }
+                        };
+                    },
+                ))
             });
 
         pin_mut!(iter);

@@ -50,13 +50,13 @@ pub async fn barrier_align(
 ) {
     let actor_id = actor_id.to_string();
     let fragment_id = fragment_id.to_string();
-    let left_barrier_align_duration = metrics.barrier_align_duration.with_label_values(&[
+    let left_barrier_align_duration = metrics.barrier_align_duration.with_guarded_label_values(&[
         &actor_id,
         &fragment_id,
         "left",
         executor_name,
     ]);
-    let right_barrier_align_duration = metrics.barrier_align_duration.with_label_values(&[
+    let right_barrier_align_duration = metrics.barrier_align_duration.with_guarded_label_values(&[
         &actor_id,
         &fragment_id,
         "right",
@@ -121,7 +121,7 @@ pub async fn barrier_align(
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
                             right_barrier_align_duration
-                                .observe(start_time.elapsed().as_secs_f64());
+                                .inc_by(start_time.elapsed().as_nanos() as u64);
                             break;
                         }
                     }
@@ -144,7 +144,8 @@ pub async fn barrier_align(
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
-                            left_barrier_align_duration.observe(start_time.elapsed().as_secs_f64());
+                            left_barrier_align_duration
+                                .inc_by(start_time.elapsed().as_nanos() as u64);
                             break;
                         }
                     }

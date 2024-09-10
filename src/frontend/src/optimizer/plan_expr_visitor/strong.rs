@@ -188,6 +188,7 @@ impl Strong {
             | ExprType::Cot
             | ExprType::Asin
             | ExprType::Acos
+            | ExprType::Acosd
             | ExprType::Atan
             | ExprType::Atan2
             | ExprType::Sind
@@ -290,6 +291,18 @@ impl Strong {
             | ExprType::JsonbPopulateRecord
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
+            | ExprType::JsonbPopulateMap
+            | ExprType::MapFromEntries
+            | ExprType::MapAccess
+            | ExprType::MapKeys
+            | ExprType::MapValues
+            | ExprType::MapEntries
+            | ExprType::MapFromKeyValues
+            | ExprType::MapCat
+            | ExprType::MapContains
+            | ExprType::MapDelete
+            | ExprType::MapInsert
+            | ExprType::MapLength
             | ExprType::Vnode
             | ExprType::TestPaidTier
             | ExprType::Proctime
@@ -305,6 +318,8 @@ impl Strong {
             | ExprType::PgRelationSize
             | ExprType::PgGetSerialSequence
             | ExprType::PgIndexColumnHasProperty
+            | ExprType::PgIsInRecovery
+            | ExprType::RwRecoveryStatus
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
             | ExprType::HasAnyColumnPrivilege

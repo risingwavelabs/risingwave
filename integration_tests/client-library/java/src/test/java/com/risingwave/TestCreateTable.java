@@ -8,7 +8,7 @@ import java.sql.Statement;
 
 public class TestCreateTable {
 
-    public void createSourceTable() throws SQLException {
+    public static void createSourceTable() throws SQLException {
         String createTableQuery;
         Statement statement;
         try (Connection connection = TestUtils.establishConnection()) {
@@ -40,7 +40,7 @@ public class TestCreateTable {
         }
     }
 
-    public void dropSourceTable() throws SQLException {
+    public static void dropSourceTable() throws SQLException {
         String dropSourceQuery = "DROP TABLE s1_java;";
         try (Connection connection = TestUtils.establishConnection()) {
             Statement statement = connection.createStatement();

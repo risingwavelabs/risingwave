@@ -19,6 +19,7 @@ async-trait = "0.1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
+prost = { workspace = true }
 rand = { workspace = true }
 regex = "1"
 risingwave_common = { workspace = true }
@@ -39,7 +40,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-stream = { version = "0.1", features = ["net"] }
+tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 

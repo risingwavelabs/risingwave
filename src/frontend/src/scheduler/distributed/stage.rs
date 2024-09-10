@@ -196,7 +196,7 @@ impl StageExecution {
         match cur_state {
             Pending { msg_sender } => {
                 let runner = StageRunner {
-                    epoch: self.epoch.clone(),
+                    epoch: self.epoch,
                     stage: self.stage.clone(),
                     worker_node_manager: self.worker_node_manager.clone(),
                     tasks: self.tasks.clone(),
@@ -380,22 +380,70 @@ impl StageRunner {
                 ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
-            let chunk_size = (source_info.split_info().unwrap().len() as f32
+            // If there is no file in source, the `chunk_size` is set to 1.
+            let chunk_size = ((source_info.split_info().unwrap().len() as f32
+                / self.stage.parallelism.unwrap() as f32)
+                .ceil() as usize)
+                .max(1);
+            if source_info.split_info().unwrap().is_empty() {
+                // No file in source, schedule an empty task.
+                const EMPTY_TASK_ID: u64 = 0;
+                let task_id = PbTaskId {
+                    query_id: self.stage.query_id.id.clone(),
+                    stage_id: self.stage.id,
+                    task_id: EMPTY_TASK_ID,
+                };
+                let plan_fragment =
+                    self.create_plan_fragment(EMPTY_TASK_ID, Some(PartitionInfo::Source(vec![])));
+                let worker = self.choose_worker(
+                    &plan_fragment,
+                    EMPTY_TASK_ID as u32,
+                    self.stage.dml_table_id,
+                )?;
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
+            } else {
+                for (id, split) in source_info
+                    .split_info()
+                    .unwrap()
+                    .chunks(chunk_size)
+                    .enumerate()
+                {
+                    let task_id = PbTaskId {
+                        query_id: self.stage.query_id.id.clone(),
+                        stage_id: self.stage.id,
+                        task_id: id as u64,
+                    };
+                    let plan_fragment = self.create_plan_fragment(
+                        id as u64,
+                        Some(PartitionInfo::Source(split.to_vec())),
+                    );
+                    let worker =
+                        self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
+                    futures.push(self.schedule_task(
+                        task_id,
+                        plan_fragment,
+                        worker,
+                        expr_context.clone(),
+                    ));
+                }
+            }
+        } else if let Some(file_scan_info) = self.stage.file_scan_info.as_ref() {
+            let chunk_size = (file_scan_info.file_location.len() as f32
                 / self.stage.parallelism.unwrap() as f32)
                 .ceil() as usize;
-            for (id, split) in source_info
-                .split_info()
-                .unwrap()
-                .chunks(chunk_size)
-                .enumerate()
-            {
+            for (id, files) in file_scan_info.file_location.chunks(chunk_size).enumerate() {
                 let task_id = PbTaskId {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
                     task_id: id as u64,
                 };
-                let plan_fragment = self
-                    .create_plan_fragment(id as u64, Some(PartitionInfo::Source(split.to_vec())));
+                let plan_fragment =
+                    self.create_plan_fragment(id as u64, Some(PartitionInfo::File(files.to_vec())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(
@@ -601,7 +649,7 @@ impl StageRunner {
             &plan_node,
             &task_id,
             self.ctx.to_batch_task_context(),
-            self.epoch.clone(),
+            self.epoch,
             shutdown_rx.clone(),
         );
 
@@ -674,7 +722,7 @@ impl StageRunner {
     fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         self.catalog_reader
             .read_guard()
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map(|table| table.fragment_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
@@ -687,7 +735,7 @@ impl StageRunner {
         let guard = self.catalog_reader.read_guard();
 
         let table = guard
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
 
         let fragment_id = match table.dml_fragment_id.as_ref() {
@@ -712,11 +760,11 @@ impl StageRunner {
 
         if let Some(table_id) = dml_table_id {
             let vnode_mapping = self.get_table_dml_vnode_mapping(&table_id)?;
-            let worker_ids = vnode_mapping.iter_unique().collect_vec();
+            let worker_slot_ids = vnode_mapping.iter_unique().collect_vec();
             let candidates = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_worker_slot_ids(&worker_ids)?;
+                .get_workers_by_worker_slot_ids(&worker_slot_ids)?;
             if candidates.is_empty() {
                 return Err(BatchError::EmptyWorkerNodes.into());
             }
@@ -887,7 +935,7 @@ impl StageRunner {
         let t_id = task_id.task_id;
 
         let stream_status: Fuse<Streaming<TaskInfoResponse>> = compute_client
-            .create_task(task_id, plan_fragment, self.epoch.clone(), expr_context)
+            .create_task(task_id, plan_fragment, self.epoch, expr_context)
             .await
             .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?
@@ -980,7 +1028,7 @@ impl StageRunner {
                     .expect("no partition info for seq scan")
                     .into_table()
                     .expect("PartitionInfo should be TablePartitionInfo");
-                scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                 scan_node.scan_ranges = partition.scan_ranges;
                 PbPlanNode {
                     children: vec![],
@@ -997,16 +1045,14 @@ impl StageRunner {
                     .expect("no partition info for seq scan")
                     .into_table()
                     .expect("PartitionInfo should be TablePartitionInfo");
-                scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                 PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(NodeBody::LogRowSeqScan(scan_node)),
                 }
             }
-            PlanNodeType::BatchSource
-            | PlanNodeType::BatchKafkaScan
-            | PlanNodeType::BatchIcebergScan => {
+            PlanNodeType::BatchSource | PlanNodeType::BatchKafkaScan => {
                 let node_body = execution_plan_node.node.clone();
                 let NodeBody::Source(mut source_node) = node_body else {
                     unreachable!();
@@ -1024,6 +1070,26 @@ impl StageRunner {
                     children: vec![],
                     identity,
                     node_body: Some(NodeBody::Source(source_node)),
+                }
+            }
+            PlanNodeType::BatchIcebergScan => {
+                let node_body = execution_plan_node.node.clone();
+                let NodeBody::IcebergScan(mut iceberg_scan_node) = node_body else {
+                    unreachable!();
+                };
+
+                let partition = partition
+                    .expect("no partition info for seq scan")
+                    .into_source()
+                    .expect("PartitionInfo should be SourcePartitionInfo");
+                iceberg_scan_node.split = partition
+                    .into_iter()
+                    .map(|split| split.encode_to_bytes().into())
+                    .collect_vec();
+                PbPlanNode {
+                    children: vec![],
+                    identity,
+                    node_body: Some(NodeBody::IcebergScan(iceberg_scan_node)),
                 }
             }
             _ => {

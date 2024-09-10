@@ -18,21 +18,20 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::compact_task::ReportTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_compaction_group_ids, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_meta_model_v2::compaction_config;
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
-use risingwave_pb::hummock::subscribe_compaction_event_request::ReportTask;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
-    GroupDelta, GroupDestroy, StateTableInfoDelta,
+    CompactionConfig, CompactionGroupInfo, CompatibilityVersion, PbGroupConstruct, PbGroupDestroy,
+    PbStateTableInfoDelta,
 };
 use tokio::sync::OnceCell;
 
@@ -47,7 +46,10 @@ use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl};
-use crate::model::{BTreeMapTransaction, MetadataModel, MetadataModelError};
+use crate::model::{
+    BTreeMapTransaction, BTreeMapTransactionInner, DerefMutForward, MetadataModel,
+    MetadataModelError,
+};
 
 type CompactionGroupTransaction<'a> = BTreeMapTransaction<'a, CompactionGroupId, CompactionGroup>;
 
@@ -219,7 +221,9 @@ impl HummockManager {
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
-        let epoch = new_version_delta.latest_version().max_committed_epoch;
+        let epoch = new_version_delta
+            .latest_version()
+            .visible_table_committed_epoch();
 
         for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;
@@ -252,20 +256,20 @@ impl HummockManager {
                             }
                         };
 
-                    group_deltas.push(GroupDelta {
-                        delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                            group_config: Some(config),
-                            group_id,
-                            ..Default::default()
-                        })),
+                    let group_delta = GroupDelta::GroupConstruct(PbGroupConstruct {
+                        group_config: Some(config),
+                        group_id,
+                        ..Default::default()
                     });
+
+                    group_deltas.push(group_delta);
                 }
             }
             assert!(new_version_delta
                 .state_table_info_delta
                 .insert(
                     TableId::new(*table_id),
-                    StateTableInfoDelta {
+                    PbStateTableInfoDelta {
                         committed_epoch: epoch,
                         safe_epoch: epoch,
                         compaction_group_id: *raw_group_id,
@@ -330,7 +334,7 @@ impl HummockManager {
                         new_version_delta
                             .latest_version()
                             .get_compaction_group_levels(group_id)
-                            .get_levels()
+                            .levels
                             .len(),
                     ));
                 }
@@ -343,9 +347,9 @@ impl HummockManager {
                 .entry(*group_id)
                 .or_default()
                 .group_deltas;
-            group_deltas.push(GroupDelta {
-                delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
-            });
+
+            let group_delta = GroupDelta::GroupDestroy(PbGroupDestroy {});
+            group_deltas.push(group_delta);
         }
 
         for (group_id, max_level) in groups_to_remove {
@@ -363,7 +367,7 @@ impl HummockManager {
             version.latest_version(),
         )));
         commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
-
+        // No need to handle DeltaType::GroupDestroy during time travel.
         Ok(())
     }
 
@@ -532,16 +536,14 @@ impl HummockManager {
                 new_version_delta.group_deltas.insert(
                     new_compaction_group_id,
                     GroupDeltas {
-                        group_deltas: vec![GroupDelta {
-                            delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                                group_config: Some(config.clone()),
-                                group_id: new_compaction_group_id,
-                                parent_group_id,
-                                new_sst_start_id,
-                                table_ids: vec![],
-                                version: CompatibilityVersion::NoMemberTableIds as i32,
-                            })),
-                        }],
+                        group_deltas: vec![GroupDelta::GroupConstruct(PbGroupConstruct {
+                            group_config: Some(config.clone()),
+                            group_id: new_compaction_group_id,
+                            parent_group_id,
+                            new_sst_start_id,
+                            table_ids: vec![],
+                            version: CompatibilityVersion::NoMemberTableIds as i32,
+                        })],
                     },
                 );
                 ((new_compaction_group_id, config), new_compaction_group_id)
@@ -561,7 +563,7 @@ impl HummockManager {
                     .state_table_info_delta
                     .insert(
                         table_id,
-                        StateTableInfoDelta {
+                        PbStateTableInfoDelta {
                             committed_epoch: info.committed_epoch,
                             safe_epoch: info.safe_epoch,
                             compaction_group_id: new_compaction_group_id,
@@ -579,16 +581,19 @@ impl HummockManager {
             new_version_delta.pre_apply();
             commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
         }
-
+        // Instead of handling DeltaType::GroupConstruct for time travel, simply enforce a version snapshot.
+        versioning.mark_next_time_travel_version_snapshot();
         let mut canceled_tasks = vec![];
         for task_assignment in compaction_guard.compact_task_assignment.values() {
             if let Some(task) = task_assignment.compact_task.as_ref() {
-                let need_cancel =
-                    HummockManager::is_compact_task_expired(task, &versioning.current_version);
+                let need_cancel = HummockManager::is_compact_task_expired(
+                    &task.into(),
+                    &versioning.current_version,
+                );
                 if need_cancel {
                     canceled_tasks.push(ReportTask {
                         task_id: task.task_id,
-                        task_status: TaskStatus::ManualCanceled as i32,
+                        task_status: TaskStatus::ManualCanceled,
                         table_stats_change: HashMap::default(),
                         sorted_output_ssts: vec![],
                     });
@@ -599,16 +604,6 @@ impl HummockManager {
         drop(versioning_guard);
         drop(compaction_guard);
         self.report_compact_tasks(canceled_tasks).await?;
-
-        // Don't trigger compactions if we enable deterministic compaction
-        if !self.env.opts.compaction_deterministic_test {
-            // commit_epoch may contains SSTs from any compaction group
-            self.try_send_compaction_request(parent_group_id, compact_task::TaskType::SpaceReclaim);
-            self.try_send_compaction_request(
-                target_compaction_group_id,
-                compact_task::TaskType::SpaceReclaim,
-            );
-        }
 
         self.metrics
             .move_state_table_count
@@ -693,6 +688,26 @@ impl CompactionGroupManager {
         CompactionGroupTransaction::new(&mut self.compaction_groups)
     }
 
+    pub fn start_owned_compaction_groups_txn<P: DerefMut<Target = Self>>(
+        inner: P,
+    ) -> BTreeMapTransactionInner<
+        CompactionGroupId,
+        CompactionGroup,
+        DerefMutForward<
+            Self,
+            BTreeMap<CompactionGroupId, CompactionGroup>,
+            P,
+            impl Fn(&Self) -> &BTreeMap<CompactionGroupId, CompactionGroup>,
+            impl Fn(&mut Self) -> &mut BTreeMap<CompactionGroupId, CompactionGroup>,
+        >,
+    > {
+        BTreeMapTransactionInner::new(DerefMutForward::new(
+            inner,
+            |mgr| &mgr.compaction_groups,
+            |mgr| &mut mgr.compaction_groups,
+        ))
+    }
+
     /// Tries to get compaction group config for `compaction_group_id`.
     pub(super) fn try_get_compaction_group_config(
         &self,
@@ -760,7 +775,10 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                     .clone_from(&c.compression_algorithm);
             }
             MutableConfig::MaxL0CompactLevelCount(c) => {
-                target.max_l0_compact_level_count = *c;
+                target.max_l0_compact_level_count = Some(*c);
+            }
+            MutableConfig::SstAllowedTrivialMoveMinSize(c) => {
+                target.sst_allowed_trivial_move_min_size = Some(*c);
             }
         }
     }

@@ -31,7 +31,7 @@ use risingwave_sqlparser::ast::{
     display_comma_separated, Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
 };
 
-use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
+use super::{fields_to_descriptors, PgResponseStream, RwPgResponse, RwPgResponseBuilderExt};
 use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::Result;
@@ -214,7 +214,7 @@ struct ShowClusterRow {
     addr: String,
     r#type: String,
     state: String,
-    parallel_units: String,
+    parallelism: i32,
     is_streaming: Option<bool>,
     is_serving: Option<bool>,
     is_unschedulable: Option<bool>,
@@ -311,7 +311,7 @@ pub async fn handle_show_object(
         ShowObject::MaterializedView { schema } => catalog_reader
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
-            .iter_mv()
+            .iter_created_mvs()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Source { schema } => catalog_reader
@@ -319,6 +319,7 @@ pub async fn handle_show_object(
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_source()
             .map(|t| t.name.clone())
+            .chain(session.temporary_source_manager().keys())
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
             .read_guard()
@@ -435,7 +436,7 @@ pub async fn handle_show_object(
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
                     state: worker.get_state().unwrap().as_str_name().to_string(),
-                    parallel_units: worker.parallel_units.into_iter().map(|pu| pu.id).join(", "),
+                    parallelism: worker.get_parallelism() as _,
                     is_streaming: property.map(|p| p.is_streaming),
                     is_serving: property.map(|p| p.is_serving),
                     is_unschedulable: property.map(|p| p.is_unschedulable),
@@ -449,7 +450,7 @@ pub async fn handle_show_object(
                 .into());
         }
         ShowObject::Jobs => {
-            let resp = session.env().meta_client().list_ddl_progress().await?;
+            let resp = session.env().meta_client().get_ddl_progress().await?;
             let rows = resp.into_iter().map(|job| ShowJobRow {
                 id: job.id as i64,
                 statement: job.statement,
@@ -479,6 +480,23 @@ pub async fn handle_show_object(
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .rows(rows)
+                .into());
+        }
+        ShowObject::Cursor => {
+            let (rows, pg_descs) = session.get_cursor_manager().get_all_query_cursors().await;
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .row_cnt_opt(Some(rows.len() as i32))
+                .values(PgResponseStream::from(rows), pg_descs)
+                .into());
+        }
+        ShowObject::SubscriptionCursor => {
+            let (rows, pg_descs) = session
+                .get_cursor_manager()
+                .get_all_subscription_cursors()
+                .await;
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .row_cnt_opt(Some(rows.len() as i32))
+                .values(PgResponseStream::from(rows), pg_descs)
                 .into());
         }
     };
@@ -516,7 +534,7 @@ pub fn handle_show_create_object(
     let sql = match show_create_type {
         ShowCreateType::MaterializedView => {
             let mv = schema
-                .get_table_by_name(&object_name)
+                .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_mview())
                 .ok_or_else(|| CatalogError::NotFound("materialized view", name.to_string()))?;
             mv.create_sql()
@@ -529,7 +547,7 @@ pub fn handle_show_create_object(
         }
         ShowCreateType::Table => {
             let table = schema
-                .get_table_by_name(&object_name)
+                .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_table())
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
             table.create_sql()
@@ -549,7 +567,7 @@ pub fn handle_show_create_object(
         }
         ShowCreateType::Index => {
             let index = schema
-                .get_table_by_name(&object_name)
+                .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_index())
                 .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
             index.create_sql()
@@ -588,7 +606,7 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         let sql = r#"CREATE SOURCE t1 (column1 varchar)
-        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
         FORMAT PLAIN ENCODE JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
@@ -602,7 +620,7 @@ mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
     FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );

@@ -19,6 +19,7 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use tokio::time::sleep;
@@ -79,19 +80,55 @@ async fn scale_test_inner(is_decouple: bool) -> Result<()> {
         .await?;
 
     assert_eq!(sink_fragments.len(), 1);
-    let framgment = sink_fragments.pop().unwrap();
-    let id = framgment.id();
+    let fragment = sink_fragments.pop().unwrap();
+    let id = fragment.id();
 
     let count = test_source.id_list.len();
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
 
     scale_and_check(
         &mut cluster,
         &test_sink,
         count,
         vec![
-            (format!("{id}-[1,2,3]"), 3),
-            (format!("{id}-[4,5]+[1,2]"), 3),
-            (format!("{id}+[3,4,5]"), 6),
+            // (format!("{id}-[1,2,3]"), 3),
+            (
+                fragment.reschedule(
+                    [
+                        WorkerSlotId::new(workers[0], 0),
+                        WorkerSlotId::new(workers[1], 0),
+                        WorkerSlotId::new(workers[1], 1),
+                    ],
+                    [],
+                ),
+                3,
+            ),
+            // (format!("{id}-[4,5]+[1,2]"), 3)
+            (
+                fragment.reschedule(
+                    [
+                        WorkerSlotId::new(workers[2], 0),
+                        WorkerSlotId::new(workers[2], 1),
+                    ],
+                    [
+                        WorkerSlotId::new(workers[0], 1),
+                        WorkerSlotId::new(workers[1], 0),
+                    ],
+                ),
+                3,
+            ),
+            // (format!("{id}+[3,4,5]"), 6),
+            (
+                fragment.reschedule(
+                    [],
+                    [
+                        WorkerSlotId::new(workers[1], 1),
+                        WorkerSlotId::new(workers[2], 0),
+                        WorkerSlotId::new(workers[2], 1),
+                    ],
+                ),
+                6,
+            ),
         ]
         .into_iter(),
     )
@@ -114,12 +151,21 @@ async fn scale_test_inner(is_decouple: bool) -> Result<()> {
     Ok(())
 }
 
+fn init_logger() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_ansi(false)
+        .try_init();
+}
+
 #[tokio::test]
 async fn test_sink_scale() -> Result<()> {
+    init_logger();
     scale_test_inner(false).await
 }
 
 #[tokio::test]
 async fn test_sink_decouple_scale() -> Result<()> {
+    init_logger();
     scale_test_inner(true).await
 }

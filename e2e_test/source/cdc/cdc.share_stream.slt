@@ -11,6 +11,11 @@ mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_create.sql
 system ok
 mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_init_data.sql
 
+statement ok
+create secret mysql_pwd with (
+  backend = 'meta'
+) as '${MYSQL_PWD:}';
+
 # create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
 statement ok
 create source mysql_mytest with (
@@ -18,7 +23,7 @@ create source mysql_mytest with (
  hostname = '${MYSQL_HOST:localhost}',
  port = '${MYSQL_TCP_PORT:8306}',
  username = 'rwcdc',
- password = '${MYSQL_PWD:}',
+ password = secret mysql_pwd,
  database.name = 'mytest',
  server.id = '5601'
 );
@@ -47,6 +52,9 @@ from mysql_mytest table 'mytest.products';
 
 # sleep to ensure (default,'Milk','Milk is a white liquid food') is consumed from Debezium message instead of backfill.
 sleep 10s
+
+statement error Permission denied
+drop secret mysql_pwd;
 
 system ok
 mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES (default,'Milk','Milk is a white liquid food');
@@ -191,12 +199,22 @@ SELECT c_tinyint, c_smallint, c_mediumint, c_integer, c_bigint, c_decimal, c_flo
 NULL NULL -8388608 -2147483647 9223372036854775806 -10 -10000 -10000 c d 1001-01-01 NULL 2000-01-01 00:00:00 NULL
 
 statement ok
+create secret pg_pwd with (
+  backend = 'meta'
+) as '${PGPASSWORD:}';
+
+statement ok
+create secret pg_username with (
+  backend = 'meta'
+) as '${PGUSER:$USER}';
+
+statement ok
 create source pg_source with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
- username = '${PGUSER:$USER}',
- password = '${PGPASSWORD:}',
+ username = secret pg_username,
+ password = secret pg_pwd,
  database.name = '${PGDATABASE:postgres}',
  slot.name = 'pg_slot'
 );
@@ -249,6 +267,12 @@ CREATE TABLE person_new (
     credit_card varchar,
     city varchar
 ) FROM pg_source TABLE 'person';
+
+statement ok
+CREATE TABLE upper_orders_shared (
+    id int PRIMARY KEY,
+    name varchar
+) FROM pg_source TABLE 'public.Orders';
 
 statement ok
 CREATE TABLE person_new (
@@ -491,3 +515,8 @@ select * from enum_to_varchar_shared order by id;
 ----
 1 happy
 2 ok
+
+query II
+select * from upper_orders_shared order by id;
+----
+1 happy

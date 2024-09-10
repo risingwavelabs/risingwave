@@ -18,7 +18,7 @@ use risingwave_common::bail;
 use super::plan_node::RewriteExprsRecursive;
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
-use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
+use crate::expr::NowProcTimeFinder;
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, VisitExprsRecursive,
@@ -126,10 +126,22 @@ static STREAM_GENERATE_SERIES_WITH_NOW: LazyLock<OptimizationStage> = LazyLock::
     )
 });
 
-static TABLE_FUNCTION_TO_PROJECT_SET: LazyLock<OptimizationStage> = LazyLock::new(|| {
+static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
-        "Table Function To Project Set",
-        vec![TableFunctionToProjectSetRule::create()],
+        "Table Function Convert",
+        vec![
+            // Apply file scan rule first
+            TableFunctionToFileScanRule::create(),
+            TableFunctionToProjectSetRule::create(),
+        ],
+        ApplyOrder::TopDown,
+    )
+});
+
+static TABLE_FUNCTION_TO_FILE_SCAN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Table Function To FileScan",
+        vec![TableFunctionToFileScanRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -528,8 +540,7 @@ impl LogicalOptimizer {
             return plan;
         }
 
-        let epoch = ctx.session_ctx().pinned_snapshot().epoch();
-        let mut v = InlineNowProcTime::new(epoch);
+        let mut v = ctx.session_ctx().pinned_snapshot().inline_now_proc_time();
 
         let plan = plan.rewrite_exprs_recursive(&mut v);
 
@@ -584,7 +595,7 @@ impl LogicalOptimizer {
         // Should be applied before converting table function to project set.
         plan = plan.optimize_by_rules(&STREAM_GENERATE_SERIES_WITH_NOW);
         // In order to unnest a table function, we need to convert it into a `project_set` first.
-        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT);
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
         if has_logical_max_one_row(plan.clone()) {
@@ -689,8 +700,10 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
         plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
+        // Table function should be converted into `file_scan` before `project_set`.
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_FILE_SCAN);
         // In order to unnest a table function, we need to convert it into a `project_set` first.
-        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 

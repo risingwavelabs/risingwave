@@ -29,7 +29,7 @@ use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, BoolArray, PrimitiveArray,
     PrimitiveArrayItemType, RowRef, Utf8Array,
 };
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::{
     hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl,
@@ -56,6 +56,7 @@ impl ArrayBuilder for ListArrayBuilder {
 
     #[cfg(test)]
     fn new(capacity: usize) -> Self {
+        // TODO: deprecate this
         Self::with_type(
             capacity,
             // Default datatype
@@ -249,6 +250,12 @@ impl ListArray {
             array.values.is_empty(),
             "Must have no buffer in a list array"
         );
+        debug_assert!(
+            (array.array_type == PbArrayType::List as i32)
+                || (array.array_type == PbArrayType::Map as i32),
+            "invalid array type for list: {}",
+            array.array_type
+        );
         let bitmap: Bitmap = array.get_null_bitmap()?.into();
         let array_data = array.get_list_array_data()?.to_owned();
         let flatten_len = match array_data.offsets.last() {
@@ -365,11 +372,11 @@ impl ListValue {
 
     /// Creates a new `ListValue` from an iterator of `Datum`.
     pub fn from_datum_iter<T: ToDatumRef>(
-        datatype: &DataType,
+        elem_datatype: &DataType,
         iter: impl IntoIterator<Item = T>,
     ) -> Self {
         let iter = iter.into_iter();
-        let mut builder = datatype.create_array_builder(iter.size_hint().0);
+        let mut builder = elem_datatype.create_array_builder(iter.size_hint().0);
         for datum in iter {
             builder.append(datum);
         }
@@ -406,15 +413,15 @@ impl ListValue {
     }
 
     pub fn memcmp_deserialize(
-        datatype: &DataType,
+        item_datatype: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
-        let mut builder = datatype.create_array_builder(0);
+        let mut builder = item_datatype.create_array_builder(0);
         while inner_deserializer.has_remaining() {
             builder.append(memcmp_encoding::deserialize_datum_in_composite(
-                datatype,
+                item_datatype,
                 &mut inner_deserializer,
             )?)
         }
@@ -500,6 +507,7 @@ impl From<ListValue> for ArrayImpl {
     }
 }
 
+/// A slice of an array
 #[derive(Copy, Clone)]
 pub struct ListRef<'a> {
     array: &'a ArrayImpl,
@@ -589,6 +597,24 @@ impl<'a> ListRef<'a> {
             _ => None,
         }
     }
+
+    /// # Panics
+    /// Panics if the list is not a map's internal representation (See [`super::MapArray`]).
+    pub(super) fn as_map_kv(self) -> (ListRef<'a>, ListRef<'a>) {
+        let (k, v) = self.array.as_struct().fields().collect_tuple().unwrap();
+        (
+            ListRef {
+                array: k,
+                start: self.start,
+                end: self.end,
+            },
+            ListRef {
+                array: v,
+                start: self.start,
+                end: self.end,
+            },
+        )
+    }
 }
 
 impl PartialEq for ListRef<'_> {
@@ -650,10 +676,12 @@ impl ToText for ListRef<'_> {
                     && (s.is_empty()
                         || s.to_ascii_lowercase() == "null"
                         || s.contains([
-                            '"', '\\', '{', '}', ',',
+                            '"', '\\', ',',
+                            // whilespace:
                             // PostgreSQL `array_isspace` includes '\x0B' but rust
                             // [`char::is_ascii_whitespace`] does not.
-                            ' ', '\t', '\n', '\r', '\x0B', '\x0C',
+                            ' ', '\t', '\n', '\r', '\x0B', '\x0C', // list-specific:
+                            '{', '}',
                         ]));
                 if need_quote {
                     f(&"\"")?;

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::SinkMetadata;
 
 use crate::sink::{SinkCommitCoordinator, SinkWriter};

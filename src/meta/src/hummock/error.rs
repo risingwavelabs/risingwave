@@ -27,7 +27,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("invalid hummock context {0}")]
     InvalidContext(HummockContextId),
-    #[error("failed to access meta store: {0}")]
+    #[error("failed to access meta store")]
     MetaStore(
         #[source]
         #[backtrace]
@@ -45,6 +45,12 @@ pub enum Error {
     CompactionGroup(String),
     #[error("SST {0} is invalid")]
     InvalidSst(HummockSstableObjectId),
+    #[error("time travel")]
+    TimeTravel(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error(transparent)]
     Internal(
         #[from]

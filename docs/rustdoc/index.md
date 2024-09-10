@@ -4,9 +4,7 @@ Welcome to an overview of the developer documentations of RisingWave!
 
 ## Developer Docs
 
-To learn how to develop RisingWave, see the [RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/).
-
-The [design docs](https://github.com/risingwavelabs/risingwave/blob/main/docs/README.md) covers some high-level ideas of how we built RisingWave.
+To learn how to develop RisingWave, and access high-level design docs, see the [RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/).
 
 ## Crate Docs
 

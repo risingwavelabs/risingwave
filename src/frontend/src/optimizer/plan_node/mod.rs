@@ -49,7 +49,7 @@ use self::batch::BatchPlanRef;
 use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
-use super::property::{Distribution, FunctionalDependencySet, Order};
+use super::property::{Distribution, FunctionalDependencySet, MonotonicityMap, Order};
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::session::current::notice_to_user;
@@ -609,6 +609,10 @@ impl StreamPlanRef for PlanRef {
     fn watermark_columns(&self) -> &FixedBitSet {
         self.plan_base().watermark_columns()
     }
+
+    fn columns_monotonicity(&self) -> &MonotonicityMap {
+        self.plan_base().columns_monotonicity()
+    }
 }
 
 /// Allow access to all fields defined in [`BatchPlanRef`] for the type-erased plan node.
@@ -889,16 +893,19 @@ mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
 mod stream_fs_fetch;
+mod stream_global_approx_percentile;
 mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
+mod stream_local_approx_percentile;
 mod stream_materialize;
 mod stream_now;
 mod stream_over_window;
 mod stream_project;
 mod stream_project_set;
 mod stream_row_id_gen;
+mod stream_row_merge;
 mod stream_simple_agg;
 mod stream_sink;
 mod stream_sort;
@@ -910,9 +917,11 @@ mod stream_topn;
 mod stream_values;
 mod stream_watermark_filter;
 
+mod batch_file_scan;
 mod batch_iceberg_scan;
 mod batch_kafka_scan;
 mod derive;
+mod logical_file_scan;
 mod logical_iceberg_scan;
 mod stream_cdc_table_scan;
 mod stream_share;
@@ -923,6 +932,7 @@ pub mod utils;
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
+pub use batch_file_scan::BatchFileScan;
 pub use batch_filter::BatchFilter;
 pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
@@ -959,6 +969,7 @@ pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
+pub use logical_file_scan::LogicalFileScan;
 pub use logical_filter::LogicalFilter;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_scan::LogicalIcebergScan;
@@ -994,16 +1005,19 @@ pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
 pub use stream_fs_fetch::StreamFsFetch;
+pub use stream_global_approx_percentile::StreamGlobalApproxPercentile;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
+pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
 pub use stream_over_window::StreamOverWindow;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
+pub use stream_row_merge::StreamRowMerge;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::{IcebergPartitionInfo, PartitionComputeInfo, StreamSink};
@@ -1076,6 +1090,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, RecursiveUnion }
             , { Logical, CteRef }
             , { Logical, ChangeLog }
+            , { Logical, FileScan }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1106,6 +1121,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, MaxOneRow }
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
+            , { Batch, FileScan }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1140,6 +1156,9 @@ macro_rules! for_all_plan_nodes {
             , { Stream, OverWindow }
             , { Stream, FsFetch }
             , { Stream, ChangeLog }
+            , { Stream, GlobalApproxPercentile }
+            , { Stream, LocalApproxPercentile }
+            , { Stream, RowMerge }
         }
     };
 }
@@ -1182,6 +1201,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, RecursiveUnion }
             , { Logical, CteRef }
             , { Logical, ChangeLog }
+            , { Logical, FileScan }
         }
     };
 }
@@ -1221,6 +1241,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, MaxOneRow }
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
+            , { Batch, FileScan }
         }
     };
 }
@@ -1264,6 +1285,9 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, OverWindow }
             , { Stream, FsFetch }
             , { Stream, ChangeLog }
+            , { Stream, GlobalApproxPercentile }
+            , { Stream, LocalApproxPercentile }
+            , { Stream, RowMerge }
         }
     };
 }

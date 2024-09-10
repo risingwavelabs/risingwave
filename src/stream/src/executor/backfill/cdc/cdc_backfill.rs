@@ -42,7 +42,8 @@ use crate::executor::backfill::utils::{
 use crate::executor::backfill::CdcScanOptions;
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
-use crate::task::CreateMviewProgress;
+use crate::executor::UpdateMutation;
+use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
@@ -67,7 +68,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     // TODO: introduce a CdcBackfillProgress to report finish to Meta
     // This object is just a stub right now
-    progress: Option<CreateMviewProgress>,
+    progress: Option<CreateMviewProgressReporter>,
 
     metrics: CdcBackfillMetrics,
 
@@ -85,7 +86,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         upstream: Executor,
         output_indices: Vec<usize>,
         output_columns: Vec<ColumnDesc>,
-        progress: Option<CreateMviewProgress>,
+        progress: Option<CreateMviewProgressReporter>,
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
@@ -135,7 +136,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let pk_indices = self.external_table.pk_indices().to_vec();
         let pk_order = self.external_table.pk_order_types().to_vec();
 
-        let upstream_table_id = self.external_table.table_id().table_id;
+        let table_id = self.external_table.table_id().table_id;
         let upstream_table_name = self.external_table.qualified_table_name();
         let schema_table_name = self.external_table.schema_table_name().clone();
         let external_database_name = self.external_table.database_name().to_owned();
@@ -157,7 +158,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
 
-        let mut paused = first_barrier.is_pause_on_startup();
+        let mut is_snapshot_paused = first_barrier.is_pause_on_startup();
+        let mut rate_limit_to_zero = self.rate_limit_rps.is_some_and(|val| val == 0);
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
@@ -192,11 +194,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
         tracing::info!(
-            upstream_table_id,
+            table_id,
             upstream_table_name,
             initial_binlog_offset = ?last_binlog_offset,
             ?current_pk_pos,
             is_finished = state.is_finished,
+            is_snapshot_paused,
             snapshot_row_count = total_snapshot_row_count,
             rate_limit = self.rate_limit_rps,
             disable_backfill = self.options.disable_backfill,
@@ -234,6 +237,27 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             for msg in upstream.by_ref() {
                 match msg? {
                     Message::Barrier(barrier) => {
+                        match barrier.mutation.as_deref() {
+                            Some(crate::executor::Mutation::Pause) => {
+                                is_snapshot_paused = true;
+                                tracing::info!(
+                                    table_id,
+                                    upstream_table_name,
+                                    "snapshot is paused by barrier"
+                                );
+                            }
+                            Some(crate::executor::Mutation::Resume) => {
+                                is_snapshot_paused = false;
+                                tracing::info!(
+                                    table_id,
+                                    upstream_table_name,
+                                    "snapshot is resumed by barrier"
+                                );
+                            }
+                            _ => {
+                                // ignore other mutations
+                            }
+                        }
                         // commit state just to bump the epoch of state table
                         state_impl.commit_state(barrier.epoch).await?;
                         yield Message::Barrier(barrier);
@@ -248,10 +272,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
             }
 
-            tracing::info!(upstream_table_id,
+            tracing::info!(table_id,
                 upstream_table_name,
                 initial_binlog_offset = ?last_binlog_offset,
                 ?current_pk_pos,
+                is_snapshot_paused,
                 "start cdc backfill loop");
 
             // the buffer will be drained when a barrier comes
@@ -274,9 +299,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
                     .map(Either::Right));
 
-                let (right_snapshot, valve) = pausable(right_snapshot);
-                if paused {
-                    valve.pause();
+                let (right_snapshot, snapshot_valve) = pausable(right_snapshot);
+                if is_snapshot_paused {
+                    snapshot_valve.pause();
                 }
 
                 // Prefer to select upstream, so we can stop snapshot stream when barrier comes.
@@ -306,12 +331,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         use crate::executor::Mutation;
                                         match mutation {
                                             Mutation::Pause => {
-                                                paused = true;
-                                                valve.pause();
+                                                is_snapshot_paused = true;
+                                                snapshot_valve.pause();
                                             }
                                             Mutation::Resume => {
-                                                paused = false;
-                                                valve.resume();
+                                                is_snapshot_paused = false;
+                                                snapshot_valve.resume();
                                             }
                                             Mutation::Throttle(some) => {
                                                 if let Some(new_rate_limit) =
@@ -319,8 +344,39 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     self.rate_limit_rps = *new_rate_limit;
-                                                    // rebuild the new reader stream with new rate limit
+                                                    rate_limit_to_zero = self
+                                                        .rate_limit_rps
+                                                        .is_some_and(|val| val == 0);
+
+                                                    // update and persist current backfill progress without draining the buffered upstream chunks
+                                                    state_impl
+                                                        .mutate_state(
+                                                            current_pk_pos.clone(),
+                                                            last_binlog_offset.clone(),
+                                                            total_snapshot_row_count,
+                                                            false,
+                                                        )
+                                                        .await?;
+                                                    state_impl.commit_state(barrier.epoch).await?;
+                                                    yield Message::Barrier(barrier);
+
+                                                    // rebuild the snapshot stream with new rate limit
                                                     continue 'backfill_loop;
+                                                }
+                                            }
+                                            Mutation::Update(UpdateMutation {
+                                                dropped_actors,
+                                                ..
+                                            }) => {
+                                                if dropped_actors.contains(&self.actor_ctx.id) {
+                                                    // the actor has been dropped, exit the backfill loop
+                                                    tracing::info!(
+                                                        table_id,
+                                                        upstream_table_name,
+                                                        "CdcBackfill has been dropped due to config change"
+                                                    );
+                                                    yield Message::Barrier(barrier);
+                                                    break 'backfill_loop;
                                                 }
                                             }
                                             _ => (),
@@ -339,7 +395,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         // staging the barrier
                                         pending_barrier = Some(barrier);
                                         tracing::debug!(
-                                            upstream_table_id,
+                                            table_id,
                                             ?current_pk_pos,
                                             ?snapshot_read_row_cnt,
                                             "Prepare to start a new snapshot"
@@ -406,7 +462,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             match msg? {
                                 None => {
                                     tracing::info!(
-                                        upstream_table_id,
+                                        table_id,
                                         ?last_binlog_offset,
                                         ?current_pk_pos,
                                         "snapshot read stream ends"
@@ -457,14 +513,22 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 // Otherwise, the result set of the new snapshot stream may become empty.
                 // It maybe a cancellation bug of the mysql driver.
                 let (_, mut snapshot_stream) = backfill_stream.into_inner();
-                if let Some(msg) = snapshot_stream.next().await {
+
+                // skip consume the snapshot stream if it is paused or rate limit to 0
+                if !is_snapshot_paused
+                    && !rate_limit_to_zero
+                    && let Some(msg) = snapshot_stream
+                        .next()
+                        .instrument_await("consume_snapshot_stream_once")
+                        .await
+                {
                     let Either::Right(msg) = msg else {
                         bail!("BUG: snapshot_read contains upstream messages");
                     };
                     match msg? {
                         None => {
                             tracing::info!(
-                                upstream_table_id,
+                                table_id,
                                 ?last_binlog_offset,
                                 ?current_pk_pos,
                                 "snapshot read stream ends in the force emit branch"
@@ -501,7 +565,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             snapshot_read_row_cnt += row_count as usize;
 
                             tracing::debug!(
-                                upstream_table_id,
+                                table_id,
                                 ?current_pk_pos,
                                 ?snapshot_read_row_cnt,
                                 "force emit a snapshot chunk"
@@ -567,7 +631,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         } else if self.options.disable_backfill {
             // If backfill is disabled, we just mark the backfill as finished
             tracing::info!(
-                upstream_table_id,
+                table_id,
                 upstream_table_name,
                 "CdcBackfill has been disabled"
             );
@@ -585,7 +649,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         drop(upstream_table_reader);
 
         tracing::info!(
-            upstream_table_id,
+            table_id,
             upstream_table_name,
             "CdcBackfill has already finished and will forward messages directly to the downstream"
         );
@@ -610,7 +674,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                     // mark progress as finished
                     if let Some(progress) = self.progress.as_mut() {
-                        progress.finish(barrier.epoch.curr, total_snapshot_row_count);
+                        progress.finish(barrier.epoch, total_snapshot_row_count);
                     }
                     yield msg;
                     // break after the state have been saved

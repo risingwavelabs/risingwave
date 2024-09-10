@@ -18,7 +18,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
-use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
+use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
@@ -48,6 +48,12 @@ use tonic::Streaming;
 use crate::error::{Result, RpcError};
 use crate::{RpcClient, RpcClientPool};
 
+// TODO: this client has too many roles, e.g.
+// - batch MPP task query execution
+// - batch exchange
+// - streaming exchange
+// - general services specific to compute node, like monitoring, profiling, debugging, etc.
+// We should consider splitting them into different clients.
 #[derive(Clone)]
 pub struct ComputeClient {
     pub exchange_client: ExchangeServiceClient<Channel>,
@@ -278,4 +284,4 @@ impl RpcClient for ComputeClient {
 }
 
 pub type ComputeClientPool = RpcClientPool<ComputeClient>;
-pub type ComputeClientPoolRef = Arc<ComputeClientPool>;
+pub type ComputeClientPoolRef = Arc<ComputeClientPool>; // TODO: no need for `Arc` since clone is cheap and shared

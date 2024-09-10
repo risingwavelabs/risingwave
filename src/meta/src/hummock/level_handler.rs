@@ -15,9 +15,10 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::level::Level;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockSstableId};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
-use risingwave_pb::hummock::{Level, SstableInfo};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {
@@ -90,9 +91,9 @@ impl LevelHandler {
         let mut table_ids = vec![];
         let mut total_file_size = 0;
         for sst in ssts {
-            self.compacting_files.insert(sst.get_sst_id(), task_id);
-            total_file_size += sst.file_size;
-            table_ids.push(sst.get_sst_id());
+            self.compacting_files.insert(sst.sst_id, task_id);
+            total_file_size += sst.sst_size;
+            table_ids.push(sst.sst_id);
         }
 
         self.pending_tasks.push(RunningCompactTask {

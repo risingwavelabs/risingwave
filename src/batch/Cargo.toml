@@ -32,11 +32,12 @@ hytra = "0.1.2"
 iceberg = { workspace = true }
 itertools = { workspace = true }
 memcomparable = "0.2"
-opendal = "0.45.1"
+opendal = { workspace = true }
 parking_lot = { workspace = true }
+parquet = { workspace = true }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.12"
+prost = { workspace = true }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
@@ -62,7 +63,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-metrics = "0.3.0"
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"

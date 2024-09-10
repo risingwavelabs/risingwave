@@ -127,8 +127,10 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                 | DataType::Struct(_)
                 | DataType::List(_)
                 | DataType::Int256
-                | DataType::Serial => {
+                | DataType::Serial
+                | DataType::Map(_) => {
                     // Interval, Struct, List, Int256 are not supported
+                    // XXX: is this branch reachable?
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                         tracing::warn!(column = rw_field.name, ?rw_field.data_type, suppressed_count, "unsupported data type, set to null");
                     }
@@ -149,7 +151,7 @@ mod tests {
     use mysql_async::Row as MySqlRow;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, ToText};
+    use risingwave_common::types::DataType;
     use tokio_stream::StreamExt;
 
     use crate::parser::mysql_row_to_owned_row;
@@ -187,7 +189,7 @@ mod tests {
                 let d = owned_row.datum_at(2);
                 if let Some(scalar) = d {
                     let v = scalar.into_timestamptz();
-                    println!("timestamp: {}", v.to_text());
+                    println!("timestamp: {:?}", v);
                 }
             }
         }

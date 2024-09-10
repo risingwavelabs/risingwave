@@ -1,5 +1,29 @@
 # THIS FILE IS AUTO_GENERATED. DO NOT EDIT
+# UPDATE WITH: ./risedev generate-with-options
 
+AzblobConfig:
+  fields:
+  - name: azblob.container_name
+    field_type: String
+    required: true
+  - name: azblob.path
+    field_type: String
+    comments: The directory where the sink file is located.
+    required: true
+  - name: azblob.credentials.account_name
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.credentials.account_key
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.endpoint_url
+    field_type: String
+    required: true
+  - name: r#type
+    field_type: String
+    required: true
 BigQueryConfig:
   fields:
   - name: bigquery.local.path
@@ -17,14 +41,6 @@ BigQueryConfig:
   - name: bigquery.table
     field_type: String
     required: true
-  - name: bigquery.max_batch_rows
-    field_type: usize
-    required: false
-    default: '1024'
-  - name: bigquery.retry_times
-    field_type: usize
-    required: false
-    default: '5'
   - name: auto_create
     field_type: bool
     required: false
@@ -97,9 +113,9 @@ ClickHouseConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: r#type
     field_type: String
     required: true
@@ -125,9 +141,9 @@ DeltaLakeConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: r#type
     field_type: String
     required: true
@@ -212,6 +228,36 @@ DynamoDbConfig:
     field_type: usize
     required: false
     default: '256'
+FsConfig:
+  fields:
+  - name: fs.path
+    field_type: String
+    comments: The directory where the sink file is located.
+    required: true
+  - name: r#type
+    field_type: String
+    required: true
+GcsConfig:
+  fields:
+  - name: gcs.bucket_name
+    field_type: String
+    required: true
+  - name: gcs.credential
+    field_type: String
+    comments: The base64 encoded credential key. If not set, ADC will be used.
+    required: true
+  - name: gcs.service_account
+    field_type: String
+    comments: If credential/ADC is not set. The service account can be used to provide the credential info.
+    required: false
+    default: Default::default
+  - name: gcs.path
+    field_type: String
+    comments: The directory where the sink file is located
+    required: true
+  - name: r#type
+    field_type: String
+    required: true
 GooglePubSubConfig:
   fields:
   - name: pubsub.project_id
@@ -228,11 +274,17 @@ GooglePubSubConfig:
     required: true
   - name: pubsub.emulator_host
     field_type: String
-    comments: use the connector with a pubsub emulator  <https://cloud.google.com/pubsub/docs/emulator>
+    comments: |-
+      use the connector with a pubsub emulator
+      <https://cloud.google.com/pubsub/docs/emulator>
     required: false
   - name: pubsub.credentials
     field_type: String
-    comments: A JSON string containing the service account credentials for authorization,  see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.  The provided account credential must have the  `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
+    comments: |-
+      A JSON string containing the service account credentials for authorization,
+      see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.
+      The provided account credential must have the
+      `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
     required: false
 IcebergConfig:
   fields:
@@ -276,6 +328,10 @@ IcebergConfig:
   - name: s3.secret.key
     field_type: String
     required: true
+  - name: s3.path.style.access
+    field_type: bool
+    required: false
+    default: Default::default
   - name: primary_key
     field_type: Vec<String>
     required: false
@@ -285,6 +341,11 @@ IcebergConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
+    comments: Commit every n(>0) checkpoints, default is 10.
+    required: false
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+  - name: create_table_if_not_exists
+    field_type: bool
     required: false
     default: Default::default
 KafkaConfig:
@@ -305,7 +366,9 @@ KafkaConfig:
     default: 'Duration :: from_secs (5)'
   - name: properties.security.protocol
     field_type: String
-    comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    comments: |-
+      Security protocol used for RisingWave to communicate with Kafka brokers. Could be
+      PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
     required: false
   - name: properties.ssl.endpoint.identification.algorithm
     field_type: String
@@ -314,13 +377,25 @@ KafkaConfig:
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false
+  - name: properties.ssl.ca.pem
+    field_type: String
+    comments: CA certificate string (PEM format) for verifying the broker's key.
+    required: false
   - name: properties.ssl.certificate.location
     field_type: String
     comments: Path to client's certificate file (PEM).
     required: false
+  - name: properties.ssl.certificate.pem
+    field_type: String
+    comments: Client's public key string (PEM format) used for authentication.
+    required: false
   - name: properties.ssl.key.location
     field_type: String
     comments: Path to client's private key file (PEM).
+    required: false
+  - name: properties.ssl.key.pem
+    field_type: String
+    comments: Client's private key string (PEM format) used for authentication.
     required: false
   - name: properties.ssl.key.password
     field_type: String
@@ -372,15 +447,26 @@ KafkaConfig:
     default: 'Duration :: from_millis (100)'
   - name: primary_key
     field_type: String
-    comments: We have parsed the primary key for an upsert kafka sink into a `usize` vector representing  the indices of the pk columns in the frontend, so we simply store the primary key here  as a string.
+    comments: |-
+      We have parsed the primary key for an upsert kafka sink into a `usize` vector representing
+      the indices of the pk columns in the frontend, so we simply store the primary key here
+      as a string.
     required: false
   - name: properties.message.max.bytes
     field_type: usize
-    comments: Maximum Kafka protocol request message size. Due to differing framing overhead between  protocol versions the producer is unable to reliably enforce a strict max message limit at  produce time and may exceed the maximum size by one message in protocol ProduceRequests,  the broker will enforce the the topic's max.message.bytes limit
+    comments: |-
+      Maximum Kafka protocol request message size. Due to differing framing overhead between
+      protocol versions the producer is unable to reliably enforce a strict max message limit at
+      produce time and may exceed the maximum size by one message in protocol ProduceRequests,
+      the broker will enforce the the topic's max.message.bytes limit
     required: false
   - name: properties.receive.message.max.bytes
     field_type: usize
-    comments: Maximum Kafka protocol response message size. This serves as a safety precaution to avoid  memory exhaustion in case of protocol hickups. This value must be at least fetch.max.bytes  + 512 to allow for protocol overhead; the value is adjusted automatically unless the  configuration property is explicitly set.
+    comments: |-
+      Maximum Kafka protocol response message size. This serves as a safety precaution to avoid
+      memory exhaustion in case of protocol hickups. This value must be at least fetch.max.bytes
+      + 512 to allow for protocol overhead; the value is adjusted automatically unless the
+      configuration property is explicitly set.
     required: false
   - name: properties.statistics.interval.ms
     field_type: usize
@@ -398,19 +484,33 @@ KafkaConfig:
     required: false
   - name: properties.queue.buffering.max.messages
     field_type: usize
-    comments: Maximum number of messages allowed on the producer queue. This queue is shared by all  topics and partitions. A value of 0 disables this limit.
+    comments: |-
+      Maximum number of messages allowed on the producer queue. This queue is shared by all
+      topics and partitions. A value of 0 disables this limit.
     required: false
   - name: properties.queue.buffering.max.kbytes
     field_type: usize
-    comments: Maximum total message size sum allowed on the producer queue. This queue is shared by all  topics and partitions. This property has higher priority than queue.buffering.max.messages.
+    comments: |-
+      Maximum total message size sum allowed on the producer queue. This queue is shared by all
+      topics and partitions. This property has higher priority than queue.buffering.max.messages.
     required: false
   - name: properties.queue.buffering.max.ms
     field_type: f64
-    comments: Delay in milliseconds to wait for messages in the producer queue to accumulate before  constructing message batches (MessageSets) to transmit to brokers. A higher value allows  larger and more effective (less overhead, improved compression) batches of messages to  accumulate at the expense of increased message delivery latency.
+    comments: |-
+      Delay in milliseconds to wait for messages in the producer queue to accumulate before
+      constructing message batches (MessageSets) to transmit to brokers. A higher value allows
+      larger and more effective (less overhead, improved compression) batches of messages to
+      accumulate at the expense of increased message delivery latency.
     required: false
   - name: properties.enable.idempotence
     field_type: bool
-    comments: 'When set to true, the producer will ensure that messages are successfully produced exactly  once and in the original produce order. The following configuration properties are adjusted  automatically (if not modified by the user) when idempotence is enabled:  max.in.flight.requests.per.connection=5 (must be less than or equal to 5),  retries=INT32_MAX (must be greater than 0), acks=all, queuing.strategy=fifo. Producer  will fail if user-supplied configuration is incompatible.'
+    comments: |-
+      When set to true, the producer will ensure that messages are successfully produced exactly
+      once and in the original produce order. The following configuration properties are adjusted
+      automatically (if not modified by the user) when idempotence is enabled:
+      max.in.flight.requests.per.connection=5 (must be less than or equal to 5),
+      retries=INT32_MAX (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
+      will fail if user-supplied configuration is incompatible.
     required: false
   - name: properties.message.send.max.retries
     field_type: usize
@@ -426,7 +526,11 @@ KafkaConfig:
     required: false
   - name: properties.batch.size
     field_type: usize
-    comments: Maximum size (in bytes) of all messages batched in one MessageSet, including protocol  framing overhead. This limit is applied after the first message has been added to the  batch, regardless of the first message's size, this is to ensure that messages that exceed  batch.size are produced.
+    comments: |-
+      Maximum size (in bytes) of all messages batched in one MessageSet, including protocol
+      framing overhead. This limit is applied after the first message has been added to the
+      batch, regardless of the first message's size, this is to ensure that messages that exceed
+      batch.size are produced.
     required: false
   - name: properties.compression.codec
     field_type: CompressionCodec
@@ -434,9 +538,11 @@ KafkaConfig:
     required: false
   - name: properties.message.timeout.ms
     field_type: usize
-    comments: Produce message timeout.  This value is used to limits the time a produced message waits for  successful delivery (including retries).
+    comments: |-
+      Produce message timeout.
+      This value is used to limits the time a produced message waits for
+      successful delivery (including retries).
     required: false
-    default: '5000'
   - name: properties.max.in.flight.requests.per.connection
     field_type: usize
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
@@ -542,29 +648,44 @@ MongodbConfig:
     required: true
   - name: collection.name
     field_type: String
-    comments: The collection name where data should be written to or read from. For sinks, the format is  `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`  for more information.
+    comments: |-
+      The collection name where data should be written to or read from. For sinks, the format is
+      `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`
+      for more information.
     required: true
   - name: r#type
     field_type: String
     required: true
   - name: collection.name.field
     field_type: String
-    comments: The dynamic collection name where data should be sunk to. If specified, the field value will be used  as the collection name. The collection name format is same as `collection.name`. If the field value is  null or an empty string, then the `collection.name` will be used as a fallback destination.
+    comments: |-
+      The dynamic collection name where data should be sunk to. If specified, the field value will be used
+      as the collection name. The collection name format is same as `collection.name`. If the field value is
+      null or an empty string, then the `collection.name` will be used as a fallback destination.
     required: false
   - name: collection.name.field.drop
     field_type: bool
-    comments: Controls whether the field value of `collection.name.field` should be dropped when sinking.  Set this option to true to avoid the duplicate values of `collection.name.field` being written to the  result collection.
+    comments: |-
+      Controls whether the field value of `collection.name.field` should be dropped when sinking.
+      Set this option to true to avoid the duplicate values of `collection.name.field` being written to the
+      result collection.
     required: false
     default: Default::default
 MqttConfig:
   fields:
   - name: url
     field_type: String
-    comments: The url of the broker to connect to. e.g. tcp://localhost.  Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  to denote the protocol for establishing a connection with the broker.  `mqtts://`, `ssl://` will use the native certificates if no ca is specified
+    comments: |-
+      The url of the broker to connect to. e.g. tcp://localhost.
+      Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
+      to denote the protocol for establishing a connection with the broker.
+      `mqtts://`, `ssl://` will use the native certificates if no ca is specified
     required: true
   - name: qos
     field_type: QualityOfService
-    comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
+    comments: |-
+      The quality of service to use when publishing messages. Defaults to at_most_once.
+      Could be at_most_once, at_least_once or exactly_once
     required: false
   - name: username
     field_type: String
@@ -576,11 +697,19 @@ MqttConfig:
     required: false
   - name: client_prefix
     field_type: String
-    comments: Prefix for the mqtt client id.  The client id will be generated as `client_prefix`_`actor_id`_`(executor_id|source_id)`. Defaults to risingwave
+    comments: |-
+      Prefix for the mqtt client id.
+      The client id will be generated as `client_prefix`_`actor_id`_`(executor_id|source_id)`. Defaults to risingwave
     required: false
   - name: clean_start
     field_type: bool
-    comments: '`clean_start = true` removes all the state from queues & instructs the broker  to clean all the client state when client disconnects.   When set `false`, broker will hold the client state and performs pending  operations on the client when reconnection with same `client_id`  happens. Local queue state is also held to retransmit packets after reconnection.'
+    comments: |-
+      `clean_start = true` removes all the state from queues & instructs the broker
+      to clean all the client state when client disconnects.
+
+      When set `false`, broker will hold the client state and performs pending
+      operations on the client when reconnection with same `client_id`
+      happens. Local queue state is also held to retransmit packets after reconnection.
     required: false
     default: Default::default
   - name: inflight_messages
@@ -593,11 +722,15 @@ MqttConfig:
     required: false
   - name: tls.client_cert
     field_type: String
-    comments: Path to client's certificate file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the certificate content.
+    comments: |-
+      Path to client's certificate file (PEM). Required for client authentication.
+      Can be a file path under fs:// or a string with the certificate content.
     required: false
   - name: tls.client_key
     field_type: String
-    comments: Path to client's private key file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the private key content.
+    comments: |-
+      Path to client's private key file (PEM). Required for client authentication.
+      Can be a file path under fs:// or a string with the private key content.
     required: false
   - name: topic
     field_type: String
@@ -746,56 +879,72 @@ RedisConfig:
   - name: redis.url
     field_type: String
     required: true
+S3Config:
+  fields:
+  - name: s3.region_name
+    field_type: String
+    required: true
+  - name: s3.bucket_name
+    field_type: String
+    required: true
+  - name: s3.path
+    field_type: String
+    comments: The directory where the sink file is located.
+    required: true
+  - name: s3.credentials.access
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.credentials.secret
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.endpoint_url
+    field_type: String
+    required: false
+  - name: s3.assume_role
+    field_type: String
+    required: false
+    default: Default::default
+  - name: r#type
+    field_type: String
+    required: true
 SnowflakeConfig:
   fields:
-  - name: snowflake.database
-    field_type: String
-    comments: The snowflake database used for sinking
-    required: true
-  - name: snowflake.schema
-    field_type: String
-    comments: The corresponding schema where sink table exists
-    required: true
-  - name: snowflake.pipe
-    field_type: String
-    comments: The created pipe object, will be used as `insertFiles` target
-    required: true
-  - name: snowflake.account_identifier
-    field_type: String
-    comments: 'The unique, snowflake provided `account_identifier`  NOTE: please use the form `<orgname>-<account_name>`  For detailed guidance, reference: <https://docs.snowflake.com/en/user-guide/admin-account-identifier>'
-    required: true
-  - name: snowflake.user
-    field_type: String
-    comments: 'The user that owns the table to be sinked  NOTE: the user should''ve been granted corresponding *role*  reference: <https://docs.snowflake.com/en/sql-reference/sql/grant-role>'
-    required: true
-  - name: snowflake.rsa_public_key_fp
-    field_type: String
-    comments: 'The public key fingerprint used when generating custom `jwt_token`  reference: <https://docs.snowflake.com/en/developer-guide/sql-api/authenticating>'
-    required: true
-  - name: snowflake.private_key
-    field_type: String
-    comments: The rsa pem key *without* encryption
-    required: true
   - name: snowflake.s3_bucket
     field_type: String
     comments: The s3 bucket where intermediate sink files will be stored
     required: true
+    alias:
+    - s3.bucket_name
   - name: snowflake.s3_path
     field_type: String
-    comments: The optional s3 path to be specified  the actual file location would be `s3://<s3_bucket>/<s3_path>/<rw_auto_gen_intermediate_file_name>`  if this field is specified by user(s)  otherwise it would be `s3://<s3_bucket>/<rw_auto_gen_intermediate_file_name>`
+    comments: |-
+      The optional s3 path to be specified
+      the actual file location would be `s3://<s3_bucket>/<s3_path>/<rw_auto_gen_intermediate_file_name>`
+      if this field is specified by user(s)
+      otherwise it would be `s3://<s3_bucket>/<rw_auto_gen_intermediate_file_name>`
     required: false
+    alias:
+    - s3.path
   - name: snowflake.aws_access_key_id
     field_type: String
     comments: s3 credentials
     required: true
+    alias:
+    - s3.credentials.access
   - name: snowflake.aws_secret_access_key
     field_type: String
     comments: s3 credentials
     required: true
+    alias:
+    - s3.credentials.secret
   - name: snowflake.aws_region
     field_type: String
     comments: The s3 region, e.g., us-east-2
     required: true
+    alias:
+    - s3.region_name
 SqlServerConfig:
   fields:
   - name: sqlserver.host
@@ -864,13 +1013,30 @@ StarrocksConfig:
     default: 30 * 1000
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Set this option to a positive integer n, RisingWave will try to commit data  to Starrocks at every n checkpoints by leveraging the  [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),  also, in this time, the `sink_decouple` option should be enabled as well.  Defaults to 1 if commit_checkpoint_interval <= 0
+    comments: |-
+      Set this option to a positive integer n, RisingWave will try to commit data
+      to Starrocks at every n checkpoints by leveraging the
+      [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
+      also, in this time, the `sink_decouple` option should be enabled as well.
+      Defaults to 10 if commit_checkpoint_interval <= 0
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: starrocks.partial_update
     field_type: String
     comments: Enable partial update
     required: false
+  - name: r#type
+    field_type: String
+    required: true
+WebhdfsConfig:
+  fields:
+  - name: webhdfs.endpoint
+    field_type: String
+    required: true
+  - name: webhdfs.path
+    field_type: String
+    comments: The directory where the sink file is located.
+    required: true
   - name: r#type
     field_type: String
     required: true

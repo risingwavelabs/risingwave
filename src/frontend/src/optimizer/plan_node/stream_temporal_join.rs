@@ -69,12 +69,19 @@ impl StreamTemporalJoin {
                 .rewrite_bitset(core.left.watermark_columns()),
         );
 
+        let columns_monotonicity = core.i2o_col_mapping().rewrite_monotonicity_map(
+            &core
+                .l2i_col_mapping()
+                .rewrite_monotonicity_map(core.left.columns_monotonicity()),
+        );
+
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             append_only,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
+            columns_monotonicity,
         );
 
         Self {

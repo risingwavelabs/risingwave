@@ -20,9 +20,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::array::{Array, DataChunk, RowRef};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
@@ -34,6 +33,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::data::DataChunk as PbDataChunk;
+use risingwave_pb::Message;
 
 use super::{ChunkedData, JoinType, RowId};
 use crate::error::{BatchError, Result};
@@ -907,7 +907,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 if !visible {
                     continue;
                 }
-                non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     non_equi_state
                         .first_output_row_id
@@ -2018,13 +2017,17 @@ impl DataChunkMutator {
                 new_visibility.set(row_id, true);
             }
         }
-        if !has_more_output_rows && !*found_non_null {
-            new_visibility.set(start_row_id, true);
+        if !has_more_output_rows {
+            if !*found_non_null {
+                new_visibility.set(start_row_id, true);
+            }
+            *found_non_null = false;
         }
 
         first_output_row_ids.clear();
 
-        self.0.set_visibility(new_visibility.finish());
+        self.0
+            .set_visibility(new_visibility.finish() & self.0.visibility());
         self
     }
 
@@ -3316,14 +3319,15 @@ mod tests {
              3   5.0 3   4.0
              3   5.0 3   3.0
              4   1.0 4   0
-             4   1.0 4   0.5",
+             4   1.0 4   9.0",
         );
         let expect = DataChunk::from_pretty(
             "i   f   i   F
              1   3.5 1   5.5
              2   4.0 .   .
              3   5.0 .   .
-             3   5.0 .   .",
+             3   5.0 .   .
+             4   1.0 4   9.0",
         );
         let cond = TestFixture::create_cond();
         let mut state = LeftNonEquiJoinState {
@@ -3344,7 +3348,7 @@ mod tests {
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(!state.found_matched);
+        assert!(state.found_matched);
 
         let chunk = DataChunk::from_pretty(
             "i   f   i   F
@@ -3404,7 +3408,7 @@ mod tests {
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(state.found_matched);
+        assert!(!state.found_matched);
     }
 
     #[tokio::test]

@@ -47,6 +47,10 @@
             <groupId>io.debezium</groupId>
             <artifactId>debezium-connector-mongodb</artifactId>
         </dependency>
+        <dependency>
+            <groupId>io.debezium</groupId>
+            <artifactId>debezium-connector-sqlserver</artifactId>
+        </dependency>
 
         <!-- database dependencies  -->
         <dependency>
@@ -56,7 +60,8 @@
         <dependency>
             <groupId>com.zendesk</groupId>
             <artifactId>mysql-binlog-connector-java</artifactId>
-            <version>0.27.2</version>
+            <!-- https://central.sonatype.com/artifact/com.zendesk/mysql-binlog-connector-java/versions -->
+            <version>0.29.0</version>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>

@@ -17,7 +17,7 @@ normal = ["workspace-hack"]
 [dependencies]
 await-tree = { workspace = true }
 console = "0.15"
-console-subscriber = "0.3.0"
+console-subscriber = "0.4"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.4"
@@ -26,6 +26,8 @@ pprof = { version = "0.13", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
 rlimit = "0.10"
+# Explicitly specify the tokio version used in RisingWave runtime
+rw-tokio = { version = "=1.38.0", package = "tokio" }
 thiserror-ext = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -56,6 +58,8 @@ opentelemetry_sdk = { workspace = true, features = [
     "rt-tokio",
 ] } # only enable `rt-tokio` feature under non-madsim target
 workspace-hack = { path = "../../workspace-hack" }
+minitrace = "0.6.7"
+minitrace-opentelemetry = "0.6.7"
 
 [lints]
 workspace = true

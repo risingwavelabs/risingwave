@@ -14,7 +14,7 @@
 
 use thiserror::Error;
 
-use super::{License, LicenseKeyError, LicenseManager, Tier};
+use super::{report_telemetry, License, LicenseKeyError, LicenseManager, Tier};
 
 /// Define all features that are available based on the tier of the license.
 ///
@@ -44,6 +44,20 @@ macro_rules! for_all_features {
         $macro! {
             // name                 min tier    doc
             { TestPaid,             Paid,       "A dummy feature that's only available on paid tier for testing purposes." },
+            { TimeTravel,           Paid,       "Query historical data within the retention period."},
+            { GlueSchemaRegistry,   Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
+            { SnowflakeSink,        Paid,       "Delivering data to SnowFlake." },
+            { DynamoDbSink,         Paid,       "Delivering data to DynamoDb." },
+            { OpenSearchSink,       Paid,       "Delivering data to OpenSearch." },
+            { BigQuerySink,         Paid,       "Delivering data to BigQuery." },
+            { ClickHouseSharedEngine,Paid,      "Delivering data to Shared tree on clickhouse cloud"},
+            { SecretManagement,     Paid,       "Secret management." },
+            { CdcTableSchemaMap,    Paid,       "Automatically map upstream schema to CDC Table."},
+            { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
+            { SqlServerCdcSource,   Paid,       "CDC source connector for Sql Server." },
+            { CdcAutoSchemaChange,  Paid,       "Auto replicate upstream DDL to CDC Table." },
+            { IcebergSinkWithGlue,  Paid,       "Delivering data to Iceberg with Glue catalog." },
+            { FileSink,             Paid,       "Delivering data to object storage."},
         }
     };
 }
@@ -70,6 +84,14 @@ macro_rules! def_feature {
                     )*
                 }
             }
+
+            fn get_feature_name(&self) -> &'static str {
+                match &self {
+                    $(
+                        Self::$name => stringify!($name),
+                    )*
+                }
+            }
         }
     };
 }
@@ -80,9 +102,9 @@ for_all_features!(def_feature);
 #[derive(Debug, Error)]
 pub enum FeatureNotAvailable {
     #[error(
-        "feature {:?} is only available for tier {:?} and above, while the current tier is {:?}\n\n\
+    "feature {:?} is only available for tier {:?} and above, while the current tier is {:?}\n\n\
         Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.",
-        feature, feature.min_tier(), current_tier,
+    feature, feature.min_tier(), current_tier,
     )]
     InsufficientTier {
         feature: Feature,
@@ -99,7 +121,7 @@ pub enum FeatureNotAvailable {
 impl Feature {
     /// Check whether the feature is available based on the current license.
     pub fn check_available(self) -> Result<(), FeatureNotAvailable> {
-        match LicenseManager::get().license() {
+        let check_res = match LicenseManager::get().license() {
             Ok(license) => {
                 if license.tier >= self.min_tier() {
                     Ok(())
@@ -122,6 +144,10 @@ impl Feature {
                     })
                 }
             }
-        }
+        };
+
+        report_telemetry(&self, self.get_feature_name(), check_res.is_ok());
+
+        check_res
     }
 }

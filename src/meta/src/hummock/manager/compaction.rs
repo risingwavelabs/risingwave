@@ -41,29 +41,31 @@ use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::level::{InputLevel, Level, Levels};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
     HummockVersionId,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
-use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
-    self, Event as RequestEvent, HeartBeat, PullTask, ReportTask,
+    self, Event as RequestEvent, HeartBeat, PullTask,
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    compact_task, CompactStatus as PbCompactStatus, CompactTask, CompactTaskAssignment,
-    CompactionConfig, GroupDelta, InputLevel, IntraLevelDelta, Level, SstableInfo,
-    StateTableInfoDelta, SubscribeCompactionEventRequest, TableOption, TableSchema,
+    compact_task, CompactTaskAssignment, CompactionConfig, PbCompactStatus,
+    PbCompactTaskAssignment, StateTableInfoDelta, SubscribeCompactionEventRequest, TableOption,
+    TableSchema,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -78,7 +80,7 @@ use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic, ManualCompactionOption,
     ManualCompactionSelector, SpaceReclaimCompactionSelector, TombstoneCompactionSelector,
-    TtlCompactionSelector,
+    TtlCompactionSelector, VnodeWatermarkCompactionSelector,
 };
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
 use crate::hummock::error::{Error, Result};
@@ -133,6 +135,10 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
         compact_task::TaskType::Tombstone,
         Box::<TombstoneCompactionSelector>::default(),
     );
+    compaction_selectors.insert(
+        compact_task::TaskType::VnodeWatermark,
+        Box::<VnodeWatermarkCompactionSelector>::default(),
+    );
     compaction_selectors
 }
 
@@ -151,11 +157,8 @@ impl<'a> HummockVersionTransaction<'a> {
 
         for level in &compact_task.input_ssts {
             let level_idx = level.level_idx;
-            let mut removed_table_ids = level
-                .table_infos
-                .iter()
-                .map(|sst| sst.get_sst_id())
-                .collect_vec();
+            let mut removed_table_ids =
+                level.table_infos.iter().map(|sst| sst.sst_id).collect_vec();
 
             removed_table_ids_map
                 .entry(level_idx)
@@ -164,40 +167,42 @@ impl<'a> HummockVersionTransaction<'a> {
         }
 
         for (level_idx, removed_table_ids) in removed_table_ids_map {
-            let group_delta = GroupDelta {
-                delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                    level_idx,
-                    removed_table_ids,
-                    ..Default::default()
-                })),
-            };
+            let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
+                level_idx,
+                0, // default
+                removed_table_ids,
+                vec![], // default
+                0,      // default
+            ));
+
             group_deltas.push(group_delta);
         }
 
-        let group_delta = GroupDelta {
-            delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                level_idx: compact_task.target_level,
-                inserted_table_infos: compact_task.sorted_output_ssts.clone(),
-                l0_sub_level_id: compact_task.target_sub_level_id,
-                vnode_partition_count: compact_task.split_weight_by_vnode,
-                ..Default::default()
-            })),
-        };
+        let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
+            compact_task.target_level,
+            compact_task.target_sub_level_id,
+            vec![], // default
+            compact_task.sorted_output_ssts.clone(),
+            compact_task.split_weight_by_vnode,
+        ));
+
         group_deltas.push(group_delta);
-        version_delta.safe_epoch = std::cmp::max(
+        let new_visible_table_safe_epoch = std::cmp::max(
             version_delta.latest_version().visible_table_safe_epoch(),
             compact_task.watermark,
         );
-        if version_delta.latest_version().visible_table_safe_epoch() < version_delta.safe_epoch {
+        version_delta.set_safe_epoch(new_visible_table_safe_epoch);
+        if version_delta.latest_version().visible_table_safe_epoch() < new_visible_table_safe_epoch
+        {
             version_delta.with_latest_version(|version, version_delta| {
                 for (table_id, info) in version.state_table_info.info() {
-                    let new_safe_epoch = min(version_delta.safe_epoch, info.committed_epoch);
+                    let new_safe_epoch = min(new_visible_table_safe_epoch, info.committed_epoch);
                     if new_safe_epoch > info.safe_epoch {
-                        if new_safe_epoch != version_delta.safe_epoch {
+                        if new_safe_epoch != version_delta.visible_table_safe_epoch() {
                             warn!(
                                 new_safe_epoch,
                                 committed_epoch = info.committed_epoch,
-                                global_safe_epoch = version_delta.safe_epoch,
+                                global_safe_epoch = new_visible_table_safe_epoch,
                                 table_id = table_id.table_id,
                                 "table has different safe epoch to global"
                             );
@@ -221,7 +226,7 @@ impl<'a> HummockVersionTransaction<'a> {
 #[derive(Default)]
 pub struct Compaction {
     /// Compaction task that is already assigned to a compactor
-    pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
+    pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, PbCompactTaskAssignment>,
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 
@@ -319,7 +324,7 @@ impl HummockManager {
                             for task in compact_tasks {
                                 let task_id = task.task_id;
                                 if let Err(e) =
-                                    compactor.send_event(ResponseEvent::CompactTask(task))
+                                    compactor.send_event(ResponseEvent::CompactTask(task.into()))
                                 {
                                     tracing::warn!(
                                         error = %e.as_report(),
@@ -597,7 +602,7 @@ impl HummockManager {
                         }
 
                         RequestEvent::ReportTask(task) => {
-                           report_events.push(task);
+                           report_events.push(task.into());
                         }
 
                         _ => unreachable!(),
@@ -615,7 +620,7 @@ impl HummockManager {
                             }
 
                             RequestEvent::ReportTask(task) => {
-                                report_events.push(task);
+                                report_events.push(task.into());
                                 if report_events.len() >= MAX_REPORT_COUNT {
                                     break;
                                 }
@@ -660,7 +665,7 @@ impl HummockManager {
         let _timer = start_measure_real_process_timer!(self, "get_compact_tasks_impl");
 
         let start_time = Instant::now();
-        let max_committed_epoch = versioning.current_version.max_committed_epoch;
+        let max_committed_epoch = versioning.current_version.visible_table_committed_epoch();
         let watermark = self
             .context_info
             .read()
@@ -764,8 +769,10 @@ impl HummockManager {
                 &group_config,
                 &mut stats,
                 selector,
-                table_id_to_option.clone(),
+                &table_id_to_option,
                 developer_config.clone(),
+                &version.latest_version().table_watermarks,
+                &version.latest_version().state_table_info,
             ) {
                 let target_level_id = compact_task.input.target_level as u32;
 
@@ -775,11 +782,9 @@ impl HummockManager {
                     _ => 0,
                 };
                 let vnode_partition_count = compact_task.input.vnode_partition_count;
-                use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-
                 let mut compact_task = CompactTask {
                     input_ssts: compact_task.input.input_levels,
-                    splits: vec![risingwave_pb::hummock::KeyRange::inf()],
+                    splits: vec![KeyRange::inf()],
                     watermark,
                     sorted_output_ssts: vec![],
                     task_id,
@@ -791,7 +796,7 @@ impl HummockManager {
                         .get_compaction_group_levels(compaction_group_id)
                         .is_last_level(target_level_id),
                     base_level: compact_task.base_level as u32,
-                    task_status: TaskStatus::Pending as i32,
+                    task_status: TaskStatus::Pending,
                     compaction_group_id: group_config.group_id,
                     existing_table_ids: member_table_ids.clone(),
                     compression_algorithm,
@@ -805,7 +810,7 @@ impl HummockManager {
                     current_epoch_time: Epoch::now().0,
                     compaction_filter_mask: group_config.compaction_config.compaction_filter_mask,
                     target_sub_level_id: compact_task.input.target_sub_level_id,
-                    task_type: compact_task.compaction_task_type as i32,
+                    task_type: compact_task.compaction_task_type,
                     split_weight_by_vnode: vnode_partition_count,
                     max_sub_compaction: group_config.compaction_config.max_sub_compaction,
                     ..Default::default()
@@ -832,7 +837,7 @@ impl HummockManager {
                         compact_task.input_ssts,
                         start_time.elapsed()
                     );
-                    compact_task.set_task_status(TaskStatus::Success);
+                    compact_task.task_status = TaskStatus::Success;
                     compact_status.report_compact_task(&compact_task);
                     if !is_trivial_reclaim {
                         compact_task
@@ -886,7 +891,7 @@ impl HummockManager {
                     compact_task_assignment.insert(
                         compact_task.task_id,
                         CompactTaskAssignment {
-                            compact_task: Some(compact_task.clone()),
+                            compact_task: Some(compact_task.clone().into()),
                             context_id: META_NODE_ID, // deprecated
                         },
                     );
@@ -946,7 +951,7 @@ impl HummockManager {
                 .initiate_task_heartbeat(compact_task.clone());
 
             // this task has been finished.
-            compact_task.set_task_status(TaskStatus::Pending);
+            compact_task.task_status = TaskStatus::Pending;
             let compact_task_statistics = statistics_compact_task(compact_task);
 
             let level_type_label = build_compact_task_level_type_metrics_label(
@@ -984,7 +989,7 @@ impl HummockManager {
                     "For compaction group {}: pick up {} {} sub_level in level {} to compact to target {}. cost time: {:?} compact_task_statistics {:?}",
                     compaction_group_id,
                     level_count,
-                    compact_task.input_ssts[0].level_type().as_str_name(),
+                    compact_task.input_ssts[0].level_type.as_str_name(),
                     compact_task.input_ssts[0].level_idx,
                     compact_task.target_level,
                     start_time.elapsed(),
@@ -1029,7 +1034,7 @@ impl HummockManager {
             .into_iter()
             .map(|task_id| ReportTask {
                 task_id,
-                task_status: task_status as i32,
+                task_status,
                 sorted_output_ssts: vec![],
                 table_stats_change: HashMap::default(),
             })
@@ -1056,7 +1061,7 @@ impl HummockManager {
             .get_compact_tasks_impl(compaction_groups, max_select_count, selector)
             .await?;
         tasks.retain(|task| {
-            if task.task_status() == TaskStatus::Success {
+            if task.task_status == TaskStatus::Success {
                 debug_assert!(
                     CompactStatus::is_trivial_reclaim(task)
                         || CompactStatus::is_trivial_move_task(task)
@@ -1082,7 +1087,7 @@ impl HummockManager {
             .get_compact_tasks_impl(vec![compaction_group_id], 1, selector)
             .await?;
         for task in normal_tasks {
-            if task.task_status() != TaskStatus::Success {
+            if task.task_status != TaskStatus::Success {
                 return Ok(Some(task));
             }
             debug_assert!(
@@ -1112,7 +1117,7 @@ impl HummockManager {
             .levels
             .get(&compact_task.compaction_group_id)
         {
-            for input_level in compact_task.get_input_ssts() {
+            for input_level in &compact_task.input_ssts {
                 let input_level: &InputLevel = input_level;
                 let mut sst_ids: HashSet<_> = input_level
                     .table_infos
@@ -1125,7 +1130,7 @@ impl HummockManager {
                     }
                 }
                 if input_level.level_idx == 0 {
-                    for level in &group.get_level0().sub_levels {
+                    for level in &group.level0().sub_levels {
                         filter_ssts(level, &mut sst_ids);
                     }
                 } else {
@@ -1150,7 +1155,7 @@ impl HummockManager {
         let rets = self
             .report_compact_tasks(vec![ReportTask {
                 task_id,
-                task_status: task_status as i32,
+                task_status,
                 sorted_output_ssts,
                 table_stats_change: table_stats_change.unwrap_or_default(),
             }])
@@ -1208,7 +1213,7 @@ impl HummockManager {
         for (idx, task) in report_tasks.into_iter().enumerate() {
             rets[idx] = true;
             let mut compact_task = match compact_task_assignment.remove(task.task_id) {
-                Some(compact_task) => compact_task.compact_task.unwrap(),
+                Some(compact_task) => CompactTask::from(compact_task.compact_task.unwrap()),
                 None => {
                     tracing::warn!("{}", format!("compact task {} not found", task.task_id));
                     rets[idx] = false;
@@ -1227,7 +1232,7 @@ impl HummockManager {
                     compact_status.report_compact_task(&compact_task);
                 }
                 None => {
-                    compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                    compact_task.task_status = TaskStatus::InvalidGroupCanceled;
                 }
             }
 
@@ -1241,12 +1246,12 @@ impl HummockManager {
                 .iter()
                 .map(|level| level.level_idx)
                 .collect();
-            let is_success = if let TaskStatus::Success = compact_task.task_status() {
+            let is_success = if let TaskStatus::Success = compact_task.task_status {
                 // if member_table_ids changes, the data of sstable may stale.
                 let is_expired =
                     Self::is_compact_task_expired(&compact_task, version.latest_version());
                 if is_expired {
-                    compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
+                    compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                     false
                 } else {
                     let group = version
@@ -1257,7 +1262,7 @@ impl HummockManager {
                     let input_exist =
                         group.check_deleted_sst_exist(&input_level_ids, input_sst_ids);
                     if !input_exist {
-                        compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                        compact_task.task_status = TaskStatus::InvalidGroupCanceled;
                         warn!(
                             "The task may be expired because of group split, task:\n {:?}",
                             compact_task_to_string(&compact_task)
@@ -1309,9 +1314,9 @@ impl HummockManager {
         }
         let mut success_groups = vec![];
         for compact_task in tasks {
-            let task_status = compact_task.task_status();
+            let task_status = compact_task.task_status;
             let task_status_label = task_status.as_str_name();
-            let task_type_label = compact_task.task_type().as_str_name();
+            let task_type_label = compact_task.task_type.as_str_name();
 
             self.compactor_manager
                 .remove_task_heartbeat(compact_task.task_id);
@@ -1342,8 +1347,8 @@ impl HummockManager {
             );
 
             if !deterministic_mode
-                && (matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
-                    || matches!(compact_task.task_type(), compact_task::TaskType::Emergency))
+                && (matches!(compact_task.task_type, compact_task::TaskType::Dynamic)
+                    || matches!(compact_task.task_type, compact_task::TaskType::Emergency))
             {
                 // only try send Dynamic compaction
                 self.try_send_compaction_request(
@@ -1370,13 +1375,15 @@ impl HummockManager {
         _base_version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<()> {
-        let old_version = self.get_current_version().await;
-        tracing::info!(
-            "Trigger compaction for version {}, epoch {}, groups {:?}",
-            old_version.id,
-            old_version.max_committed_epoch,
-            compaction_groups
-        );
+        self.on_current_version(|old_version| {
+            tracing::info!(
+                "Trigger compaction for version {}, epoch {}, groups {:?}",
+                old_version.id,
+                old_version.visible_table_committed_epoch(),
+                compaction_groups
+            );
+        })
+        .await;
 
         if compaction_groups.is_empty() {
             return Ok(());
@@ -1437,7 +1444,7 @@ impl HummockManager {
         let compact_task_string = compact_task_to_string(&compact_task);
         // TODO: shall we need to cancel on meta ?
         compactor
-            .send_event(ResponseEvent::CompactTask(compact_task))
+            .send_event(ResponseEvent::CompactTask(compact_task.into()))
             .with_context(|| {
                 format!(
                     "Failed to trigger compaction task for compaction_group {}",
@@ -1501,7 +1508,7 @@ impl HummockManager {
                     existing_table_ids.extend(sst.table_ids.iter());
                     for table_id in &sst.table_ids {
                         *table_size_info.entry(*table_id).or_default() +=
-                            sst.file_size / (sst.table_ids.len() as u64);
+                            sst.sst_size / (sst.table_ids.len() as u64);
                     }
                 }
             }
@@ -1664,7 +1671,7 @@ impl HummockManager {
             guard.compact_task_assignment.insert(
                 task_id,
                 CompactTaskAssignment {
-                    compact_task: Some(task),
+                    compact_task: Some(task.into()),
                     context_id: 0,
                 },
             );
@@ -1674,7 +1681,7 @@ impl HummockManager {
         // So we pass the modified compact_task directly into the `report_compact_task_impl`
         self.report_compact_tasks(vec![ReportTask {
             task_id,
-            task_status: task_status as i32,
+            task_status,
             sorted_output_ssts,
             table_stats_change: table_stats_change.unwrap_or_default(),
         }])
@@ -1688,7 +1695,7 @@ pub fn check_cg_write_limit(
     compaction_config: &CompactionConfig,
 ) -> WriteLimitType {
     let threshold = compaction_config.level0_stop_write_threshold_sub_level_number as usize;
-    let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
+    let l0_sub_level_number = levels.l0.sub_levels.len();
     if threshold < l0_sub_level_number {
         return WriteLimitType::WriteStop(l0_sub_level_number, threshold);
     }
@@ -1766,6 +1773,8 @@ impl CompactionState {
             Some(compact_task::TaskType::Ttl)
         } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
             Some(compact_task::TaskType::Tombstone)
+        } else if guard.contains(&(group, compact_task::TaskType::VnodeWatermark)) {
+            Some(compact_task::TaskType::VnodeWatermark)
         } else {
             None
         }

@@ -33,14 +33,12 @@ use maplit::hashmap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row as _;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
-use super::catalog::desc::SinkDesc;
 use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
@@ -110,14 +108,10 @@ impl Sink for DynamoDbSink {
 
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
 
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
-        }
-    }
-
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::DynamoDbSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
         let client = (self.config.build_client().await)
             .context("validate DynamoDB sink error")
             .map_err(SinkError::DynamoDb)?;
@@ -211,7 +205,6 @@ impl DynamoDbRequest {
 }
 
 struct DynamoDbPayloadWriter {
-    request_items: Vec<DynamoDbRequest>,
     client: Client,
     table: String,
     dynamodb_keys: Vec<String>,
@@ -219,29 +212,37 @@ struct DynamoDbPayloadWriter {
 }
 
 impl DynamoDbPayloadWriter {
-    fn write_one_insert(&mut self, item: HashMap<String, AttributeValue>) {
+    fn write_one_insert(
+        &mut self,
+        item: HashMap<String, AttributeValue>,
+        request_items: &mut Vec<DynamoDbRequest>,
+    ) {
         let put_req = PutRequest::builder().set_item(Some(item)).build().unwrap();
         let req = WriteRequest::builder().put_request(put_req).build();
-        self.write_one_req(req);
+        self.write_one_req(req, request_items);
     }
 
-    fn write_one_delete(&mut self, key: HashMap<String, AttributeValue>) {
+    fn write_one_delete(
+        &mut self,
+        key: HashMap<String, AttributeValue>,
+        request_items: &mut Vec<DynamoDbRequest>,
+    ) {
         let key = key
             .into_iter()
             .filter(|(k, _)| self.dynamodb_keys.contains(k))
             .collect();
         let del_req = DeleteRequest::builder().set_key(Some(key)).build().unwrap();
         let req = WriteRequest::builder().delete_request(del_req).build();
-        self.write_one_req(req);
+        self.write_one_req(req, request_items);
     }
 
-    fn write_one_req(&mut self, req: WriteRequest) {
+    fn write_one_req(&mut self, req: WriteRequest, request_items: &mut Vec<DynamoDbRequest>) {
         let r_req = DynamoDbRequest {
             inner: req,
             key_items: self.dynamodb_keys.clone(),
         };
         if let Some(v) = r_req.extract_pk_values() {
-            self.request_items.retain(|item| {
+            request_items.retain(|item| {
                 !item
                     .extract_pk_values()
                     .unwrap_or_default()
@@ -249,11 +250,12 @@ impl DynamoDbPayloadWriter {
                     .all(|x| v.contains(x))
             });
         }
-        self.request_items.push(r_req);
+        request_items.push(r_req);
     }
 
     fn write_chunk(
         &mut self,
+        request_items: Vec<DynamoDbRequest>,
     ) -> Result<
         Vec<
             impl Future<
@@ -265,7 +267,7 @@ impl DynamoDbPayloadWriter {
         >,
     > {
         let table = self.table.clone();
-        let req_items: Vec<Vec<_>> = std::mem::take(&mut self.request_items)
+        let req_items: Vec<Vec<_>> = request_items
             .into_iter()
             .map(|r| r.inner)
             .chunks(self.max_batch_item_nums)
@@ -320,7 +322,6 @@ impl DynamoDbSinkWriter {
             .collect();
 
         let payload_writer = DynamoDbPayloadWriter {
-            request_items: Vec::new(),
             client,
             table: config.table.clone(),
             dynamodb_keys,
@@ -346,19 +347,22 @@ impl DynamoDbSinkWriter {
             >,
         >,
     > {
+        let mut request_items = Vec::new();
         for (op, row) in chunk.rows() {
             let items = self.formatter.format_row(row)?;
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.payload_writer.write_one_insert(items);
+                    self.payload_writer
+                        .write_one_insert(items, &mut request_items);
                 }
                 Op::Delete => {
-                    self.payload_writer.write_one_delete(items);
+                    self.payload_writer
+                        .write_one_delete(items, &mut request_items);
                 }
                 Op::UpdateDelete => {}
             }
         }
-        self.payload_writer.write_chunk()
+        self.payload_writer.write_chunk(request_items)
     }
 }
 
@@ -456,6 +460,7 @@ fn map_data_type(
             }
             AttributeValue::M(map)
         }
+        DataType::Map(_) => todo!(),
     };
     Ok(attr)
 }

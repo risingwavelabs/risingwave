@@ -29,6 +29,7 @@ def format_json(data):
         for file in data
     ]
 
+
 def format_csv(data, with_header):
     csv_files = []
 
@@ -42,7 +43,7 @@ def format_csv(data, with_header):
         csv_files.append(ostream.getvalue())
     return csv_files
 
-def do_test(config, file_num, item_num_per_file, prefix, fmt):
+def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=True):
     conn = psycopg2.connect(
         host="localhost",
         port="4566",
@@ -69,13 +70,14 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt):
         sex int,
         mark int,
     ) WITH (
-        connector = 's3_v2',
+        connector = 's3',
         match_pattern = '{prefix}*.{fmt}',
         s3.region_name = '{config['S3_REGION']}',
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
+        refresh.interval.sec = 1
     ) FORMAT PLAIN ENCODE {_encode()};''')
 
     total_rows = file_num * item_num_per_file
@@ -105,10 +107,16 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt):
 
     print('Test pass')
 
-    cur.execute(f'drop table {_table()}')
+    if need_drop_table:
+        cur.execute(f'drop table {_table()}')
     cur.close()
     conn.close()
 
+FORMATTER = {
+        'json': format_json,
+        'csv_with_header': partial(format_csv, with_header=True),
+        'csv_without_header': partial(format_csv, with_header=False),
+    }
 
 if __name__ == "__main__":
     FILE_NUM = 4001
@@ -116,11 +124,6 @@ if __name__ == "__main__":
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
 
     fmt = sys.argv[1]
-    FORMATTER = {
-        'json': format_json,
-        'csv_with_header': partial(format_csv, with_header=True),
-        'csv_without_header': partial(format_csv, with_header=False),
-    }
     assert fmt in FORMATTER, f"Unsupported format: {fmt}"
     formatted_files = FORMATTER[fmt](data)
 

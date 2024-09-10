@@ -154,6 +154,7 @@ message ExprNode {
     ACOSH = 265;
     ATANH = 266;
     SINH = 267;
+    ACOSD = 268;
     // skips 268,269,270 so that acosd, atand, atan2d are close to others
     TRUNC = 271;
     LN = 272;
@@ -281,6 +282,20 @@ message ExprNode {
     JSONB_POPULATE_RECORD = 629;
     JSONB_TO_RECORD = 630;
     JSONB_SET = 631;
+    JSONB_POPULATE_MAP = 632;
+
+    // Map functions
+    MAP_FROM_ENTRIES = 700;
+    MAP_ACCESS = 701;
+    MAP_KEYS = 702;
+    MAP_VALUES = 703;
+    MAP_ENTRIES = 704;
+    MAP_FROM_KEY_VALUES = 705;
+    MAP_LENGTH = 706;
+    MAP_CONTAINS = 707;
+    MAP_CAT = 708;
+    MAP_INSERT = 709;
+    MAP_DELETE = 710;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -307,6 +322,8 @@ message ExprNode {
     HAS_TABLE_PRIVILEGE = 2407;
     HAS_ANY_COLUMN_PRIVILEGE = 2408;
     HAS_SCHEMA_PRIVILEGE = 2409;
+    PG_IS_IN_RECOVERY = 2411;
+    RW_RECOVERY_STATUS = 2412;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
@@ -343,6 +360,8 @@ message TableFunction {
     JSONB_PATH_QUERY = 15;
     JSONB_POPULATE_RECORDSET = 16;
     JSONB_TO_RECORDSET = 17;
+    // file scan
+    FILE_SCAN = 19;
     // User defined table function
     USER_DEFINED = 100;
   }
@@ -432,8 +451,12 @@ message AggCall {
     LAST_VALUE = 25;
     GROUPING = 26;
     INTERNAL_LAST_SEEN_VALUE = 27;
+    APPROX_PERCENTILE = 28;
+
     // user defined aggregate function
     USER_DEFINED = 100;
+    // wraps a scalar function that takes a list as input as an aggregate function.
+    WRAP_SCALAR = 101;
   }
   Type type = 1;
   repeated InputRef args = 2;
@@ -444,6 +467,8 @@ message AggCall {
   repeated Constant direct_args = 7;
   // optional. only used when the type is USER_DEFINED.
   UserDefinedFunctionMetadata udf = 8;
+  // optional. only used when the type is WRAP_SCALAR.
+  ExprNode scalar = 9;
 }
 
 message WindowFrame {
@@ -575,6 +600,7 @@ message UserDefinedFunction {
 message UserDefinedFunctionMetadata {
   repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
+  data.DataType return_type = 13;
   string language = 4;
   optional string link = 5;
   optional string identifier = 6;

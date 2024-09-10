@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, ScalarImpl};
+use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, MapType, ScalarImpl};
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 use thiserror_ext::AsReport;
 
@@ -100,7 +100,7 @@ impl Binder {
         Ok(literal)
     }
 
-    fn bind_date_time_field(field: AstDateTimeField) -> DateTimeField {
+    pub(crate) fn bind_date_time_field(field: AstDateTimeField) -> DateTimeField {
         // This is a binder function rather than `impl From<AstDateTimeField> for DateTimeField`,
         // so that the `sqlparser` crate and the `common` crate are kept independent.
         match field {
@@ -132,27 +132,92 @@ impl Binder {
         Ok(expr)
     }
 
-    pub(super) fn bind_array_cast(&mut self, exprs: Vec<Expr>, ty: DataType) -> Result<ExprImpl> {
-        let inner_type = if let DataType::List(datatype) = &ty {
-            *datatype.clone()
-        } else {
-            return Err(ErrorCode::BindError(format!(
-                "cannot cast array to non-array type {}",
-                ty
-            ))
-            .into());
-        };
+    pub(super) fn bind_map(&mut self, entries: Vec<(Expr, Expr)>) -> Result<ExprImpl> {
+        if entries.is_empty() {
+            return Err(ErrorCode::BindError("cannot determine type of empty map\nHINT:  Explicitly cast to the desired type, for example MAP{}::map(int,int).".into()).into());
+        }
+        let mut keys = Vec::with_capacity(entries.len());
+        let mut values = Vec::with_capacity(entries.len());
+        for (k, v) in entries {
+            keys.push(self.bind_expr_inner(k)?);
+            values.push(self.bind_expr_inner(v)?);
+        }
+        let key_type = align_types(keys.iter_mut())?;
+        let value_type = align_types(values.iter_mut())?;
 
-        let exprs = exprs
-            .into_iter()
-            .map(|e| self.bind_cast_inner(e, inner_type.clone()))
-            .collect::<Result<Vec<ExprImpl>>>()?;
+        let keys: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            keys,
+            DataType::List(Box::new(key_type.clone())),
+        )
+        .into();
+        let values: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            values,
+            DataType::List(Box::new(value_type.clone())),
+        )
+        .into();
 
-        let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Array, exprs, ty).into();
+        let expr: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::MapFromKeyValues,
+            vec![keys, values],
+            DataType::Map(MapType::from_kv(key_type, value_type)),
+        )
+        .into();
         Ok(expr)
     }
 
-    pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_array_cast(
+        &mut self,
+        exprs: Vec<Expr>,
+        element_type: Box<DataType>,
+    ) -> Result<ExprImpl> {
+        let exprs = exprs
+            .into_iter()
+            .map(|e| self.bind_cast_inner(e, *element_type.clone()))
+            .collect::<Result<Vec<ExprImpl>>>()?;
+
+        let expr: ExprImpl =
+            FunctionCall::new_unchecked(ExprType::Array, exprs, DataType::List(element_type))
+                .into();
+        Ok(expr)
+    }
+
+    pub(super) fn bind_map_cast(
+        &mut self,
+        entries: Vec<(Expr, Expr)>,
+        map_type: MapType,
+    ) -> Result<ExprImpl> {
+        let mut keys = Vec::with_capacity(entries.len());
+        let mut values = Vec::with_capacity(entries.len());
+        for (k, v) in entries {
+            keys.push(self.bind_cast_inner(k, map_type.key().clone())?);
+            values.push(self.bind_cast_inner(v, map_type.value().clone())?);
+        }
+
+        let keys: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            keys,
+            DataType::List(Box::new(map_type.key().clone())),
+        )
+        .into();
+        let values: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            values,
+            DataType::List(Box::new(map_type.value().clone())),
+        )
+        .into();
+
+        let expr: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::MapFromKeyValues,
+            vec![keys, values],
+            DataType::Map(map_type),
+        )
+        .into();
+        Ok(expr)
+    }
+
+    pub(super) fn bind_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr_inner(obj)?;
         match obj.return_type() {
             DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
@@ -161,8 +226,14 @@ impl Binder {
                 *return_type,
             )
             .into()),
+            DataType::Map(m) => Ok(FunctionCall::new_unchecked(
+                ExprType::MapAccess,
+                vec![obj, self.bind_expr_inner(index)?],
+                m.value().clone(),
+            )
+            .into()),
             data_type => Err(ErrorCode::BindError(format!(
-                "array index applied to type {}, which is not a composite type",
+                "index operator applied to type {}, which is not a list or map",
                 data_type
             ))
             .into()),
@@ -198,7 +269,7 @@ impl Binder {
             )
             .into()),
             data_type => Err(ErrorCode::BindError(format!(
-                "array range index applied to type {}, which is not a composite type",
+                "array range index applied to type {}, which is not a list",
                 data_type
             ))
             .into()),
@@ -212,7 +283,7 @@ impl Binder {
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let data_type =
-            DataType::new_struct(exprs.iter().map(|e| e.return_type()).collect_vec(), vec![]);
+            DataType::new_unnamed_struct(exprs.iter().map(|e| e.return_type()).collect_vec());
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }

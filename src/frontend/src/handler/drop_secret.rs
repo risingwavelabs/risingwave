@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
+use risingwave_common::license::Feature;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::catalog::root_catalog::SchemaPath;
@@ -25,6 +26,10 @@ pub async fn handle_drop_secret(
     secret_name: ObjectName,
     if_exists: bool,
 ) -> Result<RwPgResponse> {
+    Feature::SecretManagement
+        .check_available()
+        .map_err(|e| anyhow::anyhow!(e))?;
+
     let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, secret_name)?;
@@ -52,13 +57,11 @@ pub async fn handle_drop_secret(
             };
         session.check_privilege_for_drop_alter(schema_name, &**secret)?;
 
-        secret.secret_id
+        secret.id
     };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_secret(secret_id).await?;
 
-    Ok(RwPgResponse::builder(StatementType::DROP_SECRET)
-        .notice(format!("dropped secret \"{}\"", secret_name))
-        .into())
+    Ok(RwPgResponse::empty_result(StatementType::DROP_SECRET))
 }

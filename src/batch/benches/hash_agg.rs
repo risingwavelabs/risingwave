@@ -25,7 +25,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc, hash};
-use risingwave_expr::aggregate::{AggCall, AggKind};
+use risingwave_expr::aggregate::{AggCall, AggKind, PbAggKind};
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
@@ -53,6 +53,7 @@ fn create_agg_call(
         filter: None,
         direct_args: vec![],
         udf: None,
+        scalar: None,
     }
 }
 
@@ -119,15 +120,15 @@ fn bench_hash_agg(c: &mut Criterion) {
 
     let bench_variants = [
         // (group by, agg, args, return type)
-        (vec![0], AggKind::Sum, vec![1], DataType::Int64),
-        (vec![0], AggKind::Count, vec![], DataType::Int64),
-        (vec![0], AggKind::Count, vec![2], DataType::Int64),
-        (vec![0], AggKind::Min, vec![1], DataType::Int64),
-        (vec![0], AggKind::StringAgg, vec![2], DataType::Varchar),
-        (vec![0, 2], AggKind::Sum, vec![1], DataType::Int64),
-        (vec![0, 2], AggKind::Count, vec![], DataType::Int64),
-        (vec![0, 2], AggKind::Count, vec![2], DataType::Int64),
-        (vec![0, 2], AggKind::Min, vec![1], DataType::Int64),
+        (vec![0], PbAggKind::Sum, vec![1], DataType::Int64),
+        (vec![0], PbAggKind::Count, vec![], DataType::Int64),
+        (vec![0], PbAggKind::Count, vec![2], DataType::Int64),
+        (vec![0], PbAggKind::Min, vec![1], DataType::Int64),
+        (vec![0], PbAggKind::StringAgg, vec![2], DataType::Varchar),
+        (vec![0, 2], PbAggKind::Sum, vec![1], DataType::Int64),
+        (vec![0, 2], PbAggKind::Count, vec![], DataType::Int64),
+        (vec![0, 2], PbAggKind::Count, vec![2], DataType::Int64),
+        (vec![0, 2], PbAggKind::Min, vec![1], DataType::Int64),
     ];
 
     for (group_key_columns, agg_kind, arg_columns, return_type) in bench_variants {
@@ -141,7 +142,7 @@ fn bench_hash_agg(c: &mut Criterion) {
                         || {
                             create_hash_agg_executor(
                                 group_key_columns.clone(),
-                                agg_kind,
+                                agg_kind.into(),
                                 arg_columns.clone(),
                                 return_type.clone(),
                                 chunk_size,

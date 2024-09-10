@@ -18,7 +18,6 @@ normal = ["workspace-hack", "ctor"]
 [features]
 external-udf = ["arrow-udf-flight", "arrow-flight", "tonic"]
 js-udf = ["arrow-udf-js"]
-deno-udf = ["arrow-udf-js-deno", "zstd"]
 python-udf = ["arrow-udf-python"]
 wasm-udf = ["arrow-udf-wasm", "zstd"]
 
@@ -31,11 +30,11 @@ arrow-schema = { workspace = true }
 arrow-schema-iceberg = { workspace = true }
 arrow-udf-flight = { workspace = true, optional = true }
 arrow-udf-js = { workspace = true, optional = true }
-arrow-udf-js-deno = { workspace = true, optional = true }
 arrow-udf-python = { workspace = true, optional = true }
 arrow-udf-wasm = { workspace = true, optional = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
+bytes = "1"
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
@@ -45,7 +44,7 @@ educe = "0.6"
 fancy-regex = "0.13"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
-ginepro = "0.7"
+ginepro = "0.7" # TODO(http-bump): bump to 0.8 once arrow-udf switches to tonic 0.12
 hex = "0.4"
 icelake = { workspace = true }
 itertools = { workspace = true }
@@ -72,7 +71,7 @@ sql-json-path = { version = "0.1", features = ["jsonbb"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
-tonic = { version = "0.10", optional = true }
+tonic = { version = "0.10", optional = true } # TODO(http-bump): bump once arrow-udf switches to tonic 0.12
 tracing = "0.1"
 zstd = { version = "0.13", default-features = false, optional = true }
 

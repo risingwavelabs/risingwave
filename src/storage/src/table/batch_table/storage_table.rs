@@ -25,8 +25,8 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use more_asserts::assert_gt;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk, Op};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
@@ -47,9 +47,11 @@ use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
-use crate::store::{ChangeLogValue, PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter};
+use crate::store::{
+    PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter, StateStoreIterExt,
+};
 use crate::table::merge_sort::merge_sort;
-use crate::table::{KeyedRow, TableDistribution, TableIter};
+use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
 use crate::StateStore;
 
 /// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with
@@ -359,6 +361,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
+        let read_time_travel = matches!(wait_epoch, HummockReadEpoch::TimeTravel(_));
         self.store.try_wait_epoch(wait_epoch).await?;
         let serialized_pk = serialize_pk_with_vnode(
             &pk,
@@ -379,13 +382,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
+            read_version_from_time_travel: read_time_travel,
             cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
-            // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
-            self.store.validate_read_epoch(wait_epoch)?;
-
             let row = self.row_serde.deserialize(&value)?;
             let result_row_in_value = self.mapping.project(OwnedRow::new(row));
 
@@ -486,12 +487,14 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let iterators: Vec<_> = try_join_all(table_key_ranges.map(|table_key_range| {
             let prefix_hint = prefix_hint.clone();
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
+            let read_time_travel = matches!(wait_epoch, HummockReadEpoch::TimeTravel(_));
             async move {
                 let read_options = ReadOptions {
                     prefix_hint,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     read_version_from_backup: read_backup,
+                    read_version_from_time_travel: read_time_travel,
                     prefetch_options,
                     cache_policy,
                     ..Default::default()
@@ -743,13 +746,12 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 
     pub async fn batch_iter_log_with_pk_bounds(
         &self,
-        satrt_epoch: HummockReadEpoch,
-        end_epoch: HummockReadEpoch,
-        pk_prefix: impl Row,
-        range_bounds: impl RangeBounds<OwnedRow>,
-    ) -> StorageResult<impl Stream<Item = StorageResult<(Op, KeyedRow<Bytes>)>> + Send> {
-        let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
-        let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
+        start_epoch: u64,
+        end_epoch: u64,
+    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
+        let pk_prefix = OwnedRow::default();
+        let start_key = self.serialize_pk_bound(&pk_prefix, Unbounded, true);
+        let end_key = self.serialize_pk_bound(&pk_prefix, Unbounded, false);
 
         assert!(pk_prefix.len() <= self.pk_indices.len());
         let table_key_ranges = {
@@ -774,7 +776,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                 self.row_serde.clone(),
                 table_key_range,
                 read_options,
-                satrt_epoch,
+                start_epoch,
                 end_epoch,
             )
             .await?
@@ -867,11 +869,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         let raw_epoch = epoch.get_epoch();
         store.try_wait_epoch(epoch).await?;
         let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
-        // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
-        // `HummockReadEpoch::Current` read incomplete.
-        // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read
-        // result if any recovery has happened after `try_wait_epoch`.
-        store.validate_read_epoch(epoch)?;
         let iter = Self {
             iter,
             mapping,
@@ -969,18 +966,14 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
         row_deserializer: Arc<SD>,
         table_key_range: TableKeyRange,
         read_options: ReadLogOptions,
-        satrt_epoch: HummockReadEpoch,
-        end_epoch: HummockReadEpoch,
+        start_epoch: u64,
+        end_epoch: u64,
     ) -> StorageResult<Self> {
-        let raw_satrt_epoch = satrt_epoch.get_epoch();
-        let raw_end_epoch = end_epoch.get_epoch();
-        store.try_wait_epoch(end_epoch).await?;
+        store
+            .try_wait_epoch(HummockReadEpoch::Committed(end_epoch))
+            .await?;
         let iter = store
-            .iter_log(
-                (raw_satrt_epoch, raw_end_epoch),
-                table_key_range,
-                read_options,
-            )
+            .iter_log((start_epoch, end_epoch), table_key_range, read_options)
             .await?;
         let iter = Self {
             iter,
@@ -991,77 +984,16 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = (Op, KeyedRow<Bytes>), error = StorageError)]
-    async fn into_stream(mut self) {
-        while let Some((k, v)) = self
-            .iter
-            .try_next()
-            .verbose_instrument_await("storage_table_iter_next")
-            .await?
-        {
-            match v {
-                ChangeLogValue::Insert(value) => {
-                    let full_row = self.row_deserializer.deserialize(value)?;
-                    let row = self
-                        .mapping
-                        .project(OwnedRow::new(full_row))
-                        .into_owned_row();
-                    // TODO: may optimize the key clone
-                    yield (
-                        Op::Insert,
-                        KeyedRow::<Bytes> {
-                            vnode_prefixed_key: k.copy_into(),
-                            row,
-                        },
-                    );
-                }
-                ChangeLogValue::Update {
-                    new_value,
-                    old_value,
-                } => {
-                    let full_row = self.row_deserializer.deserialize(old_value)?;
-                    let row = self
-                        .mapping
-                        .project(OwnedRow::new(full_row))
-                        .into_owned_row();
-                    // TODO: may optimize the key clone
-                    yield (
-                        Op::UpdateDelete,
-                        KeyedRow::<Bytes> {
-                            vnode_prefixed_key: k.copy_into(),
-                            row,
-                        },
-                    );
-                    let full_row = self.row_deserializer.deserialize(new_value)?;
-                    let row = self
-                        .mapping
-                        .project(OwnedRow::new(full_row))
-                        .into_owned_row();
-                    // TODO: may optimize the key clone
-                    yield (
-                        Op::UpdateInsert,
-                        KeyedRow::<Bytes> {
-                            vnode_prefixed_key: k.copy_into(),
-                            row,
-                        },
-                    );
-                }
-                ChangeLogValue::Delete(value) => {
-                    let full_row = self.row_deserializer.deserialize(value)?;
-                    let row = self
-                        .mapping
-                        .project(OwnedRow::new(full_row))
-                        .into_owned_row();
-                    // TODO: may optimize the key clone
-                    yield (
-                        Op::Delete,
-                        KeyedRow::<Bytes> {
-                            vnode_prefixed_key: k.copy_into(),
-                            row,
-                        },
-                    );
-                }
-            }
-        }
+    fn into_stream(self) -> impl Stream<Item = StorageResult<ChangeLogRow>> {
+        self.iter.into_stream(move |(_key, value)| {
+            value.try_map(|value| {
+                let full_row = self.row_deserializer.deserialize(value)?;
+                let row = self
+                    .mapping
+                    .project(OwnedRow::new(full_row))
+                    .into_owned_row();
+                Ok(row)
+            })
+        })
     }
 }

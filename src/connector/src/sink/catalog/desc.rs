@@ -51,6 +51,9 @@ pub struct SinkDesc {
     /// The properties of the sink.
     pub properties: BTreeMap<String, String>,
 
+    /// Secret ref
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
+
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified
     // options in `properties`.
@@ -84,7 +87,6 @@ impl SinkDesc {
         owner: UserId,
         connection_id: Option<ConnectionId>,
         dependent_relations: Vec<TableId>,
-        secret_ref: BTreeMap<String, PbSecretRef>,
     ) -> SinkCatalog {
         SinkCatalog {
             id: self.id,
@@ -99,7 +101,7 @@ impl SinkDesc {
             owner,
             dependent_relations,
             properties: self.properties,
-            secret_refs: secret_ref,
+            secret_refs: self.secret_refs,
             sink_type: self.sink_type,
             format_desc: self.format_desc,
             connection_id,
@@ -111,6 +113,7 @@ impl SinkDesc {
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
             create_type: self.create_type,
+            original_target_columns: vec![],
         }
     }
 
@@ -134,7 +137,7 @@ impl SinkDesc {
             sink_from_name: self.sink_from_name.clone(),
             target_table: self.target_table.map(|table_id| table_id.table_id()),
             extra_partition_col_idx: self.extra_partition_col_idx.map(|idx| idx as u64),
-            secret_refs: Default::default(),
+            secret_refs: self.secret_refs.clone(),
         }
     }
 }

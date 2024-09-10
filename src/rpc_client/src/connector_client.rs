@@ -19,7 +19,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context};
 use futures::TryStreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
-use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
+use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::sink_coordinator_stream_request::{
     CommitMetadata, StartCoordinator,

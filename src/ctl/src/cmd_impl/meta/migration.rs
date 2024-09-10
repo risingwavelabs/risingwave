@@ -154,20 +154,17 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         Worker::insert(worker::ActiveModel::from(&worker.worker_node))
             .exec(&meta_store_sql.conn)
             .await?;
-        if worker.worker_type() == WorkerType::ComputeNode {
+        if worker.worker_type() == WorkerType::ComputeNode
+            || worker.worker_type() == WorkerType::Frontend
+        {
             let pb_property = worker.worker_node.property.as_ref().unwrap();
-            let parallel_unit_ids = worker
-                .worker_node
-                .parallel_units
-                .iter()
-                .map(|pu| pu.id as i32)
-                .collect_vec();
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker.worker_id() as _),
-                parallel_unit_ids: Set(parallel_unit_ids.into()),
                 is_streaming: Set(pb_property.is_streaming),
                 is_serving: Set(pb_property.is_serving),
                 is_unschedulable: Set(pb_property.is_unschedulable),
+                parallelism: Set(worker.worker_node.parallelism() as _),
+                internal_rpc_host_addr: Set(Some(pb_property.internal_rpc_host_addr.clone())),
             };
             WorkerProperty::insert(property)
                 .exec(&meta_store_sql.conn)
@@ -745,10 +742,10 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             version_delta
                 .into_iter()
                 .map(|vd| hummock_version_delta::ActiveModel {
-                    id: Set(vd.id as _),
-                    prev_id: Set(vd.prev_id as _),
-                    max_committed_epoch: Set(vd.max_committed_epoch as _),
-                    safe_epoch: Set(vd.safe_epoch as _),
+                    id: Set(vd.id.to_u64() as _),
+                    prev_id: Set(vd.prev_id.to_u64() as _),
+                    max_committed_epoch: Set(vd.visible_table_committed_epoch() as _),
+                    safe_epoch: Set(vd.visible_table_safe_epoch() as _),
                     trivial_move: Set(vd.trivial_move),
                     full_version_delta: Set((&vd.to_protobuf()).into()),
                 })

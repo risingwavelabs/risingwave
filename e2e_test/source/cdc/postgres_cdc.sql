@@ -1,4 +1,5 @@
 -- PG
+DROP TABLE IF EXISTS shipments;
 CREATE TABLE shipments (
   shipment_id SERIAL NOT NULL PRIMARY KEY,
   order_id SERIAL NOT NULL,
@@ -105,3 +106,9 @@ CREATE TABLE list_with_null(id int primary key, my_int int[], my_num numeric[], 
 INSERT INTO list_with_null VALUES (1, '{1,2,NULL}', '{1.1,inf,NULL}', '{1.1,inf,NULL}', '{1.1,inf,NULL}', '{happy,ok,NULL}', '{bb488f9b-330d-4012-b849-12adeb49e57e,bb488f9b-330d-4012-b849-12adeb49e57f, NULL}', '{\\x00,\\x01,NULL}');
 INSERT INTO list_with_null VALUES (2, '{NULL,3,4}', '{2.2,0,NULL}' , '{2.2,0,NULL}', '{2.2,0,NULL}', '{happy,ok,sad}', '{2de296df-eda7-4202-a81f-1036100ef4f6,2977afbc-0b12-459c-a36f-f623fc9e9840}', '{\\x00,\\x01,\\x02}');
 INSERT INTO list_with_null VALUES (5, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+
+CREATE TABLE "Orders" (
+    id int PRIMARY KEY,
+    name varchar
+);
+INSERT INTO "Orders" VALUES (1, 'happy');

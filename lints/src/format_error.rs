@@ -14,7 +14,7 @@
 
 use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::macros::{
-    find_format_arg_expr, find_format_args, is_format_macro, macro_backtrace,
+    find_format_arg_expr, is_format_macro, macro_backtrace, FormatArgsStorage,
 };
 use clippy_utils::ty::{implements_trait, match_type};
 use clippy_utils::{
@@ -56,7 +56,15 @@ declare_tool_lint! {
 }
 
 #[derive(Default)]
-pub struct FormatError;
+pub struct FormatError {
+    format_args: FormatArgsStorage,
+}
+
+impl FormatError {
+    pub fn new(format_args: FormatArgsStorage) -> Self {
+        Self { format_args }
+    }
+}
 
 impl_lint_pass!(FormatError => [FORMAT_ERROR]);
 
@@ -90,7 +98,7 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
 
         for macro_call in macro_backtrace(expr.span) {
             if is_format_macro(cx, macro_call.def_id)
-                && let Some(format_args) = find_format_args(cx, expr, macro_call.expn)
+                && let Some(format_args) = self.format_args.get(cx, expr, macro_call.expn)
             {
                 for piece in &format_args.template {
                     if let FormatArgsPiece::Placeholder(placeholder) = piece

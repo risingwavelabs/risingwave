@@ -479,7 +479,7 @@ pub(crate) mod tests {
     use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
-    use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
+    use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
 
@@ -507,7 +507,7 @@ pub(crate) mod tests {
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        let compute_client_pool = Arc::new(ComputeClientPool::default());
+        let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
         )));
@@ -596,6 +596,7 @@ pub(crate) mod tests {
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
+            cdc_table_id: None,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
@@ -675,11 +676,12 @@ pub(crate) mod tests {
                 port: 5687,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallel_units: generate_parallel_units(0, 0),
+            parallelism: 8,
             property: Some(Property {
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
+                internal_rpc_host_addr: "".to_string(),
             }),
             transactional_id: Some(0),
             ..Default::default()
@@ -692,11 +694,12 @@ pub(crate) mod tests {
                 port: 5688,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallel_units: generate_parallel_units(8, 1),
+            parallelism: 8,
             property: Some(Property {
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
+                internal_rpc_host_addr: "".to_string(),
             }),
             transactional_id: Some(1),
             ..Default::default()
@@ -709,11 +712,12 @@ pub(crate) mod tests {
                 port: 5689,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallel_units: generate_parallel_units(16, 2),
+            parallelism: 8,
             property: Some(Property {
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
+                internal_rpc_host_addr: "".to_string(),
             }),
             transactional_id: Some(2),
             ..Default::default()
@@ -742,15 +746,5 @@ pub(crate) mod tests {
         )
         .unwrap();
         fragmenter.generate_complete_query().await.unwrap()
-    }
-
-    fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {
-        let parallel_degree = 8;
-        (start_id..start_id + parallel_degree)
-            .map(|id| ParallelUnit {
-                id,
-                worker_node_id: node_id,
-            })
-            .collect()
     }
 }

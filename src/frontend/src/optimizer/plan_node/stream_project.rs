@@ -20,10 +20,9 @@ use risingwave_pb::stream_plan::ProjectNode;
 use super::stream::prelude::*;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{
-    try_derive_watermark, Expr, ExprImpl, ExprRewriter, ExprVisitor, WatermarkDerivation,
-};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -63,7 +62,8 @@ impl Distill for StreamProject {
 
 impl StreamProject {
     pub fn new(core: generic::Project<PlanRef>) -> Self {
-        Self::new_inner(core, false)
+        let noop_update_hint = core.likely_produces_noop_updates();
+        Self::new_inner(core, noop_update_hint)
     }
 
     /// Set the `noop_update_hint` flag to the given value.
@@ -82,23 +82,28 @@ impl StreamProject {
 
         let mut watermark_derivations = vec![];
         let mut nondecreasing_exprs = vec![];
-        let mut watermark_columns = FixedBitSet::with_capacity(core.exprs.len());
+        let mut out_watermark_columns = FixedBitSet::with_capacity(core.exprs.len());
+        let mut out_monotonicity_map = MonotonicityMap::new();
         for (expr_idx, expr) in core.exprs.iter().enumerate() {
-            match try_derive_watermark(expr) {
-                WatermarkDerivation::Watermark(input_idx) => {
-                    if input.watermark_columns().contains(input_idx) {
-                        watermark_derivations.push((input_idx, expr_idx));
-                        watermark_columns.insert(expr_idx);
+            use monotonicity_variants::*;
+            match analyze_monotonicity(expr) {
+                Inherent(monotonicity) => {
+                    out_monotonicity_map.insert(expr_idx, monotonicity);
+                    if monotonicity.is_non_decreasing() && !monotonicity.is_constant() {
+                        // TODO(rc): may be we should also derive watermark for constant later
+                        nondecreasing_exprs.push(expr_idx); // to produce watermarks
+                        out_watermark_columns.insert(expr_idx);
                     }
                 }
-                WatermarkDerivation::Nondecreasing => {
-                    nondecreasing_exprs.push(expr_idx);
-                    watermark_columns.insert(expr_idx);
+                FollowingInput(input_idx) => {
+                    let in_monotonicity = input.columns_monotonicity()[input_idx];
+                    out_monotonicity_map.insert(expr_idx, in_monotonicity);
+                    if input.watermark_columns().contains(input_idx) {
+                        watermark_derivations.push((input_idx, expr_idx)); // to propagate watermarks
+                        out_watermark_columns.insert(expr_idx);
+                    }
                 }
-                WatermarkDerivation::Constant => {
-                    // XXX(rc): we can produce one watermark on each recovery for this case.
-                }
-                WatermarkDerivation::None => {}
+                _FollowingInputInversely(_) => {}
             }
         }
         // Project executor won't change the append-only behavior of the stream, so it depends on
@@ -108,7 +113,8 @@ impl StreamProject {
             distribution,
             input.append_only(),
             input.emit_on_window_close(),
-            watermark_columns,
+            out_watermark_columns,
+            out_monotonicity_map,
         );
 
         StreamProject {

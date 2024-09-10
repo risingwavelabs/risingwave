@@ -28,7 +28,7 @@ use risingwave_batch::executor::{
     RowSeqScanExecutor, ScanRange,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };
@@ -267,6 +267,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqExecutor2".to_string(),
         None,
         None,
+        None,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -335,6 +336,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
         None,
     ));
@@ -416,6 +418,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqScanExecutor2".to_string(),
         None,
         None,
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -485,6 +488,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
         None,
     ));

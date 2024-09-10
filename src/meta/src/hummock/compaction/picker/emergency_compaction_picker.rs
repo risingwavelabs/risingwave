@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::hummock::hummock_version::Levels;
+use risingwave_hummock_sdk::level::Levels;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
@@ -51,26 +51,24 @@ impl EmergencyCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let unused_validator = Arc::new(CompactionTaskValidator::unused());
-        let l0 = levels.l0.as_ref().unwrap();
+        let l0 = &levels.l0;
         let overlapping_count = l0
             .sub_levels
             .iter()
-            .filter(|level| level.level_type == LevelType::Overlapping as i32)
+            .filter(|level| level.level_type == LevelType::Overlapping)
             .count();
         let no_overlap_count = l0
             .sub_levels
             .iter()
             .filter(|level| {
-                level.level_type == LevelType::Nonoverlapping as i32
-                    && level.vnode_partition_count == 0
+                level.level_type == LevelType::Nonoverlapping && level.vnode_partition_count == 0
             })
             .count();
         let partitioned_count = l0
             .sub_levels
             .iter()
             .filter(|level| {
-                level.level_type == LevelType::Nonoverlapping as i32
-                    && level.vnode_partition_count > 0
+                level.level_type == LevelType::Nonoverlapping && level.vnode_partition_count > 0
             })
             .count();
         // We trigger `EmergencyCompactionPicker` only when some unexpected condition cause the number of l0 levels increase and the origin strategy
@@ -102,7 +100,7 @@ impl EmergencyCompactionPicker {
                 WholeLevelCompactionPicker::new(self.config.clone(), unused_validator.clone());
 
             if let Some(ret) = intral_level_compaction_picker.pick_whole_level(
-                levels.l0.as_ref().unwrap(),
+                &levels.l0,
                 &level_handlers[0],
                 self.config.split_weight_by_vnode,
                 stats,

@@ -242,3 +242,19 @@ create table enum_to_varchar (
  table.name = 'enum_table',
  slot.name = 'enum_to_varchar'
 );
+
+statement ok
+create table upper_orders (
+  id int,
+  name varchar,
+  PRIMARY KEY (id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ table.name = 'Orders',
+ slot.name = 'orders'
+);

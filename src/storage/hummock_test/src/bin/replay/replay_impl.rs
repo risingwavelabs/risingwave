@@ -19,9 +19,9 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
+use risingwave_common_service::{Channel, NotificationClient, ObserverError};
 use risingwave_hummock_sdk::key::TableKey;
-use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId, SyncResult};
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, LocalReplayRead, ReplayItem, ReplayRead, ReplayStateStore,
     ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
@@ -147,10 +147,6 @@ impl ReplayStateStore for GlobalReplayImpl {
         Ok(result.sync_size)
     }
 
-    fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
-        self.store.seal_epoch(epoch_id, is_checkpoint);
-    }
-
     async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64) -> Result<u64> {
         let prev_version_id = match &info {
             Info::HummockVersionDeltas(deltas) => deltas.version_deltas.last().map(|d| d.prev_id),
@@ -162,7 +158,9 @@ impl ReplayStateStore for GlobalReplayImpl {
 
         // wait till version updated
         if let Some(prev_version_id) = prev_version_id {
-            self.store.wait_version_update(prev_version_id).await;
+            self.store
+                .wait_version_update(HummockVersionId::new(prev_version_id))
+                .await;
         }
         Ok(version)
     }
@@ -178,17 +176,6 @@ impl ReplayStateStore for GlobalReplayImpl {
             .await
             .map_err(|_| TraceError::TryWaitEpochFailed)?;
         Ok(())
-    }
-
-    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> Result<()> {
-        self.store
-            .validate_read_epoch(epoch)
-            .map_err(|_| TraceError::ValidateReadEpochFailed)?;
-        Ok(())
-    }
-
-    async fn clear_shared_buffer(&self, prev_epoch: u64) {
-        self.store.clear_shared_buffer(prev_epoch).await
     }
 }
 pub(crate) struct LocalReplayImpl(LocalHummockStorage);

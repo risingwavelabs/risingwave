@@ -20,9 +20,8 @@ use bytes::Bytes;
 use futures_async_stream::try_stream;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::array::{DataChunk, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
@@ -35,6 +34,7 @@ use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 use risingwave_pb::data::DataChunk as PbDataChunk;
+use risingwave_pb::Message;
 
 use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
@@ -805,6 +805,7 @@ mod tests {
                 filter: None,
                 direct_args: vec![],
                 udf: None,
+                scalar: None,
             };
 
             let agg_prost = HashAggNode {
@@ -883,6 +884,7 @@ mod tests {
             filter: None,
             direct_args: vec![],
             udf: None,
+            scalar: None,
         };
 
         let agg_prost = HashAggNode {
@@ -1000,6 +1002,7 @@ mod tests {
             filter: None,
             direct_args: vec![],
             udf: None,
+            scalar: None,
         };
 
         let agg_prost = HashAggNode {
@@ -1092,6 +1095,7 @@ mod tests {
             filter: None,
             direct_args: vec![],
             udf: None,
+            scalar: None,
         };
 
         let agg_prost = HashAggNode {

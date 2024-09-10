@@ -15,7 +15,7 @@
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
     use std::ops::Bound;
     use std::sync::Arc;
 
@@ -23,22 +23,25 @@ pub(crate) mod tests {
     use foyer::CacheContext;
     use itertools::Itertools;
     use rand::{Rng, RngCore, SeedableRng};
-    use risingwave_common::buffer::BitmapBuilder;
+    use risingwave_common::bitmap::BitmapBuilder;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt};
-    use risingwave_common_service::observer_manager::NotificationClient;
+    use risingwave_common_service::NotificationClient;
     use risingwave_hummock_sdk::can_concat;
+    use risingwave_hummock_sdk::compact_task::CompactTask;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{
         next_key, prefix_slice_with_vnode, prefixed_range_with_vnode, FullKey, TableKey,
         TABLE_PREFIX_LEN,
     };
-    use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::level::InputLevel;
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_hummock_sdk::table_watermark::{
-        ReadTableWatermark, VnodeWatermark, WatermarkDirection,
+        ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection,
     };
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -51,10 +54,7 @@ pub(crate) mod tests {
     };
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
-    use risingwave_pb::hummock::{
-        CompactTask, InputLevel, KeyRange, SstableInfo, TableOption, TableWatermarks,
-    };
+    use risingwave_pb::hummock::TableOption;
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{
@@ -156,6 +156,9 @@ pub(crate) mod tests {
         value_size: usize,
         epochs: Vec<u64>,
     ) {
+        for epoch in &epochs {
+            storage.start_epoch(*epoch, HashSet::from_iter([Default::default()]));
+        }
         let mut local = storage
             .new_local(NewLocalOptions::for_test(TableId::default()))
             .await;
@@ -315,7 +318,7 @@ pub(crate) mod tests {
                 .report_compact_task_for_test(
                     result_task.task_id,
                     Some(compact_task),
-                    result_task.task_status(),
+                    result_task.task_status,
                     result_task.sorted_output_ssts,
                     Some(to_prost_table_stats_map(task_stats)),
                 )
@@ -342,8 +345,6 @@ pub(crate) mod tests {
             .chain(
                 group
                     .l0
-                    .as_ref()
-                    .unwrap()
                     .sub_levels
                     .iter()
                     .flat_map(|level| level.table_infos.clone()),
@@ -470,7 +471,7 @@ pub(crate) mod tests {
             hummock_manager_ref
                 .report_compact_task(
                     result_task.task_id,
-                    result_task.task_status(),
+                    result_task.task_status,
                     result_task.sorted_output_ssts,
                     Some(to_prost_table_stats_map(task_stats)),
                 )
@@ -534,17 +535,16 @@ pub(crate) mod tests {
         existing_table_id: u32,
         keys_per_epoch: usize,
     ) {
+        let table_id = existing_table_id.into();
         let kv_count: u16 = 128;
         let mut epoch = test_epoch(1);
-        let mut local = storage
-            .new_local(NewLocalOptions::for_test(existing_table_id.into()))
-            .await;
+        let mut local = storage.new_local(NewLocalOptions::for_test(table_id)).await;
+
+        storage.start_epoch(epoch, HashSet::from_iter([table_id]));
 
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
         for idx in 0..kv_count {
-            epoch.inc_epoch();
-
             if idx == 0 {
                 local.init_for_test(epoch).await.unwrap();
             }
@@ -559,9 +559,11 @@ pub(crate) mod tests {
             }
             local.flush().await.unwrap();
             let next_epoch = epoch.next_epoch();
+            storage.start_epoch(next_epoch, HashSet::from_iter([table_id]));
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             flush_and_commit(&hummock_meta_client, storage, epoch).await;
+            epoch.inc_epoch();
         }
     }
 
@@ -727,9 +729,10 @@ pub(crate) mod tests {
             .await;
 
         let vnode = VirtualNode::from_index(1);
+        global_storage.start_epoch(epoch, HashSet::from_iter([1.into(), 2.into()]));
         for index in 0..kv_count {
-            epoch.inc_epoch();
             let next_epoch = epoch.next_epoch();
+            global_storage.start_epoch(next_epoch, HashSet::from_iter([1.into(), 2.into()]));
             if index == 0 {
                 storage_1.init_for_test(epoch).await.unwrap();
                 storage_2.init_for_test(epoch).await.unwrap();
@@ -755,6 +758,7 @@ pub(crate) mod tests {
 
             let res = global_storage.seal_and_sync_epoch(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+            epoch.inc_epoch();
         }
 
         // Mimic dropping table
@@ -797,11 +801,10 @@ pub(crate) mod tests {
             filter_key_extractor_manager,
         )
         .await;
-
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
-                result_task.task_status(),
+                result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
             )
@@ -838,7 +841,6 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch.inc_epoch();
         // to update version for hummock_storage
         global_storage.wait_version(version).await;
 
@@ -921,12 +923,14 @@ pub(crate) mod tests {
         let vnode = VirtualNode::from_index(1);
         let mut epoch_set = BTreeSet::new();
 
+        storage.start_epoch(epoch, HashSet::from_iter([existing_table_id.into()]));
+
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
         for i in 0..kv_count {
-            epoch += millisec_interval_epoch;
             let next_epoch = epoch + millisec_interval_epoch;
+            storage.start_epoch(next_epoch, HashSet::from_iter([existing_table_id.into()]));
             if i == 0 {
                 local.init_for_test(epoch).await.unwrap();
             }
@@ -944,6 +948,7 @@ pub(crate) mod tests {
 
             let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+            epoch += millisec_interval_epoch;
         }
 
         let manual_compcation_option = ManualCompactionOption {
@@ -969,7 +974,10 @@ pub(crate) mod tests {
                 retention_seconds: Some(retention_seconds_expire_second),
             },
         )]);
-        compact_task.current_epoch_time = epoch;
+        compact_task.current_epoch_time = hummock_manager_ref
+            .get_current_version()
+            .await
+            .max_committed_epoch();
 
         // assert compact_task
         assert_eq!(
@@ -995,7 +1003,7 @@ pub(crate) mod tests {
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
-                result_task.task_status(),
+                result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
             )
@@ -1123,12 +1131,13 @@ pub(crate) mod tests {
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
+        storage.start_epoch(epoch, HashSet::from_iter([existing_table_id.into()]));
         for i in 0..kv_count {
-            epoch += millisec_interval_epoch;
             if i == 0 {
                 local.init_for_test(epoch).await.unwrap();
             }
             let next_epoch = epoch + millisec_interval_epoch;
+            storage.start_epoch(next_epoch, HashSet::from_iter([existing_table_id.into()]));
             epoch_set.insert(epoch);
 
             let ramdom_key = [key_prefix.as_ref(), &rand::thread_rng().gen::<[u8; 32]>()].concat();
@@ -1139,6 +1148,7 @@ pub(crate) mod tests {
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
             let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+            epoch += millisec_interval_epoch;
         }
 
         let manual_compcation_option = ManualCompactionOption {
@@ -1166,7 +1176,10 @@ pub(crate) mod tests {
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        compact_task.current_epoch_time = epoch;
+        compact_task.current_epoch_time = hummock_manager_ref
+            .get_current_version()
+            .await
+            .max_committed_epoch();
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
@@ -1182,7 +1195,7 @@ pub(crate) mod tests {
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
-                result_task.task_status(),
+                result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
             )
@@ -1353,7 +1366,7 @@ pub(crate) mod tests {
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
-                result_task.task_status(),
+                result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
             )
@@ -1389,10 +1402,6 @@ pub(crate) mod tests {
             normal_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
         }
         assert!(fast_ret.iter().all(|f| f.file_size < capacity * 6 / 5));
-        println!(
-            "fast sstables file size: {:?}",
-            fast_ret.iter().map(|f| f.file_size).collect_vec(),
-        );
         assert!(can_concat(&ret));
         assert!(can_concat(&fast_ret));
         let read_options = Arc::new(SstableIteratorReadOptions::default());
@@ -1522,7 +1531,6 @@ pub(crate) mod tests {
                 sstable_store.clone(),
             )
             .await;
-            println!("generate ssts size: {}", sst.file_size);
             ssts.push(sst);
         }
         let select_file_count = ssts.len() / 2;
@@ -1531,12 +1539,12 @@ pub(crate) mod tests {
             input_ssts: vec![
                 InputLevel {
                     level_idx: 5,
-                    level_type: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
                     table_infos: ssts.drain(..select_file_count).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
-                    level_type: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
                     table_infos: ssts,
                 },
             ],
@@ -1753,12 +1761,12 @@ pub(crate) mod tests {
             input_ssts: vec![
                 InputLevel {
                     level_idx: 5,
-                    level_type: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
                     table_infos: sst_infos.drain(..1).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
-                    level_type: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
                     table_infos: sst_infos,
                 },
             ],
@@ -1869,10 +1877,6 @@ pub(crate) mod tests {
             max_sst_file_size = std::cmp::max(max_sst_file_size, sst_info.file_size);
             sst_infos.push(sst_info);
         }
-        println!(
-            "input data: {}",
-            sst_infos.iter().map(|sst| sst.file_size).sum::<u64>(),
-        );
 
         let target_file_size = max_sst_file_size / 4;
         let mut table_watermarks = BTreeMap::default();
@@ -1891,13 +1895,11 @@ pub(crate) mod tests {
         table_watermarks.insert(
             1,
             TableWatermarks {
-                epoch_watermarks: vec![PbEpochNewWatermarks {
-                    watermarks: vec![
-                        VnodeWatermark::new(bitmap.clone(), watermark_key.clone()).to_protobuf()
-                    ],
-                    epoch: test_epoch(500),
-                }],
-                is_ascending: true,
+                watermarks: vec![(
+                    test_epoch(500),
+                    vec![VnodeWatermark::new(bitmap.clone(), watermark_key.clone())].into(),
+                )],
+                direction: WatermarkDirection::Ascending,
             },
         );
 
@@ -1905,12 +1907,12 @@ pub(crate) mod tests {
             input_ssts: vec![
                 InputLevel {
                     level_idx: 5,
-                    level_type: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
                     table_infos: sst_infos.drain(..1).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
-                    level_type: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
                     table_infos: sst_infos,
                 },
             ],
@@ -1927,12 +1929,6 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let (ret, fast_ret) = run_fast_and_normal_runner(compact_ctx.clone(), task).await;
-        println!(
-            "normal compact result data: {}, fast compact result data: {}",
-            ret.iter().map(|sst| sst.file_size).sum::<u64>(),
-            fast_ret.iter().map(|sst| sst.file_size).sum::<u64>(),
-        );
-        // check_compaction_result(compact_ctx.sstable_store, ret.clone(), fast_ret, target_file_size).await;
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
         let mut normal_tables = Vec::with_capacity(ret.len());
         let mut stats = StoreLocalStatistic::default();

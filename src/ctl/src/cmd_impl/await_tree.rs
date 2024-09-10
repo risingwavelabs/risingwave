@@ -28,7 +28,7 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
     let compute_nodes = meta_client
         .list_worker_nodes(Some(WorkerType::ComputeNode))
         .await?;
-    let clients = ComputeClientPool::default();
+    let clients = ComputeClientPool::adhoc();
 
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.

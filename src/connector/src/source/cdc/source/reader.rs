@@ -22,7 +22,7 @@ use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_jni_core::jvm_runtime::JVM;
+use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, JVM};
 use risingwave_jni_core::{call_static_method, JniReceiverType, JniSenderType};
 use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
 use thiserror_ext::AsReport;
@@ -111,38 +111,43 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         };
 
         std::thread::spawn(move || {
-            let result: anyhow::Result<_> = try {
-                let env = jvm.attach_current_thread()?;
-                let get_event_stream_request_bytes =
-                    env.byte_array_from_slice(&Message::encode_to_vec(&get_event_stream_request))?;
-                (env, get_event_stream_request_bytes)
-            };
+            execute_with_jni_env(jvm, |env| {
+                let result: anyhow::Result<_> = try {
+                    let get_event_stream_request_bytes = env.byte_array_from_slice(
+                        &Message::encode_to_vec(&get_event_stream_request),
+                    )?;
+                    (env, get_event_stream_request_bytes)
+                };
 
-            let (mut env, get_event_stream_request_bytes) = match result {
-                Ok(inner) => inner,
-                Err(e) => {
-                    let _ = tx
-                        .blocking_send(Err(e.context("err before calling runJniDbzSourceThread")));
-                    return;
-                }
-            };
+                let (env, get_event_stream_request_bytes) = match result {
+                    Ok(inner) => inner,
+                    Err(e) => {
+                        let _ = tx.blocking_send(Err(
+                            e.context("err before calling runJniDbzSourceThread")
+                        ));
+                        return Ok(());
+                    }
+                };
 
-            let result = call_static_method!(
-                env,
-                {com.risingwave.connector.source.core.JniDbzSourceHandler},
-                {void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)},
-                &get_event_stream_request_bytes,
-                &mut tx as *mut JniSenderType<GetEventStreamResponse>
-            );
+                let result = call_static_method!(
+                    env,
+                    {com.risingwave.connector.source.core.JniDbzSourceHandler},
+                    {void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)},
+                    &get_event_stream_request_bytes,
+                    &mut tx as *mut JniSenderType<GetEventStreamResponse>
+                );
 
-            match result {
-                Ok(_) => {
-                    tracing::info!(?source_id, "end of jni call runJniDbzSourceThread");
+                match result {
+                    Ok(_) => {
+                        tracing::info!(?source_id, "end of jni call runJniDbzSourceThread");
+                    }
+                    Err(e) => {
+                        tracing::error!(?source_id, error = %e.as_report(), "jni call error");
+                    }
                 }
-                Err(e) => {
-                    tracing::error!(?source_id, error = %e.as_report(), "jni call error");
-                }
-            }
+
+                Ok(())
+            })
         });
 
         // wait for the handshake message
@@ -156,13 +161,16 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 }
             };
             if !inited {
-                bail!("failed to start cdc connector");
+                bail!("failed to start cdc connector.\nHINT: increase `cdc_source_wait_streaming_start_timeout` session variable to a large value and retry.");
             }
         }
         tracing::info!(?source_id, "cdc connector started");
 
         let instance = match T::source_type() {
-            CdcSourceType::Mysql | CdcSourceType::Postgres | CdcSourceType::Mongodb => Self {
+            CdcSourceType::Mysql
+            | CdcSourceType::Postgres
+            | CdcSourceType::Mongodb
+            | CdcSourceType::SqlServer => Self {
                 source_id: split.split_id() as u64,
                 start_offset: split.start_offset().clone(),
                 server_addr: None,
@@ -212,7 +220,7 @@ impl<T: CdcSourceTypeTrait> CdcSplitReader<T> {
                     tracing::trace!("receive {} cdc events ", events.len());
                     metrics
                         .connector_source_rows_received
-                        .with_label_values(&[source_type.as_str_name(), &source_id])
+                        .with_guarded_label_values(&[source_type.as_str_name(), &source_id])
                         .inc_by(events.len() as u64);
                     let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
                     yield msgs;

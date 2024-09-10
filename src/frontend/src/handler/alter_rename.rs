@@ -43,7 +43,7 @@ pub async fn handle_rename_table(
     let table_id = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
-            reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+            reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
         if table_type != table.table_type {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "\"{table_name}\" is not a {}",
@@ -332,7 +332,6 @@ pub async fn handle_rename_database(
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -350,7 +349,7 @@ mod tests {
         let table_id = {
             let catalog_reader = session.env().catalog_reader().read_guard();
             catalog_reader
-                .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+                .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
                 .unwrap()
                 .0
                 .id
@@ -362,7 +361,7 @@ mod tests {
 
         let catalog_reader = session.env().catalog_reader().read_guard();
         let altered_table_name = catalog_reader
-            .get_table_by_id(&table_id)
+            .get_any_table_by_id(&table_id)
             .unwrap()
             .name()
             .to_string();

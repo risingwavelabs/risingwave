@@ -16,9 +16,9 @@
 #![feature(trait_alias)]
 #![feature(iterator_try_collect)]
 #![feature(trusted_len)]
-#![feature(lazy_cell)]
 #![feature(buf_read_has_data_left)]
 #![feature(round_char_boundary)]
+#![feature(never_type)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;

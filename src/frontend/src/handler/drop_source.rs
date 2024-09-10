@@ -33,12 +33,19 @@ pub async fn handle_drop_source(
     let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
+    // Check if temporary source exists, if yes, drop it.
+    if let Some(_source) = session.get_temporary_source(&source_name) {
+        session.drop_temporary_source(&source_name);
+        return Ok(PgResponse::empty_result(StatementType::DROP_SOURCE));
+    }
+
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let (source, schema_name) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
-        if let Ok((table, _)) = catalog_reader.get_table_by_name(db_name, schema_path, &source_name)
+        if let Ok((table, _)) =
+            catalog_reader.get_created_table_by_name(db_name, schema_path, &source_name)
         {
             return Err(table.bad_drop_error());
         }

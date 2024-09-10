@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 
 use anyhow::Context;
 use itertools::Itertools;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{
@@ -42,8 +42,8 @@ use risingwave_pb::plan_common::StorageTableDesc;
 
 use crate::error::Result;
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
-    ExecutorBuilder, JoinType, LookupJoinBase,
+    unix_timestamp_sec_to_epoch, AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
+    DummyExecutor, Executor, ExecutorBuilder, JoinType, LookupJoinBase,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -66,6 +66,7 @@ struct InnerSideExecutorBuilder<C> {
     chunk_size: usize,
     shutdown_rx: ShutdownToken,
     next_stage_id: usize,
+    as_of: Option<AsOf>,
 }
 
 /// Used to build the executor for the inner side
@@ -108,6 +109,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
             limit: None,
+            as_of: self.as_of.as_ref().map(Into::into),
         });
 
         Ok(row_seq_scan_node)
@@ -132,7 +134,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
                     ..Default::default()
                 }),
             }),
-            epoch: Some(self.epoch.clone()),
+            epoch: Some(self.epoch),
             tracing_context: TracingContext::from_current_span().to_protobuf(),
         };
 
@@ -163,7 +165,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
         self.worker_slot_to_scan_range_mapping = HashMap::new();
     }
 
-    /// Adds the scan range made from the given `kwy_scalar_impls` into the parallel unit id
+    /// Adds the scan range made from the given `kwy_scalar_impls` into the worker slot id
     /// hash map, along with the scan range's virtual node.
     async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()> {
         let mut scan_range = ScanRange::full_table_scan();
@@ -235,7 +237,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             &plan_node,
             &task_id,
             self.context.clone(),
-            self.epoch.clone(),
+            self.epoch,
             self.shutdown_rx.clone(),
         );
 
@@ -296,6 +298,24 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::LocalLookupJoin
         )?;
+        // as_of takes precedence
+        let as_of = lookup_join_node
+            .as_of
+            .as_ref()
+            .map(AsOf::try_from)
+            .transpose()?;
+        let query_epoch = as_of
+            .as_ref()
+            .map(|a| {
+                let epoch = unix_timestamp_sec_to_epoch(a.timestamp).0;
+                tracing::debug!(epoch, "time travel");
+                risingwave_pb::common::BatchQueryEpoch {
+                    epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::TimeTravel(
+                        epoch,
+                    )),
+                }
+            })
+            .unwrap_or_else(|| source.epoch());
 
         let join_type = JoinType::from_prost(lookup_join_node.get_join_type()?);
         let condition = match lookup_join_node.get_condition() {
@@ -383,17 +403,16 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
         let worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode> = worker_nodes
             .iter()
             .flat_map(|worker| {
-                (0..(worker.parallel_units.len()))
+                (0..(worker.parallelism()))
                     .map(|i| (WorkerSlotId::new(worker.id, i), worker.clone()))
             })
             .collect();
 
+        // TODO(var-vnode): use vnode count from table desc
+        let vnodes = Some(Bitmap::ones(VirtualNode::COUNT).into());
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
-            table_distribution: TableDistribution::new_from_storage_table_desc(
-                Some(TableDistribution::all_vnodes()),
-                table_desc,
-            ),
+            table_distribution: TableDistribution::new_from_storage_table_desc(vnodes, table_desc),
             vnode_mapping,
             outer_side_key_types,
             inner_side_schema,
@@ -402,12 +421,13 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             lookup_prefix_len,
             context: source.context().clone(),
             task_id: source.task_id.clone(),
-            epoch: source.epoch(),
+            epoch: query_epoch,
             worker_slot_to_scan_range_mapping: HashMap::new(),
             chunk_size,
             shutdown_rx: source.shutdown_rx.clone(),
             next_stage_id: 0,
             worker_slot_mapping,
+            as_of,
         };
 
         let identity = source.plan_node().get_identity().clone();

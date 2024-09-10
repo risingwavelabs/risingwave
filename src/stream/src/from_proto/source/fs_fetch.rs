@@ -16,10 +16,11 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpendalGcs, OpendalPosixFs, OpendalS3,
+    OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_storage::StateStore;
 
@@ -46,12 +47,14 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let source_id = TableId::new(source.source_id);
         let source_name = source.source_name.clone();
         let source_info = source.get_info()?;
-        let properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
+        let source_options_with_secret =
+            WithOptionsSecResolved::new(source.with_properties.clone(), source.secret_refs.clone());
+        let properties = ConnectorProperties::extract(source_options_with_secret.clone(), false)?;
         let source_desc_builder = SourceDescBuilder::new(
             source.columns.clone(),
             params.env.source_metrics(),
             source.row_id_index.map(|x| x as _),
-            source.with_properties.clone(),
+            source_options_with_secret,
             source_info.clone(),
             params.env.config().developer.connector_message_buffer_size,
             params.info.pk_indices.clone(),
@@ -94,6 +97,15 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             }
             risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
                 FsFetchExecutor::<_, OpendalS3>::new(
+                    params.actor_context.clone(),
+                    stream_source_core,
+                    upstream,
+                    source.rate_limit,
+                )
+                .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::Azblob(_) => {
+                FsFetchExecutor::<_, OpendalAzblob>::new(
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,

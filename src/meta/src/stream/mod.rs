@@ -36,16 +36,16 @@ pub use stream_manager::*;
 pub(crate) fn to_build_actor_info(
     actor: StreamActor,
     subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
-    fragment_table_id: TableId,
+    subscription_depend_table_id: TableId,
 ) -> BuildActorInfo {
     BuildActorInfo {
         actor: Some(actor),
         related_subscriptions: subscriptions
-            .get(&fragment_table_id)
+            .get(&subscription_depend_table_id)
             .into_iter()
             .map(|subscriptions| {
                 (
-                    fragment_table_id.table_id,
+                    subscription_depend_table_id.table_id,
                     SubscriptionIds {
                         subscription_ids: subscriptions.keys().cloned().collect(),
                     },

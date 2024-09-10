@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::{BTreeMap, HashSet};
-use std::num::NonZeroU32;
-use std::sync::LazyLock;
 use std::time::Duration;
 
-use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
 use risingwave_common::hash::{HashKey, NullBitmap};
-use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -269,8 +265,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .collect_vec();
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
-        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
+        let pk_contained_in_jk_l =
+            is_subset(state_pk_indices_l.clone(), state_join_key_indices_l.clone());
+        let pk_contained_in_jk_r =
+            is_subset(state_pk_indices_r.clone(), state_join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
@@ -812,7 +810,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let join_matched_join_keys = ctx
             .streaming_metrics
             .join_matched_join_keys
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 &ctx.id.to_string(),
                 &ctx.fragment_id.to_string(),
                 &side_update.ht.table_id().to_string(),
@@ -838,25 +836,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             if let Some(rows) = &matched_rows {
                 join_matched_join_keys.observe(rows.len() as _);
                 if rows.len() > high_join_amplification_threshold {
-                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(|| {
-                        LogSuppresser::new(RateLimiter::direct(Quota::per_minute(
-                            NonZeroU32::new(1).unwrap(),
-                        )))
-                    });
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                        let join_key_data_types = side_update.ht.join_key_data_types();
-                        let key = key.deserialize(join_key_data_types)?;
-                        tracing::warn!(target: "high_join_amplification",
-                            suppressed_count,
-                            matched_rows_len = rows.len(),
-                            update_table_id = side_update.ht.table_id(),
-                            match_table_id = side_match.ht.table_id(),
-                            join_key = ?key,
-                            actor_id = ctx.id,
-                            fragment_id = ctx.fragment_id,
-                            "large rows matched for join key"
-                        );
-                    }
+                    let join_key_data_types = side_update.ht.join_key_data_types();
+                    let key = key.deserialize(join_key_data_types)?;
+                    tracing::warn!(target: "high_join_amplification",
+                        matched_rows_len = rows.len(),
+                        update_table_id = side_update.ht.table_id(),
+                        match_table_id = side_match.ht.table_id(),
+                        join_key = ?key,
+                        actor_id = ctx.id,
+                        fragment_id = ctx.fragment_id,
+                        "large rows matched for join key"
+                    );
                 }
             } else {
                 join_matched_join_keys.observe(0.0)
@@ -3001,8 +2991,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I I I
-                U- 2 5 . .
-                U+ 2 5 2 7
+                U-  2 5 . .
+                U+  2 5 2 7
                 +  . . 4 8
                 +  . . 6 9"
             )
@@ -3017,6 +3007,67 @@ mod tests {
                 " I I I I
                 + . . 5 10
                 - . . 5 10"
+            )
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_streaming_hash_full_outer_join_update() -> StreamExecutorResult<()> {
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_classical_executor::<{ JoinType::FullOuter }>(false, false, None).await;
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        tx_l.push_chunk(StreamChunk::from_pretty(
+            "  I I
+             + 1 1
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                + 1 1 . ."
+            )
+        );
+
+        tx_r.push_chunk(StreamChunk::from_pretty(
+            "  I I
+             + 1 1
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                U- 1 1 . .
+                U+ 1 1 1 1"
+            )
+        );
+
+        tx_l.push_chunk(StreamChunk::from_pretty(
+            "   I I
+              - 1 1
+              + 1 2
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        let chunk = chunk.compact();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                - 1 1 1 1
+                + 1 2 1 1
+                "
             )
         );
 
@@ -3093,8 +3144,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I I I
-                U- 2 5 . .
-                U+ 2 5 2 6
+                U-  2 5 . .
+                U+  2 5 2 6
                 +  . . 4 8
                 +  . . 3 4" /* regression test (#2420): 3 4 should be forwarded only once
                              * despite matching on eq join on 2

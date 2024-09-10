@@ -55,15 +55,26 @@ message AnalyzeHeapResponse {
 message GetBackPressureRequest {}
 
 message BackPressureInfo {
-  uint32 actor_id = 1;
-  uint32 fragment_id = 2;
-  uint32 downstream_fragment_id = 3;
+  uint32 fragment_id = 1;
+  uint32 downstream_fragment_id = 2;
+  uint32 actor_count = 3;
   double value = 4;
 }
 
 message GetBackPressureResponse {
   repeated BackPressureInfo back_pressure_infos = 1;
 }
+
+message TieredCacheTracingRequest {
+  bool enable = 1;
+  optional uint32 record_hybrid_insert_threshold_ms = 2;
+  optional uint32 record_hybrid_get_threshold_ms = 3;
+  optional uint32 record_hybrid_obtain_threshold_ms = 4;
+  optional uint32 record_hybrid_remove_threshold_ms = 5;
+  optional uint32 record_hybrid_fetch_threshold_ms = 6;
+}
+
+message TieredCacheTracingResponse {}
 
 service MonitorService {
   rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
@@ -72,4 +83,5 @@ service MonitorService {
   rpc ListHeapProfiling(ListHeapProfilingRequest) returns (ListHeapProfilingResponse);
   rpc AnalyzeHeap(AnalyzeHeapRequest) returns (AnalyzeHeapResponse);
   rpc GetBackPressure(GetBackPressureRequest) returns (GetBackPressureResponse);
+  rpc TieredCacheTracing(TieredCacheTracingRequest) returns (TieredCacheTracingResponse);
 }

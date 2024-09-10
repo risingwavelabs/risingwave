@@ -23,7 +23,7 @@ use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -33,10 +33,18 @@ pub struct StreamSimpleAgg {
 
     /// The index of `count(*)` in `agg_calls`.
     row_count_idx: usize,
+
+    // Required by the downstream `RowMerge`,
+    // currently only used by the `approx_percentile`'s two phase plan
+    must_output_per_barrier: bool,
 }
 
 impl StreamSimpleAgg {
-    pub fn new(core: generic::Agg<PlanRef>, row_count_idx: usize) -> Self {
+    pub fn new(
+        core: generic::Agg<PlanRef>,
+        row_count_idx: usize,
+        must_output_per_barrier: bool,
+    ) -> Self {
         assert_eq!(core.agg_calls[row_count_idx], PlanAggCall::count_star());
 
         let input = core.input.clone();
@@ -50,11 +58,19 @@ impl StreamSimpleAgg {
         let watermark_columns = FixedBitSet::with_capacity(core.output_len());
 
         // Simple agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_core(&core, dist, false, false, watermark_columns);
+        let base = PlanBase::new_stream_with_core(
+            &core,
+            dist,
+            false,
+            false,
+            watermark_columns,
+            MonotonicityMap::new(),
+        );
         StreamSimpleAgg {
             base,
             core,
             row_count_idx,
+            must_output_per_barrier,
         }
     }
 
@@ -68,7 +84,11 @@ impl Distill for StreamSimpleAgg {
         let name = plan_node_name!("StreamSimpleAgg",
             { "append_only", self.input().append_only() },
         );
-        childless_record(name, self.core.fields_pretty())
+        let mut vec = self.core.fields_pretty();
+        if self.must_output_per_barrier {
+            vec.push(("must_output_per_barrier", "true".into()));
+        }
+        childless_record(name, vec)
     }
 }
 
@@ -82,7 +102,7 @@ impl PlanTreeNodeUnary for StreamSimpleAgg {
             input,
             ..self.core.clone()
         };
-        Self::new(logical, self.row_count_idx)
+        Self::new(logical, self.row_count_idx, self.must_output_per_barrier)
     }
 }
 impl_plan_tree_node_for_unary! { StreamSimpleAgg }
@@ -130,6 +150,7 @@ impl StreamNode for StreamSimpleAgg {
                 .collect(),
             row_count_index: self.row_count_idx as u32,
             version: PbAggNodeVersion::Issue13465 as _,
+            must_output_per_barrier: self.must_output_per_barrier,
         })
     }
 }
@@ -142,7 +163,7 @@ impl ExprRewritable for StreamSimpleAgg {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.row_count_idx).into()
+        Self::new(core, self.row_count_idx, self.must_output_per_barrier).into()
     }
 }
 

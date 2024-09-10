@@ -15,11 +15,10 @@
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
-use crate::expr::{
-    try_derive_watermark, ExprRewriter, FunctionCall, InputRef, WatermarkDerivation,
-};
+use crate::expr::{ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
+use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants};
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -36,18 +35,19 @@ impl Rule for FilterWithNowToJoinRule {
         let mut now_filters = vec![];
         let mut remainder = vec![];
 
-        let mut rewriter = NowAsInputRef::new(lhs_len);
-
         // If the `now` is not a valid dynamic filter expression, we will not push it down.
         filter.predicate().conjunctions.iter().for_each(|expr| {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
-                let now_expr = rewriter.rewrite_expr(now_expr);
-
-                // ensure that this expression will derive a watermark
-                if try_derive_watermark(&now_expr) != WatermarkDerivation::Watermark(lhs_len) {
-                    remainder.push(expr.clone());
+                // ensure that this expression is increasing
+                use monotonicity_variants::*;
+                if matches!(analyze_monotonicity(&now_expr), Inherent(NonDecreasing)) {
+                    now_filters.push(
+                        FunctionCall::new(cmp, vec![input_expr, now_expr])
+                            .unwrap()
+                            .into(),
+                    );
                 } else {
-                    now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
+                    remainder.push(expr.clone());
                 }
             } else {
                 remainder.push(expr.clone());
@@ -60,13 +60,15 @@ impl Rule for FilterWithNowToJoinRule {
         }
         let mut new_plan = plan.inputs()[0].clone();
 
+        let mut rewriter = NowAsInputRef::new(lhs_len);
         for now_filter in now_filters {
+            let now_filter = rewriter.rewrite_expr(now_filter);
             new_plan = LogicalJoin::new(
                 new_plan,
                 LogicalNow::new(generic::Now::update_current(plan.ctx())).into(),
                 JoinType::LeftSemi,
                 Condition {
-                    conjunctions: vec![now_filter.into()],
+                    conjunctions: vec![now_filter],
                 },
             )
             .into()

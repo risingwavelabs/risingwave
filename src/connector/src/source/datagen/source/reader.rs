@@ -162,7 +162,7 @@ impl SplitReader for DatagenSplitReader {
                         .inspect_ok(move |stream_chunk| {
                             metrics
                                 .partition_input_count
-                                .with_label_values(&[
+                                .with_guarded_label_values(&[
                                     &actor_id,
                                     &source_id,
                                     &split_id,

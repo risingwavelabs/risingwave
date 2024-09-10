@@ -71,7 +71,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         } else {
             (None, None)
         };
-
+        let compression_format = s3_properties.compression_format;
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
@@ -82,6 +82,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             prefix,
             matcher,
             marker: PhantomData,
+            compression_format,
         })
     }
 }

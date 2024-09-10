@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::PbAggKind;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -47,14 +47,13 @@ impl Rule for AggGroupBySimplifyRule {
                 if !new_group_key.contains(i) {
                     let data_type = agg_input.schema().fields[i].data_type();
                     new_agg_calls.push(PlanAggCall {
-                        agg_kind: AggKind::InternalLastSeenValue,
+                        agg_kind: PbAggKind::InternalLastSeenValue.into(),
                         return_type: data_type.clone(),
                         inputs: vec![InputRef::new(i, data_type)],
                         distinct: false,
                         order_by: vec![],
                         filter: Condition::true_cond(),
                         direct_args: vec![],
-                        user_defined: None,
                     });
                 }
             }

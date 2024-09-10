@@ -34,13 +34,14 @@ use crate::source::kafka::{
     KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SplitId, SplitMetaData,
-    SplitReader,
+    into_chunk_stream, BackfillInfo, BoxChunkSourceStream, Column, SourceContextRef, SplitId,
+    SplitMetaData, SplitReader,
 };
 
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<RwConsumerContext>,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
+    backfill_info: HashMap<SplitId, BackfillInfo>,
     bytes_per_second: usize,
     max_num_messages: usize,
     parser_config: ParserConfig,
@@ -73,9 +74,13 @@ impl SplitReader for KafkaSplitReader {
         properties.common.set_security_properties(&mut config);
         properties.set_client(&mut config);
 
+        let group_id_prefix = properties
+            .group_id_prefix
+            .as_deref()
+            .unwrap_or("rw-consumer");
         config.set(
             "group.id",
-            format!("rw-consumer-{}", source_ctx.fragment_id),
+            format!("{}-{}", group_id_prefix, source_ctx.fragment_id),
         );
 
         let ctx_common = KafkaContextCommon::new(
@@ -102,7 +107,7 @@ impl SplitReader for KafkaSplitReader {
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
         let mut offsets = HashMap::new();
-
+        let mut backfill_info = HashMap::new();
         for split in splits {
             offsets.insert(split.id(), (split.start_offset, split.stop_offset));
 
@@ -117,7 +122,29 @@ impl SplitReader for KafkaSplitReader {
             } else {
                 tpl.add_partition(split.topic.as_str(), split.partition);
             }
+
+            let (low, high) = consumer
+                .fetch_watermarks(
+                    split.topic.as_str(),
+                    split.partition,
+                    properties.common.sync_call_timeout,
+                )
+                .await?;
+            tracing::debug!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
+            // note: low is inclusive, high is exclusive
+            if low == high {
+                backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
+            } else {
+                debug_assert!(high > 0);
+                backfill_info.insert(
+                    split.id(),
+                    BackfillInfo::HasDataToBackfill {
+                        latest_offset: (high - 1).to_string(),
+                    },
+                );
+            }
         }
+        tracing::debug!("backfill_info: {:?}", backfill_info);
 
         consumer.assign(&tpl)?;
 
@@ -139,6 +166,7 @@ impl SplitReader for KafkaSplitReader {
         Ok(Self {
             consumer,
             offsets,
+            backfill_info,
             bytes_per_second,
             max_num_messages,
             parser_config,
@@ -151,6 +179,10 @@ impl SplitReader for KafkaSplitReader {
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
+
+    fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
+        self.backfill_info.clone()
+    }
 }
 
 impl KafkaSplitReader {
@@ -158,7 +190,7 @@ impl KafkaSplitReader {
         self.source_ctx
             .metrics
             .latest_message_id
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 // source name is not available here
                 &self.source_ctx.source_id.to_string(),
                 &self.source_ctx.actor_id.to_string(),

@@ -27,8 +27,9 @@ use risingwave_common::config::EvictionConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
-use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
@@ -112,16 +113,17 @@ pub fn gen_dummy_sst_info(
     SstableInfo {
         object_id: id,
         sst_id: id,
-        key_range: Some(KeyRange {
-            left: FullKey::for_test(table_id, min_table_key, epoch).encode(),
-            right: FullKey::for_test(table_id, max_table_key, epoch).encode(),
+        key_range: KeyRange {
+            left: Bytes::from(FullKey::for_test(table_id, min_table_key, epoch).encode()),
+            right: Bytes::from(FullKey::for_test(table_id, max_table_key, epoch).encode()),
             right_exclusive: false,
-        }),
+        },
         file_size,
         table_ids: vec![table_id.table_id],
         uncompressed_file_size: file_size,
         min_epoch: epoch,
         max_epoch: epoch,
+        sst_size: file_size,
         ..Default::default()
     }
 }
@@ -173,6 +175,7 @@ pub async fn put_sst(
     mut meta: SstableMeta,
     sstable_store: SstableStoreRef,
     mut options: SstableWriterOptions,
+    table_ids: Vec<u32>,
 ) -> HummockResult<SstableInfo> {
     options.policy = CachePolicy::NotFill;
     let mut writer = sstable_store
@@ -185,18 +188,31 @@ pub async fn put_sst(
             .write_block(&data[offset..end_offset], block_meta)
             .await?;
     }
+
+    // dummy
+    let bloom_filter = {
+        let mut filter_builder = BlockedXor16FilterBuilder::new(100);
+        for _ in &meta.block_metas {
+            filter_builder.switch_block(None);
+        }
+
+        filter_builder.finish(None)
+    };
+
     meta.meta_offset = writer.data_len() as u64;
+    meta.bloom_filter = bloom_filter;
     let sst = SstableInfo {
         object_id: sst_object_id,
         sst_id: sst_object_id,
-        key_range: Some(KeyRange {
-            left: meta.smallest_key.clone(),
-            right: meta.largest_key.clone(),
+        key_range: KeyRange {
+            left: Bytes::from(meta.smallest_key.clone()),
+            right: Bytes::from(meta.largest_key.clone()),
             right_exclusive: false,
-        }),
+        },
         file_size: meta.estimated_size as u64,
         meta_offset: meta.meta_offset,
         uncompressed_file_size: meta.estimated_size as u64,
+        table_ids,
         ..Default::default()
     };
     let writer_output = writer.finish(meta).await?;

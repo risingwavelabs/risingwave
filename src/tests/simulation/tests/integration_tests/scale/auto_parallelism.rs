@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -25,7 +25,7 @@ use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 /// Please ensure that this value is the same as the one in the `risingwave-auto-scale.toml` file.
-const MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE: u64 = 15;
+pub const MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE: u64 = 15;
 
 #[tokio::test]
 async fn test_passive_online_and_offline() -> Result<()> {
@@ -62,37 +62,33 @@ async fn test_passive_online_and_offline() -> Result<()> {
         ])
         .await?;
 
-    let (_, single_used_parallel_unit_ids) = single_agg_fragment.parallel_unit_usage();
+    assert_eq!(single_agg_fragment.parallelism(), 1);
 
-    let used_parallel_unit_id = single_used_parallel_unit_ids.iter().next().unwrap();
+    let used_worker_slots = single_agg_fragment.used_worker_count();
 
-    let mut workers: Vec<WorkerNode> = cluster
+    let (single_used_worker_id, should_be_one) =
+        used_worker_slots.into_iter().exactly_one().unwrap();
+
+    assert_eq!(should_be_one, 1);
+
+    let worker_map: HashMap<_, _> = cluster
         .get_cluster_info()
         .await?
         .worker_nodes
         .into_iter()
         .filter(|worker| worker.r#type() == WorkerType::ComputeNode)
+        .map(|worker| (worker.id, worker))
         .collect();
 
-    let prev_workers = workers
-        .extract_if(|worker| {
-            worker
-                .parallel_units
-                .iter()
-                .map(|parallel_unit| parallel_unit.id)
-                .contains(used_parallel_unit_id)
-        })
-        .collect_vec();
-
-    let prev_worker = prev_workers.into_iter().exactly_one().unwrap();
-    let host = prev_worker.host.unwrap().host;
+    let prev_worker = worker_map.get(&single_used_worker_id).unwrap();
+    let host = prev_worker.clone().host.unwrap().host;
     let host_name = format!("compute-{}", host.split('.').last().unwrap());
 
-    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
+    assert_eq!(all_worker_slots, used_worker_slots);
 
-    assert_eq!(all_parallel_units.len(), used_parallel_units.len());
-
-    let initialized_parallelism = used_parallel_units.len();
+    let initialized_parallelism = table_mat_fragment.parallelism();
 
     assert_eq!(
         initialized_parallelism,
@@ -100,13 +96,11 @@ async fn test_passive_online_and_offline() -> Result<()> {
     );
 
     cluster.simple_kill_nodes(vec![host_name.clone()]).await;
-
     // wait for a while
     sleep(Duration::from_secs(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
     .await;
-
     let table_mat_fragment = cluster
         .locate_one_fragment(vec![
             identity_contains("materialize"),
@@ -114,22 +108,18 @@ async fn test_passive_online_and_offline() -> Result<()> {
         ])
         .await?;
 
-    let (_, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
-
     assert_eq!(
         initialized_parallelism - config.compute_node_cores,
-        used_parallel_units.len()
+        table_mat_fragment.parallelism()
     );
 
     let stream_scan_fragment = cluster
         .locate_one_fragment(vec![identity_contains("streamTableScan")])
         .await?;
 
-    let (_, used_parallel_units) = stream_scan_fragment.parallel_unit_usage();
-
     assert_eq!(
         initialized_parallelism - config.compute_node_cores,
-        used_parallel_units.len()
+        stream_scan_fragment.parallelism()
     );
 
     let single_agg_fragment = cluster
@@ -139,12 +129,11 @@ async fn test_passive_online_and_offline() -> Result<()> {
         ])
         .await?;
 
-    let (_, used_parallel_units_ids) = single_agg_fragment.parallel_unit_usage();
+    let used_worker_slots = single_agg_fragment.used_worker_count();
 
-    assert_eq!(used_parallel_units_ids.len(), 1);
-
-    assert_ne!(single_used_parallel_unit_ids, used_parallel_units_ids);
-
+    let (curr_used_worker_id, should_be_one) = used_worker_slots.into_iter().exactly_one().unwrap();
+    assert_eq!(should_be_one, 1);
+    assert_ne!(single_used_worker_id, curr_used_worker_id);
     session
         .run("select count(*) from t")
         .await?
@@ -186,17 +175,14 @@ async fn test_passive_online_and_offline() -> Result<()> {
         ])
         .await?;
 
-    let (_, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
-
-    assert_eq!(initialized_parallelism, used_parallel_units.len());
+    assert_eq!(initialized_parallelism, table_mat_fragment.parallelism());
 
     let stream_scan_fragment = cluster
         .locate_one_fragment(vec![identity_contains("streamTableScan")])
         .await?;
 
-    let (_, used_parallel_units) = stream_scan_fragment.parallel_unit_usage();
+    assert_eq!(initialized_parallelism, stream_scan_fragment.parallelism());
 
-    assert_eq!(initialized_parallelism, used_parallel_units.len());
     session
         .run("select count(*) from t")
         .await?
@@ -217,7 +203,6 @@ async fn test_active_online() -> Result<()> {
         true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
-    let mut session = cluster.start_session();
 
     // Keep one worker reserved for adding later.
     cluster
@@ -228,6 +213,8 @@ async fn test_active_online() -> Result<()> {
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
     .await;
+
+    let mut session = cluster.start_session();
 
     session.run("create table t (v1 int);").await?;
     session
@@ -248,14 +235,13 @@ async fn test_active_online() -> Result<()> {
         ])
         .await?;
 
-    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
 
-    assert_eq!(all_parallel_units.len(), used_parallel_units.len());
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
-    assert_eq!(
-        all_parallel_units.len(),
-        (config.compute_nodes - 1) * config.compute_node_cores
-    );
+    assert_eq!(all_worker_slots, used_worker_slots);
+
+    assert_eq!(all_worker_slots.len(), config.compute_nodes - 1);
 
     cluster
         .simple_restart_nodes(vec!["compute-2".to_string()])
@@ -273,14 +259,12 @@ async fn test_active_online() -> Result<()> {
         ])
         .await?;
 
-    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
 
-    assert_eq!(all_parallel_units.len(), used_parallel_units.len());
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
-    assert_eq!(
-        all_parallel_units.len(),
-        config.compute_nodes * config.compute_node_cores
-    );
+    assert_eq!(all_worker_slots, used_worker_slots);
+    assert_eq!(all_worker_slots.len(), config.compute_nodes);
 
     Ok(())
 }
@@ -303,7 +287,6 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
         enable_auto_parallelism_control,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
-    let mut session = cluster.start_session();
 
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";
@@ -315,6 +298,8 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
     .await;
+
+    let mut session = cluster.start_session();
 
     session.run("create table t (v1 int);").await?;
 
@@ -334,14 +319,11 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
-    assert_eq!(all_parallel_units.len(), used_parallel_units.len());
-
-    assert_eq!(
-        all_parallel_units.len(),
-        (config.compute_nodes - 1) * config.compute_node_cores
-    );
+    assert_eq!(all_worker_slots, used_worker_slots);
+    assert_eq!(all_worker_slots.len(), config.compute_nodes - 1);
 
     session.run("alter table t set parallelism = 3").await?;
 
@@ -352,9 +334,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let (_, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
-
-    assert_eq!(used_parallel_units.len(), 3);
+    assert_eq!(table_mat_fragment.parallelism(), 3);
 
     // Keep one worker reserved for adding later.
     cluster
@@ -377,33 +357,18 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     assert_eq!(workers.len(), 3);
 
-    let parallel_unit_to_worker = workers
-        .into_iter()
-        .flat_map(|worker| {
-            worker
-                .parallel_units
-                .into_iter()
-                .map(move |parallel_unit| (parallel_unit.id, worker.id))
-        })
-        .collect::<HashMap<_, _>>();
-
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let (_, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
-    assert_eq!(used_parallel_units.len(), 3);
-
-    let worker_ids: HashSet<_> = used_parallel_units
-        .iter()
-        .map(|id| parallel_unit_to_worker.get(id).unwrap())
-        .collect();
+    assert_eq!(table_mat_fragment.parallelism(), 3);
 
     // check auto scale out for fixed
     if enable_auto_parallelism_control {
-        assert_eq!(worker_ids.len(), config.compute_nodes);
+        assert_eq!(used_worker_slots.len(), config.compute_nodes);
     } else {
         // no rebalance process
-        assert_eq!(worker_ids.len(), config.compute_nodes - 1);
+        assert_eq!(used_worker_slots.len(), config.compute_nodes - 1);
     }
 
     // We kill compute-2 again to verify the behavior of auto scale-in
@@ -418,16 +383,11 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let (_, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
-    assert_eq!(used_parallel_units.len(), 3);
+    assert_eq!(table_mat_fragment.parallelism(), 3);
 
-    let worker_ids: HashSet<_> = used_parallel_units
-        .iter()
-        .map(|id| parallel_unit_to_worker.get(id).unwrap())
-        .collect();
-
-    assert_eq!(worker_ids.len(), config.compute_nodes - 1);
+    assert_eq!(used_worker_slots.len(), config.compute_nodes - 1);
 
     // We alter parallelism back to auto
 
@@ -442,14 +402,11 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
-    assert_eq!(all_parallel_units.len(), used_parallel_units.len());
-
-    assert_eq!(
-        all_parallel_units.len(),
-        (config.compute_nodes - 1) * config.compute_node_cores
-    );
+    assert_eq!(all_worker_slots, used_worker_slots);
+    assert_eq!(all_worker_slots.len(), config.compute_nodes - 1);
 
     // Keep one worker reserved for adding later.
     cluster
@@ -463,21 +420,15 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
     // check auto scale out for auto
     if enable_auto_parallelism_control {
-        assert_eq!(all_parallel_units.len(), used_parallel_units.len());
-
-        assert_eq!(
-            all_parallel_units.len(),
-            config.compute_nodes * config.compute_node_cores
-        );
+        assert_eq!(all_worker_slots, used_worker_slots);
+        assert_eq!(all_worker_slots.len(), config.compute_nodes);
     } else {
-        assert_eq!(
-            used_parallel_units.len(),
-            (config.compute_nodes - 1) * config.compute_node_cores
-        );
+        assert_eq!(used_worker_slots.len(), config.compute_nodes - 1);
     }
 
     Ok(())
@@ -490,10 +441,6 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("SET streaming_use_arrangement_backfill = false;")
-        .await?;
 
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";
@@ -505,6 +452,11 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
     .await;
+
+    let mut session = cluster.start_session();
+    session
+        .run("SET streaming_use_arrangement_backfill = false;")
+        .await?;
 
     session.run("create table t(v int);").await?;
 
@@ -530,18 +482,19 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         ])
         .await?;
 
-    let (mut all_parallel_units, _) = table_mat_fragment.parallel_unit_usage();
+    let mut all_workers = table_mat_fragment
+        .all_worker_count()
+        .into_keys()
+        .collect_vec();
 
-    let chosen_parallel_unit_a = all_parallel_units.pop().unwrap();
-    let chosen_parallel_unit_b = all_parallel_units.pop().unwrap();
+    let chosen_worker_a = all_workers.pop().unwrap();
+    let chosen_worker_b = all_workers.pop().unwrap();
 
     let table_mat_fragment_id = table_mat_fragment.id();
 
     // manual scale in table materialize fragment
     cluster
-        .reschedule(format!(
-            "{table_mat_fragment_id}-[{chosen_parallel_unit_a}]",
-        ))
+        .reschedule(format!("{table_mat_fragment_id}:[{chosen_worker_a}:-1]",))
         .await?;
 
     session
@@ -565,9 +518,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
 
     // manual scale in m_simple materialize fragment
     cluster
-        .reschedule_resolve_no_shuffle(format!(
-            "{simple_mv_fragment_id}-[{chosen_parallel_unit_b}]",
-        ))
+        .reschedule_resolve_no_shuffle(format!("{simple_mv_fragment_id}:[{chosen_worker_b}:-1]",))
         .await?;
 
     // Since `m_simple` only has 1 fragment, and this fragment is a downstream of NO_SHUFFLE relation,
@@ -592,9 +543,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
 
     // manual scale in m_join materialize fragment
     cluster
-        .reschedule_resolve_no_shuffle(format!(
-            "{hash_join_fragment_id}-[{chosen_parallel_unit_a}]"
-        ))
+        .reschedule_resolve_no_shuffle(format!("{hash_join_fragment_id}:[{chosen_worker_a}:-1]"))
         .await?;
 
     session
@@ -631,7 +580,6 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
         true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
-    let mut session = cluster.start_session();
 
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";
@@ -643,6 +591,8 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
     .await;
+
+    let mut session = cluster.start_session();
 
     session.run("create table t(v int);").await?;
 
@@ -667,18 +617,19 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
         ])
         .await?;
 
-    let (mut all_parallel_units, _) = table_mat_fragment.parallel_unit_usage();
+    let mut all_workers = table_mat_fragment
+        .all_worker_count()
+        .into_keys()
+        .collect_vec();
 
-    let chosen_parallel_unit_a = all_parallel_units.pop().unwrap();
-    let chosen_parallel_unit_b = all_parallel_units.pop().unwrap();
+    let chosen_worker_a = all_workers.pop().unwrap();
+    let chosen_worker_b = all_workers.pop().unwrap();
 
     let table_mat_fragment_id = table_mat_fragment.id();
 
     // manual scale in table materialize fragment
     cluster
-        .reschedule(format!(
-            "{table_mat_fragment_id}-[{chosen_parallel_unit_a}]",
-        ))
+        .reschedule(format!("{table_mat_fragment_id}:[{chosen_worker_a}:-1]",))
         .await?;
 
     session
@@ -704,9 +655,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
 
     // manual scale in m_simple materialize fragment
     cluster
-        .reschedule_resolve_no_shuffle(format!(
-            "{simple_mv_fragment_id}-[{chosen_parallel_unit_b}]",
-        ))
+        .reschedule_resolve_no_shuffle(format!("{simple_mv_fragment_id}:[{chosen_worker_b}:-1]",))
         .await?;
 
     // The downstream table fragment should be separate from the upstream table fragment.

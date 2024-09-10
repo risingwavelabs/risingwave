@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::future::Future;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
 use std::sync::LazyLock;
@@ -27,16 +28,13 @@ use mongodb::{Client, Database, Namespace};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::must_match;
 use risingwave_common::row::Row;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::ScalarRefImpl;
 use serde_derive::Deserialize;
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
-use super::catalog::desc::SinkDesc;
 use super::encoder::BsonEncoder;
 use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
@@ -57,6 +55,9 @@ pub const MONGODB_PK_NAME: &str = "_id";
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
+const fn _default_bulk_write_max_entries() -> usize {
+    1024
+}
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct MongodbConfig {
@@ -80,6 +81,15 @@ pub struct MongodbConfig {
         rename = "collection.name.field.drop"
     )]
     pub drop_collection_name_field: bool,
+
+    /// The maximum entries will accumulate before performing the bulk write, defaults to 1024.
+    #[serde(
+        rename = "mongodb.bulk_write.max_entries",
+        default = "_default_bulk_write_max_entries"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    #[deprecated]
+    pub bulk_write_max_entries: usize,
 }
 
 impl MongodbConfig {
@@ -175,13 +185,6 @@ impl Sink for MongodbSink {
     type LogSinker = AsyncTruncateLogSinkerOf<MongodbSinkWriter>;
 
     const SINK_NAME: &'static str = MONGODB_SINK;
-
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
@@ -302,8 +305,8 @@ pub struct MongodbSinkWriter {
     pub config: MongodbConfig,
     payload_writer: MongodbPayloadWriter,
     is_append_only: bool,
-    // TODO switching to bulk write API when mongodb driver supports it
-    command_builder: CommandBuilder,
+    // // TODO switching to bulk write API when mongodb driver supports it
+    // command_builder: CommandBuilder,
 }
 
 impl MongodbSinkWriter {
@@ -348,11 +351,11 @@ impl MongodbSinkWriter {
 
         let row_encoder = BsonEncoder::new(schema.clone(), Some(col_indices), pk_indices.clone());
 
-        let command_builder = if is_append_only {
-            CommandBuilder::AppendOnly(HashMap::new())
-        } else {
-            CommandBuilder::Upsert(HashMap::new())
-        };
+        // let command_builder = if is_append_only {
+        //     CommandBuilder::AppendOnly(HashMap::new())
+        // } else {
+        //     CommandBuilder::Upsert(HashMap::new())
+        // };
 
         let payload_writer = MongodbPayloadWriter::new(
             schema,
@@ -367,13 +370,11 @@ impl MongodbSinkWriter {
             config,
             payload_writer,
             is_append_only,
-            command_builder,
         })
     }
 
-    fn append(&mut self, chunk: StreamChunk) -> Result<()> {
-        let insert_builder =
-            must_match!(&mut self.command_builder, CommandBuilder::AppendOnly(builder) => builder);
+    fn append(&mut self, chunk: StreamChunk) -> Result<Vec<impl Future<Output = Result<()>>>> {
+        let mut insert_builder: HashMap<MongodbNamespace, InsertCommandBuilder> = HashMap::new();
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
                 if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
@@ -386,22 +387,21 @@ impl MongodbSinkWriter {
                 }
                 continue;
             }
-            self.payload_writer.append(insert_builder, row)?;
+            self.payload_writer.append(&mut insert_builder, row)?;
         }
-        Ok(())
+        self.payload_writer.flush_insert(&mut insert_builder)
     }
 
-    fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
-        let upsert_builder =
-            must_match!(&mut self.command_builder, CommandBuilder::Upsert(builder) => builder);
+    fn upsert(&mut self, chunk: StreamChunk) -> Result<Vec<impl Future<Output = Result<()>>>> {
+        let mut upsert_builder: HashMap<MongodbNamespace, UpsertCommandBuilder> = HashMap::new();
         for (op, row) in chunk.rows() {
             if op == Op::UpdateDelete {
                 // we should ignore the `UpdateDelete` in upsert mode
                 continue;
             }
-            self.payload_writer.upsert(upsert_builder, op, row)?;
+            self.payload_writer.upsert(&mut upsert_builder, op, row)?;
         }
-        Ok(())
+        self.payload_writer.flush_upsert(&mut upsert_builder)
     }
 }
 
@@ -415,22 +415,14 @@ impl AsyncTruncateSinkWriter for MongodbSinkWriter {
         chunk: StreamChunk,
         mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        if self.is_append_only {
-            self.append(chunk)?;
-            let insert_builder = must_match!(&mut self.command_builder, CommandBuilder::AppendOnly(builder) => builder);
-            let futures = self.payload_writer.flush_insert(insert_builder)?;
-            add_future
-                .add_future_may_await(try_join_all(futures).map_ok(|_: Vec<()>| ()).boxed())
-                .await?;
+        let boxed_futures = if self.is_append_only {
+            let futures = self.append(chunk)?;
+            try_join_all(futures).map_ok(|_: Vec<()>| ()).boxed()
         } else {
-            self.upsert(chunk)?;
-            let upsert_builder =
-                must_match!(&mut self.command_builder, CommandBuilder::Upsert(builder) => builder);
-            let futures = self.payload_writer.flush_upsert(upsert_builder)?;
-            add_future
-                .add_future_may_await(try_join_all(futures).map_ok(|_: Vec<()>| ()).boxed())
-                .await?;
+            let futures = self.upsert(chunk)?;
+            try_join_all(futures).map_ok(|_: Vec<()>| ()).boxed()
         };
+        add_future.add_future_may_await(boxed_futures).await?;
         Ok(())
     }
 }
@@ -532,11 +524,6 @@ impl UpsertCommandBuilder {
         }
         (upsert_document, delete_document)
     }
-}
-
-enum CommandBuilder {
-    AppendOnly(HashMap<MongodbNamespace, InsertCommandBuilder>),
-    Upsert(HashMap<MongodbNamespace, UpsertCommandBuilder>),
 }
 
 type MongodbNamespace = (String, String);

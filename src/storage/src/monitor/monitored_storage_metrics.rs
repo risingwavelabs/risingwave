@@ -18,14 +18,14 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use prometheus::{
-    exponential_buckets, histogram_opts, linear_buckets, register_histogram_vec_with_registry,
-    register_histogram_with_registry, Histogram, Registry,
+    exponential_buckets, histogram_opts, linear_buckets, register_histogram_with_registry,
+    Histogram, Registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedLocalHistogram,
     LabelGuardedLocalIntCounter, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
-    RelabeledGuardedIntGaugeVec, RelabeledHistogramVec,
+    RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -55,7 +55,6 @@ pub struct MonitoredStorageMetrics {
 
     // [table_id, op_type]
     pub iter_log_op_type_counts: LabelGuardedIntCounterVec<2>,
-    pub may_exist_duration: RelabeledHistogramVec,
 
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
@@ -240,19 +239,6 @@ impl MonitoredStorageMetrics {
         .unwrap();
 
         let opts = histogram_opts!(
-            "state_store_may_exist_duration",
-            "Histogram of may exist time that have been issued to state store",
-            buckets,
-        );
-        let may_exist_duration =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let may_exist_duration = RelabeledHistogramVec::with_metric_level(
-            MetricLevel::Debug,
-            may_exist_duration,
-            metric_level,
-        );
-
-        let opts = histogram_opts!(
             "state_store_sync_duration",
             "Histogram of time spent on compacting shared buffer to remote storage",
             time_buckets,
@@ -277,7 +263,6 @@ impl MonitoredStorageMetrics {
             iter_counts,
             iter_in_progress_counts,
             iter_log_op_type_counts,
-            may_exist_duration,
             sync_duration,
             sync_size,
         }
@@ -302,27 +287,27 @@ impl MonitoredStorageMetrics {
     ) -> LocalIterMetricsInner {
         let iter_init_duration = self
             .iter_init_duration
-            .with_label_values(&[table_label, iter_type])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_counts = self
             .iter_counts
-            .with_label_values(&[table_label, iter_type])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_scan_duration = self
             .iter_scan_duration
-            .with_label_values(&[table_label, iter_type])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_item = self
             .iter_item
-            .with_label_values(&[table_label, iter_type])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_size = self
             .iter_size
-            .with_label_values(&[table_label, iter_type])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_in_progress_counts = self
             .iter_in_progress_counts
-            .with_label_values(&[table_label, iter_type]);
+            .with_guarded_label_values(&[table_label, iter_type]);
 
         LocalIterMetricsInner {
             iter_init_duration,
@@ -358,11 +343,17 @@ impl MonitoredStorageMetrics {
     }
 
     fn local_get_metrics(&self, table_label: &str) -> LocalGetMetrics {
-        let get_duration = self.get_duration.with_label_values(&[table_label]).local();
-        let get_key_size = self.get_key_size.with_label_values(&[table_label]).local();
+        let get_duration = self
+            .get_duration
+            .with_guarded_label_values(&[table_label])
+            .local();
+        let get_key_size = self
+            .get_key_size
+            .with_guarded_label_values(&[table_label])
+            .local();
         let get_value_size = self
             .get_value_size
-            .with_label_values(&[table_label])
+            .with_guarded_label_values(&[table_label])
             .local();
 
         LocalGetMetrics {

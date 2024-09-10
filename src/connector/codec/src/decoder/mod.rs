@@ -16,6 +16,7 @@ pub mod avro;
 pub mod json;
 pub mod utils;
 
+use risingwave_common::error::NotImplemented;
 use risingwave_common::types::{DataType, Datum, DatumCow, ToOwnedDatum};
 use thiserror::Error;
 use thiserror_ext::Macro;
@@ -37,26 +38,50 @@ pub enum AccessError {
     #[error("Unsupported additional column `{name}`")]
     UnsupportedAdditionalColumn { name: String },
 
+    #[error("Fail to convert protobuf Any into jsonb: {0}")]
+    ProtobufAnyToJson(#[source] serde_json::Error),
+
     /// Errors that are not categorized into variants above.
     #[error("{message}")]
     Uncategorized { message: String },
+
+    #[error(transparent)]
+    NotImplemented(#[from] NotImplemented),
+    // NOTE: We intentionally don't embed `anyhow::Error` in `AccessError` since it happens
+    // in record-level and it might be too heavy to capture the backtrace
+    // when creating a new `anyhow::Error`.
 }
 
 pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
 
-/// Access to a field in the data structure.
+/// Access to a field in the data structure. Created by `AccessBuilder`.
+///
+/// It's the `ENCODE ...` part in `FORMAT ... ENCODE ...`
 pub trait Access {
     /// Accesses `path` in the data structure (*parsed* Avro/JSON/Protobuf data),
     /// and then converts it to RisingWave `Datum`.
+    ///
     /// `type_expected` might or might not be used during the conversion depending on the implementation.
     ///
     /// # Path
     ///
-    /// We usually expect the data is a record (struct), and `path` represents field path.
+    /// We usually expect the data (`Access` instance) is a record (struct), and `path` represents field path.
     /// The data (or part of the data) represents the whole row (`Vec<Datum>`),
     /// and we use different `path` to access one column at a time.
     ///
-    /// e.g., for Avro, we access `["col_name"]`; for Debezium Avro, we access `["before", "col_name"]`.
+    /// TODO: the meaning of `path` is a little confusing and maybe over-abstracted.
+    /// `access` does not need to serve arbitrarily deep `path` access, but just "top-level" access.
+    /// The API creates an illusion that arbitrary access is supported, but it's not.
+    /// Perhapts we should separate out another trait like `ToDatum`,
+    /// which only does type mapping, without caring about the path. And `path` itself is only an `enum` instead of `&[&str]`.
+    ///
+    /// What `path` to access is decided by the CDC layer, i.e., the `FORMAT ...` part (`ChangeEvent`).
+    /// e.g.,
+    /// - `DebeziumChangeEvent` accesses `["before", "col_name"]` for value,
+    ///   `["source", "db"]`, `["source", "table"]` etc. for additional columns' values,
+    ///   `["op"]` for op type.
+    /// - `MaxwellChangeEvent` accesses `["data", "col_name"]` for value, `["type"]` for op type.
+    /// - In the simplest case, for `FORMAT PLAIN/UPSERT` (`KvEvent`), they just access `["col_name"]` for value, and op type is derived.
     ///
     /// # Returns
     ///

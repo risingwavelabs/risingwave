@@ -22,3 +22,4 @@ mod pg_get_viewdef;
 mod pg_index_column_has_property;
 mod pg_indexes_size;
 mod pg_relation_size;
+mod rw_recovery_status;

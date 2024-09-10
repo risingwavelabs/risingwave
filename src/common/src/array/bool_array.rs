@@ -16,7 +16,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, DataType};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoolArray {

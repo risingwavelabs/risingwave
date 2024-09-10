@@ -29,11 +29,12 @@ use winnow::{PResult, Parser as _};
 
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
-use crate::parser_v2;
 use crate::parser_v2::{
-    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _,
+    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, token_number,
+    ParserExt as _,
 };
 use crate::tokenizer::*;
+use crate::{impl_parse_to, parser_v2};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 
@@ -607,9 +608,11 @@ impl Parser<'_> {
                     Ok(exists_node)
                 }
                 Keyword::ARRAY if self.peek_token() == Token::LBracket => self.parse_array_expr(),
+                Keyword::MAP if self.peek_token() == Token::LBrace => self.parse_map_expr(),
                 // `LEFT` and `RIGHT` are reserved as identifier but okay as function
                 Keyword::LEFT | Keyword::RIGHT => {
-                    self.parse_function(ObjectName(vec![w.to_ident()?]))
+                    *self = checkpoint;
+                    self.parse_function()
                 }
                 Keyword::OPERATOR if self.peek_token().token == Token::LParen => {
                     let op = UnaryOperator::PGQualified(Box::new(self.parse_qualified_operator()?));
@@ -643,24 +646,15 @@ impl Parser<'_> {
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token().token {
-                    Token::LParen | Token::Period => {
-                        let mut id_parts: Vec<Ident> = vec![w.to_ident()?];
-                        while self.consume_token(&Token::Period) {
-                            let ckpt = *self;
-                            let token = self.next_token();
-                            match token.token {
-                                Token::Word(w) => id_parts.push(w.to_ident()?),
-                                _ => {
-                                    *self = ckpt;
-                                    return self.expected("an identifier or a '*' after '.'");
-                                }
-                            }
-                        }
-
-                        if self.peek_token().token == Token::LParen {
-                            self.parse_function(ObjectName(id_parts))
+                    Token::LParen | Token::Period | Token::Colon => {
+                        *self = checkpoint;
+                        if let Ok(object_name) = self.parse_object_name()
+                            && !matches!(self.peek_token().token, Token::LParen | Token::Colon)
+                        {
+                            Ok(Expr::CompoundIdentifier(object_name.0))
                         } else {
-                            Ok(Expr::CompoundIdentifier(id_parts))
+                            *self = checkpoint;
+                            self.parse_function()
                         }
                     }
                     _ => Ok(Expr::Identifier(w.to_ident()?)),
@@ -819,10 +813,38 @@ impl Parser<'_> {
         Ok(QualifiedOperator { schema, name })
     }
 
-    pub fn parse_function(&mut self, name: ObjectName) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-        let distinct = self.parse_all_or_distinct()?;
-        let (args, order_by, variadic) = self.parse_optional_args()?;
+    /// Parse a function call.
+    pub fn parse_function(&mut self) -> PResult<Expr> {
+        // [aggregate:]
+        let scalar_as_agg = if self.parse_keyword(Keyword::AGGREGATE) {
+            self.expect_token(&Token::Colon)?;
+            true
+        } else {
+            false
+        };
+        let name = self.parse_object_name()?;
+        let arg_list = self.parse_argument_list()?;
+
+        let within_group = if self.parse_keywords(&[Keyword::WITHIN, Keyword::GROUP]) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
+            let order_by = self.parse_order_by_expr()?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(order_by.clone()))
+        } else {
+            None
+        };
+
+        let filter = if self.parse_keyword(Keyword::FILTER) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keyword(Keyword::WHERE)?;
+            let filter_expr = self.parse_expr()?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(filter_expr))
+        } else {
+            None
+        };
+
         let over = if self.parse_keyword(Keyword::OVER) {
             // TODO: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
@@ -854,35 +876,13 @@ impl Parser<'_> {
             None
         };
 
-        let filter = if self.parse_keyword(Keyword::FILTER) {
-            self.expect_token(&Token::LParen)?;
-            self.expect_keyword(Keyword::WHERE)?;
-            let filter_expr = self.parse_expr()?;
-            self.expect_token(&Token::RParen)?;
-            Some(Box::new(filter_expr))
-        } else {
-            None
-        };
-
-        let within_group = if self.parse_keywords(&[Keyword::WITHIN, Keyword::GROUP]) {
-            self.expect_token(&Token::LParen)?;
-            self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
-            let order_by = self.parse_order_by_expr()?;
-            self.expect_token(&Token::RParen)?;
-            Some(Box::new(order_by.clone()))
-        } else {
-            None
-        };
-
         Ok(Expr::Function(Function {
+            scalar_as_agg,
             name,
-            args,
-            variadic,
-            over,
-            distinct,
-            order_by,
-            filter,
+            arg_list,
             within_group,
+            filter,
+            over,
         }))
     }
 
@@ -1149,6 +1149,22 @@ impl Parser<'_> {
         };
         self.expect_token(&Token::RBracket)?;
         Ok(exprs)
+    }
+
+    /// Parses a map expression `MAP {k1:v1, k2:v2, ..}`
+    pub fn parse_map_expr(&mut self) -> PResult<Expr> {
+        self.expect_token(&Token::LBrace)?;
+        if self.consume_token(&Token::RBrace) {
+            return Ok(Expr::Map { entries: vec![] });
+        }
+        let entries = self.parse_comma_separated(|parser| {
+            let key = parser.parse_expr()?;
+            parser.expect_token(&Token::Colon)?;
+            let value = parser.parse_expr()?;
+            Ok((key, value))
+        })?;
+        self.expect_token(&Token::RBrace)?;
+        Ok(Expr::Map { entries })
     }
 
     // This function parses date/time fields for interval qualifiers.
@@ -1556,7 +1572,7 @@ impl Parser<'_> {
                     }
                     _ => {
                         // [N]
-                        Expr::ArrayIndex {
+                        Expr::Index {
                             obj: Box::new(expr),
                             index,
                         }
@@ -1809,6 +1825,18 @@ impl Parser<'_> {
         self.expected(expected)
     }
 
+    /// Check if the expected match is the next token.
+    /// The equality check is case-insensitive.
+    pub fn parse_word(&mut self, expected: &str) -> bool {
+        match self.peek_token().token {
+            Token::Word(w) if w.value.to_uppercase() == expected => {
+                self.next_token();
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Look for an expected keyword and consume it if it exists
     #[must_use]
     pub fn parse_keyword(&mut self, expected: Keyword) -> bool {
@@ -1980,7 +2008,7 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
             parser_err!("CREATE MATERIALIZED SOURCE has been deprecated, use CREATE TABLE instead")
         } else if self.parse_keyword(Keyword::SOURCE) {
-            self.parse_create_source(or_replace)
+            self.parse_create_source(or_replace, temporary)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
         } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
@@ -2074,17 +2102,54 @@ impl Parser<'_> {
     }
 
     // CREATE [OR REPLACE]?
-    // [MATERIALIZED] SOURCE
+    // [TEMPORARY] SOURCE
     // [IF NOT EXISTS]?
     // <source_name: Ident>
     // [COLUMNS]?
     // [WITH (properties)]?
     // ROW FORMAT <row_format: Ident>
     // [ROW SCHEMA LOCATION <row_schema_location: String>]?
-    pub fn parse_create_source(&mut self, _or_replace: bool) -> PResult<Statement> {
-        Ok(Statement::CreateSource {
-            stmt: CreateSourceStatement::parse_to(self)?,
-        })
+    pub fn parse_create_source(
+        &mut self,
+        _or_replace: bool,
+        temporary: bool,
+    ) -> PResult<Statement> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
+        impl_parse_to!(source_name: ObjectName, self);
+
+        // parse columns
+        let (columns, constraints, source_watermarks, wildcard_idx) =
+            self.parse_columns_with_watermark()?;
+        let include_options = self.parse_include_options()?;
+
+        let with_options = self.parse_with_properties()?;
+        let option = with_options
+            .iter()
+            .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
+        let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
+        let cdc_source_job = connector.contains("-cdc");
+        if cdc_source_job && (!columns.is_empty() || !constraints.is_empty()) {
+            parser_err!("CDC source cannot define columns and constraints");
+        }
+
+        // row format for nexmark source must be native
+        // default row format for datagen source is native
+        let source_schema = self.parse_source_schema_with_connector(&connector, cdc_source_job)?;
+
+        let stmt = CreateSourceStatement {
+            temporary,
+            if_not_exists,
+            columns,
+            wildcard_idx,
+            constraints,
+            source_name,
+            with_properties: WithProperties(with_options),
+            source_schema,
+            source_watermarks,
+            include_column_options: include_options,
+        };
+
+        Ok(Statement::CreateSource { stmt })
     }
 
     // CREATE [OR REPLACE]?
@@ -2882,7 +2947,7 @@ impl Parser<'_> {
         Ok(SqlOption { name, value })
     }
 
-    pub fn parse_since(&mut self) -> PResult<Option<Since>> {
+    pub fn parse_since(&mut self) -> PResult<Since> {
         if self.parse_keyword(Keyword::SINCE) {
             let checkpoint = *self;
             let token = self.next_token();
@@ -2893,11 +2958,11 @@ impl Parser<'_> {
                     if ident.real_value() == "proctime" || ident.real_value() == "now" {
                         self.expect_token(&Token::LParen)?;
                         self.expect_token(&Token::RParen)?;
-                        Ok(Some(Since::ProcessTime))
+                        Ok(Since::ProcessTime)
                     } else if ident.real_value() == "begin" {
                         self.expect_token(&Token::LParen)?;
                         self.expect_token(&Token::RParen)?;
-                        Ok(Some(Since::Begin))
+                        Ok(Since::Begin)
                     } else {
                         parser_err!(
                             "Expected proctime(), begin() or now(), found: {}",
@@ -2909,12 +2974,14 @@ impl Parser<'_> {
                     let num = s
                         .parse::<u64>()
                         .map_err(|e| StrError(format!("Could not parse '{}' as u64: {}", s, e)))?;
-                    Ok(Some(Since::TimestampMsNum(num)))
+                    Ok(Since::TimestampMsNum(num))
                 }
                 _ => self.expected_at(checkpoint, "proctime(), begin() , now(), Number"),
             }
+        } else if self.parse_word("FULL") {
+            Ok(Since::Full)
         } else {
-            Ok(None)
+            Ok(Since::ProcessTime)
         }
     }
 
@@ -3075,10 +3142,12 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
-                AlterTableOperation::SetStreamingRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(true)? {
+                AlterTableOperation::SetSourceRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
+                AlterTableOperation::SetBackfillRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/STREAMING_RATE_LIMIT after SET");
+                return self.expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT after SET");
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -3130,14 +3199,37 @@ impl Parser<'_> {
         })
     }
 
-    /// STREAMING_RATE_LIMIT = default | NUMBER
-    /// STREAMING_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_streaming_rate_limit(&mut self) -> PResult<Option<i32>> {
-        if !self.parse_keyword(Keyword::STREAMING_RATE_LIMIT) {
+    /// BACKFILL_RATE_LIMIT = default | NUMBER
+    /// BACKFILL_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_backfill_rate_limit(&mut self) -> PResult<Option<i32>> {
+        if !self.parse_word("BACKFILL_RATE_LIMIT") {
             return Ok(None);
         }
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after ALTER TABLE SET STREAMING_RATE_LIMIT");
+            return self.expected("TO or = after ALTER TABLE SET BACKFILL_RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(Some(rate_limit))
+    }
+
+    /// SOURCE_RATE_LIMIT = default | NUMBER
+    /// SOURCE_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_source_rate_limit(&mut self, is_table: bool) -> PResult<Option<i32>> {
+        if !self.parse_word("SOURCE_RATE_LIMIT") {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            let ddl = if is_table { "TABLE" } else { "SOURCE" };
+            return self.expected(&format!("TO or = after ALTER {ddl} SET SOURCE_RATE_LIMIT"));
         }
         let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
             -1
@@ -3226,11 +3318,11 @@ impl Parser<'_> {
                     deferred,
                 }
             } else if materialized
-                && let Some(rate_limit) = self.parse_alter_streaming_rate_limit()?
+                && let Some(rate_limit) = self.parse_alter_backfill_rate_limit()?
             {
-                AlterViewOperation::SetStreamingRateLimit { rate_limit }
+                AlterViewOperation::SetBackfillRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/STREAMING_RATE_LIMIT after SET");
+                return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT after SET");
             }
         } else {
             return self.expected(&format!(
@@ -3351,8 +3443,8 @@ impl Parser<'_> {
                 AlterSourceOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
-                AlterSourceOperation::SetStreamingRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(false)? {
+                AlterSourceOperation::SetSourceRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA after SET");
             }
@@ -3366,7 +3458,7 @@ impl Parser<'_> {
             AlterSourceOperation::RefreshSchema
         } else {
             return self.expected(
-                "RENAME, ADD COLUMN, OWNER TO, SET or STREAMING_RATE_LIMIT after ALTER SOURCE",
+                "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
             );
         };
 
@@ -3495,6 +3587,18 @@ impl Parser<'_> {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
+                Keyword::SECRET => {
+                    let secret_name = self.parse_object_name()?;
+                    let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
+                        SecretRefAsType::File
+                    } else {
+                        SecretRefAsType::Text
+                    };
+                    Ok(Value::Ref(SecretRef {
+                        secret_name,
+                        ref_as,
+                    }))
+                }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
@@ -3573,27 +3677,16 @@ impl Parser<'_> {
 
     /// Parse a map key string
     pub fn parse_map_key(&mut self) -> PResult<Expr> {
-        let checkpoint = *self;
-        let token = self.next_token();
-        match token.token {
-            Token::Word(Word {
-                value,
-                keyword: Keyword::NoKeyword,
-                ..
-            }) => {
-                if self.peek_token() == Token::LParen {
-                    return self.parse_function(ObjectName(vec![Ident::new_unchecked(value)]));
-                }
-                Ok(Expr::Value(Value::SingleQuotedString(value)))
-            }
-            Token::SingleQuotedString(s) => Ok(Expr::Value(Value::SingleQuotedString(s))),
-            Token::Number(s) => Ok(Expr::Value(Value::Number(s))),
-            _ => self.expected_at(checkpoint, "literal string, number or function"),
-        }
+        alt((
+            Self::parse_function,
+            single_quoted_string.map(|s| Expr::Value(Value::SingleQuotedString(s))),
+            token_number.map(|s| Expr::Value(Value::Number(s))),
+            fail.expect("literal string, number or function"),
+        ))
+        .parse_next(self)
     }
 
-    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example) and convert
-    /// into an array of that datatype if needed
+    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example)
     pub fn parse_data_type(&mut self) -> PResult<DataType> {
         parser_v2::data_type(self)
     }
@@ -3649,10 +3742,41 @@ impl Parser<'_> {
                 (Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF),
                 cut_err(
                     alt((
-                        (
-                            Self::parse_identifier.verify(|ident| {
-                                ident.real_value() == "proctime" || ident.real_value() == "now"
+                        preceded(
+                            (
+                                Self::parse_identifier.verify(|ident| ident.real_value() == "now"),
+                                cut_err(Token::LParen),
+                                cut_err(Token::RParen),
+                                Token::Minus,
+                            ),
+                            Self::parse_literal_interval.try_map(|e| match e {
+                                Expr::Value(v) => match v {
+                                    Value::Interval {
+                                        value,
+                                        leading_field,
+                                        ..
+                                    } => {
+                                        let Some(leading_field) = leading_field else {
+                                            return Err(StrError("expect duration unit".into()));
+                                        };
+                                        Ok(AsOf::ProcessTimeWithInterval((value, leading_field)))
+                                    }
+                                    _ => Err(StrError("expect Value::Interval".into())),
+                                },
+                                _ => Err(StrError("expect Expr::Value".into())),
                             }),
+                        ),
+                        (
+                            Self::parse_identifier.verify(|ident| ident.real_value() == "now"),
+                            cut_err(Token::LParen),
+                            cut_err(Token::RParen),
+                        )
+                            .value(AsOf::ProcessTimeWithInterval((
+                                "0".to_owned(),
+                                DateTimeField::Second,
+                            ))),
+                        (
+                            Self::parse_identifier.verify(|ident| ident.real_value() == "proctime"),
                             cut_err(Token::LParen),
                             cut_err(Token::RParen),
                         )
@@ -4043,10 +4167,15 @@ impl Parser<'_> {
                 break;
             }
             self.next_token(); // skip past the set operator
+
+            let all = self.parse_keyword(Keyword::ALL);
+            let corresponding = self.parse_corresponding()?;
+
             expr = SetExpr::SetOperation {
                 left: Box::new(expr),
                 op: op.unwrap(),
-                all: self.parse_keyword(Keyword::ALL),
+                corresponding,
+                all,
                 right: Box::new(self.parse_query_body(next_precedence)?),
             };
         }
@@ -4061,6 +4190,20 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::INTERSECT => Some(SetOperator::Intersect),
             _ => None,
         }
+    }
+
+    fn parse_corresponding(&mut self) -> PResult<Corresponding> {
+        let corresponding = if self.parse_keyword(Keyword::CORRESPONDING) {
+            let column_list = if self.parse_keyword(Keyword::BY) {
+                Some(self.parse_parenthesized_column_list(IsOptional::Mandatory)?)
+            } else {
+                None
+            };
+            Corresponding::with_column_list(column_list)
+        } else {
+            Corresponding::none()
+        };
+        Ok(corresponding)
     }
 
     /// Parse a restricted `SELECT` statement (no CTEs / `UNION` / `ORDER BY`),
@@ -4344,6 +4487,19 @@ impl Parser<'_> {
                     self.expect_keywords(&[Keyword::ISOLATION, Keyword::LEVEL])?;
                     return Ok(Statement::ShowTransactionIsolationLevel);
                 }
+                Keyword::CURSORS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Cursor,
+                        filter: None,
+                    });
+                }
+                Keyword::SUBSCRIPTION => {
+                    self.expect_keyword(Keyword::CURSORS)?;
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::SubscriptionCursor,
+                        filter: None,
+                    });
+                }
                 _ => {}
             }
         }
@@ -4574,17 +4730,24 @@ impl Parser<'_> {
             }
         } else {
             let name = self.parse_object_name()?;
-            // Postgres,table-valued functions:
-            if self.consume_token(&Token::LParen) {
-                // ignore VARIADIC here
-                let (args, order_by, _variadic) = self.parse_optional_args()?;
-                // Table-valued functions do not support ORDER BY, should return error if it appears
-                if !order_by.is_empty() {
-                    parser_err!("Table-valued functions do not support ORDER BY clauses");
-                }
-                let with_ordinality = self.parse_keywords(&[Keyword::WITH, Keyword::ORDINALITY]);
+            if self.peek_token() == Token::LParen {
+                // table-valued function
 
+                let arg_list = self.parse_argument_list()?;
+                if arg_list.distinct {
+                    parser_err!("DISTINCT is not supported in table-valued function calls");
+                }
+                if !arg_list.order_by.is_empty() {
+                    parser_err!("ORDER BY is not supported in table-valued function calls");
+                }
+                if arg_list.ignore_nulls {
+                    parser_err!("IGNORE NULLS is not supported in table-valued function calls");
+                }
+
+                let args = arg_list.args;
+                let with_ordinality = self.parse_keywords(&[Keyword::WITH, Keyword::ORDINALITY]);
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
+
                 Ok(TableFactor::TableFunction {
                     name,
                     alias,
@@ -4867,17 +5030,19 @@ impl Parser<'_> {
         Ok((variadic, arg))
     }
 
-    pub fn parse_optional_args(&mut self) -> PResult<(Vec<FunctionArg>, Vec<OrderByExpr>, bool)> {
+    pub fn parse_argument_list(&mut self) -> PResult<FunctionArgList> {
+        self.expect_token(&Token::LParen)?;
         if self.consume_token(&Token::RParen) {
-            Ok((vec![], vec![], false))
+            Ok(FunctionArgList::empty())
         } else {
+            let distinct = self.parse_all_or_distinct()?;
             let args = self.parse_comma_separated(Parser::parse_function_args)?;
             if args
                 .iter()
                 .take(args.len() - 1)
                 .any(|(variadic, _)| *variadic)
             {
-                parser_err!("VARIADIC argument must be last");
+                parser_err!("VARIADIC argument must be the last");
             }
             let variadic = args.last().map(|(variadic, _)| *variadic).unwrap_or(false);
             let args = args.into_iter().map(|(_, arg)| arg).collect();
@@ -4887,8 +5052,19 @@ impl Parser<'_> {
             } else {
                 vec![]
             };
+
+            let ignore_nulls = self.parse_keywords(&[Keyword::IGNORE, Keyword::NULLS]);
+
+            let arg_list = FunctionArgList {
+                distinct,
+                args,
+                variadic,
+                order_by,
+                ignore_nulls,
+            };
+
             self.expect_token(&Token::RParen)?;
-            Ok((args, order_by, variadic))
+            Ok(arg_list)
         }
     }
 

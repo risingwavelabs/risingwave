@@ -1,0 +1,14 @@
+control substitution on
+
+statement ok
+create view ${TEST_NAME}_v as
+ SELECT P.name,
+        P.city,
+        P.state,
+        A.id
+ FROM auction AS A
+          INNER JOIN person AS P on A.seller = P.id
+ WHERE A.category = 10
+   and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
+
+include ../run_test.slt.part

@@ -197,24 +197,11 @@ impl ToStream for LogicalFilter {
         let new_input = self.input().to_stream(ctx)?;
 
         let predicate = self.predicate();
-        let has_now = predicate
-            .conjunctions
-            .iter()
-            .any(|cond| cond.count_nows() > 0);
-        if has_now {
-            if predicate
-                .conjunctions
-                .iter()
-                .any(|expr| expr.count_nows() > 0 && expr.as_now_comparison_cond().is_none())
-            {
-                bail!(
-                    "Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or \
-                    `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column \
-                    and contains no `now()`."
-                );
-            }
+        if predicate.conjunctions.iter().any(|cond| cond.has_now()) {
             bail!(
-                "All `now()` exprs were valid, but the condition must have at least one now expr as a lower bound."
+                "Conditions containing now must be in the form of `input_expr cmp now_expr` or \
+                `now_expr cmp input_expr`, where `input_expr` references a column and contains \
+                no `now()`, and `now_expr` is a non-decreasing expression contains `now()`."
             );
         }
         let mut new_logical = self.core.clone();

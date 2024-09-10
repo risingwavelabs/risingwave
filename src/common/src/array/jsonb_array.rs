@@ -16,7 +16,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{PbArray, PbArrayType};
 
 use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::types::{DataType, JsonbRef, JsonbVal, Scalar};
 
 #[derive(Debug, Clone, EstimateSize)]

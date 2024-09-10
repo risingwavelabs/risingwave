@@ -106,7 +106,7 @@ async fn merge(
     let mut watermark_buffers = BTreeMap::<usize, BufferedWatermarks<usize>>::new();
 
     let mut start_time = Instant::now();
-    let barrier_align = metrics.barrier_align_duration.with_label_values(&[
+    let barrier_align = metrics.barrier_align_duration.with_guarded_label_values(&[
         &actor_id.to_string(),
         &fragment_id.to_string(),
         "",
@@ -164,7 +164,7 @@ async fn merge(
             None => {
                 assert!(active.is_terminated());
                 let barrier = current_barrier.take().unwrap();
-                barrier_align.observe(start_time.elapsed().as_secs_f64());
+                barrier_align.inc_by(start_time.elapsed().as_nanos() as u64);
 
                 let upstreams = std::mem::take(&mut blocked);
                 active.extend(upstreams.into_iter().map(|upstream| upstream.into_future()));

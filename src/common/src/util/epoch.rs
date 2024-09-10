@@ -77,6 +77,10 @@ impl Epoch {
         Epoch((mi - UNIX_RISINGWAVE_DATE_SEC * 1000) << EPOCH_PHYSICAL_SHIFT_BITS)
     }
 
+    pub fn from_unix_millis_or_earliest(mi: u64) -> Self {
+        Epoch((mi.saturating_sub(UNIX_RISINGWAVE_DATE_SEC * 1000)) << EPOCH_PHYSICAL_SHIFT_BITS)
+    }
+
     pub fn physical_now() -> u64 {
         UNIX_RISINGWAVE_DATE_EPOCH
             .elapsed()

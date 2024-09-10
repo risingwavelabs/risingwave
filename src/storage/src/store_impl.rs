@@ -22,7 +22,7 @@ use foyer::{
     DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker, RuntimeConfigBuilder,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_common_service::observer_manager::RpcNotificationClient;
+use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::build_remote_object_store;
 
@@ -42,9 +42,27 @@ use crate::monitor::{
 use crate::opts::StorageOpts;
 use crate::StateStore;
 
-pub type HummockStorageType = impl StateStore + AsHummock;
-pub type MemoryStateStoreType = impl StateStore + AsHummock;
-pub type SledStateStoreType = impl StateStore + AsHummock;
+mod opaque_type {
+    use super::*;
+
+    pub type HummockStorageType = impl StateStore + AsHummock;
+    pub type MemoryStateStoreType = impl StateStore + AsHummock;
+    pub type SledStateStoreType = impl StateStore + AsHummock;
+
+    pub fn in_memory(state_store: MemoryStateStore) -> MemoryStateStoreType {
+        may_dynamic_dispatch(state_store)
+    }
+
+    pub fn hummock(state_store: HummockStorage) -> HummockStorageType {
+        may_dynamic_dispatch(may_verify(state_store))
+    }
+
+    pub fn sled(state_store: SledStateStore) -> SledStateStoreType {
+        may_dynamic_dispatch(state_store)
+    }
+}
+use opaque_type::{hummock, in_memory, sled};
+pub use opaque_type::{HummockStorageType, MemoryStateStoreType, SledStateStoreType};
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -114,7 +132,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of MemoryStateStoreType in deducted here.
-        Self::MemoryStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
+        Self::MemoryStateStore(in_memory(state_store).monitored(storage_metrics))
     }
 
     pub fn hummock(
@@ -122,16 +140,14 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
-        Self::HummockStateStore(
-            may_dynamic_dispatch(may_verify(state_store)).monitored(storage_metrics),
-        )
+        Self::HummockStateStore(hummock(state_store).monitored(storage_metrics))
     }
 
     pub fn sled(
         state_store: SledStateStore,
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
-        Self::SledStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
+        Self::SledStateStore(sled(state_store).monitored(storage_metrics))
     }
 
     pub fn shared_in_memory_store(storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
@@ -214,8 +230,9 @@ pub mod verify {
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
@@ -281,7 +298,7 @@ pub mod verify {
 
         // TODO: may avoid manual async fn when the bug of rust compiler is fixed. Currently it will
         // fail to compile.
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn iter(
             &self,
             key_range: TableKeyRange,
@@ -303,7 +320,7 @@ pub mod verify {
             }
         }
 
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
@@ -408,17 +425,6 @@ pub mod verify {
         type Iter<'a> = impl StateStoreIter + 'a;
         type RevIter<'a> = impl StateStoreIter + 'a;
 
-        // We don't verify `may_exist` across different state stores because
-        // the return value of `may_exist` is implementation specific and may not
-        // be consistent across different state store backends.
-        fn may_exist(
-            &self,
-            key_range: TableKeyRange,
-            read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
-            self.actual.may_exist(key_range, read_options)
-        }
-
         async fn get(
             &self,
             key: TableKey<Bytes>,
@@ -432,7 +438,7 @@ pub mod verify {
             actual
         }
 
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn iter(
             &self,
             key_range: TableKeyRange,
@@ -453,7 +459,7 @@ pub mod verify {
             }
         }
 
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
@@ -548,6 +554,14 @@ pub mod verify {
             }
             ret
         }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            let ret = self.actual.get_table_watermark(vnode);
+            if let Some(expected) = &self.expected {
+                assert_eq!(ret, expected.get_table_watermark(vnode));
+            }
+            ret
+        }
     }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
@@ -574,14 +588,6 @@ pub mod verify {
             }
         }
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.actual.seal_epoch(epoch, is_checkpoint)
-        }
-
-        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-            self.actual.clear_shared_buffer(prev_epoch)
-        }
-
         async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
             let expected = if let Some(expected) = &self.expected {
                 Some(expected.new_local(option.clone()).await)
@@ -593,10 +599,6 @@ pub mod verify {
                 expected,
                 _phantom: PhantomData::<()>,
             }
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.actual.validate_read_epoch(epoch)
         }
     }
 
@@ -655,9 +657,11 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                     .with_flushers(opts.meta_file_cache_flushers)
                     .with_reclaimers(opts.meta_file_cache_reclaimers)
+                    .with_buffer_threshold(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
                     .with_clean_region_threshold(
                         opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                     )
+                    .with_recover_mode(opts.meta_file_cache_recover_mode)
                     .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
                     .with_compression(
                         opts.meta_file_cache_compression
@@ -707,9 +711,11 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.data_file_cache_indexer_shards)
                     .with_flushers(opts.data_file_cache_flushers)
                     .with_reclaimers(opts.data_file_cache_reclaimers)
+                    .with_buffer_threshold(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
                     .with_clean_region_threshold(
                         opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                     )
+                    .with_recover_mode(opts.data_file_cache_recover_mode)
                     .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
                     .with_compression(
                         opts.data_file_cache_compression
@@ -834,8 +840,9 @@ pub mod boxed_state_store {
     use dyn_clone::{clone_trait_object, DynClone};
     use futures::future::BoxFuture;
     use futures::FutureExt;
-    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 
@@ -948,12 +955,6 @@ pub mod boxed_state_store {
     pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreIterItem>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
-        async fn may_exist(
-            &self,
-            key_range: TableKeyRange,
-            read_options: ReadOptions,
-        ) -> StorageResult<bool>;
-
         async fn get(
             &self,
             key: TableKey<Bytes>,
@@ -994,18 +995,12 @@ pub mod boxed_state_store {
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
         fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
     }
 
     #[async_trait::async_trait]
     impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
-        async fn may_exist(
-            &self,
-            key_range: TableKeyRange,
-            read_options: ReadOptions,
-        ) -> StorageResult<bool> {
-            self.may_exist(key_range, read_options).await
-        }
-
         async fn get(
             &self,
             key: TableKey<Bytes>,
@@ -1070,6 +1065,10 @@ pub mod boxed_state_store {
         fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
             self.update_vnode_bitmap(vnodes)
         }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            self.get_table_watermark(vnode)
+        }
     }
 
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
@@ -1077,14 +1076,6 @@ pub mod boxed_state_store {
     impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
         type Iter<'a> = BoxLocalStateStoreIterStream<'a>;
         type RevIter<'a> = BoxLocalStateStoreIterStream<'a>;
-
-        fn may_exist(
-            &self,
-            key_range: TableKeyRange,
-            read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
-            self.deref().may_exist(key_range, read_options)
-        }
 
         fn get(
             &self,
@@ -1108,6 +1099,10 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
             self.deref().rev_iter(key_range, read_options)
+        }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            self.deref().get_table_watermark(vnode)
         }
 
         fn insert(
@@ -1167,13 +1162,7 @@ pub mod boxed_state_store {
             table_ids: HashSet<TableId>,
         ) -> BoxFuture<'static, StorageResult<SyncResult>>;
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
-
-        async fn clear_shared_buffer(&self, prev_epoch: u64);
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -1190,20 +1179,8 @@ pub mod boxed_state_store {
             self.sync(epoch, table_ids).boxed()
         }
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.seal_epoch(epoch, is_checkpoint);
-        }
-
-        async fn clear_shared_buffer(&self, prev_epoch: u64) {
-            self.clear_shared_buffer(prev_epoch).await
-        }
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
             Box::new(self.new_local(option).await)
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.validate_read_epoch(epoch)
         }
     }
 
@@ -1288,23 +1265,11 @@ pub mod boxed_state_store {
             self.deref().sync(epoch, table_ids)
         }
 
-        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-            self.deref().clear_shared_buffer(prev_epoch)
-        }
-
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.deref().seal_epoch(epoch, is_checkpoint)
-        }
-
         fn new_local(
             &self,
             option: NewLocalOptions,
         ) -> impl Future<Output = Self::Local> + Send + '_ {
             self.deref().new_local(option)
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.deref().validate_read_epoch(epoch)
         }
     }
 }

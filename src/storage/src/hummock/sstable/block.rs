@@ -143,7 +143,7 @@ impl RestartPoint {
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
     data: Bytes,
-    /// Uncompressed entried data length.
+    /// Uncompressed entries data length.
     data_len: usize,
 
     /// Table id of this block.
@@ -522,7 +522,7 @@ impl BlockBuilder {
     pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
         let input_table_id = full_key.user_key.table_id.table_id();
         match self.table_id {
-            Some(current_table_id) => debug_assert_eq!(current_table_id, input_table_id),
+            Some(current_table_id) => assert_eq!(current_table_id, input_table_id),
             None => self.table_id = Some(input_table_id),
         }
         #[cfg(debug_assertions)]

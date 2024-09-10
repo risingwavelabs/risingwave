@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -20,9 +20,13 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_object_store::object::{ObjectStore, OpendalStreamingUploader, StreamingUploader};
+use risingwave_common::config::ObjectStoreConfig;
+use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
+use risingwave_object_store::object::{
+    ObjectStore, OpendalObjectStore, OpendalStreamingUploader, StreamingUploader,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
@@ -30,72 +34,46 @@ use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::encoder::{
-    JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
+    JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
 };
-use super::snowflake_connector::{generate_s3_file_name, SnowflakeHttpClient, SnowflakeS3Client};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam};
 use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
+const S3_INTERMEDIATE_FILE_NAME: &str = "RW_SNOWFLAKE_S3_SINK_FILE";
 
-#[derive(Deserialize, Debug, Clone, WithOptions)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct SnowflakeCommon {
-    /// The snowflake database used for sinking
-    #[serde(rename = "snowflake.database")]
-    pub database: String,
-
-    /// The corresponding schema where sink table exists
-    #[serde(rename = "snowflake.schema")]
-    pub schema: String,
-
-    /// The created pipe object, will be used as `insertFiles` target
-    #[serde(rename = "snowflake.pipe")]
-    pub pipe: String,
-
-    /// The unique, snowflake provided `account_identifier`
-    /// NOTE: please use the form `<orgname>-<account_name>`
-    /// For detailed guidance, reference: <https://docs.snowflake.com/en/user-guide/admin-account-identifier>
-    #[serde(rename = "snowflake.account_identifier")]
-    pub account_identifier: String,
-
-    /// The user that owns the table to be sinked
-    /// NOTE: the user should've been granted corresponding *role*
-    /// reference: <https://docs.snowflake.com/en/sql-reference/sql/grant-role>
-    #[serde(rename = "snowflake.user")]
-    pub user: String,
-
-    /// The public key fingerprint used when generating custom `jwt_token`
-    /// reference: <https://docs.snowflake.com/en/developer-guide/sql-api/authenticating>
-    #[serde(rename = "snowflake.rsa_public_key_fp")]
-    pub rsa_public_key_fp: String,
-
-    /// The rsa pem key *without* encryption
-    #[serde(rename = "snowflake.private_key")]
-    pub private_key: String,
-
     /// The s3 bucket where intermediate sink files will be stored
-    #[serde(rename = "snowflake.s3_bucket")]
+    #[serde(rename = "snowflake.s3_bucket", alias = "s3.bucket_name")]
     pub s3_bucket: String,
 
     /// The optional s3 path to be specified
     /// the actual file location would be `s3://<s3_bucket>/<s3_path>/<rw_auto_gen_intermediate_file_name>`
     /// if this field is specified by user(s)
     /// otherwise it would be `s3://<s3_bucket>/<rw_auto_gen_intermediate_file_name>`
-    #[serde(rename = "snowflake.s3_path")]
+    #[serde(rename = "snowflake.s3_path", alias = "s3.path")]
     pub s3_path: Option<String>,
 
     /// s3 credentials
-    #[serde(rename = "snowflake.aws_access_key_id")]
+    #[serde(
+        rename = "snowflake.aws_access_key_id",
+        alias = "s3.credentials.access"
+    )]
     pub aws_access_key_id: String,
 
     /// s3 credentials
-    #[serde(rename = "snowflake.aws_secret_access_key")]
+    #[serde(
+        rename = "snowflake.aws_secret_access_key",
+        alias = "s3.credentials.secret"
+    )]
     pub aws_secret_access_key: String,
 
     /// The s3 region, e.g., us-east-2
-    #[serde(rename = "snowflake.aws_region")]
+    #[serde(rename = "snowflake.aws_region", alias = "s3.region_name")]
     pub aws_region: String,
 }
 
@@ -140,6 +118,9 @@ impl Sink for SnowflakeSink {
     }
 
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::SnowflakeSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
         if !self.is_append_only {
             return Err(SinkError::Config(
                 anyhow!("SnowflakeSink only supports append-only mode at present, please change the query to append-only, or use `force_append_only = 'true'`")
@@ -173,8 +154,6 @@ pub struct SnowflakeSinkWriter {
     pk_indices: Vec<usize>,
     #[expect(dead_code)]
     is_append_only: bool,
-    /// the client used to send `insertFiles` post request
-    http_client: SnowflakeHttpClient,
     /// the client to insert file to external storage (i.e., s3)
     s3_client: SnowflakeS3Client,
     row_encoder: JsonEncoder,
@@ -187,7 +166,7 @@ pub struct SnowflakeSinkWriter {
     /// note: the option here *implicitly* indicates whether we have at
     /// least call `streaming_upload` once during this epoch,
     /// which is mainly used to prevent uploading empty data.
-    streaming_uploader: Option<(OpendalStreamingUploader, String)>,
+    streaming_uploader: Option<OpendalStreamingUploader>,
 }
 
 impl SnowflakeSinkWriter {
@@ -197,18 +176,6 @@ impl SnowflakeSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let http_client = SnowflakeHttpClient::new(
-            config.common.account_identifier.clone(),
-            config.common.user.clone(),
-            config.common.database.clone(),
-            config.common.schema.clone(),
-            config.common.pipe.clone(),
-            config.common.rsa_public_key_fp.clone(),
-            config.common.private_key.clone(),
-            HashMap::new(),
-            config.common.s3_path.clone(),
-        );
-
         let s3_client = SnowflakeS3Client::new(
             config.common.s3_bucket.clone(),
             config.common.s3_path.clone(),
@@ -222,7 +189,6 @@ impl SnowflakeSinkWriter {
             schema: schema.clone(),
             pk_indices,
             is_append_only,
-            http_client,
             s3_client,
             row_encoder: JsonEncoder::new(
                 schema,
@@ -231,6 +197,7 @@ impl SnowflakeSinkWriter {
                 TimestampHandlingMode::String,
                 TimestamptzHandlingMode::UtcString,
                 TimeHandlingMode::String,
+                JsonbHandlingMode::String,
             ),
             // initial value of `epoch` will be set to 0
             epoch: 0,
@@ -245,7 +212,7 @@ impl SnowflakeSinkWriter {
     /// and `streaming_upload` being called the first time.
     /// i.e., lazily initialization of the internal `streaming_uploader`.
     /// plus, this function is *pure*, the `&mut self` here is to make rustc (and tokio) happy.
-    async fn new_streaming_uploader(&mut self) -> Result<(OpendalStreamingUploader, String)> {
+    async fn new_streaming_uploader(&mut self) -> Result<OpendalStreamingUploader> {
         let file_suffix = self.file_suffix();
         let path = generate_s3_file_name(self.s3_client.s3_path(), &file_suffix);
         let uploader = self
@@ -260,12 +227,12 @@ impl SnowflakeSinkWriter {
                 )
             })
             .map_err(SinkError::Snowflake)?;
-        Ok((uploader, file_suffix))
+        Ok(uploader)
     }
 
     /// write data to the current streaming uploader for this epoch.
     async fn streaming_upload(&mut self, data: Bytes) -> Result<()> {
-        let (uploader, _) = match self.streaming_uploader.as_mut() {
+        let uploader = match self.streaming_uploader.as_mut() {
             Some(s) => s,
             None => {
                 assert!(
@@ -286,18 +253,18 @@ impl SnowflakeSinkWriter {
 
     /// finalize streaming upload for this epoch.
     /// ensure all the data has been properly uploaded to intermediate s3.
-    async fn finish_streaming_upload(&mut self) -> Result<Option<String>> {
+    async fn finish_streaming_upload(&mut self) -> Result<()> {
         let uploader = std::mem::take(&mut self.streaming_uploader);
-        let Some((uploader, file_suffix)) = uploader else {
+        let Some(uploader) = uploader else {
             // there is no data to be uploaded for this epoch
-            return Ok(None);
+            return Ok(());
         };
         uploader
             .finish()
             .await
             .context("failed to finish streaming upload to s3")
             .map_err(SinkError::Snowflake)?;
-        Ok(Some(file_suffix))
+        Ok(())
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -344,13 +311,7 @@ impl SnowflakeSinkWriter {
         // note that after `finish_streaming_upload`, do *not* interact with
         // `streaming_uploader` until new data comes in at next epoch,
         // since the ownership has been taken in this method, and `None` will be left.
-        let Some(file_suffix) = self.finish_streaming_upload().await? else {
-            // represents there is no data to be uploaded for this epoch
-            return Ok(());
-        };
-        // trigger `insertFiles` post request to snowflake
-        self.http_client.send_request(&file_suffix).await?;
-        Ok(())
+        self.finish_streaming_upload().await
     }
 }
 
@@ -382,5 +343,59 @@ impl SinkWriter for SnowflakeSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         self.append_only(chunk).await?;
         Ok(())
+    }
+}
+
+/// The helper function to generate the *global unique* s3 file name.
+pub(crate) fn generate_s3_file_name(s3_path: Option<&str>, suffix: &str) -> String {
+    match s3_path {
+        Some(path) => format!("{}/{}_{}", path, S3_INTERMEDIATE_FILE_NAME, suffix),
+        None => format!("{}_{}", S3_INTERMEDIATE_FILE_NAME, suffix),
+    }
+}
+
+/// todo: refactor this part after s3 sink is available
+pub struct SnowflakeS3Client {
+    #[expect(dead_code)]
+    s3_bucket: String,
+    s3_path: Option<String>,
+    pub opendal_s3_engine: OpendalObjectStore,
+}
+
+impl SnowflakeS3Client {
+    pub fn new(
+        s3_bucket: String,
+        s3_path: Option<String>,
+        aws_access_key_id: String,
+        aws_secret_access_key: String,
+        aws_region: String,
+    ) -> Result<Self> {
+        // FIXME: we should use the `ObjectStoreConfig` instead of default
+        // just use default configuration here for opendal s3 engine
+        let config = ObjectStoreConfig::default();
+
+        let metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
+
+        // create the s3 engine for streaming upload to the intermediate s3 bucket
+        let opendal_s3_engine = OpendalObjectStore::new_s3_engine_with_credentials(
+            &s3_bucket,
+            Arc::new(config),
+            metrics,
+            &aws_access_key_id,
+            &aws_secret_access_key,
+            &aws_region,
+        )
+        .context("failed to create opendal s3 engine")
+        .map_err(SinkError::Snowflake)?;
+
+        Ok(Self {
+            s3_bucket,
+            s3_path,
+            opendal_s3_engine,
+        })
+    }
+
+    pub fn s3_path(&self) -> Option<&str> {
+        self.s3_path.as_deref()
     }
 }

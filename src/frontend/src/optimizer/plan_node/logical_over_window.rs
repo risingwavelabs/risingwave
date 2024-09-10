@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::{AggKind, PbAggKind};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
@@ -105,17 +105,19 @@ impl<'a> LogicalOverWindowBuilder<'a> {
             window_func.frame,
         );
 
-        let new_expr = if let WindowFuncKind::Aggregate(agg_kind) = kind
+        let new_expr = if let WindowFuncKind::Aggregate(agg_kind) = &kind
             && matches!(
                 agg_kind,
-                AggKind::Avg
-                    | AggKind::StddevPop
-                    | AggKind::StddevSamp
-                    | AggKind::VarPop
-                    | AggKind::VarSamp
+                AggKind::Builtin(
+                    PbAggKind::Avg
+                        | PbAggKind::StddevPop
+                        | PbAggKind::StddevSamp
+                        | PbAggKind::VarPop
+                        | PbAggKind::VarSamp
+                )
             ) {
             let agg_call = AggCall::new(
-                agg_kind,
+                agg_kind.clone(),
                 args,
                 false,
                 order_by,
@@ -186,10 +188,15 @@ impl<'a> OverWindowProjectBuilder<'a> {
         &mut self,
         window_function: &WindowFunction,
     ) -> std::result::Result<(), ErrorCode> {
-        if let WindowFuncKind::Aggregate(agg_kind) = window_function.kind
+        if let WindowFuncKind::Aggregate(agg_kind) = &window_function.kind
             && matches!(
                 agg_kind,
-                AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp
+                AggKind::Builtin(
+                    PbAggKind::StddevPop
+                        | PbAggKind::StddevSamp
+                        | PbAggKind::VarPop
+                        | PbAggKind::VarSamp
+                )
             )
         {
             let input = window_function.args.iter().exactly_one().unwrap();
@@ -371,7 +378,10 @@ impl LogicalOverWindow {
                     )
                 };
 
-                (WindowFuncKind::Aggregate(AggKind::FirstValue), frame)
+                (
+                    WindowFuncKind::Aggregate(AggKind::Builtin(PbAggKind::FirstValue)),
+                    frame,
+                )
             }
             WindowFuncKind::Aggregate(_) => {
                 let frame = window_function.frame.unwrap_or({

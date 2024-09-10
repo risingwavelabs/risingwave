@@ -26,12 +26,12 @@ crc32fast = "1"
 either = "1"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = { version = "0.14", features = ["tcp", "client"] }                    # required by aws sdk
+hyper = { version = "0.14", features = ["tcp", "client"] }                    # TODO(http-bump): required by aws sdk
 hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = { workspace = true }
-madsim = "0.2.27"
-opendal = { version = "0.47", features = [
+madsim = "0.2.30"
+opendal = { workspace = true, features = [
     "executors-tokio",
     "services-azblob",
     "services-fs",
@@ -42,11 +42,11 @@ opendal = { version = "0.47", features = [
     "services-s3",
     "services-webhdfs",
     "services-azfile",
-    # "service-hdfs",
 ] }
 prometheus = { version = "0.13", features = ["process"] }
 reqwest = "0.12.2" # required by opendal
 risingwave_common = { workspace = true }
+risingwave_jni_core = { workspace = true, optional = true }
 rustls = "0.23.5"
 spin = "0.9"
 thiserror = "1"
@@ -64,4 +64,4 @@ tracing = "0.1"
 # normal = ["workspace-hack"]
 
 # [features]
-# hdfs-backend = ["opendal/services-hdfs"]
+# hdfs-backend = ["opendal/services-hdfs", "dep:risingwave_jni_core"]

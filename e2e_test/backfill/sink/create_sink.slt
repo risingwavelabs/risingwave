@@ -5,7 +5,7 @@ statement ok
 create table t (v1 int);
 
 statement ok
-SET STREAMING_RATE_LIMIT = 500;
+SET BACKFILL_RATE_LIMIT = 500;
 
 # Should finish in 20s
 statement ok

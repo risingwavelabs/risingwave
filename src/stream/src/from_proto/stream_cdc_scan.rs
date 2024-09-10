@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::external::{
@@ -52,11 +51,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         assert_eq!(output_indices, (0..output_schema.len()).collect_vec());
         assert_eq!(output_schema.data_types(), params.info.schema.data_types());
 
-        let properties: HashMap<String, String> = table_desc
-            .connect_properties
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        let properties = table_desc.connect_properties.clone();
 
         let table_pk_order_types = table_desc
             .pk
@@ -92,18 +87,15 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .collect();
 
         let schema_table_name = SchemaTableName::from_properties(&properties);
-        let table_config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(properties).unwrap(),
+        let table_config = ExternalTableConfig::try_from_btreemap(
+            properties.clone(),
+            table_desc.secret_refs.clone(),
         )
-        .map_err(|e| anyhow!("failed to parse external table config").context(e))?;
+        .context("failed to parse external table config")?;
+
         let database_name = table_config.database.clone();
         let table_reader = table_type
-            .create_table_reader(
-                table_config,
-                table_schema.clone(),
-                table_pk_indices.clone(),
-                scan_options.snapshot_batch_size,
-            )
+            .create_table_reader(table_config, table_schema.clone(), table_pk_indices.clone())
             .await?;
 
         let external_table = ExternalStorageTable::new(

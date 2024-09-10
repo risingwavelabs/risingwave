@@ -375,7 +375,6 @@ macro_rules! to_jvalue {
 
 /// Generate the jni signature of a given function
 /// ```
-/// #![feature(lazy_cell)]
 /// use risingwave_jni_core::gen_jni_sig;
 /// assert_eq!(gen_jni_sig!(boolean f(int, short, byte[])), "(IS[B)Z");
 /// assert_eq!(

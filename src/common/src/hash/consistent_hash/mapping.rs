@@ -12,28 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
-use std::ops::{Index, Sub};
+use std::ops::Index;
 
 use educe::Educe;
 use itertools::Itertools;
-use risingwave_pb::common::{
-    ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto, PbWorkerSlotMapping,
-};
+use risingwave_pb::common::PbWorkerSlotMapping;
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use super::bitmap::VnodeBitmapExt;
-use super::vnode::{ParallelUnitId, VirtualNode};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
+use crate::hash::VirtualNode;
 use crate::util::compress::compress_data;
 use crate::util::iter_util::ZipEqDebug;
 
 // TODO: find a better place for this.
 pub type ActorId = u32;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct WorkerSlotId(u64);
 
 impl WorkerSlotId {
@@ -68,11 +66,17 @@ impl Display for WorkerSlotId {
     }
 }
 
+impl Debug for WorkerSlotId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[{}:{}]", self.worker_id(), self.slot_idx()))
+    }
+}
+
 /// Trait for items that can be used as keys in [`VnodeMapping`].
 pub trait VnodeMappingItem {
     /// The type of the item.
     ///
-    /// Currently, there are two types of items: [`ParallelUnitId`] and [`ActorId`]. We don't use
+    /// Currently, there are two types of items: [`WorkerSlotId`] and [`ActorId`]. We don't use
     /// them directly as the generic parameter because they're the same type aliases.
     type Item: Copy + Ord + Hash + Debug;
 }
@@ -101,26 +105,26 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     ///
     /// For example, if `items` is `[0, 1, 2]`, and the total vnode count is 10, we'll generate
     /// mapping like `[0, 0, 0, 0, 1, 1, 1, 2, 2, 2]`.
-    pub fn new_uniform(items: impl ExactSizeIterator<Item = T::Item>) -> Self {
+    pub fn new_uniform(items: impl ExactSizeIterator<Item = T::Item>, vnode_count: usize) -> Self {
         // If the number of items is greater than the total vnode count, no vnode will be mapped to
         // some items and the mapping will be invalid.
-        assert!(items.len() <= VirtualNode::COUNT);
+        assert!(items.len() <= vnode_count);
 
         let mut original_indices = Vec::with_capacity(items.len());
         let mut data = Vec::with_capacity(items.len());
 
-        let hash_shard_size = VirtualNode::COUNT / items.len();
-        let mut one_more_count = VirtualNode::COUNT % items.len();
+        let hash_shard_size = vnode_count / items.len();
+        let mut one_more_count = vnode_count % items.len();
         let mut init_bound = 0;
 
         for item in items {
-            let vnode_count = if one_more_count > 0 {
+            let count = if one_more_count > 0 {
                 one_more_count -= 1;
                 hash_shard_size + 1
             } else {
                 hash_shard_size
             };
-            init_bound += vnode_count;
+            init_bound += count;
 
             original_indices.push(init_bound as u32 - 1);
             data.push(item);
@@ -137,10 +141,11 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
 
     /// Create a vnode mapping where all vnodes are mapped to the same single item.
     pub fn new_single(item: T::Item) -> Self {
-        Self::new_uniform(std::iter::once(item))
+        // TODO(var-vnode): always 1 correct?
+        Self::new_uniform(std::iter::once(item), 1)
     }
 
-    /// The length of the vnode in this mapping, typically [`VirtualNode::COUNT`].
+    /// The length (or count) of the vnode in this mapping.
     pub fn len(&self) -> usize {
         self.original_indices
             .last()
@@ -200,12 +205,13 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Convert this vnode mapping to a mapping from items to bitmaps, where each bitmap represents
     /// the vnodes mapped to the item.
     pub fn to_bitmaps(&self) -> HashMap<T::Item, Bitmap> {
+        let vnode_count = self.len();
         let mut vnode_bitmaps = HashMap::new();
 
         for (vnode, item) in self.iter_with_vnode() {
             vnode_bitmaps
                 .entry(item)
-                .or_insert_with(|| BitmapBuilder::zeroed(VirtualNode::COUNT))
+                .or_insert_with(|| BitmapBuilder::zeroed(vnode_count))
                 .set(vnode.to_index(), true);
         }
 
@@ -218,10 +224,11 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Create a vnode mapping from the given mapping from items to bitmaps, where each bitmap
     /// represents the vnodes mapped to the item.
     pub fn from_bitmaps(bitmaps: &HashMap<T::Item, Bitmap>) -> Self {
-        let mut items = vec![None; VirtualNode::COUNT];
+        let vnode_count = bitmaps.values().next().expect("empty bitmaps").len();
+        let mut items = vec![None; vnode_count];
 
         for (&item, bitmap) in bitmaps {
-            assert_eq!(bitmap.len(), VirtualNode::COUNT);
+            assert_eq!(bitmap.len(), vnode_count);
             for idx in bitmap.iter_ones() {
                 if let Some(prev) = items[idx].replace(item) {
                     panic!("mapping at index `{idx}` is set to both `{prev:?}` and `{item:?}`");
@@ -237,9 +244,8 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         Self::from_expanded(&items)
     }
 
-    /// Create a vnode mapping from the expanded slice of items with length [`VirtualNode::COUNT`].
+    /// Create a vnode mapping from the expanded slice of items.
     pub fn from_expanded(items: &[T::Item]) -> Self {
-        assert_eq!(items.len(), VirtualNode::COUNT);
         let (original_indices, data) = compress_data(items);
         Self {
             original_indices,
@@ -247,7 +253,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         }
     }
 
-    /// Convert this vnode mapping to a expanded vector of items with length [`VirtualNode::COUNT`].
+    /// Convert this vnode mapping to a expanded vector of items.
     pub fn to_expanded(&self) -> ExpandedMapping<T> {
         self.iter().collect()
     }
@@ -286,12 +292,6 @@ pub mod marker {
         type Item = ActorId;
     }
 
-    /// A marker type for items of [`ParallelUnitId`].
-    pub struct ParallelUnit;
-    impl VnodeMappingItem for ParallelUnit {
-        type Item = ParallelUnitId;
-    }
-
     /// A marker type for items of [`WorkerSlotId`].
     pub struct WorkerSlot;
     impl VnodeMappingItem for WorkerSlot {
@@ -304,23 +304,35 @@ pub type ActorMapping = VnodeMapping<marker::Actor>;
 /// An expanded mapping from [`VirtualNode`] to [`ActorId`].
 pub type ExpandedActorMapping = ExpandedMapping<marker::Actor>;
 
-/// A mapping from [`VirtualNode`] to [`ParallelUnitId`].
-pub type ParallelUnitMapping = VnodeMapping<marker::ParallelUnit>;
-/// An expanded mapping from [`VirtualNode`] to [`ParallelUnitId`].
-pub type ExpandedParallelUnitMapping = ExpandedMapping<marker::ParallelUnit>;
-
 /// A mapping from [`VirtualNode`] to [`WorkerSlotId`].
 pub type WorkerSlotMapping = VnodeMapping<marker::WorkerSlot>;
 /// An expanded mapping from [`VirtualNode`] to [`WorkerSlotId`].
 pub type ExpandedWorkerSlotMapping = ExpandedMapping<marker::WorkerSlot>;
 
 impl ActorMapping {
-    /// Transform this actor mapping to a parallel unit mapping, essentially `transform`.
-    pub fn to_parallel_unit<M>(&self, to_map: &M) -> ParallelUnitMapping
-    where
-        M: for<'a> Index<&'a ActorId, Output = ParallelUnitId>,
-    {
-        self.transform(to_map)
+    /// Transform the actor mapping to the worker slot mapping. Note that the parameter is a mapping from actor to worker.
+    pub fn to_worker_slot(&self, actor_to_worker: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
+        let mut worker_actors = HashMap::new();
+        for actor_id in self.iter_unique() {
+            let worker_id = actor_to_worker
+                .get(&actor_id)
+                .cloned()
+                .unwrap_or_else(|| panic!("location for actor {} not found", actor_id));
+
+            worker_actors
+                .entry(worker_id)
+                .or_insert(BTreeSet::new())
+                .insert(actor_id);
+        }
+
+        let mut actor_location = HashMap::new();
+        for (worker, actors) in worker_actors {
+            for (idx, &actor) in actors.iter().enumerate() {
+                actor_location.insert(actor, WorkerSlotId::new(worker, idx));
+            }
+        }
+
+        self.transform(&actor_location)
     }
 
     /// Create an actor mapping from the protobuf representation.
@@ -341,16 +353,10 @@ impl ActorMapping {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum ParallelUnitError {
-    #[error("parallel units {0:?} are not covered by the worker slot mapping")]
-    NotCovered(HashSet<ParallelUnitId>),
-}
-
 impl WorkerSlotMapping {
     /// Create a uniform worker mapping from the given worker ids
-    pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId]) -> Self {
-        Self::new_uniform(worker_slot_ids.iter().cloned())
+    pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId], vnode_count: usize) -> Self {
+        Self::new_uniform(worker_slot_ids.iter().cloned(), vnode_count)
     }
 
     /// Create a worker mapping from the protobuf representation.
@@ -371,73 +377,10 @@ impl WorkerSlotMapping {
     }
 }
 
-impl ParallelUnitMapping {
-    /// Create a uniform parallel unit mapping from the given parallel units, essentially
-    /// `new_uniform`.
-    pub fn build(parallel_units: &[ParallelUnit]) -> Self {
-        Self::new_uniform(parallel_units.iter().map(|pu| pu.id))
-    }
-
-    /// Create a uniform parallel unit mapping from the given parallel units ids
-    pub fn build_from_ids(parallel_unit_ids: &[ParallelUnitId]) -> Self {
-        Self::new_uniform(parallel_unit_ids.iter().cloned())
-    }
-
-    /// Transform this parallel unit mapping to an actor mapping, essentially `transform`.
-    pub fn to_actor(&self, to_map: &HashMap<ParallelUnitId, ActorId>) -> ActorMapping {
+impl WorkerSlotMapping {
+    /// Transform this worker slot mapping to an actor mapping, essentially `transform`.
+    pub fn to_actor(&self, to_map: &HashMap<WorkerSlotId, ActorId>) -> ActorMapping {
         self.transform(to_map)
-    }
-
-    /// Transform this parallel unit mapping to a worker slot mapping, essentially `transform`.
-    pub fn to_worker_slot(
-        &self,
-        to_map: &HashMap<ParallelUnitId, u32>,
-    ) -> Result<WorkerSlotMapping, ParallelUnitError> {
-        let mut worker_to_parallel_units = HashMap::<_, BTreeSet<_>>::new();
-        for (parallel_unit_id, worker_id) in to_map {
-            worker_to_parallel_units
-                .entry(*worker_id)
-                .or_default()
-                .insert(*parallel_unit_id);
-        }
-
-        let mut parallel_unit_to_worker_slot = HashMap::with_capacity(to_map.len());
-
-        for (worker_id, parallel_unit_ids) in worker_to_parallel_units {
-            for (index, &parallel_unit_id) in parallel_unit_ids.iter().enumerate() {
-                parallel_unit_to_worker_slot
-                    .insert(parallel_unit_id, WorkerSlotId::new(worker_id, index));
-            }
-        }
-
-        let available_parallel_unit_ids: HashSet<_> =
-            parallel_unit_to_worker_slot.keys().copied().collect();
-
-        let parallel_unit_ids: HashSet<_> = self.data.iter().copied().collect();
-
-        let sub_set = parallel_unit_ids.sub(&available_parallel_unit_ids);
-        if sub_set.is_empty() {
-            Ok(self.transform(&parallel_unit_to_worker_slot))
-        } else {
-            Err(ParallelUnitError::NotCovered(sub_set))
-        }
-    }
-
-    /// Create a parallel unit mapping from the protobuf representation.
-    pub fn from_protobuf(proto: &ParallelUnitMappingProto) -> Self {
-        assert_eq!(proto.original_indices.len(), proto.data.len());
-        Self {
-            original_indices: proto.original_indices.clone(),
-            data: proto.data.clone(),
-        }
-    }
-
-    /// Convert this parallel unit mapping to the protobuf representation.
-    pub fn to_protobuf(&self) -> ParallelUnitMappingProto {
-        ParallelUnitMappingProto {
-            original_indices: self.original_indices.clone(),
-            data: self.data.clone(),
-        }
     }
 }
 
@@ -462,18 +405,18 @@ mod tests {
     type TestMapping = VnodeMapping<Test>;
     type Test2Mapping = VnodeMapping<Test2>;
 
-    const COUNTS: &[usize] = &[1, 3, 12, 42, VirtualNode::COUNT];
+    const COUNTS: &[usize] = &[1, 3, 12, 42, VirtualNode::COUNT_FOR_TEST];
 
     fn uniforms() -> impl Iterator<Item = TestMapping> {
         COUNTS
             .iter()
-            .map(|&count| TestMapping::new_uniform(0..count as u32))
+            .map(|&count| TestMapping::new_uniform(0..count as u32, VirtualNode::COUNT_FOR_TEST))
     }
 
     fn randoms() -> impl Iterator<Item = TestMapping> {
         COUNTS.iter().map(|&count| {
             let raw = repeat_with(|| rand::thread_rng().gen_range(0..count as u32))
-                .take(VirtualNode::COUNT)
+                .take(VirtualNode::COUNT_FOR_TEST)
                 .collect_vec();
             TestMapping::from_expanded(&raw)
         })
@@ -486,7 +429,7 @@ mod tests {
     #[test]
     fn test_uniform() {
         for vnode_mapping in uniforms() {
-            assert_eq!(vnode_mapping.len(), VirtualNode::COUNT);
+            assert_eq!(vnode_mapping.len(), VirtualNode::COUNT_FOR_TEST);
             let item_count = vnode_mapping.iter_unique().count();
 
             let mut check: HashMap<u32, Vec<_>> = HashMap::new();

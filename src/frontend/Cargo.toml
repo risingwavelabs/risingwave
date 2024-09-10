@@ -26,6 +26,7 @@ auto_impl = "1"
 base64 = "0.22"
 bk-tree = "0.5.0"
 bytes = "1"
+chrono = { version = "0.4", default-features = false }
 clap = { workspace = true }
 downcast-rs = "1.2"
 dyn-clone = "1.0.14"
@@ -38,6 +39,7 @@ fixedbitset = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
+iceberg = { workspace = true }
 icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
@@ -91,7 +93,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 uuid = "1"

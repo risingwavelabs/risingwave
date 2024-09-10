@@ -7,6 +7,10 @@ repos:
     hooks:
     -   id: end-of-file-fixer
     -   id: trailing-whitespace
+-   repo: https://github.com/crate-ci/typos
+    rev: v1.23.1
+    hooks:
+      - id: typos
 -   repo: local
     hooks:
     -   id: rustfmt
@@ -14,10 +18,6 @@ repos:
         entry: rustfmt --edition 2021
         language: system
         types: [rust]
-    -   id: typos
-        name: typos
-        entry: typos -w
-        language: system
     -   id: cargo sort
         name: cargo sort
         entry: cargo sort -g -w

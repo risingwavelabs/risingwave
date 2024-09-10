@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::io;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -23,13 +22,15 @@ use bytes::Bytes;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
 use serde::Deserialize;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
-use crate::net::{AddressRef, Listener};
+use crate::net::{AddressRef, Listener, TcpKeepalive};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
@@ -46,6 +47,14 @@ pub type SessionId = (ProcessId, SecretKey);
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
+    /// In the process of auto schema change, we need a dummy session to access
+    /// catalog information in frontend and build a replace plan for the table.
+    fn create_dummy_session(
+        &self,
+        database_id: u32,
+        user_id: u32,
+    ) -> Result<Arc<Self::Session>, BoxedError>;
+
     fn connect(
         &self,
         database: &str,
@@ -58,6 +67,11 @@ pub trait SessionManager: Send + Sync + 'static {
     fn cancel_creating_jobs_in_session(&self, session_id: SessionId);
 
     fn end_session(&self, session: &Self::Session);
+
+    /// Run some cleanup tasks before the server shutdown.
+    fn shutdown(&self) -> impl Future<Output = ()> + Send {
+        async {}
+    }
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -79,7 +93,7 @@ pub trait Session: Send + Sync {
         self: Arc<Self>,
         sql: Option<Statement>,
         params_types: Vec<Option<DataType>>,
-    ) -> Result<Self::PreparedStatement, BoxedError>;
+    ) -> impl Future<Output = Result<Self::PreparedStatement, BoxedError>> + Send;
 
     // TODO: maybe this function should be async and return the notice more timely
     /// try to take the current notices from the session
@@ -247,16 +261,20 @@ impl UserAuthenticator {
 }
 
 /// Binds a Tcp or Unix listener at `addr`. Spawn a coroutine to serve every new connection.
+///
+/// Returns when the `shutdown` token is triggered.
 pub async fn pg_serve(
     addr: &str,
+    tcp_keepalive: TcpKeepalive,
     session_mgr: Arc<impl SessionManager>,
     tls_config: Option<TlsConfig>,
     redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
-) -> io::Result<()> {
+    shutdown: CancellationToken,
+) -> Result<(), BoxedError> {
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
 
-    let acceptor_runtime = {
+    let acceptor_runtime = BackgroundShutdownRuntime::from({
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         builder.worker_threads(1);
         builder
@@ -264,22 +282,23 @@ pub async fn pg_serve(
             .enable_all()
             .build()
             .unwrap()
-    };
+    });
 
     #[cfg(not(madsim))]
     let worker_runtime = tokio::runtime::Handle::current();
     #[cfg(madsim)]
     let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
 
+    let session_mgr_clone = session_mgr.clone();
     let f = async move {
         loop {
-            let conn_ret = listener.accept().await;
+            let conn_ret = listener.accept(&tcp_keepalive).await;
             match conn_ret {
                 Ok((stream, peer_addr)) => {
                     tracing::info!(%peer_addr, "accept connection");
                     worker_runtime.spawn(handle_connection(
                         stream,
-                        session_mgr.clone(),
+                        session_mgr_clone.clone(),
                         tls_config.clone(),
                         Arc::new(peer_addr),
                         redact_sql_option_keywords.clone(),
@@ -292,7 +311,16 @@ pub async fn pg_serve(
             }
         }
     };
-    acceptor_runtime.spawn(f).await?;
+    acceptor_runtime.spawn(f);
+
+    // Wait for the shutdown signal.
+    shutdown.cancelled().await;
+
+    // Stop accepting new connections.
+    drop(acceptor_runtime);
+    // Shutdown session manager, typically close all existing sessions.
+    session_mgr.shutdown().await;
+
     Ok(())
 }
 
@@ -339,6 +367,7 @@ mod tests {
     use futures::stream::BoxStream;
     use futures::StreamExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::tokio_util::sync::CancellationToken;
     use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::NoTls;
 
@@ -358,6 +387,14 @@ mod tests {
 
     impl SessionManager for MockSessionManager {
         type Session = MockSession;
+
+        fn create_dummy_session(
+            &self,
+            _database_id: u32,
+            _user_name: u32,
+        ) -> Result<Arc<Self::Session>, BoxedError> {
+            unimplemented!()
+        }
 
         fn connect(
             &self,
@@ -403,7 +440,7 @@ mod tests {
                 .into())
         }
 
-        fn parse(
+        async fn parse(
             self: Arc<Self>,
             _sql: Option<Statement>,
             _params_types: Vec<Option<DataType>>,
@@ -494,8 +531,18 @@ mod tests {
         let bind_addr = bind_addr.into();
         let pg_config = pg_config.into();
 
-        let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve(&bind_addr, session_mgr, None, None).await });
+        let session_mgr = MockSessionManager {};
+        tokio::spawn(async move {
+            pg_serve(
+                &bind_addr,
+                socket2::TcpKeepalive::new(),
+                Arc::new(session_mgr),
+                None,
+                None,
+                CancellationToken::new(), // dummy
+            )
+            .await
+        });
         // wait for server to start
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 

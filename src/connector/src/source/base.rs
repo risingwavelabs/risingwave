@@ -26,11 +26,13 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use serde::de::DeserializeOwned;
+use tokio::sync::mpsc;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
@@ -39,16 +41,17 @@ use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
-use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
+use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
-use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
+use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
-    impl_split, match_source_name_str,
+    impl_split, match_source_name_str, WithOptionsSecResolved,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
@@ -177,6 +180,9 @@ pub struct SourceContext {
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
     pub connector_props: ConnectorProperties,
+    // source parser put schema change event into this channel
+    pub schema_change_tx:
+        Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
 }
 
 impl SourceContext {
@@ -188,6 +194,9 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_props: ConnectorProperties,
+        schema_change_channel: Option<
+            mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
+        >,
     ) -> Self {
         Self {
             actor_id,
@@ -197,6 +206,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             connector_props,
+            schema_change_tx: schema_change_channel,
         }
     }
 
@@ -214,6 +224,7 @@ impl SourceContext {
                 rate_limit: None,
             },
             ConnectorProperties::default(),
+            None,
         )
     }
 }
@@ -243,6 +254,7 @@ pub enum SourceEncode {
     Protobuf,
     Json,
     Bytes,
+    Parquet,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -295,6 +307,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         (PbFormatType::Maxwell, PbEncodeType::Json) => (SourceFormat::Maxwell, SourceEncode::Json),
         (PbFormatType::Canal, PbEncodeType::Json) => (SourceFormat::Canal, SourceEncode::Json),
         (PbFormatType::Plain, PbEncodeType::Csv) => (SourceFormat::Plain, SourceEncode::Csv),
+        (PbFormatType::Plain, PbEncodeType::Parquet) => {
+            (SourceFormat::Plain, SourceEncode::Parquet)
+        }
         (PbFormatType::Native, PbEncodeType::Native) => {
             (SourceFormat::Native, SourceEncode::Native)
         }
@@ -308,6 +323,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
             (SourceFormat::DebeziumMongo, SourceEncode::Json)
         }
         (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
+        (PbFormatType::Upsert, PbEncodeType::Protobuf) => {
+            (SourceFormat::Upsert, SourceEncode::Protobuf)
+        }
         (format, encode) => {
             bail!(
                 "Unsupported combination of format {:?} and encode {:?}",
@@ -352,6 +370,33 @@ pub trait SplitReader: Sized + Send {
     ) -> crate::error::ConnectorResult<Self>;
 
     fn into_stream(self) -> BoxChunkSourceStream;
+
+    fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
+        HashMap::new()
+    }
+}
+
+/// Information used to determine whether we should start and finish source backfill.
+///
+/// XXX: if a connector cannot provide the latest offsets (but we want to make it shareable),
+/// perhaps we should ban blocking DDL for it.
+#[derive(Debug, Clone)]
+pub enum BackfillInfo {
+    HasDataToBackfill {
+        /// The last available offsets for each split (**inclusive**).
+        ///
+        /// This will be used to determine whether source backfill is finished when
+        /// there are no _new_ messages coming from upstream `SourceExecutor`. Otherwise,
+        /// blocking DDL cannot finish until new messages come.
+        ///
+        /// When there are upstream messages, we will use the latest offsets from the upstream.
+        latest_offset: String,
+    },
+    /// If there are no messages in the split at all, we don't need to start backfill.
+    /// In this case, there will be no message from the backfill stream too.
+    /// If we started backfill, we cannot finish it until new messages come.
+    /// So we mark this a special case for optimization.
+    NoDataToBackfill,
 }
 
 for_all_sources!(impl_connector_properties);
@@ -370,6 +415,7 @@ impl ConnectorProperties {
                 s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
                     || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
                     || s.eq_ignore_ascii_case(GCS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
             })
             .unwrap_or(false)
     }
@@ -383,16 +429,19 @@ impl ConnectorProperties {
     /// `deny_unknown_fields`: Since `WITH` options are persisted in meta, we do not deny unknown fields when restoring from
     /// existing data to avoid breaking backwards compatibility. We only deny unknown fields when creating new sources.
     pub fn extract(
-        mut with_properties: BTreeMap<String, String>,
+        with_properties: WithOptionsSecResolved,
         deny_unknown_fields: bool,
     ) -> Result<Self> {
-        let connector = with_properties
+        let (options, secret_refs) = with_properties.into_parts();
+        let mut options_with_secret =
+            LocalSecretManager::global().fill_secrets(options, secret_refs)?;
+        let connector = options_with_secret
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
         match_source_name_str!(
             connector.to_lowercase().as_str(),
             PropType,
-            PropType::try_from_btreemap(with_properties, deny_unknown_fields)
+            PropType::try_from_btreemap(options_with_secret, deny_unknown_fields)
                 .map(ConnectorProperties::from),
             |other| bail!("connector '{}' is not supported", other)
         )
@@ -417,6 +466,7 @@ impl ConnectorProperties {
         matches!(self, ConnectorProperties::Kafka(_))
             || matches!(self, ConnectorProperties::OpendalS3(_))
             || matches!(self, ConnectorProperties::Gcs(_))
+            || matches!(self, ConnectorProperties::Azblob(_))
     }
 }
 
@@ -464,7 +514,7 @@ impl SplitImpl {
     pub fn is_cdc_split(&self) -> bool {
         matches!(
             self,
-            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_)
+            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_) | SqlServerCdc(_)
         )
     }
 
@@ -475,6 +525,7 @@ impl SplitImpl {
             PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
             MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
             CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            SqlServerCdc(split) => split.start_offset().clone().unwrap_or_default(),
             _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
         }
     }
@@ -686,7 +737,9 @@ mod tests {
             "nexmark.split.num" => "1",
         ));
 
-        let props = ConnectorProperties::extract(props, true).unwrap();
+        let props =
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(props), true)
+                .unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
             assert_eq!(props.table_type, Some(EventType::Person));
@@ -706,7 +759,9 @@ mod tests {
             "broker.rewrite.endpoints" => r#"{"b-1:9092":"dns-1", "b-2:9092":"dns-2"}"#,
         ));
 
-        let props = ConnectorProperties::extract(props, true).unwrap();
+        let props =
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(props), true)
+                .unwrap();
         if let ConnectorProperties::Kafka(k) = props {
             let btreemap = btreemap! {
                 "b-1:9092".to_string() => "dns-1".to_string(),
@@ -741,7 +796,11 @@ mod tests {
             "table.name" => "orders",
         ));
 
-        let conn_props = ConnectorProperties::extract(user_props_mysql, true).unwrap();
+        let conn_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(user_props_mysql),
+            true,
+        )
+        .unwrap();
         if let ConnectorProperties::MysqlCdc(c) = conn_props {
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "3306");
@@ -753,7 +812,11 @@ mod tests {
             panic!("extract cdc config failed");
         }
 
-        let conn_props = ConnectorProperties::extract(user_props_postgres, true).unwrap();
+        let conn_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(user_props_postgres),
+            true,
+        )
+        .unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "5432");

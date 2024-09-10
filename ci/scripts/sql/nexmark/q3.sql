@@ -10,4 +10,4 @@ FROM auction AS A
          INNER JOIN person AS P on A.seller = P.id
 WHERE A.category = 10
   and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca')
-WITH ( connector = 'blackhole', type = 'append-only');
+WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

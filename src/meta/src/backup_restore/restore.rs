@@ -79,6 +79,12 @@ pub struct RestoreOpts {
     /// Print the target snapshot, but won't restore to meta store.
     #[clap(long)]
     pub dry_run: bool,
+    /// The read timeout for object store
+    #[clap(long, default_value_t = 600000)]
+    pub read_attempt_timeout_ms: u64,
+    /// The maximum number of read retry attempts for the object store.
+    #[clap(long, default_value_t = 3)]
+    pub read_retry_attempts: u64,
 }
 
 async fn restore_hummock_version(
@@ -97,7 +103,7 @@ async fn restore_hummock_version(
     );
     let checkpoint_path = version_checkpoint_path(hummock_storage_directory);
     let checkpoint = PbHummockVersionCheckpoint {
-        version: Some(hummock_version.to_protobuf()),
+        version: Some(hummock_version.into()),
         // Ignore stale objects. Full GC will clear them.
         stale_objects: Default::default(),
     };
@@ -221,6 +227,7 @@ mod tests {
     use risingwave_backup::storage::MetaSnapshotStorage;
     use risingwave_common::config::{MetaBackend, SystemConfig};
     use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::HummockVersionId;
     use risingwave_pb::hummock::HummockVersionStats;
     use risingwave_pb::meta::SystemParams;
 
@@ -251,6 +258,8 @@ mod tests {
             hummock_storage_url: "memory".to_string(),
             hummock_storage_directory: "".to_string(),
             dry_run: false,
+            read_attempt_timeout_ms: 60000,
+            read_retry_attempts: 3,
         }
     }
 
@@ -281,7 +290,7 @@ mod tests {
             metadata: ClusterMetadata {
                 hummock_version: {
                     let mut version = HummockVersion::default();
-                    version.id = 123;
+                    version.id = HummockVersionId::new(123);
                     version
                 },
                 system_param: system_param.clone(),
@@ -464,7 +473,7 @@ mod tests {
                 ]),
                 hummock_version: {
                     let mut version = HummockVersion::default();
-                    version.id = 123;
+                    version.id = HummockVersionId::new(123);
                     version
                 },
                 system_param: system_param.clone(),

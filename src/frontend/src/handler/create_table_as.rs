@@ -16,7 +16,6 @@ use either::Either;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, OnConflict, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -90,6 +89,13 @@ pub async fn handle_create_as(
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args.clone());
+        let (_, secret_refs) = context.with_options().clone().into_parts();
+        if !secret_refs.is_empty() {
+            return Err(crate::error::ErrorCode::InvalidParameterValue(
+                "Secret reference is not allowed in options for CREATE TABLE AS".to_string(),
+            )
+            .into());
+        }
         let (plan, table) = gen_create_table_plan_without_source(
             context,
             table_name.clone(),
@@ -103,14 +109,8 @@ pub async fn handle_create_as(
             with_version_column,
             Some(col_id_gen.into_version()),
         )?;
-        let mut graph = build_graph(plan)?;
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
+        let graph = build_graph(plan)?;
+
         (graph, None, table)
     };
 

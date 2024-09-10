@@ -24,11 +24,11 @@ macro_rules! commit_multi_var {
                     $crate::manager::MetaStoreImpl::Kv(meta_store) => {
                         use crate::storage::Transaction;
                         use crate::storage::meta_store::MetaStore;
-                        let mut trx = Transaction::default();
+                        let mut txn = Transaction::default();
                         $(
-                            $val_txn.apply_to_txn(&mut trx).await?;
+                            $val_txn.apply_to_txn(&mut txn).await?;
                         )*
-                        meta_store.txn(trx).await?;
+                        meta_store.txn(txn).await?;
                         $(
                             $val_txn.commit();
                         )*
@@ -37,11 +37,11 @@ macro_rules! commit_multi_var {
                     crate::manager::MetaStoreImpl::Sql(sql_meta_store) => {
                         use sea_orm::TransactionTrait;
                         use crate::model::MetadataModelError;
-                        let mut trx = sql_meta_store.conn.begin().await.map_err(MetadataModelError::from)?;
+                        let mut txn = sql_meta_store.conn.begin().await.map_err(MetadataModelError::from)?;
                         $(
-                            $val_txn.apply_to_txn(&mut trx).await?;
+                            $val_txn.apply_to_txn(&mut txn).await?;
                         )*
-                        trx.commit().await.map_err(MetadataModelError::from)?;
+                        txn.commit().await.map_err(MetadataModelError::from)?;
                         $(
                             $val_txn.commit();
                         )*
@@ -52,8 +52,28 @@ macro_rules! commit_multi_var {
         }
     };
 }
-pub(crate) use commit_multi_var;
+
+macro_rules! commit_multi_var_with_provided_txn {
+    ($txn:expr, $($val_txn:expr),*) => {
+        {
+            async {
+                use crate::model::{InMemValTransaction, ValTransaction};
+                use crate::model::MetadataModelError;
+                $(
+                    $val_txn.apply_to_txn(&mut $txn).await?;
+                )*
+                $txn.commit().await.map_err(MetadataModelError::from)?;
+                $(
+                    $val_txn.commit();
+                )*
+                Result::Ok(())
+            }.await
+        }
+    };
+}
+
 use risingwave_hummock_sdk::SstObjectIdRange;
+pub(crate) use {commit_multi_var, commit_multi_var_with_provided_txn};
 
 use crate::hummock::error::Result;
 use crate::hummock::sequence::next_sstable_object_id;

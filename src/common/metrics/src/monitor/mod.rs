@@ -12,20 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod connection;
-pub mod my_stats;
-pub mod process;
-pub mod rwlock;
+pub use connection::{monitor_connector, EndpointExt, RouterExt, TcpConfig};
+pub use rwlock::MonitoredRwLock;
+
+mod connection;
+mod process;
+mod rwlock;
 
 use std::sync::LazyLock;
 
-use prometheus::core::{
-    AtomicI64, AtomicU64, Collector, GenericCounter, GenericCounterVec, GenericGauge, Metric,
-};
-use prometheus::{Histogram, HistogramVec, Registry};
-
-use crate::monitor::my_stats::MyHistogram;
-use crate::monitor::process::monitor_process;
+use prometheus::Registry;
 
 #[cfg(target_os = "linux")]
 static PAGESIZE: std::sync::LazyLock<i64> =
@@ -35,59 +31,8 @@ static PAGESIZE: std::sync::LazyLock<i64> =
 pub static CLOCK_TICK: std::sync::LazyLock<u64> =
     std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_CLK_TCK) as u64 });
 
-/// Define extension method `print` used in `print_statistics`.
-pub trait Print {
-    fn print(&self);
-}
-
-impl Print for GenericCounter<AtomicU64> {
-    fn print(&self) {
-        let desc = &self.desc()[0].fq_name;
-        let counter = self.metric().get_counter().get_value() as u64;
-        println!("{desc} COUNT : {counter}");
-    }
-}
-
-impl Print for GenericGauge<AtomicI64> {
-    fn print(&self) {
-        let desc = &self.desc()[0].fq_name;
-        let counter = self.get();
-        println!("{desc} COUNT : {counter}");
-    }
-}
-
-impl Print for Histogram {
-    fn print(&self) {
-        let desc = &self.desc()[0].fq_name;
-
-        let histogram = MyHistogram::from_prom_hist(self.metric().get_histogram());
-        let p50 = histogram.get_percentile(50.0);
-        let p95 = histogram.get_percentile(95.0);
-        let p99 = histogram.get_percentile(99.0);
-        let p100 = histogram.get_percentile(100.0);
-
-        let sample_count = self.get_sample_count();
-        let sample_sum = self.get_sample_sum();
-        println!("{desc} P50 : {p50} P95 : {p95} P99 : {p99} P100 : {p100} COUNT : {sample_count} SUM : {sample_sum}");
-    }
-}
-
-impl Print for HistogramVec {
-    fn print(&self) {
-        let desc = &self.desc()[0].fq_name;
-        println!("{desc} {:?}", self);
-    }
-}
-
-impl Print for GenericCounterVec<AtomicU64> {
-    fn print(&self) {
-        let desc = &self.desc()[0].fq_name;
-        println!("{desc} {:?}", self);
-    }
-}
-
 pub static GLOBAL_METRICS_REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     let registry = Registry::new();
-    monitor_process(&registry);
+    process::monitor_process(&registry);
     registry
 });

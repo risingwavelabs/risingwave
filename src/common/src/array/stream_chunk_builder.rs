@@ -14,7 +14,7 @@
 
 use crate::array::stream_record::Record;
 use crate::array::{ArrayBuilderImpl, Op, StreamChunk};
-use crate::buffer::BitmapBuilder;
+use crate::bitmap::BitmapBuilder;
 use crate::row::Row;
 use crate::types::{DataType, DatumRef};
 use crate::util::iter_util::ZipEqFast;

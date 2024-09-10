@@ -29,7 +29,6 @@
 #![feature(map_try_insert)]
 #![feature(never_type)]
 #![feature(btreemap_alloc)]
-#![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
 #![feature(btree_extract_if)]
 #![feature(iter_order_by)]
@@ -55,6 +54,7 @@ pub mod error;
 pub mod executor;
 mod from_proto;
 pub mod task;
+pub mod telemetry;
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();

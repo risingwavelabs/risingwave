@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::rc::Rc;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
@@ -23,7 +22,10 @@ use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::catalog::{ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId,
+};
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
@@ -31,13 +33,13 @@ use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
-use risingwave_pb::catalog::{PbSource, Table};
-use risingwave_pb::ddl_service::ReplaceTablePlan;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamFragmentGraph, StreamNode};
+use risingwave_pb::catalog::{PbSink, PbSource, Table};
+use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
+use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
+use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_sqlparser::ast::{
-    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, Query, Statement,
+    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format,
+    Query, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -49,6 +51,7 @@ use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
+use crate::catalog::SinkId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
@@ -60,12 +63,12 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{
     generic, IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject,
 };
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
+use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_in_with_options};
-use crate::{Explain, Planner, TableCatalog, WithOptions};
+use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
+use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
 
 // used to store result of `gen_sink_plan`
 pub struct SinkPlanContext {
@@ -75,16 +78,35 @@ pub struct SinkPlanContext {
     pub target_table_catalog: Option<Arc<TableCatalog>>,
 }
 
-pub fn gen_sink_plan(
-    session: &SessionImpl,
-    context: OptimizerContextRef,
+pub async fn gen_sink_plan(
+    handler_args: HandlerArgs,
     stmt: CreateSinkStatement,
-    partition_info: Option<PartitionComputeInfo>,
+    explain_options: Option<ExplainOptions>,
 ) -> Result<SinkPlanContext> {
+    let session = handler_args.session.clone();
+    let session = session.as_ref();
     let user_specified_columns = !stmt.columns.is_empty();
     let db_name = session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
+
+    let mut with_options = handler_args.with_options.clone();
+
+    let connection_id = {
+        let conn_id =
+            resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
+        conn_id.map(ConnectionId)
+    };
+
+    let mut resolved_with_options = resolve_secret_ref_in_with_options(with_options, session)?;
+
+    let partition_info = get_partition_compute_info(&resolved_with_options).await?;
+
+    let context = if let Some(explain_options) = explain_options {
+        OptimizerContext::new(handler_args.clone(), explain_options)
+    } else {
+        OptimizerContext::from_handler_args(handler_args.clone())
+    };
 
     // Used for debezium's table name
     let sink_from_table_name;
@@ -109,8 +131,6 @@ pub fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let definition = context.normalized_sql().to_owned();
-
     let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(*query.clone())?;
@@ -127,12 +147,9 @@ pub fn gen_sink_plan(
         get_column_names(&bound, session, stmt.columns)?
     };
 
-    let mut with_options = context.with_options().clone();
-
     if sink_into_table_name.is_some() {
-        let prev = with_options
-            .inner_mut()
-            .insert(CONNECTOR_TYPE_KEY.to_string(), "table".to_string());
+        let prev =
+            resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_string(), "table".to_string());
 
         if prev.is_some() {
             return Err(RwError::from(ErrorCode::BindError(
@@ -141,19 +158,12 @@ pub fn gen_sink_plan(
         }
     }
 
-    let connection_id = {
-        let conn_id =
-            resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
-        conn_id.map(ConnectionId)
-    };
-    let secret_ref = resolve_secret_in_with_options(&mut with_options, session)?;
-
     let emit_on_window_close = stmt.emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
 
-    let connector = with_options
+    let connector = resolved_with_options
         .get(CONNECTOR_TYPE_KEY)
         .cloned()
         .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
@@ -162,13 +172,13 @@ pub fn gen_sink_plan(
         // Case A: new syntax `format ... encode ...`
         Some(f) => {
             validate_compatibility(&connector, &f)?;
-            Some(bind_sink_format_desc(f)?)
+            Some(bind_sink_format_desc(session,f)?)
         }
-        None => match with_options.get(SINK_TYPE_OPTION) {
+        None => match resolved_with_options.get(SINK_TYPE_OPTION) {
             // Case B: old syntax `type = '...'`
             Some(t) => SinkFormatDesc::from_legacy_type(&connector, t)?.map(|mut f| {
                 session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
-                if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
+                if let Some(v) = resolved_with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
                     f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
                 }
                 f
@@ -178,12 +188,13 @@ pub fn gen_sink_plan(
         },
     };
 
-    let mut plan_root = Planner::new(context).plan_query(bound)?;
+    let definition = context.normalized_sql().to_owned();
+    let mut plan_root = Planner::new(context.into()).plan_query(bound)?;
     if let Some(col_names) = &col_names {
         plan_root.set_out_names(col_names.clone())?;
     };
 
-    let without_backfill = match with_options.remove(SINK_WITHOUT_BACKFILL) {
+    let without_backfill = match resolved_with_options.remove(SINK_WITHOUT_BACKFILL) {
         Some(flag) if flag.eq_ignore_ascii_case("false") => {
             if direct_sink {
                 true
@@ -227,7 +238,7 @@ pub fn gen_sink_plan(
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
-        with_options,
+        resolved_with_options,
         emit_on_window_close,
         db_name.to_owned(),
         sink_from_table_name,
@@ -236,6 +247,7 @@ pub fn gen_sink_plan(
         target_table,
         partition_info,
     )?;
+
     let sink_desc = sink_plan.sink_desc().clone();
 
     let mut sink_plan: PlanRef = sink_plan.into();
@@ -256,7 +268,6 @@ pub fn gen_sink_plan(
         UserId::new(session.user_id()),
         connection_id,
         dependent_relations.into_iter().collect_vec(),
-        secret_ref,
     );
 
     if let Some(table_catalog) = &target_table_catalog {
@@ -281,7 +292,7 @@ pub fn gen_sink_plan(
         let exprs = derive_default_column_project_for_sink(
             &sink_catalog,
             sink_plan.schema(),
-            table_catalog,
+            table_catalog.columns(),
             user_specified_columns,
         )?;
 
@@ -291,6 +302,7 @@ pub fn gen_sink_plan(
 
         let exprs =
             LogicalSource::derive_output_exprs_from_generated_columns(table_catalog.columns())?;
+
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, sink_plan);
             sink_plan = StreamProject::new(logical_project).into();
@@ -310,12 +322,13 @@ pub fn gen_sink_plan(
 // `Some(PartitionComputeInfo)` if the sink need to compute partition.
 // `None` if the sink does not need to compute partition.
 pub async fn get_partition_compute_info(
-    with_options: &WithOptions,
+    with_options: &WithOptionsSecResolved,
 ) -> Result<Option<PartitionComputeInfo>> {
-    let properties = with_options.clone().into_inner();
-    let Some(connector) = properties.get(UPSTREAM_SOURCE_KEY) else {
+    let (options, secret_refs) = with_options.clone().into_parts();
+    let Some(connector) = options.get(UPSTREAM_SOURCE_KEY).cloned() else {
         return Ok(None);
     };
+    let properties = LocalSecretManager::global().fill_secrets(options, secret_refs)?;
     match connector.as_str() {
         ICEBERG_SINK => {
             let iceberg_config = IcebergConfig::from_btreemap(properties)?;
@@ -328,6 +341,10 @@ pub async fn get_partition_compute_info(
 async fn get_partition_compute_info_for_iceberg(
     iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
+    // TODO: check table if exists
+    if iceberg_config.create_table_if_not_exists {
+        return Ok(None);
+    }
     let table = iceberg_config.load_table().await?;
     let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok() else {
         return Ok(None);
@@ -401,6 +418,8 @@ pub async fn handle_create_sink(
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
 
+    session.check_cluster_limits().await?;
+
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         stmt.sink_name.clone(),
         StatementType::CREATE_SINK,
@@ -409,63 +428,67 @@ pub async fn handle_create_sink(
         return Ok(resp);
     }
 
-    let partition_info = get_partition_compute_info(&handle_args.with_options).await?;
-
-    let (sink, graph, target_table_catalog) = {
-        let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
-
+    let (mut sink, graph, target_table_catalog) = {
         let SinkPlanContext {
             query,
             sink_plan: plan,
             sink_catalog: sink,
             target_table_catalog,
-        } = gen_sink_plan(&session, context.clone(), stmt, partition_info)?;
+        } = gen_sink_plan(handle_args, stmt, None).await?;
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {
-            context.warn_to_user(
+            plan.ctx().warn_to_user(
                 r#"The ORDER BY clause in the CREATE SINK statement has no effect at all."#
                     .to_string(),
             );
         }
 
-        let mut graph = build_graph(plan)?;
-
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
+        let graph = build_graph(plan)?;
 
         (sink, graph, target_table_catalog)
     };
 
     let mut target_table_replace_plan = None;
     if let Some(table_catalog) = target_table_catalog {
+        use crate::handler::alter_table_column::hijack_merger_for_target_table;
+
         check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())?;
 
         let (mut graph, mut table, source) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
+        sink.original_target_columns = table
+            .columns
+            .iter()
+            .map(|col| ColumnCatalog::from(col.clone()))
+            .collect_vec();
+
         table
             .incoming_sinks
             .clone_from(&table_catalog.incoming_sinks);
 
-        for _ in 0..(table_catalog.incoming_sinks.len() + 1) {
-            for fragment in graph.fragments.values_mut() {
-                if let Some(node) = &mut fragment.node {
-                    insert_merger_to_union(node);
-                }
-            }
+        let incoming_sink_ids: HashSet<_> = table_catalog.incoming_sinks.iter().copied().collect();
+        let incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
+
+        for existing_sink in incoming_sinks {
+            hijack_merger_for_target_table(
+                &mut graph,
+                table_catalog.columns(),
+                &existing_sink,
+                Some(&existing_sink.unique_identity()),
+            )?;
         }
+
+        // for new creating sink, we don't have a unique identity because the sink id is not generated yet.
+        hijack_merger_for_target_table(&mut graph, table_catalog.columns(), &sink, None)?;
 
         target_table_replace_plan = Some(ReplaceTablePlan {
             source,
             table: Some(table),
             fragment_graph: Some(graph),
             table_col_index_mapping: None,
+            job_type: TableJobType::General as _,
         });
     }
 
@@ -486,6 +509,24 @@ pub async fn handle_create_sink(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
+}
+
+pub fn fetch_incoming_sinks(
+    session: &Arc<SessionImpl>,
+    incoming_sink_ids: &HashSet<SinkId>,
+) -> Result<Vec<Arc<SinkCatalog>>> {
+    let reader = session.env().catalog_reader().read_guard();
+    let mut sinks = Vec::with_capacity(incoming_sink_ids.len());
+    let db_name = session.database();
+    for schema in reader.iter_schemas(db_name)? {
+        for sink in schema.iter_sink() {
+            if incoming_sink_ids.contains(&sink.id.sink_id) {
+                sinks.push(sink.clone());
+            }
+        }
+    }
+
+    Ok(sinks)
 }
 
 fn check_cycle_for_sink(
@@ -561,7 +602,7 @@ fn check_cycle_for_sink(
             path: &mut Vec<String>,
         ) -> Result<()> {
             for table_id in dependent_jobs {
-                if let Ok(table) = self.reader.get_table_by_id(table_id) {
+                if let Ok(table) = self.reader.get_any_table_by_id(table_id) {
                     path.push(table.name.clone());
                     self.visit_table(table.as_ref(), target_table_id, path)?;
                     path.pop();
@@ -634,7 +675,7 @@ pub(crate) async fn reparse_table_for_sink(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source) = generate_stream_graph_for_table(
+    let (graph, table, source, _) = generate_stream_graph_for_table(
         session,
         table_name,
         table_catalog,
@@ -648,21 +689,33 @@ pub(crate) async fn reparse_table_for_sink(
         append_only,
         on_conflict,
         with_version_column,
+        None,
+        None,
     )
     .await?;
 
     Ok((graph, table, source))
 }
 
-pub(crate) fn insert_merger_to_union(node: &mut StreamNode) {
+pub(crate) fn insert_merger_to_union_with_project(
+    node: &mut StreamNode,
+    project_node: &PbNodeBody,
+    uniq_identity: Option<&str>,
+) {
     if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
+        // TODO: MergeNode is used as a placeholder, see issue #17658
         node.input.push(StreamNode {
-            identity: "Merge (sink into table)".to_string(),
-            fields: node.fields.clone(),
-            node_body: Some(NodeBody::Merge(MergeNode {
-                upstream_dispatcher_type: DispatcherType::Hash as _,
+            input: vec![StreamNode {
+                node_body: Some(NodeBody::Merge(MergeNode {
+                    ..Default::default()
+                })),
                 ..Default::default()
-            })),
+            }],
+            identity: uniq_identity
+                .unwrap_or(PbSink::UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK)
+                .to_string(),
+            fields: node.fields.clone(),
+            node_body: Some(project_node.clone()),
             ..Default::default()
         });
 
@@ -670,7 +723,7 @@ pub(crate) fn insert_merger_to_union(node: &mut StreamNode) {
     }
 
     for input in &mut node.input {
-        insert_merger_to_union(input);
+        insert_merger_to_union_with_project(input, project_node, uniq_identity);
     }
 }
 
@@ -683,9 +736,10 @@ fn derive_sink_to_table_expr(
 
     if target_type != input_type {
         bail!(
-            "column type mismatch: {:?} vs {:?}",
+            "column type mismatch: {:?} vs {:?}, column name: {:?}",
             target_type,
-            input_type
+            input_type,
+            sink_schema.fields()[idx].name
         );
     } else {
         Ok(ExprImpl::InputRef(Box::new(InputRef::new(
@@ -695,13 +749,15 @@ fn derive_sink_to_table_expr(
     }
 }
 
-fn derive_default_column_project_for_sink(
+pub(crate) fn derive_default_column_project_for_sink(
     sink: &SinkCatalog,
     sink_schema: &Schema,
-    target_table_catalog: &Arc<TableCatalog>,
+    columns: &[ColumnCatalog],
     user_specified_columns: bool,
 ) -> Result<Vec<ExprImpl>> {
     assert_eq!(sink.full_schema().len(), sink_schema.len());
+
+    let default_column_exprs = TableCatalog::default_column_exprs(columns);
 
     let mut exprs = vec![];
 
@@ -718,17 +774,16 @@ fn derive_default_column_project_for_sink(
         .map(|(i, c)| (c.name(), i))
         .collect::<BTreeMap<_, _>>();
 
-    for (idx, table_column) in target_table_catalog.columns().iter().enumerate() {
-        if table_column.is_generated() {
+    for (idx, column) in columns.iter().enumerate() {
+        if column.is_generated() {
             continue;
         }
 
-        let default_col_expr = || -> ExprImpl {
-            rewrite_now_to_proctime(target_table_catalog.default_column_expr(idx))
-        };
+        let default_col_expr =
+            || -> ExprImpl { rewrite_now_to_proctime(default_column_exprs[idx].clone()) };
 
         let sink_col_expr = |sink_col_idx: usize| -> Result<ExprImpl> {
-            derive_sink_to_table_expr(sink_schema, sink_col_idx, table_column.data_type())
+            derive_sink_to_table_expr(sink_schema, sink_col_idx, column.data_type())
         };
 
         // If users specified the columns to be inserted e.g. `CREATE SINK s INTO t(a, b)`, the expressions of `Project` will be generated accordingly.
@@ -736,7 +791,7 @@ fn derive_default_column_project_for_sink(
         // Otherwise, e.g. `CREATE SINK s INTO t`, the columns will be matched by their order in `select` query and the target table.
         #[allow(clippy::collapsible_else_if)]
         if user_specified_columns {
-            if let Some(idx) = sink_visible_col_idxes_by_name.get(table_column.name()) {
+            if let Some(idx) = sink_visible_col_idxes_by_name.get(column.name()) {
                 exprs.push(sink_col_expr(*idx)?);
             } else {
                 exprs.push(default_col_expr());
@@ -755,7 +810,7 @@ fn derive_default_column_project_for_sink(
 /// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.
 /// This is an analogy to (part of) [`crate::handler::create_source::bind_columns_from_source`]
 /// which transforms sqlparser AST `SourceSchemaV2` into `StreamSourceInfo`.
-fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
+fn bind_sink_format_desc(session: &SessionImpl, value: ConnectorSchema) -> Result<SinkFormatDesc> {
     use risingwave_connector::sink::catalog::{SinkEncode, SinkFormat};
     use risingwave_connector::sink::encoder::TimestamptzHandlingMode;
     use risingwave_sqlparser::ast::{Encode as E, Format as F};
@@ -773,6 +828,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
+        E::Parquet => SinkEncode::Parquet,
         e @ (E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
@@ -790,7 +846,11 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         }
     }
 
-    let mut options = WithOptions::try_from(value.row_options.as_slice())?.into_inner();
+    let (mut options, secret_refs) = resolve_secret_ref_in_with_options(
+        WithOptions::try_from(value.row_options.as_slice())?,
+        session,
+    )?
+    .into_parts();
 
     options
         .entry(TimestamptzHandlingMode::OPTION_KEY.to_owned())
@@ -800,12 +860,19 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         format,
         encode,
         options,
+        secret_refs,
         key_encode,
     })
 }
 
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
+        use risingwave_connector::sink::file_sink::azblob::AzblobSink;
+        use risingwave_connector::sink::file_sink::fs::FsSink;
+        use risingwave_connector::sink::file_sink::gcs::GcsSink;
+        use risingwave_connector::sink::file_sink::opendal_sink::FileSink;
+        use risingwave_connector::sink::file_sink::s3::S3Sink;
+        use risingwave_connector::sink::file_sink::webhdfs::WebhdfsSink;
         use risingwave_connector::sink::google_pubsub::GooglePubSubSink;
         use risingwave_connector::sink::kafka::KafkaSink;
         use risingwave_connector::sink::kinesis::KinesisSink;
@@ -820,8 +887,23 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 KafkaSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
-                    Format::Upsert => vec![Encode::Json, Encode::Avro],
+                    Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
                     Format::Debezium => vec![Encode::Json],
+                ),
+                FileSink::<S3Sink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
+                ),
+                FileSink::<GcsSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
+                ),
+                FileSink::<AzblobSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
+                ),
+                FileSink::<WebhdfsSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
+                ),
+                FileSink::<FsSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],
@@ -868,20 +950,6 @@ pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) ->
     Ok(())
 }
 
-/// For `planner_test` crate so that it does not depend directly on `connector` crate just for `SinkFormatDesc`.
-impl TryFrom<&WithOptions> for Option<SinkFormatDesc> {
-    type Error = risingwave_connector::sink::SinkError;
-
-    fn try_from(value: &WithOptions) -> std::result::Result<Self, Self::Error> {
-        let connector = value.get(CONNECTOR_TYPE_KEY);
-        let r#type = value.get(SINK_TYPE_OPTION);
-        match (connector, r#type) {
-            (Some(c), Some(t)) => SinkFormatDesc::from_legacy_type(c, t),
-            _ => Ok(None),
-        }
-    }
-}
-
 #[cfg(test)]
 pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
@@ -894,7 +962,7 @@ pub mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t1
-    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
     FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
@@ -922,7 +990,7 @@ pub mod tests {
 
         // Check table exists.
         let (table, schema_name) = catalog_reader
-            .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
+            .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
             .unwrap();
         assert_eq!(table.name(), "mv1");
 

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;

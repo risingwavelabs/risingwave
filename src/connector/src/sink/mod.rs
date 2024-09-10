@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 pub mod big_query;
 pub mod boxed;
 pub mod catalog;
@@ -24,6 +23,7 @@ pub mod doris_starrocks_connector;
 pub mod dynamodb;
 pub mod elasticsearch;
 pub mod encoder;
+pub mod file_sink;
 pub mod formatter;
 pub mod google_pubsub;
 pub mod iceberg;
@@ -38,7 +38,6 @@ pub mod pulsar;
 pub mod redis;
 pub mod remote;
 pub mod snowflake;
-pub mod snowflake_connector;
 pub mod sqlserver;
 pub mod starrocks;
 pub mod test_sink;
@@ -54,11 +53,14 @@ use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use risingwave_common::buffer::Bitmap;
+use opendal::Error as OpendalError;
+use risingwave_common::array::ArrayError;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
+use risingwave_common::secret::{LocalSecretManager, SecretError};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
@@ -73,9 +75,9 @@ use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEn
 use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
-
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
 macro_rules! for_all_sinks {
@@ -94,11 +96,18 @@ macro_rules! for_all_sinks {
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
-                { Opensearch, $crate::sink::remote::OpensearchSink },
+                { Opensearch, $crate::sink::remote::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>},
+
+                { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::gcs::GcsSink>  },
+                { Azblob, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::azblob::AzblobSink>},
+                { Webhdfs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::webhdfs::WebhdfsSink>},
+
+                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
                 { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
@@ -231,45 +240,61 @@ impl SinkParam {
             fields: self.columns.iter().map(Field::from).collect(),
         }
     }
-}
 
-impl From<SinkCatalog> for SinkParam {
-    fn from(sink_catalog: SinkCatalog) -> Self {
+    // `SinkParams` should only be used when there is a secret context.
+    // FIXME: Use a new type for `SinkFormatDesc` with properties contain filled secrets.
+    pub fn fill_secret_for_format_desc(
+        format_desc: Option<SinkFormatDesc>,
+    ) -> Result<Option<SinkFormatDesc>> {
+        match format_desc {
+            Some(mut format_desc) => {
+                format_desc.options = LocalSecretManager::global()
+                    .fill_secrets(format_desc.options, format_desc.secret_refs.clone())?;
+                Ok(Some(format_desc))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Try to convert a `SinkCatalog` to a `SinkParam` and fill the secrets to properties.
+    pub fn try_from_sink_catalog(sink_catalog: SinkCatalog) -> Result<Self> {
         let columns = sink_catalog
             .visible_columns()
             .map(|col| col.column_desc.clone())
             .collect();
-        Self {
+        let properties_with_secret = LocalSecretManager::global()
+            .fill_secrets(sink_catalog.properties, sink_catalog.secret_refs)?;
+        let format_desc_with_secret = Self::fill_secret_for_format_desc(sink_catalog.format_desc)?;
+        Ok(Self {
             sink_id: sink_catalog.id,
             sink_name: sink_catalog.name,
-            properties: sink_catalog.properties,
+            properties: properties_with_secret,
             columns,
             downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
-            format_desc: sink_catalog.format_desc,
+            format_desc: format_desc_with_secret,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
-        }
+        })
     }
 }
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration_metrics: LabelGuardedHistogram<3>,
-    pub connector_sink_rows_received: LabelGuardedIntCounter<2>,
-    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_write_rows: LabelGuardedIntCounter<3>,
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_read_rows: LabelGuardedIntCounter<3>,
+    pub sink_commit_duration_metrics: LabelGuardedHistogram<4>,
+    pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_write_rows: LabelGuardedIntCounter<4>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_read_rows: LabelGuardedIntCounter<4>,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
 
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
-
-    pub iceberg_write_qps: LabelGuardedIntCounter<2>,
-    pub iceberg_write_latency: LabelGuardedHistogram<2>,
-    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
-    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<2>,
-    pub iceberg_partition_num: LabelGuardedIntGauge<2>,
+    pub iceberg_write_qps: LabelGuardedIntCounter<3>,
+    pub iceberg_write_latency: LabelGuardedHistogram<3>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<3>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<3>,
+    pub iceberg_partition_num: LabelGuardedIntGauge<3>,
 }
 
 impl SinkMetrics {
@@ -349,8 +374,8 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     /// `user_specified` is the value of `sink_decouple` config.
     fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Disable | SinkDecouple::Default => Ok(false),
-            SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
         }
     }
 
@@ -464,14 +489,14 @@ macro_rules! def_sink_impl {
         #[derive(Debug)]
         pub enum SinkImpl {
             $(
-                $variant_name($sink_type),
+                $variant_name(Box<$sink_type>),
             )*
         }
 
         $(
             impl From<$sink_type> for SinkImpl {
                 fn from(sink: $sink_type) -> SinkImpl {
-                    SinkImpl::$variant_name(sink)
+                    SinkImpl::$variant_name(Box::new(sink))
                 }
             }
         )*
@@ -556,6 +581,8 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
+    #[error("File error: {0}")]
+    File(String),
     #[error("Snowflake error: {0}")]
     Snowflake(
         #[source]
@@ -598,6 +625,12 @@ pub enum SinkError {
         #[backtrace]
         ConnectorError,
     ),
+    #[error("Secret error: {0}")]
+    Secret(
+        #[from]
+        #[backtrace]
+        SecretError,
+    ),
     #[error("Mongodb error: {0}")]
     Mongodb(
         #[source]
@@ -609,6 +642,24 @@ pub enum SinkError {
 impl From<icelake::Error> for SinkError {
     fn from(value: icelake::Error) -> Self {
         SinkError::Iceberg(anyhow!(value))
+    }
+}
+
+impl From<OpendalError> for SinkError {
+    fn from(error: OpendalError) -> Self {
+        SinkError::File(error.to_report_string())
+    }
+}
+
+impl From<parquet::errors::ParquetError> for SinkError {
+    fn from(error: parquet::errors::ParquetError) -> Self {
+        SinkError::File(error.to_report_string())
+    }
+}
+
+impl From<ArrayError> for SinkError {
+    fn from(error: ArrayError) -> Self {
+        SinkError::File(error.to_report_string())
     }
 }
 

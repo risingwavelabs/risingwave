@@ -39,10 +39,10 @@ mod rw_indexes;
 mod rw_internal_tables;
 mod rw_materialized_views;
 mod rw_meta_snapshot;
-mod rw_parallel_units;
 mod rw_relation_info;
 mod rw_relations;
 mod rw_schemas;
+mod rw_secrets;
 mod rw_sinks;
 mod rw_sources;
 mod rw_streaming_parallelism;
@@ -59,3 +59,4 @@ mod rw_worker_nodes;
 
 mod rw_actor_id_to_ddl;
 mod rw_fragment_id_to_ddl;
+mod rw_worker_actor_count;

@@ -19,7 +19,7 @@ use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SecretCatalog {
-    pub secret_id: SecretId,
+    pub id: SecretId,
     pub name: String,
     pub database_id: DatabaseId,
     pub value: Vec<u8>,
@@ -29,7 +29,7 @@ pub struct SecretCatalog {
 impl From<&PbSecret> for SecretCatalog {
     fn from(value: &PbSecret) -> Self {
         Self {
-            secret_id: SecretId::new(value.id),
+            id: SecretId::new(value.id),
             database_id: value.database_id,
             owner: value.owner,
             name: value.name.clone(),

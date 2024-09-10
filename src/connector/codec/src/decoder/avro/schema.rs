@@ -14,13 +14,17 @@
 
 use std::sync::{Arc, LazyLock};
 
+use anyhow::Context;
 use apache_avro::schema::{DecimalSchema, RecordSchema, ResolvedSchema, Schema};
 use apache_avro::AvroResult;
 use itertools::Itertools;
-use risingwave_common::bail;
+use risingwave_common::error::NotImplemented;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::{DataType, Decimal};
+use risingwave_common::types::{DataType, Decimal, MapType};
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
+
+use super::get_nullable_union_inner;
 
 /// Avro schema with `Ref` inlined. The newtype is used to indicate whether the schema is resolved.
 ///
@@ -53,8 +57,7 @@ impl ResolvedAvroSchema {
 #[derive(Debug, Copy, Clone)]
 pub enum MapHandling {
     Jsonb,
-    // TODO: <https://github.com/risingwavelabs/risingwave/issues/13387>
-    // Map
+    Map,
 }
 
 impl MapHandling {
@@ -65,6 +68,7 @@ impl MapHandling {
     ) -> anyhow::Result<Option<Self>> {
         let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some("jsonb") => Self::Jsonb,
+            Some("map") => Self::Map,
             Some(v) => bail!("unrecognized {} value {}", Self::OPTION_KEY, v),
             None => return Ok(None),
         };
@@ -74,6 +78,8 @@ impl MapHandling {
 
 /// This function expects resolved schema (no `Ref`).
 /// FIXME: require passing resolved schema here.
+/// TODO: change `map_handling` to some `Config`, and also unify debezium.
+/// TODO: use `ColumnDesc` in common instead of PB.
 pub fn avro_schema_to_column_descs(
     schema: &Schema,
     map_handling: Option<MapHandling>,
@@ -196,20 +202,46 @@ fn avro_type_mapping(
             DataType::List(Box::new(item_type))
         }
         Schema::Union(union_schema) => {
-            // We only support using union to represent nullable fields, not general unions.
-            let variants = union_schema.variants();
-            if variants.len() != 2 || !variants.contains(&Schema::Null) {
-                bail!(
-                    "unsupported Avro type, only unions like [null, T] is supported: {:?}",
-                    schema
-                );
-            }
-            let nested_schema = variants
-                .iter()
-                .find_or_first(|s| !matches!(s, Schema::Null))
-                .unwrap();
+            // Note: Unions may not immediately contain other unions. So a `null` must represent a top-level null.
+            // e.g., ["null", ["null", "string"]] is not allowed
 
-            avro_type_mapping(nested_schema, map_handling)?
+            // Note: Unions may not contain more than one schema with the same type, except for the named types record, fixed and enum.
+            // https://avro.apache.org/docs/1.11.1/specification/_print/#unions
+            debug_assert!(
+                union_schema
+                    .variants()
+                    .iter()
+                    .map(Schema::canonical_form) // Schema doesn't implement Eq, but only PartialEq.
+                    .duplicates()
+                    .next()
+                    .is_none(),
+                "Union contains duplicate types: {union_schema:?}",
+            );
+            match get_nullable_union_inner(union_schema) {
+                Some(inner) => avro_type_mapping(inner, map_handling)?,
+                None => {
+                    // Convert the union to a struct, each field of the struct represents a variant of the union.
+                    // Refer to https://github.com/risingwavelabs/risingwave/issues/16273#issuecomment-2179761345 to see why it's not perfect.
+                    // Note: Avro union's variant tag is type name, not field name (unlike Rust enum, or Protobuf oneof).
+
+                    // XXX: do we need to introduce union.handling.mode?
+                    let (fields, field_names) = union_schema
+                        .variants()
+                        .iter()
+                        // null will mean the whole struct is null
+                        .filter(|variant| !matches!(variant, &&Schema::Null))
+                        .map(|variant| {
+                            avro_type_mapping(variant, map_handling).and_then(|t| {
+                                let name = avro_schema_to_struct_field_name(variant)?;
+                                Ok((t, name))
+                            })
+                        })
+                        .process_results(|it| it.unzip::<_, _, Vec<_>, Vec<_>>())
+                        .context("failed to convert Avro union to struct")?;
+
+                    DataType::new_struct(fields, field_names)
+                }
+            }
         }
         Schema::Ref { name } => {
             if name.name == DBZ_VARIABLE_SCALE_DECIMAL_NAME
@@ -217,7 +249,7 @@ fn avro_type_mapping(
             {
                 DataType::Decimal
             } else {
-                bail!("unsupported Avro type: {:?}", schema);
+                bail_not_implemented!("Avro type: {:?}", schema);
             }
         }
         Schema::Map(value_schema) => {
@@ -227,20 +259,23 @@ fn avro_type_mapping(
                     if supported_avro_to_json_type(value_schema) {
                         DataType::Jsonb
                     } else {
-                        bail!(
-                            "unsupported Avro type, cannot convert map to jsonb: {:?}",
+                        bail_not_implemented!(
+                            issue = 16963,
+                            "Avro map type to jsonb: {:?}",
                             schema
-                        )
+                        );
                     }
                 }
-                None => {
-                    bail!("`map.handling.mode` not specified in ENCODE AVRO (...). Currently supported modes: `jsonb`")
+                Some(MapHandling::Map) | None => {
+                    let value = avro_type_mapping(value_schema.as_ref(), map_handling)
+                        .context("failed to convert Avro map type")?;
+                    DataType::Map(MapType::from_kv(DataType::Varchar, value))
                 }
             }
         }
         Schema::Uuid => DataType::Varchar,
         Schema::Null | Schema::Fixed(_) => {
-            bail!("unsupported Avro type: {:?}", schema)
+            bail_not_implemented!("Avro type: {:?}", schema);
         }
     };
 
@@ -277,4 +312,72 @@ fn supported_avro_to_json_type(schema: &Schema) -> bool {
         | Schema::Ref { name: _ }
         | Schema::Union(_) => false,
     }
+}
+
+/// The field name when converting Avro union type to RisingWave struct type.
+pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> Result<String, NotImplemented> {
+    Ok(match schema {
+        Schema::Null => unreachable!(),
+        Schema::Union(_) => unreachable!(),
+        // Primitive types
+        Schema::Boolean => "boolean".to_string(),
+        Schema::Int => "int".to_string(),
+        Schema::Long => "long".to_string(),
+        Schema::Float => "float".to_string(),
+        Schema::Double => "double".to_string(),
+        Schema::Bytes => "bytes".to_string(),
+        Schema::String => "string".to_string(),
+        // Unnamed Complex types
+        Schema::Array(_) => "array".to_string(),
+        Schema::Map(_) => "map".to_string(),
+        // Named Complex types
+        Schema::Enum(_) | Schema::Ref { name: _ } | Schema::Fixed(_) | Schema::Record(_) => {
+            // schema.name().unwrap().fullname(None)
+            // See test_avro_lib_union_record_bug
+            // https://github.com/risingwavelabs/risingwave/issues/17632
+            bail_not_implemented!(issue=17632, "Avro named type used in Union type: {:?}", schema)
+
+        }
+
+        // Logical types are currently banned. See https://github.com/risingwavelabs/risingwave/issues/17616
+
+/*
+        Schema::Uuid => "uuid".to_string(),
+        // Decimal is the most tricky. https://avro.apache.org/docs/1.11.1/specification/_print/#decimal
+        // - A decimal logical type annotates Avro bytes _or_ fixed types.
+        // - It has attributes `precision` and `scale`.
+        //  "For the purposes of schema resolution, two schemas that are decimal logical types match if their scales and precisions match."
+        // - When the physical type is fixed, it's a named type. And a schema containing 2 decimals is possible:
+        //   [
+        //     {"type":"fixed","name":"Decimal128","size":16,"logicalType":"decimal","precision":38,"scale":2},
+        //     {"type":"fixed","name":"Decimal256","size":32,"logicalType":"decimal","precision":50,"scale":2}
+        //   ]
+        //   In this case (a logical type's physical type is a named type), perhaps we should use the physical type's `name`.
+        Schema::Decimal(_) => "decimal".to_string(),
+        Schema::Date => "date".to_string(),
+        // Note: in Avro, the name style is "time-millis", etc.
+        // But in RisingWave (Postgres), it will require users to use quotes, i.e.,
+        // select (struct)."time-millis", (struct).time_millies from t;
+        // The latter might be more user-friendly.
+        Schema::TimeMillis => "time_millis".to_string(),
+        Schema::TimeMicros => "time_micros".to_string(),
+        Schema::TimestampMillis => "timestamp_millis".to_string(),
+        Schema::TimestampMicros => "timestamp_micros".to_string(),
+        Schema::LocalTimestampMillis => "local_timestamp_millis".to_string(),
+        Schema::LocalTimestampMicros => "local_timestamp_micros".to_string(),
+        Schema::Duration => "duration".to_string(),
+*/
+        Schema::Uuid
+        | Schema::Decimal(_)
+        | Schema::Date
+        | Schema::TimeMillis
+        | Schema::TimeMicros
+        | Schema::TimestampMillis
+        | Schema::TimestampMicros
+        | Schema::LocalTimestampMillis
+        | Schema::LocalTimestampMicros
+        | Schema::Duration => {
+            bail_not_implemented!(issue=17616, "Avro logicalType used in Union type: {:?}", schema)
+        }
+    })
 }

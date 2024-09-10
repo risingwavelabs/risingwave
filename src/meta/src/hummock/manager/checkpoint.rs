@@ -22,10 +22,10 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::hummock::hummock_version_checkpoint::{
-    StaleObjects as PbStaleObjects, StaleObjects,
+use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
+use risingwave_pb::hummock::{
+    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint,
 };
-use risingwave_pb::hummock::{PbHummockVersionArchive, PbHummockVersionCheckpoint};
 use thiserror_ext::AsReport;
 use tracing::warn;
 
@@ -53,15 +53,19 @@ impl HummockVersionCheckpoint {
             stale_objects: checkpoint
                 .stale_objects
                 .iter()
-                .map(|(version_id, objects)| (*version_id as HummockVersionId, objects.clone()))
+                .map(|(version_id, objects)| (HummockVersionId::new(*version_id), objects.clone()))
                 .collect(),
         }
     }
 
     pub fn to_protobuf(&self) -> PbHummockVersionCheckpoint {
         PbHummockVersionCheckpoint {
-            version: Some(self.version.to_protobuf()),
-            stale_objects: self.stale_objects.clone(),
+            version: Some(PbHummockVersion::from(&self.version)),
+            stale_objects: self
+                .stale_objects
+                .iter()
+                .map(|(version_id, objects)| (version_id.to_u64(), objects.clone()))
+                .collect(),
         }
     }
 }
@@ -197,13 +201,19 @@ impl HummockManager {
         );
         if self.env.opts.enable_hummock_data_archive {
             archive = Some(PbHummockVersionArchive {
-                version: Some(old_checkpoint.version.to_protobuf()),
+                version: Some(PbHummockVersion::from(&old_checkpoint.version)),
                 version_deltas: versioning
                     .hummock_version_deltas
                     .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
-                    .map(|(_, version_delta)| version_delta.to_protobuf())
+                    .map(|(_, version_delta)| version_delta.into())
                     .collect(),
             });
+        }
+        // Whenever data archive or time travel is enabled, we can directly discard reference to stale objects that will no longer be used.
+        if self.env.opts.enable_hummock_data_archive || self.time_travel_enabled().await {
+            let context_info = self.context_info.read().await;
+            let min_pinned_version_id = context_info.min_pinned_version_id();
+            stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
         }
         let new_checkpoint = HummockVersionCheckpoint {
             version: current_version.clone(),
@@ -227,8 +237,8 @@ impl HummockManager {
         let context_info = self.context_info.read().await;
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
-        // Not delete stale objects when archive is enabled
-        if !self.env.opts.enable_hummock_data_archive {
+        // Not delete stale objects when archive or time travel is enabled
+        if !self.env.opts.enable_hummock_data_archive && !self.time_travel_enabled().await {
             versioning.mark_objects_for_deletion(&context_info, &self.delete_object_tracker);
         }
 
@@ -239,7 +249,7 @@ impl HummockManager {
         timer.observe_duration();
         self.metrics
             .checkpoint_version_id
-            .set(new_checkpoint_id as i64);
+            .set(new_checkpoint_id.to_u64() as i64);
 
         Ok(new_checkpoint_id - old_checkpoint_id)
     }

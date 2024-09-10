@@ -358,14 +358,14 @@ SELECT 'maca' NOT LIKE 'm%aca' ESCAPE '%' AS "false";
 SELECT 'ma%a' LIKE 'm%a%%a' ESCAPE '%' AS "true";
 SELECT 'ma%a' NOT LIKE 'm%a%%a' ESCAPE '%' AS "false";
 
---@ SELECT 'bear' LIKE 'b_ear' ESCAPE '_' AS "true";
---@ SELECT 'bear' NOT LIKE 'b_ear' ESCAPE '_' AS "false";
---@ 
---@ SELECT 'be_r' LIKE 'b_e__r' ESCAPE '_' AS "true";
---@ SELECT 'be_r' NOT LIKE 'b_e__r' ESCAPE '_' AS "false";
---@ 
---@ SELECT 'be_r' LIKE '__e__r' ESCAPE '_' AS "false";
---@ SELECT 'be_r' NOT LIKE '__e__r' ESCAPE '_' AS "true";
+SELECT 'bear' LIKE 'b_ear' ESCAPE '_' AS "true";
+SELECT 'bear' NOT LIKE 'b_ear' ESCAPE '_' AS "false";
+
+SELECT 'be_r' LIKE 'b_e__r' ESCAPE '_' AS "true";
+SELECT 'be_r' NOT LIKE 'b_e__r' ESCAPE '_' AS "false";
+
+SELECT 'be_r' LIKE '__e__r' ESCAPE '_' AS "false";
+SELECT 'be_r' NOT LIKE '__e__r' ESCAPE '_' AS "true";
 
 
 --

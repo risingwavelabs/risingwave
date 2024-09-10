@@ -15,10 +15,13 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use compact_task::PbTaskStatus;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, SYS_CATALOG_START_ID};
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
@@ -73,7 +76,10 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<UnpinVersionBeforeResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .unpin_version_before(req.context_id, req.unpin_version_before)
+            .unpin_version_before(
+                req.context_id,
+                HummockVersionId::new(req.unpin_version_before),
+            )
             .await?;
         Ok(Response::new(UnpinVersionBeforeResponse { status: None }))
     }
@@ -82,10 +88,13 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         _request: Request<GetCurrentVersionRequest>,
     ) -> Result<Response<GetCurrentVersionResponse>, Status> {
-        let current_version = self.hummock_manager.get_current_version().await;
+        let current_version = self
+            .hummock_manager
+            .on_current_version(|version| version.into())
+            .await;
         Ok(Response::new(GetCurrentVersionResponse {
             status: None,
-            current_version: Some(current_version.to_protobuf()),
+            current_version: Some(current_version),
         }))
     }
 
@@ -101,7 +110,7 @@ impl HummockManagerService for HummockServiceImpl {
             ))
             .await?;
         Ok(Response::new(ReplayVersionDeltaResponse {
-            version: Some(version.to_protobuf()),
+            version: Some(version.into()),
             modified_compaction_groups: compaction_groups,
         }))
     }
@@ -112,7 +121,10 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<TriggerCompactionDeterministicResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .trigger_compaction_deterministic(req.version_id, req.compaction_groups)
+            .trigger_compaction_deterministic(
+                HummockVersionId::new(req.version_id),
+                req.compaction_groups,
+            )
             .await?;
         Ok(Response::new(TriggerCompactionDeterministicResponse {}))
     }
@@ -123,7 +135,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<DisableCommitEpochResponse>, Status> {
         let version = self.hummock_manager.disable_commit_epoch().await;
         Ok(Response::new(DisableCommitEpochResponse {
-            current_version: Some(version.to_protobuf()),
+            current_version: Some(version.into()),
         }))
     }
 
@@ -134,13 +146,17 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(req.start_id, req.num_limit, req.committed_epoch_limit)
+            .list_version_deltas(
+                HummockVersionId::new(req.start_id),
+                req.num_limit,
+                req.committed_epoch_limit,
+            )
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(PbHummockVersionDeltas {
                 version_deltas: version_deltas
-                    .iter()
-                    .map(HummockVersionDelta::to_protobuf)
+                    .into_iter()
+                    .map(HummockVersionDelta::into)
                     .collect(),
             }),
         };
@@ -234,8 +250,12 @@ impl HummockManagerService for HummockServiceImpl {
 
         // rewrite the key_range
         match request.key_range {
-            Some(key_range) => {
-                option.key_range = key_range;
+            Some(pb_key_range) => {
+                option.key_range = KeyRange {
+                    left: pb_key_range.left.into(),
+                    right: pb_key_range.right.into(),
+                    right_exclusive: pb_key_range.right_exclusive,
+                };
             }
 
             None => {
@@ -320,9 +340,9 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<TriggerFullGcRequest>,
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
-        self.hummock_manager.start_full_gc(Duration::from_secs(
-            request.into_inner().sst_retention_time_sec,
-        ))?;
+        let req = request.into_inner();
+        self.hummock_manager
+            .start_full_gc(Duration::from_secs(req.sst_retention_time_sec), req.prefix)?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
@@ -426,7 +446,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version = self.hummock_manager.pin_version(req.context_id).await?;
         Ok(Response::new(PinVersionResponse {
-            pinned_version: Some(version.to_protobuf()),
+            pinned_version: Some(version.into()),
         }))
     }
 
@@ -464,7 +484,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<RiseCtlGetCheckpointVersionResponse>, Status> {
         let checkpoint_version = self.hummock_manager.get_checkpoint_version().await;
         Ok(Response::new(RiseCtlGetCheckpointVersionResponse {
-            checkpoint_version: Some(checkpoint_version.to_protobuf()),
+            checkpoint_version: Some(checkpoint_version.into()),
         }))
     }
 
@@ -660,7 +680,10 @@ impl HummockManagerService for HummockServiceImpl {
         let request = request.into_inner();
         let ret = self
             .hummock_manager
-            .cancel_compact_task(request.task_id, request.task_status())
+            .cancel_compact_task(
+                request.task_id,
+                PbTaskStatus::try_from(request.task_status).unwrap(),
+            )
             .await?;
 
         let response = Response::new(CancelCompactTaskResponse { ret });
@@ -681,6 +704,17 @@ impl HummockManagerService for HummockServiceImpl {
             .list_change_log_epochs(table_id, min_epoch, max_count)
             .await;
         Ok(Response::new(ListChangeLogEpochsResponse { epochs }))
+    }
+
+    async fn get_version_by_epoch(
+        &self,
+        request: Request<GetVersionByEpochRequest>,
+    ) -> Result<Response<GetVersionByEpochResponse>, Status> {
+        let GetVersionByEpochRequest { epoch } = request.into_inner();
+        let version = self.hummock_manager.epoch_to_version(epoch).await?;
+        Ok(Response::new(GetVersionByEpochResponse {
+            version: Some(version.to_protobuf()),
+        }))
     }
 }
 

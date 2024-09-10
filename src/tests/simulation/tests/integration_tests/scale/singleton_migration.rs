@@ -43,27 +43,24 @@ async fn test_singleton_migration() -> Result<()> {
         ])
         .await?;
 
-    let id = fragment.id();
+    let mut all_worker_slots = fragment.all_worker_slots().into_iter().collect_vec();
+    let used_worker_slots = fragment.used_worker_slots();
 
-    let (mut all, used) = fragment.parallel_unit_usage();
+    assert_eq!(used_worker_slots.len(), 1);
 
-    assert_eq!(used.len(), 1);
+    all_worker_slots.shuffle(&mut thread_rng());
 
-    all.shuffle(&mut thread_rng());
-
-    let mut target_parallel_units = all
+    let mut target_worker_slots = all_worker_slots
         .into_iter()
-        .filter(|parallel_unit_id| !used.contains(parallel_unit_id));
+        .filter(|work_slot| !used_worker_slots.contains(work_slot));
 
-    let source_parallel_unit = used.iter().next().cloned().unwrap();
-    let target_parallel_unit = target_parallel_units.next().unwrap();
+    let source_slot = used_worker_slots.iter().exactly_one().cloned().unwrap();
+    let target_slot = target_worker_slots.next().unwrap();
 
-    assert_ne!(target_parallel_unit, source_parallel_unit);
+    assert_ne!(target_slot, source_slot);
 
     cluster
-        .reschedule(format!(
-            "{id}-[{source_parallel_unit}]+[{target_parallel_unit}]"
-        ))
+        .reschedule(fragment.reschedule([source_slot], [target_slot]))
         .await?;
 
     sleep(Duration::from_secs(3)).await;
@@ -82,13 +79,11 @@ async fn test_singleton_migration() -> Result<()> {
         .await?
         .assert_result_eq("10");
 
-    let source_parallel_unit = target_parallel_unit;
-    let target_parallel_unit = target_parallel_units.next().unwrap();
+    let source_slot = target_slot;
+    let target_slot = target_worker_slots.next().unwrap();
 
     cluster
-        .reschedule(format!(
-            "{id}-[{source_parallel_unit}]+[{target_parallel_unit}]"
-        ))
+        .reschedule(fragment.reschedule([source_slot], [target_slot]))
         .await?;
 
     sleep(Duration::from_secs(3)).await;

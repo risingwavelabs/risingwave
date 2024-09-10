@@ -55,7 +55,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { version = "0.6", default-features = false, features = ["std"] }
 hashbrown = "0.14"
 hex = "0.4.3"
-http = "0.2"
+http = "1"
 humantime = "2.1"
 hytra = { workspace = true }
 itertools = { workspace = true }
@@ -86,9 +86,11 @@ risingwave-fields-derive = { path = "./fields-derive" }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_metrics = { path = "./metrics" }
 risingwave_common_proc_macro = { workspace = true }
+risingwave_common_secret = { path = "./secret" }
 risingwave_error = { workspace = true }
 risingwave_license = { workspace = true }
 risingwave_pb = { workspace = true }
+risingwave_telemetry_event = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }
@@ -117,6 +119,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-retry = "0.3"
+tokio-util = { workspace = true }
 toml = "0.8"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
@@ -161,6 +164,10 @@ harness = false
 
 [[bench]]
 name = "bench_hash_key_encoding"
+harness = false
+
+[[bench]]
+name = "bench_column_aware_row_encoding"
 harness = false
 
 [[bench]]

@@ -79,6 +79,8 @@ impl MockOffsetGenExecutor {
                 lsn: None,
                 txid: None,
                 tx_usec: None,
+                change_lsn: None,
+                commit_lsn: None,
             },
             is_heartbeat: false,
         };
@@ -311,6 +313,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             added_actors: HashSet::new(),
             splits,
             pause: false,
+            subscriptions_to_add: vec![],
         }));
 
     tx.send_barrier(init_barrier);
@@ -379,6 +382,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqExecutor2".to_string(),
+        None,
         None,
         None,
     ));

@@ -12,13 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod parquet_file_reader;
+
 use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use icelake::types::DataContentType;
+use futures_async_stream::for_await;
+use iceberg::scan::FileScanTask;
+use iceberg::spec::TableMetadata;
 use itertools::Itertools;
+pub use parquet_file_reader::*;
 use risingwave_common::bail;
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
@@ -107,10 +113,37 @@ impl UnknownFields for IcebergProperties {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct IcebergFileScanTaskJsonStr(String);
+
+impl IcebergFileScanTaskJsonStr {
+    pub fn deserialize(&self) -> FileScanTask {
+        serde_json::from_str(&self.0).unwrap()
+    }
+
+    pub fn serialize(task: &FileScanTask) -> Self {
+        Self(serde_json::to_string(task).unwrap())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct TableMetadataJsonStr(String);
+
+impl TableMetadataJsonStr {
+    pub fn deserialize(&self) -> TableMetadata {
+        serde_json::from_str(&self.0).unwrap()
+    }
+
+    pub fn serialize(metadata: &TableMetadata) -> Self {
+        Self(serde_json::to_string(metadata).unwrap())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct IcebergSplit {
     pub split_id: i64,
     pub snapshot_id: i64,
-    pub files: Vec<String>,
+    pub table_meta: TableMetadataJsonStr,
+    pub files: Vec<IcebergFileScanTaskJsonStr>,
 }
 
 impl SplitMetaData for IcebergSplit {
@@ -165,65 +198,75 @@ pub enum IcebergTimeTravelInfo {
 impl IcebergSplitEnumerator {
     pub async fn list_splits_batch(
         &self,
+        schema: Schema,
         time_traval_info: Option<IcebergTimeTravelInfo>,
         batch_parallelism: usize,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
-        let table = self.config.load_table().await?;
+        let table = self.config.load_table_v2().await?;
+        let current_snapshot = table.metadata().current_snapshot();
+        if current_snapshot.is_none() {
+            // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
+            return Ok(vec![IcebergSplit {
+                split_id: 0,
+                snapshot_id: 0, // unused
+                table_meta: TableMetadataJsonStr::serialize(table.metadata()),
+                files: vec![],
+            }]);
+        }
+
         let snapshot_id = match time_traval_info {
             Some(IcebergTimeTravelInfo::Version(version)) => {
-                let Some(snapshot) = table.current_table_metadata().snapshot(version) else {
+                let Some(snapshot) = table.metadata().snapshot_by_id(version) else {
                     bail!("Cannot find the snapshot id in the iceberg table.");
                 };
-                snapshot.snapshot_id
+                snapshot.snapshot_id()
             }
             Some(IcebergTimeTravelInfo::TimestampMs(timestamp)) => {
-                match &table.current_table_metadata().snapshots {
-                    Some(snapshots) => {
-                        let snapshot = snapshots
-                            .iter()
-                            .filter(|snapshot| snapshot.timestamp_ms <= timestamp)
-                            .max_by_key(|snapshot| snapshot.timestamp_ms);
-                        match snapshot {
-                            Some(snapshot) => snapshot.snapshot_id,
-                            None => {
-                                // convert unix time to human readable time
-                                let time = chrono::DateTime::from_timestamp_millis(timestamp);
-                                if time.is_some() {
-                                    bail!("Cannot find a snapshot older than {}", time.unwrap());
-                                } else {
-                                    bail!("Cannot find a snapshot");
-                                }
-                            }
-                        }
-                    }
+                let snapshot = table
+                    .metadata()
+                    .snapshots()
+                    .filter(|snapshot| snapshot.timestamp().timestamp_millis() <= timestamp)
+                    .max_by_key(|snapshot| snapshot.timestamp().timestamp_millis());
+                match snapshot {
+                    Some(snapshot) => snapshot.snapshot_id(),
                     None => {
-                        bail!("Cannot find the snapshots in the iceberg table.");
+                        // convert unix time to human readable time
+                        let time = chrono::DateTime::from_timestamp_millis(timestamp);
+                        if time.is_some() {
+                            bail!("Cannot find a snapshot older than {}", time.unwrap());
+                        } else {
+                            bail!("Cannot find a snapshot");
+                        }
                     }
                 }
             }
-            None => match table.current_table_metadata().current_snapshot_id {
-                Some(snapshot_id) => snapshot_id,
-                None => bail!("Cannot find the current snapshot id in the iceberg table."),
-            },
+            None => {
+                assert!(current_snapshot.is_some());
+                current_snapshot.unwrap().snapshot_id()
+            }
         };
         let mut files = vec![];
-        for file in table
-            .data_files_of_snapshot(
-                table
-                    .current_table_metadata()
-                    .snapshot(snapshot_id)
-                    .expect("snapshot must exists"),
-            )
-            .await?
-        {
-            if file.content != DataContentType::Data {
-                bail!("Reading iceberg table with delete files is unsupported. Please try to compact the table first.");
-            }
-            files.push(file.file_path);
+
+        let scan = table
+            .scan()
+            .snapshot_id(snapshot_id)
+            .select(schema.names())
+            .build()
+            .map_err(|e| anyhow!(e))?;
+
+        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
+
+        #[for_await]
+        for task in file_scan_stream {
+            let task = task.map_err(|e| anyhow!(e))?;
+            files.push(IcebergFileScanTaskJsonStr::serialize(&task));
         }
+
+        let table_meta = TableMetadataJsonStr::serialize(table.metadata());
+
         let split_num = batch_parallelism;
         // evenly split the files into splits based on the parallelism.
         let split_size = files.len() / split_num;
@@ -235,6 +278,7 @@ impl IcebergSplitEnumerator {
             let split = IcebergSplit {
                 split_id: i as i64,
                 snapshot_id,
+                table_meta: table_meta.clone(),
                 files: files[start..end].to_vec(),
             };
             splits.push(split);

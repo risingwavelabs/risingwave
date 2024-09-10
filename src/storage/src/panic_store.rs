@@ -18,8 +18,9 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
@@ -93,15 +94,6 @@ impl LocalStateStore for PanicStateStore {
     type RevIter<'a> = PanicStateStoreIter<StateStoreIterItem>;
 
     #[allow(clippy::unused_async)]
-    async fn may_exist(
-        &self,
-        _key_range: TableKeyRange,
-        _read_options: ReadOptions,
-    ) -> StorageResult<bool> {
-        panic!("should not call may_exist from the state store!");
-    }
-
-    #[allow(clippy::unused_async)]
     async fn get(
         &self,
         _key: TableKey<Bytes>,
@@ -171,6 +163,10 @@ impl LocalStateStore for PanicStateStore {
     fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         panic!("should not operate on the panic state store!");
     }
+
+    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
+        panic!("should not operate on the panic state store!");
+    }
 }
 
 impl StateStore for PanicStateStore {
@@ -186,22 +182,9 @@ impl StateStore for PanicStateStore {
         async { panic!("should not await sync epoch from the panic state store!") }
     }
 
-    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {
-        panic!("should not update current epoch from the panic state store!");
-    }
-
-    #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
-        panic!("should not clear shared buffer from the panic state store!");
-    }
-
     #[allow(clippy::unused_async)]
     async fn new_local(&self, _option: NewLocalOptions) -> Self::Local {
         panic!("should not call new local from the panic state store");
-    }
-
-    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
-        panic!("should not call validate_read_epoch from the panic state store");
     }
 }
 

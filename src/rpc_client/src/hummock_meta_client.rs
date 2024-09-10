@@ -19,7 +19,8 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange, SyncResult,
 };
 use risingwave_pb::hummock::{
-    HummockSnapshot, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
+    HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest,
+    SubscribeCompactionEventResponse, VacuumTask,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -38,7 +39,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
     // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch(&self, epoch: HummockEpoch, sync_result: SyncResult) -> Result<()>;
-    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn trigger_manual_compaction(
         &self,
@@ -53,7 +53,11 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         total_object_count: u64,
         total_object_size: u64,
     ) -> Result<()>;
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()>;
+    async fn trigger_full_gc(
+        &self,
+        sst_retention_time_sec: u64,
+        prefix: Option<String>,
+    ) -> Result<()>;
 
     async fn subscribe_compaction_event(
         &self,
@@ -61,4 +65,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         UnboundedSender<SubscribeCompactionEventRequest>,
         BoxStream<'static, CompactionEventItem>,
     )>;
+
+    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion>;
 }

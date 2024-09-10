@@ -75,3 +75,8 @@ select * from enum_to_varchar order by id;
 ----
 1 happy
 2 ok
+
+query II
+select * from upper_orders order by id;
+----
+1 happy

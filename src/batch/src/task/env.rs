@@ -52,7 +52,7 @@ pub struct BatchEnvironment {
     /// Executor level metrics.
     executor_metrics: Arc<BatchExecutorMetrics>,
 
-    /// Compute client pool for grpc exchange.
+    /// Compute client pool for batch gRPC exchange.
     client_pool: ComputeClientPoolRef,
 
     /// Manages dml information.
@@ -112,14 +112,14 @@ impl BatchEnvironment {
                 BatchManagerMetrics::for_test(),
                 u64::MAX,
             )),
-            server_addr: "127.0.0.1:5688".parse().unwrap(),
+            server_addr: "127.0.0.1:2333".parse().unwrap(),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 MonitoredStorageMetrics::unused(),
             )),
             task_metrics: Arc::new(BatchTaskMetrics::for_test()),
-            client_pool: Arc::new(ComputeClientPool::default()),
+            client_pool: Arc::new(ComputeClientPool::for_test()),
             dml_manager: Arc::new(DmlManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
             executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),

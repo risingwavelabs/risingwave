@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(async_closure)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
@@ -24,7 +25,6 @@
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
-#![feature(lazy_cell)]
 #![feature(macro_metavar_expr)]
 #![feature(min_specialization)]
 #![feature(extend_one)]
@@ -44,6 +44,7 @@ risingwave_expr_impl::enable!();
 mod catalog;
 
 use std::collections::HashSet;
+use std::time::Duration;
 
 pub use catalog::TableCatalog;
 mod binder;
@@ -55,15 +56,17 @@ mod observer;
 pub mod optimizer;
 pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
+use pgwire::net::TcpKeepalive;
 pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
 use risingwave_common::config::{MetricLevel, OverrideConfig};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 pub use stream_fragmenter::build_graph;
 mod utils;
-pub use utils::{explain_stream_graph, WithOptions};
+pub use utils::{explain_stream_graph, WithOptions, WithOptionsSecResolved};
 pub(crate) mod error;
 mod meta_client;
 pub mod test_utils;
@@ -72,6 +75,7 @@ mod user;
 pub mod health_service;
 mod monitor;
 
+pub mod rpc;
 mod telemetry;
 
 use std::ffi::OsString;
@@ -95,6 +99,11 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "0.0.0.0:4566")]
     pub listen_addr: String,
 
+    /// The amount of time with no network activity after which the server will send a
+    /// TCP keepalive message to the client.
+    #[clap(long, env = "RW_TCP_KEEPALIVE_IDLE_SECS", default_value = "300")]
+    pub tcp_keepalive_idle_secs: usize,
+
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
@@ -117,10 +126,11 @@ pub struct FrontendOpts {
 
     #[clap(
         long,
+        alias = "health-check-listener-addr",
         env = "RW_HEALTH_CHECK_LISTENER_ADDR",
         default_value = "127.0.0.1:6786"
     )]
-    pub health_check_listener_addr: String,
+    pub frontend_rpc_listener_addr: String,
 
     /// The path of `risingwave.toml` configuration file.
     ///
@@ -141,6 +151,15 @@ pub struct FrontendOpts {
     #[clap(long, hide = true, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
+
+    /// The path of the temp secret file directory.
+    #[clap(
+        long,
+        hide = true,
+        env = "RW_TEMP_SECRET_FILE_DIR",
+        default_value = "./secrets"
+    )]
+    pub temp_secret_file_dir: String,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {
@@ -164,13 +183,22 @@ use std::pin::Pin;
 
 use pgwire::pg_protocol::TlsConfig;
 
+use crate::session::SESSION_MANAGER;
+
 /// Start frontend
-pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: FrontendOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
+        let tcp_keepalive =
+            TcpKeepalive::new().with_time(Duration::from_secs(opts.tcp_keepalive_idle_secs as _));
+
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
+        SESSION_MANAGER.get_or_init(|| session_mgr.clone());
         let redact_sql_option_keywords = Arc::new(
             session_mgr
                 .env()
@@ -180,11 +208,14 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 .map(|s| s.to_lowercase())
                 .collect::<HashSet<_>>(),
         );
+
         pg_serve(
             &listen_addr,
-            session_mgr,
+            tcp_keepalive,
+            session_mgr.clone(),
             TlsConfig::new_default(),
             Some(redact_sql_option_keywords),
+            shutdown,
         )
         .await
         .unwrap()

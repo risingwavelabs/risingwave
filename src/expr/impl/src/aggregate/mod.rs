@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod approx_count_distinct;
+mod approx_percentile;
 mod array_agg;
 mod bit_and;
 mod bit_or;

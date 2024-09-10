@@ -12,70 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::mem;
 
-use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
+use iceberg::scan::FileScanTask;
+use iceberg::spec::TableMetadata;
+use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
 use risingwave_connector::sink::iceberg::IcebergConfig;
+use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
+use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
+use risingwave_connector::WithOptionsSecResolved;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::BatchError;
 use crate::executor::{DataChunk, Executor};
-
-/// Create a iceberg scan executor.
-///
-/// # Examples
-///
-/// ```
-/// use futures_async_stream::for_await;
-/// use risingwave_batch::executor::{Executor, FileSelector, IcebergScanExecutor};
-/// use risingwave_common::catalog::{Field, Schema};
-/// use risingwave_common::types::DataType;
-/// use risingwave_connector::sink::iceberg::IcebergConfig;
-///
-/// #[tokio::test]
-/// async fn test_iceberg_scan() {
-///     let iceberg_scan_executor = IcebergScanExecutor::new(
-///         IcebergConfig {
-///             database_name: Some("demo_db".into()),
-///             table_name: "demo_table".into(),
-///             catalog_type: Some("storage".into()),
-///             path: "s3a://hummock001/".into(),
-///             endpoint: Some("http://127.0.0.1:9301".into()),
-///             access_key: "hummockadmin".into(),
-///             secret_key: "hummockadmin".into(),
-///             region: Some("us-east-1".into()),
-///             ..Default::default()
-///         },
-///         None,
-///         FileSelector::select_all(),
-///         1024,
-///         Schema::new(vec![
-///             Field::with_name(DataType::Int64, "seq_id"),
-///             Field::with_name(DataType::Int64, "user_id"),
-///             Field::with_name(DataType::Varchar, "user_name"),
-///         ]),
-///         "iceberg_scan".into(),
-///     );
-///
-///     let stream = Box::new(iceberg_scan_executor).execute();
-///     #[for_await]
-///     for chunk in stream {
-///         let chunk = chunk.unwrap();
-///         println!("{:?}", chunk);
-///     }
-/// }
-/// ```
+use crate::task::BatchTaskContext;
 
 pub struct IcebergScanExecutor {
     iceberg_config: IcebergConfig,
+    #[allow(dead_code)]
     snapshot_id: Option<i64>,
-    file_selector: FileSelector,
+    table_meta: TableMetadata,
+    file_scan_tasks: Vec<FileScanTask>,
     batch_size: usize,
-
     schema: Schema,
     identity: String,
 }
@@ -98,7 +62,8 @@ impl IcebergScanExecutor {
     pub fn new(
         iceberg_config: IcebergConfig,
         snapshot_id: Option<i64>,
-        file_selector: FileSelector,
+        table_meta: TableMetadata,
+        file_scan_tasks: Vec<FileScanTask>,
         batch_size: usize,
         schema: Schema,
         identity: String,
@@ -106,7 +71,8 @@ impl IcebergScanExecutor {
         Self {
             iceberg_config,
             snapshot_id,
-            file_selector,
+            table_meta,
+            file_scan_tasks,
             batch_size,
             schema,
             identity,
@@ -114,40 +80,23 @@ impl IcebergScanExecutor {
     }
 
     #[try_stream(ok = DataChunk, error = BatchError)]
-    async fn do_execute(self: Box<Self>) {
-        let table = self.iceberg_config.load_table_v2().await?;
+    async fn do_execute(mut self: Box<Self>) {
+        let table = self
+            .iceberg_config
+            .load_table_v2_with_metadata(self.table_meta)
+            .await?;
+        let data_types = self.schema.data_types();
 
-        let snapshot_id = if let Some(snapshot_id) = self.snapshot_id {
-            snapshot_id
-        } else {
-            table
-                .metadata()
-                .current_snapshot()
-                .ok_or_else(|| {
-                    BatchError::Internal(anyhow!("No snapshot found for iceberg table"))
-                })?
-                .snapshot_id()
+        let file_scan_tasks = mem::take(&mut self.file_scan_tasks);
+
+        let file_scan_stream = {
+            #[try_stream]
+            async move {
+                for file_scan_task in file_scan_tasks {
+                    yield file_scan_task;
+                }
+            }
         };
-        let scan = table
-            .scan()
-            .snapshot_id(snapshot_id)
-            .with_batch_size(Some(self.batch_size))
-            .select(self.schema.names())
-            .build()
-            .map_err(|e| BatchError::Internal(anyhow!(e)))?;
-
-        let file_selector = self.file_selector.clone();
-        let file_scan_stream = scan
-            .plan_files()
-            .await
-            .map_err(BatchError::Iceberg)?
-            .filter(move |task| {
-                let res = task
-                    .as_ref()
-                    .map(|task| file_selector.select(task.data_file_path()))
-                    .unwrap_or(true);
-                future::ready(res)
-            });
 
         let reader = table
             .reader_builder()
@@ -162,39 +111,72 @@ impl IcebergScanExecutor {
         for record_batch in record_batch_stream {
             let record_batch = record_batch.map_err(BatchError::Iceberg)?;
             let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-            debug_assert_eq!(chunk.data_types(), self.schema.data_types());
+            debug_assert_eq!(chunk.data_types(), data_types);
             yield chunk;
         }
     }
 }
 
-#[derive(Clone)]
-pub enum FileSelector {
-    // File paths to be scanned by this executor are specified.
-    FileList(Vec<String>),
-    // Data files to be scanned by this executor could be calculated by Hash(file_path) % num_tasks == task_id.
-    // task_id, num_tasks
-    Hash(usize, usize),
-}
+pub struct IcebergScanExecutorBuilder {}
 
-impl FileSelector {
-    pub fn select_all() -> Self {
-        FileSelector::Hash(0, 1)
-    }
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        source: &ExecutorBuilder<'_, C>,
+        inputs: Vec<BoxedExecutor>,
+    ) -> crate::error::Result<BoxedExecutor> {
+        ensure!(
+            inputs.is_empty(),
+            "Iceberg source should not have input executor!"
+        );
+        let source_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::IcebergScan
+        )?;
 
-    pub fn select(&self, path: &str) -> bool {
-        match self {
-            FileSelector::FileList(paths) => paths.contains(&path.to_string()),
-            FileSelector::Hash(task_id, num_tasks) => {
-                let hash = Self::hash_str_to_usize(path);
-                hash % num_tasks == *task_id
-            }
+        // prepare connector source
+        let options_with_secret = WithOptionsSecResolved::new(
+            source_node.with_properties.clone(),
+            source_node.secret_refs.clone(),
+        );
+        let config = ConnectorProperties::extract(options_with_secret.clone(), false)
+            .map_err(BatchError::connector)?;
+
+        let split_list = source_node
+            .split
+            .iter()
+            .map(|split| SplitImpl::restore_from_bytes(split).unwrap())
+            .collect_vec();
+        assert_eq!(split_list.len(), 1);
+
+        let fields = source_node
+            .columns
+            .iter()
+            .map(|prost| {
+                let column_desc = prost.column_desc.as_ref().unwrap();
+                let data_type = DataType::from(column_desc.column_type.as_ref().unwrap());
+                let name = column_desc.name.clone();
+                Field::with_name(data_type, name)
+            })
+            .collect();
+        let schema = Schema::new(fields);
+
+        if let ConnectorProperties::Iceberg(iceberg_properties) = config
+            && let SplitImpl::Iceberg(split) = &split_list[0]
+        {
+            let iceberg_properties: IcebergProperties = *iceberg_properties;
+            let split: IcebergSplit = split.clone();
+            Ok(Box::new(IcebergScanExecutor::new(
+                iceberg_properties.to_iceberg_config(),
+                Some(split.snapshot_id),
+                split.table_meta.deserialize(),
+                split.files.into_iter().map(|x| x.deserialize()).collect(),
+                source.context.get_config().developer.chunk_size,
+                schema,
+                source.plan_node().get_identity().clone(),
+            )))
+        } else {
+            unreachable!()
         }
-    }
-
-    pub fn hash_str_to_usize(s: &str) -> usize {
-        let mut hasher = DefaultHasher::new();
-        s.hash(&mut hasher);
-        hasher.finish() as usize
     }
 }

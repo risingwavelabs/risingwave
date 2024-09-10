@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Register a schema to schema registry
+#
+# Usage: sr_register <subject> <schema>
+#
+# https://docs.confluent.io/platform/current/schema-registry/develop/api.html#post--subjects-(string-%20subject)-versions
+
+# Validate arguments
+if [[ $# -ne 2 ]]; then
+    echo "Usage: sr_register <subject> <schema>"
+    exit 1
+fi
+
+subject="$1"
+schema="$2"
+
+
+if [[ -z $subject || -z $schema ]]; then
+    echo "Error: Arguments cannot be empty"
+    exit 1
+fi
+
+echo "$schema" | jq '{"schema": tojson}' \
+| curl -X POST -H 'content-type:application/vnd.schemaregistry.v1+json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/${subject}/versions"

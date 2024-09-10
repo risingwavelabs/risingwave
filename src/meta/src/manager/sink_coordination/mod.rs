@@ -17,7 +17,7 @@ mod manager;
 
 use futures::stream::BoxStream;
 pub use manager::SinkCoordinatorManager;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::SinkParam;
 use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse};
 use tokio::sync::mpsc::Sender;

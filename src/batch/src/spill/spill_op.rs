@@ -22,9 +22,9 @@ use futures_util::AsyncReadExt;
 use opendal::layers::RetryLayer;
 use opendal::services::{Fs, Memory};
 use opendal::Operator;
-use prost::Message;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::data::DataChunk as PbDataChunk;
+use risingwave_pb::Message;
 use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use twox_hash::XxHash64;
@@ -100,8 +100,8 @@ impl SpillOp {
         Ok(self
             .op
             .writer_with(name)
-            .buffer(DEFAULT_IO_BUFFER_SIZE)
             .concurrent(DEFAULT_IO_CONCURRENT_TASK)
+            .chunk(DEFAULT_IO_BUFFER_SIZE)
             .await?)
     }
 
@@ -109,7 +109,7 @@ impl SpillOp {
         Ok(self
             .op
             .reader_with(name)
-            .buffer(DEFAULT_IO_BUFFER_SIZE)
+            .chunk(DEFAULT_IO_BUFFER_SIZE)
             .await?)
     }
 
@@ -123,7 +123,8 @@ impl SpillOp {
     /// [proto_bytes]
     /// ```
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn read_stream(mut reader: opendal::Reader, spill_metrics: Arc<BatchSpillMetrics>) {
+    pub async fn read_stream(reader: opendal::Reader, spill_metrics: Arc<BatchSpillMetrics>) {
+        let mut reader = reader.into_futures_async_read(..).await?;
         let mut buf = [0u8; 4];
         loop {
             if let Err(err) = reader.read_exact(&mut buf).await {

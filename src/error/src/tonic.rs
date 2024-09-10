@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod extra;
+
 use std::borrow::Cow;
 use std::error::Error;
 use std::sync::Arc;
@@ -24,6 +26,7 @@ use tonic::metadata::{MetadataMap, MetadataValue};
 const ERROR_KEY: &str = "risingwave-error-bin";
 
 /// The service name that the error is from. Used to provide better error message.
+// TODO: also make it a field of `Extra`?
 type ServiceName = Cow<'static, str>;
 
 /// The error produced by the gRPC server and sent to the client on the wire.
@@ -31,6 +34,7 @@ type ServiceName = Cow<'static, str>;
 struct ServerError {
     error: serde_error::Error,
     service_name: Option<ServiceName>,
+    extra: extra::Extra,
 }
 
 impl std::fmt::Display for ServerError {
@@ -42,6 +46,13 @@ impl std::fmt::Display for ServerError {
 impl std::error::Error for ServerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.error.source()
+    }
+
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        // Provide self so that `ErrorIsFromTonicServerImpl` can work.
+        request.provide_ref(self);
+        // Provide extra fields.
+        self.extra.provide(request);
     }
 }
 
@@ -55,6 +66,7 @@ where
     let source = ServerError {
         error: serde_error::Error::new(error),
         service_name,
+        extra: extra::Extra::new(error),
     };
     let serialized = bincode::serialize(&source).unwrap();
 
@@ -92,6 +104,21 @@ where
     /// The source chain is preserved by pairing with [`TonicStatusWrapper`].
     pub fn to_status_unnamed(&self, code: tonic::Code) -> tonic::Status {
         to_status(self, code, None)
+    }
+}
+
+#[easy_ext::ext(ErrorIsFromTonicServerImpl)]
+impl<T> T
+where
+    T: ?Sized + std::error::Error,
+{
+    /// Returns whether the error is from the implementation of a tonic server, i.e., created
+    /// with [`ToTonicStatus::to_status`].
+    ///
+    /// This does not count errors initiated from the library, typically connection issues.
+    /// As a result, this function can be used to decide whether an error should be retried.
+    pub fn is_from_tonic_server_impl(&self) -> bool {
+        std::error::request_ref::<ServerError>(self).is_some()
     }
 }
 
@@ -204,6 +231,13 @@ impl std::error::Error for TonicStatusWrapper {
         // Delegate to `self.inner` as if we're transparent.
         self.inner.source()
     }
+
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        // The source error, typically a `ServerError`, may provide additional information through `extra`.
+        if let Some(source) = self.source() {
+            source.provide(request);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -228,7 +262,7 @@ mod tests {
         };
 
         let server_status = original.to_status(tonic::Code::Internal, "test");
-        let body = server_status.to_http();
+        let body = server_status.into_http();
         let client_status = tonic::Status::from_header_map(body.headers()).unwrap();
 
         let wrapper = TonicStatusWrapper::new(client_status);

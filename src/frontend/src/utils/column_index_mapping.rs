@@ -20,7 +20,8 @@ use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::property::{
-    Distribution, FunctionalDependency, FunctionalDependencySet, Order, RequiredDist,
+    Distribution, FunctionalDependency, FunctionalDependencySet, MonotonicityMap, Order,
+    RequiredDist,
 };
 
 /// Extension trait for [`ColIndexMapping`] to rewrite frontend structures.
@@ -185,6 +186,16 @@ impl ColIndexMapping {
             }
         }
         ret
+    }
+
+    pub fn rewrite_monotonicity_map(&self, map: &MonotonicityMap) -> MonotonicityMap {
+        let mut new_map = MonotonicityMap::new();
+        for (i, monotonicity) in map.iter() {
+            if let Some(mapped_i) = self.try_map(i) {
+                new_map.insert(mapped_i, monotonicity);
+            }
+        }
+        new_map
     }
 }
 

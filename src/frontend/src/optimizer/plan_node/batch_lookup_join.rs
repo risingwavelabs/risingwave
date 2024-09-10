@@ -16,9 +16,10 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnId, TableDesc};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
+use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
+use super::utils::{childless_record, to_pb_time_travel_as_of, Distill};
 use super::{generic, ExprRewritable};
 use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
@@ -54,6 +55,8 @@ pub struct BatchLookupJoin {
     /// If `distributed_lookup` is true, it will generate `DistributedLookupJoinNode` for
     /// `ToBatchPb`. Otherwise, it will generate `LookupJoinNode`.
     distributed_lookup: bool,
+
+    as_of: Option<AsOf>,
 }
 
 impl BatchLookupJoin {
@@ -64,6 +67,7 @@ impl BatchLookupJoin {
         right_output_column_ids: Vec<ColumnId>,
         lookup_prefix_len: usize,
         distributed_lookup: bool,
+        as_of: Option<AsOf>,
     ) -> Self {
         // We cannot create a `BatchLookupJoin` without any eq keys. We require eq keys to do the
         // lookup.
@@ -79,6 +83,7 @@ impl BatchLookupJoin {
             right_output_column_ids,
             lookup_prefix_len,
             distributed_lookup,
+            as_of,
         }
     }
 
@@ -157,6 +162,7 @@ impl PlanTreeNodeUnary for BatchLookupJoin {
             self.right_output_column_ids.clone(),
             self.lookup_prefix_len,
             self.distributed_lookup,
+            self.as_of.clone(),
         )
     }
 }
@@ -231,6 +237,7 @@ impl TryToBatchPb for BatchLookupJoin {
                 output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
                 null_safe: self.eq_join_predicate.null_safes(),
                 lookup_prefix_len: self.lookup_prefix_len as u32,
+                as_of: to_pb_time_travel_as_of(&self.as_of)?,
             })
         } else {
             NodeBody::LocalLookupJoin(LocalLookupJoinNode {
@@ -263,6 +270,7 @@ impl TryToBatchPb for BatchLookupJoin {
                 worker_nodes: vec![], // To be filled in at local.rs
                 null_safe: self.eq_join_predicate.null_safes(),
                 lookup_prefix_len: self.lookup_prefix_len as u32,
+                as_of: to_pb_time_travel_as_of(&self.as_of)?,
             })
         })
     }

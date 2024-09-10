@@ -15,7 +15,7 @@
 use std::fmt::Debug;
 
 use risingwave_common::array::{Array, BoolArray};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::row::Row;
 use risingwave_common::types::{Scalar, ScalarRef, ScalarRefImpl};
 use risingwave_expr::function;

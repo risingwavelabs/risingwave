@@ -14,7 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
-use risingwave_pb::meta::PbThrottleTarget;
+use risingwave_pb::meta::ThrottleTarget as PbThrottleTarget;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
@@ -42,7 +42,7 @@ pub async fn handle_alter_streaming_rate_limit(
         PbThrottleTarget::Mv => {
             let reader = session.env().catalog_reader().read_guard();
             let (table, schema_name) =
-                reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+                reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
             if table.table_type != TableType::MaterializedView {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "\"{table_name}\" is not a materialized view",
@@ -62,15 +62,28 @@ pub async fn handle_alter_streaming_rate_limit(
         PbThrottleTarget::TableWithSource => {
             let reader = session.env().catalog_reader().read_guard();
             let (table, schema_name) =
-                reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             // Get the corresponding source catalog.
             let source_id = if let Some(id) = table.associated_source_id {
                 id.table_id()
             } else {
-                bail!("ALTER STREAMING_RATE_LIMIT is not for table without source")
+                bail!("ALTER SOURCE_RATE_LIMIT is not for table without source")
             };
             (StatementType::ALTER_SOURCE, source_id)
+        }
+        PbThrottleTarget::CdcTable => {
+            let reader = session.env().catalog_reader().read_guard();
+            let (table, schema_name) =
+                reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
+            if table.table_type != TableType::Table {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "\"{table_name}\" is not a table",
+                ))
+                .into());
+            }
+            session.check_privilege_for_drop_alter(schema_name, &**table)?;
+            (StatementType::ALTER_TABLE, table.id.table_id)
         }
         _ => bail!("Unsupported throttle target: {:?}", kind),
     };
