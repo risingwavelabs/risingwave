@@ -535,10 +535,8 @@ mod tests {
             );
         }
 
-        let mut version = HummockVersion {
-            id: HummockVersionId::new(123),
-            ..Default::default()
-        };
+        let mut version = HummockVersion::default();
+        version.id = HummockVersionId::new(123);
 
         for cg in 1..3 {
             version.levels.insert(

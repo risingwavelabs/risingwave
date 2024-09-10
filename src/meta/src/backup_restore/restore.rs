@@ -288,9 +288,10 @@ mod tests {
         let snapshot = MetaSnapshot {
             id: opts.meta_snapshot_id,
             metadata: ClusterMetadata {
-                hummock_version: HummockVersion {
-                    id: HummockVersionId::new(123),
-                    ..Default::default()
+                hummock_version: {
+                    let mut version = HummockVersion::default();
+                    version.id = HummockVersionId::new(123);
+                    version
                 },
                 system_param: system_param.clone(),
                 ..Default::default()
@@ -470,9 +471,10 @@ mod tests {
                         memcomparable::to_vec(&"some_value_2".to_string()).unwrap(),
                     ),
                 ]),
-                hummock_version: HummockVersion {
-                    id: HummockVersionId::new(123),
-                    ..Default::default()
+                hummock_version: {
+                    let mut version = HummockVersion::default();
+                    version.id = HummockVersionId::new(123);
+                    version
                 },
                 system_param: system_param.clone(),
                 ..Default::default()
