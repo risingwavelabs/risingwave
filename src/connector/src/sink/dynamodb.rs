@@ -55,6 +55,11 @@ pub struct DynamoDbConfig {
     #[serde(rename = "table", alias = "dynamodb.table")]
     pub table: String,
 
+    #[serde(rename = "dynamodb.max_batch_rows", default = "default_max_batch_rows")]
+    #[serde_as(as = "DisplayFromStr")]
+    #[deprecated]
+    pub max_batch_rows: usize,
+
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
 
@@ -79,6 +84,10 @@ fn default_max_batch_item_nums() -> usize {
 
 fn default_max_future_send_nums() -> usize {
     256
+}
+
+fn default_max_batch_rows() -> usize {
+    1024
 }
 
 impl DynamoDbConfig {
