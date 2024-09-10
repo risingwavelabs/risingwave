@@ -248,7 +248,6 @@ impl Scheduler {
         assert_eq!(scheduled_worker_slots.len(), parallelism);
 
         // Build the default hash mapping uniformly.
-        // TODO(var-vnode): use vnode count from config
         let default_hash_mapping =
             WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, vnode_count);
 
