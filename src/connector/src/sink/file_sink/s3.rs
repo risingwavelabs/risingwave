@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::{BTreeMap, HashMap};
-use std::time::Duration;
 
 use anyhow::anyhow;
 use opendal::layers::{LoggingLayer, RetryLayer};

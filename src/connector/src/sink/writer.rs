@@ -40,7 +40,16 @@ pub trait SinkWriter: Send + 'static {
     /// Write a stream chunk to sink
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
-    /// Write a stream chunk to sink and try close writer according to batching strategy.
+    // Writes a stream chunk to the sink and tries to close the writer
+    /// according to the batching strategy.
+    ///
+    /// This method writes a chunk and attempts to complete the file write
+    /// based on the writer's internal batching strategy. If the write is
+    /// successful, it returns the last chunk_id that was written;
+    /// otherwise, it returns None.
+    ///
+    ///
+    /// This method is currently intended for use by the file sink's writer.
     async fn write_batch_and_try_finish(
         &mut self,
         _chunk: StreamChunk,
@@ -49,7 +58,12 @@ pub trait SinkWriter: Send + 'static {
         Ok(None)
     }
 
-    /// try finish
+    /// Attempts to complete the file write using the writer's internal batching strategy.
+    ///
+    /// If the write is completed, returns the last chunk_id that was written;
+    /// otherwise, returns None.
+    ///
+    /// This method is currently intended for use by the file sink's writer.
     async fn try_finish(&mut self) -> Result<Option<usize>> {
         Ok(None)
     }

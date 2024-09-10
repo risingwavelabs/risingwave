@@ -14,14 +14,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
-use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use arrow_schema_iceberg::SchemaRef;
 use async_trait::async_trait;
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{TimeZone, Utc};
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties;
@@ -132,17 +131,16 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
             self.op.clone(),
             &self.path,
             self.schema.clone(),
-            self.is_append_only,
             writer_param.executor_id,
             self.format_desc.encode.clone(),
             self.engine_type.clone(),
             self.batching_strategy.clone(),
         )?;
-        let commit_checkpoint_interval = NonZeroU64::new(1).unwrap();
+        let no_batching_strategy_defined = writer.no_batching_strategy_defined();
         Ok(BatchingLogSinkerOf::new(
             writer,
+            no_batching_strategy_defined,
             writer_param.sink_metrics,
-            commit_checkpoint_interval,
         ))
     }
 }
@@ -176,7 +174,6 @@ pub struct OpenDalSinkWriter {
     schema: SchemaRef,
     operator: Operator,
     sink_writer: Option<FileWriterEnum>,
-    is_append_only: bool,
     write_path: String,
     epoch: Option<u64>,
     executor_id: u64,
@@ -237,11 +234,21 @@ impl SinkWriter for OpenDalSinkWriter {
         Ok(())
     }
 
-    /// For the file sink, currently, the sink decoupling feature is not enabled.
-    /// When a checkpoint arrives, the force commit is performed to write the data to the file.
-    /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
-    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        unreachable!()
+    /// Currently, if no batching strategy is defined, the system will still forcibly finish writing the file when the checkpoint barrier arrives.
+    /// If a batching strategy is defined, it effectively enables sink decoupling, the file is no longer forcibly written when the checkpoint barrier arrive.
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
+        if self.no_batching_strategy_defined()
+            && is_checkpoint
+            && let Some(sink_writer) = self.sink_writer.take()
+        {
+            match sink_writer {
+                FileWriterEnum::ParquetFileWriter(w) => {
+                    let _ = w.close().await?;
+                }
+            };
+        }
+
+        Ok(())
     }
 
     /// For the file sink, currently, the sink decoupling feature is not enabled.
@@ -260,7 +267,6 @@ impl OpenDalSinkWriter {
         operator: Operator,
         write_path: &str,
         rw_schema: Schema,
-        is_append_only: bool,
         executor_id: u64,
         encode_type: SinkEncode,
         engine_type: EngineType,
@@ -272,7 +278,6 @@ impl OpenDalSinkWriter {
             write_path: write_path.to_string(),
             operator,
             sink_writer: None,
-            is_append_only,
             epoch: None,
             executor_id,
 
@@ -289,10 +294,10 @@ impl OpenDalSinkWriter {
     pub fn partition_granularity(&self) -> String {
         match self.created_time.duration_since(UNIX_EPOCH) {
             Ok(duration) => {
-                let datetime: DateTime<Utc> = DateTime::from_utc(
-                    NaiveDateTime::from_timestamp(duration.as_secs() as i64, 0),
-                    Utc,
-                );
+                let datetime = Utc
+                    .timestamp_opt(duration.as_secs() as i64, 0)
+                    .single()
+                    .expect("Failed to convert timestamp to DateTime<Utc>");
                 match self.batching_strategy.partition_granularity {
                     PartitionGranularity::None => "".to_string(),
                     PartitionGranularity::Day => datetime.format("%Y-%m-%d/").to_string(),
@@ -302,6 +307,12 @@ impl OpenDalSinkWriter {
             }
             Err(_) => "Invalid time".to_string(),
         }
+    }
+
+    /// If no batching conditions are defined, continue to write to the file when the checkpoint barrier has not yet arrived.
+    pub fn no_batching_strategy_defined(&self) -> bool {
+        self.batching_strategy.max_row_count.is_none()
+            && self.batching_strategy.rollover_seconds.is_none()
     }
 
     /// Attempts to finalize the writing process based on a specified rollover interval.
@@ -396,7 +407,7 @@ impl OpenDalSinkWriter {
 
             return Ok(true);
         }
-        return Ok(false);
+        Ok(false)
     }
 
     fn duration_seconds_since_writer_created(&self) -> usize {
@@ -494,7 +505,7 @@ impl OpenDalSinkWriter {
                 w.write(&batch).await?;
                 self.current_bached_row_num += batch_row_nums;
                 let res = self.try_finish_write_via_batched_rows().await?;
-                return Ok(res);
+                Ok(res)
             }
         }
     }

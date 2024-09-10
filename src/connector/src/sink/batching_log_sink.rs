@@ -12,17 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroU64;
-use std::pin::pin;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use futures::future::{select, Either};
-use rw_futures_util::drop_either_future;
 
-use super::file_sink::opendal_sink::BatchingStrategy;
-use super::log_store::{ChunkId, DeliveryFutureManager};
-use super::writer::AsyncTruncateSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{LogSinker, Result, SinkLogReader, SinkMetrics};
@@ -37,22 +30,18 @@ pub fn default_commit_checkpoint_interval() -> u64 {
 /// we delay the checkpoint barrier to make commits less frequent.
 pub struct BatchingLogSinkerOf<W> {
     writer: W,
+    no_batching_strategy_defined: bool,
     sink_metrics: SinkMetrics,
-    commit_checkpoint_interval: NonZeroU64,
 }
 
 impl<W> BatchingLogSinkerOf<W> {
     /// Create a log sinker with a commit checkpoint interval. The sinker should be used with a
     /// decouple log reader `KvLogStoreReader`.
-    pub fn new(
-        writer: W,
-        sink_metrics: SinkMetrics,
-        commit_checkpoint_interval: NonZeroU64,
-    ) -> Self {
+    pub fn new(writer: W, no_batching_strategy_defined: bool, sink_metrics: SinkMetrics) -> Self {
         BatchingLogSinkerOf {
             writer,
+            no_batching_strategy_defined,
             sink_metrics,
-            commit_checkpoint_interval,
         }
     }
 }
@@ -123,30 +112,51 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for BatchingLogSinkerOf<W> {
                             sink_writer.abort().await?;
                             return Err(e);
                         }
+                        // The file has been successfully written and is now visible to downstream consumers.
+                        // Truncate the file to remove the specified `chunk_id` and any preceding content.
                         Ok(Some(chunk_id)) => {
-                            // The file has been successfully written and is now visible to downstream consumers.
-                            // Truncate the file to remove the specified `chunk_id` and any preceding content.
                             log_reader.truncate(TruncateOffset::Chunk {
                                 epoch: (epoch),
                                 chunk_id: (chunk_id),
                             })?;
                         }
-                        Ok(None) => {
-                            // The file has not been  written  into downstream file system.
-                        }
+                        // The file has not been  written into downstream file system.
+                        Ok(None) => {}
                     }
                 }
-                LogStoreReadItem::Barrier { .. } => {
+                LogStoreReadItem::Barrier { is_checkpoint } => {
                     let prev_epoch = match state {
                         LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
                         _ => unreachable!("epoch must have begun before handling barrier"),
                     };
-                    match sink_writer.try_finish().await? {
-                        Some(committed_chunk_id) => log_reader.truncate(TruncateOffset::Chunk {
-                            epoch: (epoch),
-                            chunk_id: (committed_chunk_id),
-                        })?,
-                        None => {}
+
+                    match self.no_batching_strategy_defined {
+                        true => {
+                            // // The current sink does not specifies a batching strategy, so it will force finish write files when the checkpoint barrier arrives.
+                            if is_checkpoint {
+                                {
+                                    let start_time = Instant::now();
+                                    sink_writer.barrier(true).await?;
+                                    sink_metrics
+                                        .sink_commit_duration_metrics
+                                        .observe(start_time.elapsed().as_millis() as f64);
+                                    log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                                }
+                            } else {
+                                sink_writer.barrier(false).await?;
+                            }
+                        }
+                        false => {
+                            // The current sink specifies a batching strategy, which means that sink decoupling is enabled; therefore, there is no need to forcibly write to the file when the checkpoint barrier arrives.
+                            // When the barrier arrives, call the writer's try_finish interface to check if the file write can be completed.
+                            // If it is completed, which means the file is visible in the downstream file system, thentruncate the file in the log store; otherwise, do nothing.
+                            if let Some(committed_chunk_id) = sink_writer.try_finish().await? {
+                                log_reader.truncate(TruncateOffset::Chunk {
+                                    epoch: (epoch),
+                                    chunk_id: (committed_chunk_id),
+                                })?
+                            };
+                        }
                     };
 
                     state = LogConsumerState::BarrierReceived { prev_epoch }
