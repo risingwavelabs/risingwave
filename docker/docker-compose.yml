@@ -60,7 +60,7 @@ services:
       ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
       RW_TELEMETRY_TYPE: ${RW_TELEMETRY_TYPE:-"docker-compose"}
       RW_SECRET_STORE_PRIVATE_KEY_HEX: ${RW_SECRET_STORE_PRIVATE_KEY_HEX:-0123456789abcdef}
-      RW_LICENSE_KEY: ${RW_LICENSE_KEY:-""}
+      RW_LICENSE_KEY: ${RW_LICENSE_KEY:-}
     container_name: risingwave-standalone
     healthcheck:
       test:
@@ -113,7 +113,7 @@ services:
       - "./grafana-risedev-datasource.yml:/etc/grafana/provisioning/datasources/grafana-risedev-datasource.yml"
       - "./grafana-risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/grafana-risedev-dashboard.yml"
       - "./dashboards:/dashboards"
-    environment: { }
+    environment: {}
     container_name: grafana-0
     healthcheck:
       test:
@@ -187,7 +187,7 @@ services:
     volumes:
       - "prometheus-0:/prometheus"
       - "./prometheus.yaml:/etc/prometheus/prometheus.yml"
-    environment: { }
+    environment: {}
     container_name: prometheus-0
     healthcheck:
       test:
@@ -229,7 +229,7 @@ services:
     depends_on: [ ]
     volumes:
       - "message_queue:/var/lib/redpanda/data"
-    environment: { }
+    environment: {}
     container_name: message_queue
     healthcheck:
       test: curl -f localhost:9644/v1/status/ready
