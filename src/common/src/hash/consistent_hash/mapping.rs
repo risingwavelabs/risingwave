@@ -140,8 +140,9 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     }
 
     /// Create a vnode mapping where all vnodes are mapped to the same single item.
+    ///
+    /// The vnode count will be 1.
     pub fn new_single(item: T::Item) -> Self {
-        // TODO(var-vnode): always 1 correct?
         Self::new_uniform(std::iter::once(item), 1)
     }
 
