@@ -463,6 +463,7 @@ impl CatalogController {
             actors: pb_actors,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            maybe_vnode_count: Some(256) // TODO: sql backend
         };
 
         Ok((pb_fragment, pb_actor_status, pb_actor_splits))
@@ -1541,6 +1542,7 @@ mod tests {
                 .values()
                 .flat_map(|m| m.keys().map(|x| *x as _))
                 .collect(),
+            maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as _),
         };
 
         let pb_actor_status = (0..actor_count)
@@ -1793,6 +1795,7 @@ mod tests {
             actors: _,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            maybe_vnode_count: _,
         } = pb_fragment;
 
         assert_eq!(fragment_id, TEST_FRAGMENT_ID as u32);

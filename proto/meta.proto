@@ -94,6 +94,8 @@ message TableFragments {
     // so we pre-generate and store it here, this member will only be initialized when creating the Fragment
     // and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
+
+    optional uint32 maybe_vnode_count = 8;
   }
   uint32 table_id = 1;
   State state = 2;

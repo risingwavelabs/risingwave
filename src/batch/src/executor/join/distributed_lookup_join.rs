@@ -19,7 +19,7 @@ use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
-use risingwave_common::hash::{HashKey, HashKeyDispatcher, VirtualNode, VnodeCountCompat};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, VnodeCountCompat};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};

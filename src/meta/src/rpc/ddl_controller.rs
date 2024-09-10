@@ -29,8 +29,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_fragment, visit_internal_tables, visit_stream_node, visit_stream_node_cont_mut,
-    visit_stream_node_tables,
+    visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, current_cluster_version, hash, must_match};
 use risingwave_connector::error::ConnectorError;
@@ -1680,15 +1679,8 @@ impl DdlController {
             table_parallelism,
         );
 
-        if let Some(mut mview_fragment) = table_fragments.mview_fragment() {
-            let mut vnode_count = None;
-            visit_stream_node_tables(
-                mview_fragment.actors[0].nodes.as_mut().unwrap(),
-                |table, _| {
-                    vnode_count = Some(table.vnode_count());
-                },
-            );
-            stream_job.set_table_vnode_count(vnode_count.unwrap())
+        if let Some(mview_fragment) = table_fragments.mview_fragment() {
+            stream_job.set_table_vnode_count(mview_fragment.vnode_count());
         }
 
         let replace_table_job_info = match affected_table_replace_info {
@@ -2171,6 +2163,8 @@ impl DdlController {
             stream_ctx,
             old_table_fragments.assigned_parallelism,
         );
+
+        // TODO(var-vnode): fill vnode count for table catalog in `stream_job`.
 
         let ctx = ReplaceTableContext {
             old_table_fragments,

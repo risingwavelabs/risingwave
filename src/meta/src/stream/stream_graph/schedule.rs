@@ -25,7 +25,7 @@ use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{ActorMapping, VirtualNode, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::{bail, hash};
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::{

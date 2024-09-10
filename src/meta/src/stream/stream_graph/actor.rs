@@ -22,7 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorId, ActorMapping, WorkerSlotId};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::stream_graph_visitor::{visit_internal_tables, visit_tables};
+use risingwave_common::util::stream_graph_visitor::visit_tables;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -866,7 +866,7 @@ impl ActorGraphBuilder {
                     .worker_slots()
                     .map(|worker_slot| {
                         let actor_id = state.next_actor_id();
-                        let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&worker_slot]).cloned();
+                        let vnode_bitmap = bitmaps.as_ref().map(|m: &HashMap<WorkerSlotId, Bitmap>| &m[&worker_slot]).cloned();
 
                         state.inner.add_actor(
                             actor_id,
