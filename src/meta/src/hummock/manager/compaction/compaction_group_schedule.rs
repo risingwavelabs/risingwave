@@ -124,7 +124,6 @@ impl HummockManager {
             }
         }
 
-        // TODO(li0k): remove this check (Since the current split_sst does not change key_range, this check can not be removed, otherwise concate will fail.)
         // check branched sst on non-overlap level
         {
             let left_levels = versioning
@@ -138,9 +137,9 @@ impl HummockManager {
             // we can not check the l0 sub level, because the sub level id will be rewritten when merge
             // This check will ensure that other non-overlapping level ssts can be concat and that the key_range is correct.
             let max_level = std::cmp::max(left_levels.levels.len(), right_levels.levels.len());
-            for level_idx in 0..max_level {
-                let left_level = left_levels.levels.get(level_idx).unwrap();
-                let right_level = right_levels.levels.get(level_idx).unwrap();
+            for level_idx in 1..=max_level {
+                let left_level = left_levels.get_level(level_idx);
+                let right_level = right_levels.get_level(level_idx);
                 if left_level.table_infos.is_empty() || right_level.table_infos.is_empty() {
                     continue;
                 }
