@@ -231,7 +231,8 @@ pub struct SourceManagerCore {
     /// `source_id` -> `(fragment_id, upstream_fragment_id)`
     backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
 
-    /// Splits assigned per actor
+    /// Splits assigned per actor,
+    /// incl. both `Source` and `SourceBackfill`.
     actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
@@ -468,13 +469,13 @@ impl Default for SplitDiffOptions {
 }
 
 /// Reassigns splits if there are new splits or dropped splits,
-/// i.e., `actor_splits` and `discovered_splits` differ.
+/// i.e., `actor_splits` and `discovered_splits` differ, or actors are rescheduled.
 ///
 /// The existing splits will remain unmoved in their currently assigned actor.
 ///
 /// If an actor has an upstream actor, it should be a backfill executor,
-/// and its splits should be aligned with the upstream actor. `reassign_splits` should not be used in this case.
-/// Use `align_backfill_splits` instead.
+/// and its splits should be aligned with the upstream actor. **`reassign_splits` should not be used in this case.
+/// Use `align_backfill_splits` instead.**
 ///
 /// - `fragment_id`: just for logging
 ///
@@ -790,11 +791,10 @@ impl SourceManager {
 
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
     ///
-    /// Very occasionally split removal may happen
-    /// during scaling, in which case we need to use the old splits for reallocation instead of the
-    /// latest splits (which may be missing), so that we can resolve the split removal in the next
-    /// command.
-    pub async fn migrate_splits(
+    /// Very occasionally split removal may happen during scaling, in which case we need to
+    /// use the old splits for reallocation instead of the latest splits (which may be missing),
+    /// so that we can resolve the split removal in the next command.
+    pub async fn migrate_splits_for_source_actors(
         &self,
         fragment_id: FragmentId,
         prev_actor_ids: &[ActorId],
@@ -817,12 +817,49 @@ impl SourceManager {
             fragment_id,
             empty_actor_splits,
             &prev_splits,
-            // pre-allocate splits is the first time getting splits and it does not have scale in scene
+            // pre-allocate splits is the first time getting splits and it does not have scale-in scene
             SplitDiffOptions::default(),
         )
         .unwrap_or_default();
 
         Ok(diff)
+    }
+
+    /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
+    pub fn migrate_splits_for_backfill_actors(
+        &self,
+        fragment_id: FragmentId,
+        upstream_fragment_ids: &Vec<FragmentId>,
+        curr_actor_ids: &[ActorId],
+        fragment_actor_splits: &HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>,
+        no_shuffle_upstream_actor_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
+    ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
+        // align splits for backfill fragments with its upstream source fragment
+        debug_assert!(upstream_fragment_ids.len() == 1);
+        let upstream_fragment_id = upstream_fragment_ids[0];
+        let actors = no_shuffle_upstream_actor_map
+            .iter()
+            .filter(|(id, _)| curr_actor_ids.contains(id))
+            .map(|(id, upstream_fragment_actors)| {
+                debug_assert!(upstream_fragment_actors.len() == 1);
+                (
+                    *id,
+                    vec![*upstream_fragment_actors.get(&upstream_fragment_id).unwrap()],
+                )
+            });
+        let upstream_assignment = fragment_actor_splits.get(&upstream_fragment_id).unwrap();
+        tracing::info!(
+            fragment_id,
+            upstream_fragment_id,
+            ?upstream_assignment,
+            "migrate_splits_for_backfill_actors"
+        );
+        Ok(align_backfill_splits(
+            actors,
+            upstream_assignment,
+            fragment_id,
+            upstream_fragment_id,
+        )?)
     }
 
     /// Allocates splits to actors for a newly created source executor.

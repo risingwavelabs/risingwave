@@ -36,4 +36,5 @@ extend-exclude = [
     # We don't want to fix "fals" here, but may want in other places.
     # Ideally, we should just ignore that line: https://github.com/crate-ci/typos/issues/316
     "src/common/src/cast/mod.rs",
+    "src/tests/simulation/tests/integration_tests/scale/shared_source.rs",
 ]
