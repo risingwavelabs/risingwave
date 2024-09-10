@@ -190,8 +190,10 @@ mod tests {
         let meta_store = MemStore::new();
 
         let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
-        let mut hummock_version = HummockVersion::default();
-        hummock_version.id = HummockVersionId::new(1);
+        let hummock_version = HummockVersion {
+            id: HummockVersionId::new(1),
+            ..Default::default()
+        };
         let get_ckpt_builder = |v: &HummockVersion| {
             let v_ = v.clone();
             async move { v_ }

@@ -1458,20 +1458,22 @@ mod tests {
 
     #[test]
     fn test_get_sst_object_ids() {
-        let mut version = HummockVersion::default();
-        version.id = HummockVersionId::new(0);
-        version.levels = HashMap::from_iter([(
-            0,
-            Levels {
-                levels: vec![],
-                l0: OverlappingLevel {
-                    sub_levels: vec![],
-                    total_file_size: 0,
-                    uncompressed_file_size: 0,
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from_iter([(
+                0,
+                Levels {
+                    levels: vec![],
+                    l0: OverlappingLevel {
+                        sub_levels: vec![],
+                        total_file_size: 0,
+                        uncompressed_file_size: 0,
+                    },
+                    ..Default::default()
                 },
-                ..Default::default()
-            },
-        )]);
+            )]),
+            ..Default::default()
+        };
         assert_eq!(version.get_object_ids().len(), 0);
 
         // Add to sub level
@@ -1505,68 +1507,72 @@ mod tests {
 
     #[test]
     fn test_apply_version_delta() {
-        let mut version = HummockVersion::default();
-        version.id = HummockVersionId::new(0);
-        version.levels = HashMap::from_iter([
-            (
-                0,
-                build_initial_compaction_group_levels(
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from_iter([
+                (
                     0,
-                    &CompactionConfig {
-                        max_level: 6,
-                        ..Default::default()
-                    },
-                ),
-            ),
-            (
-                1,
-                build_initial_compaction_group_levels(
-                    1,
-                    &CompactionConfig {
-                        max_level: 6,
-                        ..Default::default()
-                    },
-                ),
-            ),
-        ]);
-        let mut version_delta = HummockVersionDelta::default();
-        version_delta.id = HummockVersionId::new(1);
-        version_delta.group_deltas = HashMap::from_iter([
-            (
-                2,
-                GroupDeltas {
-                    group_deltas: vec![GroupDelta::GroupConstruct(GroupConstruct {
-                        group_config: Some(CompactionConfig {
+                    build_initial_compaction_group_levels(
+                        0,
+                        &CompactionConfig {
                             max_level: 6,
                             ..Default::default()
-                        }),
-                        ..Default::default()
-                    })],
-                },
-            ),
-            (
-                0,
-                GroupDeltas {
-                    group_deltas: vec![GroupDelta::GroupDestroy(GroupDestroy {})],
-                },
-            ),
-            (
-                1,
-                GroupDeltas {
-                    group_deltas: vec![GroupDelta::IntraLevel(IntraLevelDelta::new(
+                        },
+                    ),
+                ),
+                (
+                    1,
+                    build_initial_compaction_group_levels(
                         1,
-                        0,
-                        vec![],
-                        vec![SstableInfo {
-                            object_id: 1,
-                            sst_id: 1,
+                        &CompactionConfig {
+                            max_level: 6,
                             ..Default::default()
-                        }],
-                        0,
-                    ))],
-                },
-            ),
-        ]);
+                        },
+                    ),
+                ),
+            ]),
+            ..Default::default()
+        };
+        let version_delta = HummockVersionDelta {
+            id: HummockVersionId::new(1),
+            group_deltas: HashMap::from_iter([
+                (
+                    2,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta::GroupConstruct(GroupConstruct {
+                            group_config: Some(CompactionConfig {
+                                max_level: 6,
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        })],
+                    },
+                ),
+                (
+                    0,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta::GroupDestroy(GroupDestroy {})],
+                    },
+                ),
+                (
+                    1,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta::IntraLevel(IntraLevelDelta::new(
+                            1,
+                            0,
+                            vec![],
+                            vec![SstableInfo {
+                                object_id: 1,
+                                sst_id: 1,
+                                ..Default::default()
+                            }],
+                            0,
+                        ))],
+                    },
+                ),
+            ]),
+            ..Default::default()
+        };
         let version_delta = version_delta;
 
         version.apply_version_delta(&version_delta);
@@ -1587,24 +1593,26 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(version, {
-            let mut version = HummockVersion::default();
-            version.id = HummockVersionId::new(1);
-            version.levels = HashMap::from_iter([
-                (
-                    2,
-                    build_initial_compaction_group_levels(
+        assert_eq!(
+            version,
+            HummockVersion {
+                id: HummockVersionId::new(1),
+                levels: HashMap::from_iter([
+                    (
                         2,
-                        &CompactionConfig {
-                            max_level: 6,
-                            ..Default::default()
-                        },
+                        build_initial_compaction_group_levels(
+                            2,
+                            &CompactionConfig {
+                                max_level: 6,
+                                ..Default::default()
+                            },
+                        ),
                     ),
-                ),
-                (1, cg1),
-            ]);
-            version
-        });
+                    (1, cg1),
+                ]),
+                ..Default::default()
+            }
+        );
     }
 
     fn gen_sst_info(object_id: u64, table_ids: Vec<u32>, left: Bytes, right: Bytes) -> SstableInfo {
