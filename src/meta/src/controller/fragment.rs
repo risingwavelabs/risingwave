@@ -19,7 +19,7 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::hash::{VnodeCountCompat, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
@@ -177,6 +177,7 @@ impl CatalogController {
         Vec<actor::Model>,
         HashMap<ActorId, Vec<actor_dispatcher::Model>>,
     )> {
+        let vnode_count = pb_fragment.vnode_count();
         let PbFragment {
             fragment_id: pb_fragment_id,
             fragment_type_mask: pb_fragment_type_mask,
@@ -294,6 +295,7 @@ impl CatalogController {
             stream_node,
             state_table_ids,
             upstream_fragment_id,
+            vnode_count: vnode_count as _,
         };
 
         Ok((fragment, actors, actor_dispatchers))
@@ -365,6 +367,7 @@ impl CatalogController {
             stream_node,
             state_table_ids,
             upstream_fragment_id,
+            vnode_count,
         } = fragment;
 
         let stream_node_template = stream_node.to_protobuf();
@@ -463,7 +466,7 @@ impl CatalogController {
             actors: pb_actors,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
-            maybe_vnode_count: Some(256) // TODO: sql backend
+            maybe_vnode_count: Some(vnode_count as _),
         };
 
         Ok((pb_fragment, pb_actor_status, pb_actor_splits))
@@ -1686,6 +1689,7 @@ mod tests {
             stream_node: StreamNode::from(&stream_node),
             state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: I32Array::default(),
+            vnode_count: VirtualNode::COUNT_FOR_TEST as _,
         };
 
         let (pb_fragment, pb_actor_status, pb_actor_splits) = CatalogController::compose_fragment(

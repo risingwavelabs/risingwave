@@ -645,6 +645,7 @@ impl ScaleController {
                     stream_node,
                     state_table_ids,
                     upstream_fragment_id,
+                    vnode_count: _,
                 },
             ) in fragments
             {
@@ -2083,7 +2084,7 @@ impl ScaleController {
                     fragment_id as FragmentId,
                     (
                         FragmentDistributionType::from(fragment.distribution_type),
-                        VirtualNode::COUNT, // TODO(var-vnode): use real value
+                        fragment.vnode_count as _,
                     ),
                 );
 

@@ -29,7 +29,7 @@ pub struct Model {
     pub stream_node: StreamNode,
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,
-    // TODO(var-vnode): vnode count field
+    pub vnode_count: i32,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
