@@ -289,24 +289,9 @@ impl HummockManager {
                 .values()
                 .map(|g| (g.group_id, g.parent_group_id))
                 .collect();
-            let time_travel_tables_to_commit =
-                new_table_ids
-                    .iter()
-                    .chain(tables_to_commit.iter().filter_map(|table_id| {
-                        if new_table_ids.contains_key(table_id) {
-                            return None;
-                        }
-                        let Some(info) = version
-                            .latest_version()
-                            .state_table_info
-                            .info()
-                            .get(table_id)
-                        else {
-                            tracing::warn!("state table info not found for {table_id}");
-                            return None;
-                        };
-                        Some((table_id, &info.compaction_group_id))
-                    }));
+            let time_travel_tables_to_commit = table_compaction_group_mapping
+                .iter()
+                .filter(|(table_id, _)| tables_to_commit.contains(table_id));
             let mut txn = sql_store.conn.begin().await?;
             let version_snapshot_sst_ids = self
                 .write_time_travel_metadata(
