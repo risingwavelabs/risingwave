@@ -23,7 +23,6 @@
 #![feature(test)]
 #![feature(trusted_len)]
 #![feature(allocator_api)]
-#![feature(lint_reasons)]
 #![feature(coroutines)]
 #![feature(map_try_insert)]
 #![feature(error_generic_member_access)]

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lint_reasons)]
-
 mod compactor_observer;
 mod rpc;
 pub mod server;

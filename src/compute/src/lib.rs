@@ -16,7 +16,6 @@
 #![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
-#![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
