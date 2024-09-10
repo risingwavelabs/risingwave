@@ -58,33 +58,47 @@ struct ControlStreamNode {
     sender: UnboundedSender<StreamingControlStreamRequest>,
 }
 
-fn into_future(
-    worker_id: WorkerId,
-    stream: BoxStream<
-        'static,
-        risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
-    >,
-) -> ResponseStreamFuture {
-    stream.into_future().map(move |(opt, stream)| {
-        (
-            worker_id,
-            stream,
-            opt.ok_or_else(|| anyhow!("end of stream").into())
-                .and_then(|result| result.map_err(|e| e.into())),
-        )
-    })
+mod response_stream_future {
+    use std::future::Future;
+
+    use anyhow::anyhow;
+    use futures::stream::BoxStream;
+    use futures::{FutureExt, StreamExt};
+    use risingwave_pb::stream_service::StreamingControlStreamResponse;
+
+    use crate::manager::WorkerId;
+    use crate::MetaResult;
+
+    pub(super) fn into_future(
+        worker_id: WorkerId,
+        stream: BoxStream<
+            'static,
+            risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
+        >,
+    ) -> ResponseStreamFuture {
+        stream.into_future().map(move |(opt, stream)| {
+            (
+                worker_id,
+                stream,
+                opt.ok_or_else(|| anyhow!("end of stream").into())
+                    .and_then(|result| result.map_err(|e| e.into())),
+            )
+        })
+    }
+
+    pub(super) type ResponseStreamFuture = impl Future<
+            Output = (
+                WorkerId,
+                BoxStream<
+                    'static,
+                    risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
+                >,
+                MetaResult<StreamingControlStreamResponse>,
+            ),
+        > + 'static;
 }
 
-type ResponseStreamFuture = impl Future<
-        Output = (
-            WorkerId,
-            BoxStream<
-                'static,
-                risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
-            >,
-            MetaResult<StreamingControlStreamResponse>,
-        ),
-    > + 'static;
+use response_stream_future::*;
 
 pub(super) struct ControlStreamManager {
     context: GlobalBarrierManagerContext,
