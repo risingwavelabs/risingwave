@@ -25,7 +25,6 @@ use risingwave_common::{
 pub struct RdKafkaStats {
     pub registry: Registry,
 
-    // pub ts: IntGaugeVec,
     pub ts: LabelGuardedIntGaugeVec<2>,
     pub time: LabelGuardedIntGaugeVec<2>,
     pub age: LabelGuardedIntGaugeVec<2>,
