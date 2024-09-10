@@ -71,12 +71,12 @@ e2e_test/generated/*
 scale-test.tar.zst
 simulation-it-test.tar.zst
 
-
 # hummock-trace
 .trace
 
 # spark binary
 e2e_test/iceberg/spark-*-bin*
+e2e_test/iceberg/metastore_db
 
 **/poetry.lock
 
