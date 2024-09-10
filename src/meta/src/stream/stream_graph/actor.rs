@@ -22,7 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorId, ActorMapping, WorkerSlotId};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::stream_graph_visitor::visit_internal_tables;
+use risingwave_common::util::stream_graph_visitor::{visit_internal_tables, visit_tables};
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -682,8 +682,7 @@ impl ActorGraphBuilder {
         let mut fragment_graph = fragment_graph;
         for (id, fragment) in fragment_graph.building_fragments_mut() {
             let vnode_count = distributions[id].vnode_count();
-            // TODO(var-vnode): this does not involve materialize table!!!!!!!!!!!!
-            visit_internal_tables(fragment, |table, _| {
+            visit_tables(fragment, |table, _| {
                 table.maybe_vnode_count = Some(vnode_count as _);
             })
         }
