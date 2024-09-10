@@ -215,19 +215,8 @@ impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockV
             max_committed_epoch: version.visible_table_committed_epoch(),
             safe_epoch: version.visible_table_safe_epoch(),
             table_watermarks: version.table_watermarks.clone(),
-            // TODO: optimization: strip table change log
-            table_change_log: version
-                .table_change_log
-                .iter()
-                .map(|(table_id, change_log)| {
-                    let incomplete_table_change_log = change_log
-                        .0
-                        .iter()
-                        .map(stripped_epoch_new_change_log)
-                        .collect();
-                    (*table_id, TableChangeLog(incomplete_table_change_log))
-                })
-                .collect(),
+            // time travel doesn't need table change log
+            table_change_log: HashMap::default(),
             state_table_info: version.state_table_info.clone(),
         }
     }
@@ -300,12 +289,8 @@ impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHum
             trivial_move: delta.trivial_move,
             new_table_watermarks: delta.new_table_watermarks.clone(),
             removed_table_ids: delta.removed_table_ids.clone(),
-            // TODO: optimization: strip table change log
-            change_log_delta: delta
-                .change_log_delta
-                .iter()
-                .map(|(table_id, log_delta)| (*table_id, stripped_change_log_delta(log_delta)))
-                .collect(),
+            // time travel doesn't need table change log
+            change_log_delta: HashMap::default(),
             state_table_info_delta: delta.state_table_info_delta.clone(),
         }
     }
