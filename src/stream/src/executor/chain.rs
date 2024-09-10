@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::executor::prelude::*;
-use crate::task::CreateMviewProgress;
+use crate::task::CreateMviewProgressReporter;
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV on MV
@@ -24,7 +24,7 @@ pub struct ChainExecutor {
 
     upstream: Executor,
 
-    progress: CreateMviewProgress,
+    progress: CreateMviewProgressReporter,
 
     actor_id: ActorId,
 
@@ -36,7 +36,7 @@ impl ChainExecutor {
     pub fn new(
         snapshot: Executor,
         upstream: Executor,
-        progress: CreateMviewProgress,
+        progress: CreateMviewProgressReporter,
         upstream_only: bool,
     ) -> Self {
         Self {
@@ -115,12 +115,12 @@ mod test {
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{AddMutation, Barrier, Execute, Message, Mutation, PkIndices};
-    use crate::task::{CreateMviewProgress, LocalBarrierManager};
+    use crate::task::{CreateMviewProgressReporter, LocalBarrierManager};
 
     #[tokio::test]
     async fn test_basic() {
         let barrier_manager = LocalBarrierManager::for_test();
-        let progress = CreateMviewProgress::for_test(barrier_manager);
+        let progress = CreateMviewProgressReporter::for_test(barrier_manager);
         let actor_id = progress.actor_id();
 
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);

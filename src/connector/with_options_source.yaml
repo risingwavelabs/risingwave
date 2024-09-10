@@ -199,13 +199,25 @@ KafkaProperties:
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false
+  - name: properties.ssl.ca.pem
+    field_type: String
+    comments: CA certificate string (PEM format) for verifying the broker's key.
+    required: false
   - name: properties.ssl.certificate.location
     field_type: String
     comments: Path to client's certificate file (PEM).
     required: false
+  - name: properties.ssl.certificate.pem
+    field_type: String
+    comments: Client's public key string (PEM format) used for authentication.
+    required: false
   - name: properties.ssl.key.location
     field_type: String
     comments: Path to client's private key file (PEM).
+    required: false
+  - name: properties.ssl.key.pem
+    field_type: String
+    comments: Client's private key string (PEM format) used for authentication.
     required: false
   - name: properties.ssl.key.password
     field_type: String

@@ -1327,7 +1327,22 @@ async fn test_split_compaction_group_on_commit() {
             sst_size: 100,
             ..Default::default()
         },
-        table_stats: Default::default(),
+        table_stats: HashMap::from([
+            (
+                100,
+                TableStats {
+                    total_compressed_size: 50,
+                    ..Default::default()
+                },
+            ),
+            (
+                101,
+                TableStats {
+                    total_compressed_size: 50,
+                    ..Default::default()
+                },
+            ),
+        ]),
     };
     hummock_manager
         .commit_epoch_for_test(30, vec![sst_1], HashMap::from([(10, context_id)]))

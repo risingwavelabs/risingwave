@@ -368,12 +368,14 @@ impl DdlController {
         }
     }
 
+    #[tracing::instrument(skip(self), level = "debug")]
     pub async fn alter_parallelism(
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
         mut deferred: bool,
     ) -> MetaResult<()> {
+        tracing::info!("alter parallelism");
         if self.barrier_manager.check_status_running().is_err() {
             tracing::info!(
                 "alter parallelism is set to deferred mode because the system is in recovery state"
@@ -1612,6 +1614,7 @@ impl DdlController {
 
         let parallelism = self.resolve_stream_parallelism(specified_parallelism, &cluster_info)?;
 
+        // TODO(var-vnode): use vnode count from config
         const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
 
         let parallelism_limited = parallelism > MAX_PARALLELISM;
@@ -1643,7 +1646,7 @@ impl DdlController {
         // Otherwise, it defaults to FIXED based on deduction.
         let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
             (None, DefaultParallelism::Full) if parallelism_limited => {
-                tracing::warn!("Parallelism limited to 256 in ADAPTIVE mode");
+                tracing::warn!("Parallelism limited to {MAX_PARALLELISM} in ADAPTIVE mode");
                 TableParallelism::Adaptive
             }
             (None, DefaultParallelism::Full) => TableParallelism::Adaptive,

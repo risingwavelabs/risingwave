@@ -17,16 +17,6 @@ message BuildActorInfo {
   map<uint32, SubscriptionIds> related_subscriptions = 2;
 }
 
-message DropActorsRequest {
-  string request_id = 1;
-  repeated uint32 actor_ids = 2;
-}
-
-message DropActorsResponse {
-  string request_id = 1;
-  common.Status status = 2;
-}
-
 message InjectBarrierRequest {
   string request_id = 1;
   stream_plan.Barrier barrier = 2;
@@ -109,7 +99,6 @@ message StreamingControlStreamResponse {
 }
 
 service StreamService {
-  rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
   rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
 }
