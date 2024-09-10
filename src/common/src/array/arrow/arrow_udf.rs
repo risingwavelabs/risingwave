@@ -242,7 +242,7 @@ mod tests {
                             Field {
                                 name: "key",
                                 data_type: Utf8,
-                                nullable: true,
+                                nullable: false,
                                 dict_id: 0,
                                 dict_is_ordered: false,
                                 metadata: {},
