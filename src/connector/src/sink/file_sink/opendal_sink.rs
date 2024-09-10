@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use arrow_schema_iceberg::SchemaRef;
@@ -29,14 +29,11 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 use with_options::WithOptions;
 
 use crate::sink::batching_log_sink::BatchingLogSinkerOf;
 use crate::sink::catalog::SinkEncode;
-use crate::sink::log_store::ChunkId;
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam, SinkWriter,
 };
@@ -56,6 +53,7 @@ pub struct FileSink<S: OpendalSinkBackend> {
     /// The schema describing the structure of the data being written to the file sink.
     pub(crate) schema: Schema,
     pub(crate) is_append_only: bool,
+    /// The batching strategy for sinking data to files.
     pub(crate) batching_strategy: BatchingStrategy,
 
     /// The description of the sink's format.
@@ -219,6 +217,11 @@ impl SinkWriter for OpenDalSinkWriter {
         if self.sink_writer.is_none() {
             self.create_sink_writer(self.current_writer_idx).await?;
         };
+
+        // While writing this chunk (via `append_only`), it checks if the maximum row count
+        // has been reached to determine if the file should be finalized.
+        // Then, it checks the rollover interval to see if the time-based batching threshold
+        // has been met. If either condition results in a successful write, the write is marked as complete.
         let finish_write =
             self.append_only(chunk).await? || self.try_finish_write_via_rollover_interval().await?;
         self.written_chunk_id = Some(chunk_id);
@@ -257,7 +260,7 @@ impl OpenDalSinkWriter {
         operator: Operator,
         write_path: &str,
         rw_schema: Schema,
-    is_append_only: bool,
+        is_append_only: bool,
         executor_id: u64,
         encode_type: SinkEncode,
         engine_type: EngineType,
@@ -301,6 +304,20 @@ impl OpenDalSinkWriter {
         }
     }
 
+    /// Attempts to finalize the writing process based on a specified rollover interval.
+    ///
+    /// This asynchronous function checks if the duration since the writer was
+    /// created exceeds the configured rollover interval (`rollover_seconds`).
+    /// If the duration condition is met and a sink writer is available, it
+    /// closes the current writer (e.g., a Parquet file writer) if any bytes
+    /// have been written. The function logs the completion message and
+    /// increments the writer index for subsequent writes.
+    ///
+    /// Returns:
+    /// - `Ok(true)` if the write was finalized successfully due to the
+    ///   rollover interval being exceeded.
+    /// - `Ok(false)` if the rollover interval has not been met, indicating that
+    ///   no action was taken.
     async fn try_finish_write_via_rollover_interval(&mut self) -> Result<bool> {
         if self.duration_seconds_since_writer_created()
             >= self
@@ -335,6 +352,20 @@ impl OpenDalSinkWriter {
         Ok(false)
     }
 
+    /// Attempts to finalize the writing process if the current number of
+    /// batched rows has reached the specified threshold.
+    ///
+    /// This asynchronous function checks if the number of rows accumulated
+    /// (`current_bached_row_num`) meets or exceeds the maximum row count
+    /// defined in the `batching_strategy`. If the threshold is met, it
+    /// closes the current writer (e.g., a Parquet file writer), logs the
+    /// completion message, and resets the row count. It also increments
+    /// the writer index for subsequent writes.
+    ///
+    /// Returns:
+    /// - `Ok(true)` if the write was finalized successfully.
+    /// - `Ok(false)` if the threshold has not been met, indicating that
+    ///   no action was taken.
     async fn try_finish_write_via_batched_rows(&mut self) -> Result<bool> {
         if self.current_bached_row_num
             >= self
@@ -382,8 +413,12 @@ impl OpenDalSinkWriter {
             _ => unimplemented!(),
         };
 
-        // Note: sink decoupling is not currently supported, which means that output files will not be batched across checkpoints.
-        // The current implementation writes files every time a checkpoint arrives, so the naming convention is `epoch + executor_id + .suffix`.
+        // With batching in place, the file writing process is decoupled from checkpoints.
+        // The current file naming convention is as follows:
+        // 1. A subdirectory is defined based on `partition_granularity` (e.g., by day、hour or month or none.).
+        // 2. The file name includes the `executor_id` and the creation time in seconds since the UNIX epoch.
+        // 3. Finally, the name is suffixed with a `writer_idx` to distinguish between multiple writers.
+        // If the engine type is `Fs`, the path is automatically handled, and the filename does not include a path prefix.
         let object_name = match self.engine_type {
             // For the local fs sink, the data will be automatically written to the defined path.
             // Therefore, there is no need to specify the path in the file name.
@@ -484,14 +519,31 @@ fn convert_rw_schema_to_arrow_schema(
 
     Ok(arrow_schema_iceberg::Schema::new(arrow_fields))
 }
+
+/// `BatchingStrategy` represents the strategy for batching data before writing to files.
+///
+/// This struct contains settings that control how data is collected and
+/// partitioned based on specified criteria:
+///
+/// - `max_row_count`: Optional maximum number of rows to accumulate before writing.
+/// - `rollover_seconds`: Optional time interval (in seconds) to trigger a write,
+///   regardless of the number of accumulated rows.
+/// - `partition_granularity`: Specifies how files are organized into directories
+///   based on creation time (e.g., by day, month, or hour).
 #[derive(Deserialize, Debug, Clone)]
 pub struct BatchingStrategy {
     pub max_row_count: Option<usize>,
-    pub max_file_size: Option<usize>,
     pub rollover_seconds: Option<usize>,
     pub partition_granularity: PartitionGranularity,
 }
 
+/// `PartitionGranularity` defines the granularity of file partitions based on creation time.
+///
+/// Each variant specifies how files are organized into directories:
+/// - `None`: No partitioning.
+/// - `Day`: Files are written in a directory for each day.
+/// - `Month`: Files are written in a directory for each month.
+/// - `Hour`: Files are written in a directory for each hour.
 #[derive(Deserialize, Debug, Clone)]
 pub enum PartitionGranularity {
     None,
@@ -499,12 +551,11 @@ pub enum PartitionGranularity {
     Month,
     Hour,
 }
+
 #[derive(Deserialize, Debug, Clone, WithOptions)]
-pub struct FileSinkBatchingStrategy {
+pub struct FileSinkBatchingStrategyConfig {
     #[serde(rename = "max_row_count")]
     pub max_row_count: Option<String>,
-    #[serde(rename = "max_file_size")]
-    pub max_file_size: Option<usize>,
     #[serde(rename = "rollover_seconds")]
     pub rollover_seconds: Option<String>,
     #[serde(rename = "partition_granularity")]

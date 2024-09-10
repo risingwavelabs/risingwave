@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use super::opendal_sink::{BatchingStrategy, FileSinkBatchingStrategy};
+use super::opendal_sink::{BatchingStrategy, FileSinkBatchingStrategyConfig};
 use crate::sink::file_sink::opendal_sink::{
     parse_partition_granularity, FileSink, OpendalSinkBackend, PartitionGranularity,
 };
@@ -41,7 +41,7 @@ pub struct FsConfig {
     #[serde(flatten)]
     pub common: FsCommon,
     #[serde(flatten)]
-    pub batching_strategy: FileSinkBatchingStrategy,
+    pub batching_strategy: FileSinkBatchingStrategyConfig,
 
     pub r#type: String, // accept "append-only"
 
@@ -127,7 +127,6 @@ impl OpendalSinkBackend for FsSink {
             };
         BatchingStrategy {
             max_row_count,
-            max_file_size: properties.batching_strategy.max_file_size,
             rollover_seconds,
             partition_granularity,
         }

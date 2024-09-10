@@ -124,13 +124,15 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for BatchingLogSinkerOf<W> {
                             return Err(e);
                         }
                         Ok(Some(chunk_id)) => {
+                            // The file has been successfully written and is now visible to downstream consumers.
+                            // Truncate the file to remove the specified `chunk_id` and any preceding content.
                             log_reader.truncate(TruncateOffset::Chunk {
                                 epoch: (epoch),
                                 chunk_id: (chunk_id),
                             })?;
                         }
                         Ok(None) => {
-                            // ignore this chunk
+                            // The file has not been  written  into downstream file system.
                         }
                     }
                 }
