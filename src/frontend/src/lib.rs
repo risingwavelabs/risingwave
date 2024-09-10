@@ -141,7 +141,7 @@ pub struct FrontendOpts {
     pub config_path: String,
 
     /// Used for control the metrics level, similar to log level.
-    /// 
+    ///
     /// level = 0: disable metrics
     /// level > 0: enable metrics
     #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
