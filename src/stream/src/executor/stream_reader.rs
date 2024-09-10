@@ -16,7 +16,7 @@ use std::pin::Pin;
 use std::task::Poll;
 
 use either::Either;
-use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
+use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
 
 use crate::executor::error::StreamExecutorResult;

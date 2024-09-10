@@ -15,16 +15,13 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::{anyhow, Context as _};
-use futures::pin_mut;
-use futures_async_stream::try_stream;
+use anyhow::anyhow;
+use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_pb::task_service::{permits, GetStreamResponse};
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc;
 
-use super::error::ExchangeChannelClosed;
 use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{DispatcherBarrier, DispatcherMessage};
@@ -122,7 +119,6 @@ impl LocalInput {
 
 mod local_input {
     use await_tree::InstrumentAwait;
-    use pin_project::pin_project;
 
     use crate::executor::exchange::error::ExchangeChannelClosed;
     use crate::executor::exchange::input::process_msg;
@@ -169,8 +165,6 @@ mod local_input {
         Err(ExchangeChannelClosed::local_input(upstream_actor_id))?
     }
 }
-
-pub use local_input::*;
 
 impl Stream for LocalInput {
     type Item = MessageStreamItem;
@@ -232,7 +226,6 @@ mod remote_input {
 
     use anyhow::Context;
     use await_tree::InstrumentAwait;
-    use pin_project::pin_project;
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::task_service::{permits, GetStreamResponse};
     use risingwave_rpc_client::ComputeClientPool;
@@ -242,7 +235,7 @@ mod remote_input {
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::prelude::{pin_mut, try_stream, StreamExt};
     use crate::executor::{DispatcherMessage, Message, StreamExecutorError};
-    use crate::task::{ActorId, LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
+    use crate::task::{LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
 
     pub(super) type RemoteInputStreamInner = impl crate::executor::MessageStream;
 
@@ -344,8 +337,6 @@ mod remote_input {
         Err(ExchangeChannelClosed::remote_input(up_down_ids.0, None))?
     }
 }
-
-use remote_input::*;
 
 impl Stream for RemoteInput {
     type Item = MessageStreamItem;

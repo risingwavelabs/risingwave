@@ -14,8 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{anyhow, Context};
-use futures::TryFutureExt;
+use anyhow::anyhow;
 use google_cloud_gax::conn::Environment;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_pubsub::apiv1;

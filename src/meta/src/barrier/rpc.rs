@@ -14,14 +14,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::future::Future;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
@@ -374,7 +373,7 @@ impl ControlStreamManager {
 
         self.nodes
             .iter_mut()
-            .map(|(node_id, node)| {
+            .try_for_each(|(node_id, node)| {
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
                     .actor_ids_to_collect(*node_id)
                     .collect();
@@ -441,7 +440,6 @@ impl ControlStreamManager {
                     Result::<_, MetaError>::Ok(())
                 }
             })
-            .try_collect()
             .inspect_err(|e| {
                 // Record failure in event log.
                 use risingwave_pb::meta::event_log;

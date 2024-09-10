@@ -231,12 +231,9 @@ impl HummockManager {
                 let mut is_group_init = false;
                 group_id = *new_compaction_group_id
                     .get_or_try_init(|| async {
-                        next_compaction_group_id(&self.env)
-                            .await
-                            .map(|new_group_id| {
-                                is_group_init = true;
-                                new_group_id
-                            })
+                        next_compaction_group_id(&self.env).await.inspect(|_| {
+                            is_group_init = true;
+                        })
                     })
                     .await?;
                 if is_group_init {

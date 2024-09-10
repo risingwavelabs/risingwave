@@ -16,7 +16,7 @@ use std::future::Future;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::pin::Pin;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;

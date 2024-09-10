@@ -42,7 +42,7 @@ use super::{BarrierCompleteResult, SubscribeMutationItem};
 use crate::error::{StreamError, StreamResult};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, Mutation};
-use crate::task::{await_tree_key, ActorId, PartialGraphId, SharedContext, StreamActorManager};
+use crate::task::{ActorId, PartialGraphId, SharedContext, StreamActorManager};
 
 struct IssuedState {
     pub mutation: Option<Arc<Mutation>>,
@@ -94,9 +94,7 @@ mod await_epoch_completed_future {
     use futures::future::BoxFuture;
     use futures::FutureExt;
     use risingwave_hummock_sdk::SyncResult;
-    use risingwave_pb::stream_service::barrier_complete_response::{
-        CreateMviewProgress, PbCreateMviewProgress,
-    };
+    use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
