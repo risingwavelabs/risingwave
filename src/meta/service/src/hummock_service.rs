@@ -457,7 +457,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let new_group_id = self
             .hummock_manager
-            .split_compaction_group(req.group_id, &req.table_ids)
+            .split_compaction_group(req.group_id, &req.table_ids, req.partition_vnode_count)
             .await?;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
@@ -715,6 +715,17 @@ impl HummockManagerService for HummockServiceImpl {
         Ok(Response::new(GetVersionByEpochResponse {
             version: Some(version.to_protobuf()),
         }))
+    }
+
+    async fn merge_compaction_group(
+        &self,
+        request: Request<MergeCompactionGroupRequest>,
+    ) -> Result<Response<MergeCompactionGroupResponse>, Status> {
+        let req = request.into_inner();
+        self.hummock_manager
+            .merge_compaction_group(req.left_group_id, req.right_group_id)
+            .await?;
+        Ok(Response::new(MergeCompactionGroupResponse {}))
     }
 }
 

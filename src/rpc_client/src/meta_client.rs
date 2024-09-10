@@ -1246,10 +1246,12 @@ impl MetaClient {
         &self,
         group_id: CompactionGroupId,
         table_ids_to_new_group: &[StateTableId],
+        partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         let req = SplitCompactionGroupRequest {
             group_id,
             table_ids: table_ids_to_new_group.to_vec(),
+            partition_vnode_count,
         };
         let resp = self.inner.split_compaction_group(req).await?;
         Ok(resp.new_group_id)
@@ -1444,6 +1446,19 @@ impl MetaClient {
         let req = GetClusterLimitsRequest {};
         let resp = self.inner.get_cluster_limits(req).await?;
         Ok(resp.active_limits.into_iter().map(|l| l.into()).collect())
+    }
+
+    pub async fn merge_compaction_group(
+        &self,
+        left_group_id: CompactionGroupId,
+        right_group_id: CompactionGroupId,
+    ) -> Result<()> {
+        let req = MergeCompactionGroupRequest {
+            left_group_id,
+            right_group_id,
+        };
+        self.inner.merge_compaction_group(req).await?;
+        Ok(())
     }
 }
 
@@ -2117,6 +2132,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
             ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
+            ,{ hummock_client, merge_compaction_group, MergeCompactionGroupRequest, MergeCompactionGroupResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
