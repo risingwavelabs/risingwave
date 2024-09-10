@@ -246,6 +246,7 @@ impl CoordinatorWorker {
         &mut self,
         mut coordinator: impl SinkCommitCoordinator,
     ) -> anyhow::Result<()> {
+        coordinator.init().await?;
         loop {
             let (handle_id, vnode_bitmap, epoch, metadata) =
                 self.handle_manager.next_commit_request().await?;
