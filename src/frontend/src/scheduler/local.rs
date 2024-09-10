@@ -500,7 +500,7 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_table()
                                 .expect("PartitionInfo should be TablePartitionInfo here");
-                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                             scan_node.scan_ranges = partition.scan_ranges;
                         }
                     }
@@ -522,7 +522,7 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_table()
                                 .expect("PartitionInfo should be TablePartitionInfo here");
-                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                         }
                     }
                     _ => unreachable!(),

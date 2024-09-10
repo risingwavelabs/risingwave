@@ -31,7 +31,6 @@ use risingwave_common::must_match;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BuildActorInfo;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use thiserror_ext::AsReport;
@@ -381,7 +380,7 @@ pub(super) struct PartialGraphManagedBarrierState {
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     ///
-    /// This is updated by [`super::CreateMviewProgress::update`] and will be reported to meta
+    /// This is updated by [`super::CreateMviewProgressReporter::update`] and will be reported to meta
     /// in [`BarrierCompleteResult`].
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
@@ -752,18 +751,7 @@ impl PartialGraphManagedBarrierState {
                 .remove(&barrier_state.barrier.epoch.curr)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(actor, state)| CreateMviewProgress {
-                    backfill_actor_id: actor,
-                    done: matches!(state, BackfillState::Done(_)),
-                    consumed_epoch: match state {
-                        BackfillState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
-                        BackfillState::Done(_) => barrier_state.barrier.epoch.curr,
-                    },
-                    consumed_rows: match state {
-                        BackfillState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
-                        BackfillState::Done(consumed_rows) => consumed_rows,
-                    },
-                })
+                .map(|(actor, state)| state.to_pb(actor))
                 .collect();
 
             let complete_barrier_future = match kind {

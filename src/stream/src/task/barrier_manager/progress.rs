@@ -15,6 +15,7 @@
 use std::fmt::{Display, Formatter};
 
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
 use super::LocalBarrierManager;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
@@ -28,6 +29,23 @@ type ConsumedRows = u64;
 pub(crate) enum BackfillState {
     ConsumingUpstream(ConsumedEpoch, ConsumedRows),
     Done(ConsumedRows),
+}
+
+impl BackfillState {
+    pub fn to_pb(self, actor_id: ActorId) -> PbCreateMviewProgress {
+        PbCreateMviewProgress {
+            backfill_actor_id: actor_id,
+            done: matches!(self, BackfillState::Done(_)),
+            consumed_epoch: match self {
+                BackfillState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
+                BackfillState::Done(_) => 0, // unused field for done
+            },
+            consumed_rows: match self {
+                BackfillState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
+                BackfillState::Done(consumed_rows) => consumed_rows,
+            },
+        }
+    }
 }
 
 impl Display for BackfillState {
@@ -103,7 +121,7 @@ impl LocalBarrierManager {
 /// TODO(kwannoel): Perhaps it is possible to get total key count of the replicated state table
 /// for arrangement backfill. We can use that to estimate the progress as well, and avoid recording
 /// `row_count` state for it.
-pub struct CreateMviewProgress {
+pub struct CreateMviewProgressReporter {
     barrier_manager: LocalBarrierManager,
 
     /// The id of the actor containing the backfill executors.
@@ -112,7 +130,7 @@ pub struct CreateMviewProgress {
     state: Option<BackfillState>,
 }
 
-impl CreateMviewProgress {
+impl CreateMviewProgressReporter {
     pub fn new(barrier_manager: LocalBarrierManager, backfill_actor_id: ActorId) -> Self {
         Self {
             barrier_manager,
@@ -186,8 +204,8 @@ impl LocalBarrierManager {
     pub fn register_create_mview_progress(
         &self,
         backfill_actor_id: ActorId,
-    ) -> CreateMviewProgress {
+    ) -> CreateMviewProgressReporter {
         trace!("register create mview progress: {}", backfill_actor_id);
-        CreateMviewProgress::new(self.clone(), backfill_actor_id)
+        CreateMviewProgressReporter::new(self.clone(), backfill_actor_id)
     }
 }

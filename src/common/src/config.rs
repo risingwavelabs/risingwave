@@ -33,7 +33,6 @@ use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
 use crate::for_all_params;
-use crate::hash::VirtualNode;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
@@ -427,16 +426,13 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
                     )))
                 }
             }
-            Parallelism::Int(i) => Ok(DefaultParallelism::Default(if i > VirtualNode::COUNT {
-                Err(serde::de::Error::custom(format!(
-                    "default parallelism should be not great than {}",
-                    VirtualNode::COUNT
-                )))?
-            } else {
+            Parallelism::Int(i) => Ok(DefaultParallelism::Default(
+                // Note: we won't check whether this exceeds the maximum parallelism (i.e., vnode count)
+                // here because it requires extra context. The check will be done when scheduling jobs.
                 NonZeroUsize::new(i).ok_or_else(|| {
-                    serde::de::Error::custom("default parallelism should be greater than 0")
-                })?
-            })),
+                    serde::de::Error::custom("default parallelism should not be 0")
+                })?,
+            )),
         }
     }
 }

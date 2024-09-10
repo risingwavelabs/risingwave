@@ -31,7 +31,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model_v2::{actor, fragment, ObjectId, StreamingParallelism};
-use risingwave_pb::common::{Buffer, PbActorLocation, WorkerNode, WorkerType};
+use risingwave_pb::common::{PbActorLocation, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
@@ -126,7 +126,8 @@ pub struct CustomActorInfo {
     pub fragment_id: u32,
     pub dispatcher: Vec<Dispatcher>,
     pub upstream_actor_id: Vec<u32>,
-    pub vnode_bitmap: Option<Buffer>,
+    /// `None` if singleton.
+    pub vnode_bitmap: Option<Bitmap>,
 }
 
 impl From<&PbStreamActor> for CustomActorInfo {
@@ -145,7 +146,7 @@ impl From<&PbStreamActor> for CustomActorInfo {
             fragment_id: *fragment_id,
             dispatcher: dispatcher.clone(),
             upstream_actor_id: upstream_actor_id.clone(),
-            vnode_bitmap: vnode_bitmap.clone(),
+            vnode_bitmap: vnode_bitmap.as_ref().map(Bitmap::from),
         }
     }
 }
@@ -261,6 +262,13 @@ pub fn rebalance_actor_vnode(
     let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
     assert!(target_actor_count > 0);
 
+    // `vnode_bitmap` must be set on distributed fragments.
+    let vnode_count = actors[0]
+        .vnode_bitmap
+        .as_ref()
+        .expect("vnode bitmap unset")
+        .len();
+
     // represents the balance of each actor, used to sort later
     #[derive(Debug)]
     struct Balance {
@@ -268,7 +276,7 @@ pub fn rebalance_actor_vnode(
         balance: i32,
         builder: BitmapBuilder,
     }
-    let (expected, mut remain) = VirtualNode::COUNT.div_rem(&target_actor_count);
+    let (expected, mut remain) = vnode_count.div_rem(&target_actor_count);
 
     tracing::debug!(
         "expected {}, remain {}, prev actors {}, target actors {}",
@@ -280,11 +288,11 @@ pub fn rebalance_actor_vnode(
 
     let (mut removed, mut rest): (Vec<_>, Vec<_>) = actors
         .iter()
-        .filter_map(|actor| {
-            actor
-                .vnode_bitmap
-                .as_ref()
-                .map(|buffer| (actor.actor_id as ActorId, Bitmap::from(buffer)))
+        .map(|actor| {
+            (
+                actor.actor_id as ActorId,
+                actor.vnode_bitmap.clone().expect("vnode bitmap unset"),
+            )
         })
         .partition(|(actor_id, _)| actors_to_remove.contains(actor_id));
 
@@ -303,7 +311,7 @@ pub fn rebalance_actor_vnode(
         builder
     };
 
-    let (prev_expected, _) = VirtualNode::COUNT.div_rem(&actors.len());
+    let (prev_expected, _) = vnode_count.div_rem(&actors.len());
 
     let prev_remain = removed
         .iter()
@@ -336,7 +344,7 @@ pub fn rebalance_actor_vnode(
         .map(|actor_id| Balance {
             actor_id: *actor_id,
             balance: -(expected as i32),
-            builder: BitmapBuilder::zeroed(VirtualNode::COUNT),
+            builder: BitmapBuilder::zeroed(vnode_count),
         })
         .collect_vec();
 
@@ -398,7 +406,7 @@ pub fn rebalance_actor_vnode(
         let n = min(abs(src.balance), abs(dst.balance));
 
         let mut moved = 0;
-        for idx in (0..VirtualNode::COUNT).rev() {
+        for idx in (0..vnode_count).rev() {
             if moved >= n {
                 break;
             }
@@ -612,7 +620,7 @@ impl ScaleController {
                         .flatten()
                         .map(|id| *id as _)
                         .collect(),
-                    vnode_bitmap: vnode_bitmap.map(|bitmap| bitmap.to_protobuf()),
+                    vnode_bitmap: vnode_bitmap.map(|b| Bitmap::from(&b.to_protobuf())),
                 };
 
                 actor_map.insert(actor_id as _, actor_info.clone());
@@ -664,7 +672,7 @@ impl ScaleController {
                         fragment_id: fragment_id as _,
                         dispatcher,
                         upstream_actor_id,
-                        vnode_bitmap,
+                        vnode_bitmap: vnode_bitmap.map(|b| b.to_protobuf()),
                         // todo, we need to fill this part
                         mview_definition: "".to_string(),
                         expr_context: expr_contexts
@@ -1470,9 +1478,7 @@ impl ScaleController {
                         if let Some(actor) = ctx.actor_map.get(actor_id) {
                             let bitmap = vnode_bitmap_updates.get(actor_id).unwrap();
 
-                            if let Some(buffer) = actor.vnode_bitmap.as_ref() {
-                                let prev_bitmap = Bitmap::from(buffer);
-
+                            if let Some(prev_bitmap) = actor.vnode_bitmap.as_ref() {
                                 if prev_bitmap.eq(bitmap) {
                                     vnode_bitmap_updates.remove(actor_id);
                                 }
@@ -1876,6 +1882,9 @@ impl ScaleController {
         &self,
         policy: TableResizePolicy,
     ) -> MetaResult<HashMap<FragmentId, WorkerReschedule>> {
+        // TODO(var-vnode): use vnode count from config
+        let max_parallelism = VirtualNode::COUNT;
+
         let TableResizePolicy {
             worker_ids,
             table_parallelisms,
@@ -2177,12 +2186,12 @@ impl ScaleController {
                     }
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive => {
-                            if all_available_slots > VirtualNode::COUNT {
-                                tracing::warn!("available parallelism for table {table_id} is larger than VirtualNode::COUNT, force limit to VirtualNode::COUNT");
-                                // force limit to VirtualNode::COUNT
+                            if all_available_slots > max_parallelism {
+                                tracing::warn!("available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}");
+                                // force limit to `max_parallelism`
                                 let target_worker_slots = schedule_units_for_slots(
                                     &schedulable_worker_slots,
-                                    VirtualNode::COUNT,
+                                    max_parallelism,
                                     table_id,
                                 )?;
 
@@ -2204,10 +2213,10 @@ impl ScaleController {
                             }
                         }
                         TableParallelism::Fixed(mut n) => {
-                            if n > VirtualNode::COUNT {
+                            if n > max_parallelism {
                                 // This should be unreachable, but we still intercept it to prevent accidental modifications.
-                                tracing::warn!("parallelism {n} for table {table_id} is larger than VirtualNode::COUNT, force limit to VirtualNode::COUNT");
-                                n = VirtualNode::COUNT
+                                tracing::warn!("specified parallelism {n} for table {table_id} is larger than max parallelism, force limit to {max_parallelism}");
+                                n = max_parallelism
                             }
 
                             let target_worker_slots =

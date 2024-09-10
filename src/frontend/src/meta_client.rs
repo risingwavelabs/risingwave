@@ -91,7 +91,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String>;
 
-    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
+    async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
     async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>>;
 
@@ -232,7 +232,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.set_session_param(param, value).await
     }
 
-    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+    async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
         let ddl_progress = self.0.get_ddl_progress().await?;
         Ok(ddl_progress)
     }

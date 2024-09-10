@@ -43,7 +43,7 @@ use crate::executor::{
     DispatcherBarrier, DispatcherMessage, Execute, Executor, Message, Mutation,
     StreamExecutorError, StreamExecutorResult,
 };
-use crate::task::CreateMviewProgress;
+use crate::task::CreateMviewProgressReporter;
 
 pub struct SnapshotBackfillExecutor<S: StateStore> {
     /// Upstream table
@@ -55,7 +55,7 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
 
-    progress: CreateMviewProgress,
+    progress: CreateMviewProgressReporter,
 
     chunk_size: usize,
     rate_limit: Option<usize>,
@@ -73,7 +73,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         upstream: Executor,
         output_indices: Vec<usize>,
         actor_ctx: ActorContextRef,
-        progress: CreateMviewProgress,
+        progress: CreateMviewProgressReporter,
         chunk_size: usize,
         rate_limit: Option<usize>,
         barrier_rx: UnboundedReceiver<Barrier>,
@@ -617,7 +617,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     rate_limit: Option<usize>,
     barrier_rx: &'a mut UnboundedReceiver<Barrier>,
     output_indices: &'a [usize],
-    mut progress: CreateMviewProgress,
+    mut progress: CreateMviewProgressReporter,
     first_recv_barrier: Barrier,
 ) {
     let mut barrier_epoch = first_recv_barrier.epoch;
