@@ -2,21 +2,22 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-CREATE TABLE diamonds (
+CREATE TABLE diamonds_recursive_read (
     carat FLOAT,
     cut TEXT,
     color TEXT,
     depth FLOAT,
 ) WITH (
-  connector = 'posix_fs',
-  match_pattern = 'data*.csv',
-  posix_fs.root = 'e2e_test/source/opendal/data',
+    connector = 'posix_fs',
+    match_pattern = 'data*.csv',
+    posix_fs.root = 'e2e_test/source/opendal/data',
+    recursive_scan = 'true',
 ) FORMAT PLAIN ENCODE CSV ( without_header = 'false', delimiter = ',');
 
 sleep 10s
 
 query TTTT rowsort
-select * from diamonds;
+select * from diamonds_recursive_read;
 ----
 0.22 Premium I 62
 0.23 Very Good H 57.5
@@ -30,4 +31,25 @@ select * from diamonds;
 1.3 Fair E 64.7
 
 statement ok
+CREATE TABLE diamonds (
+    carat FLOAT,
+    cut TEXT,
+    color TEXT,
+    depth FLOAT,
+) WITH (
+    connector = 'posix_fs',
+    match_pattern = 'data*.csv',
+    posix_fs.root = 'e2e_test/source/opendal',
+) FORMAT PLAIN ENCODE CSV ( without_header = 'false', delimiter = ',');
+
+sleep 10s
+
+query TTTT rowsort
+select * from diamonds;
+----
+
+statement ok
 DROP TABLE diamonds;
+
+statement ok
+DROP TABLE diamonds_recursive_read;
