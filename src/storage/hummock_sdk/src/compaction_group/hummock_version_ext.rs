@@ -1287,6 +1287,14 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
                 .chain(cg.levels.iter())
                 .flat_map(|level| level.table_infos.iter().map(|t| (t.object_id, t.file_size)))
         })
+        .chain(version.table_change_log.values().flat_map(|c| {
+            c.0.iter().flat_map(|l| {
+                l.old_value
+                    .iter()
+                    .chain(l.new_value.iter())
+                    .map(|t| (t.object_id, t.file_size))
+            })
+        }))
         .collect()
 }
 
