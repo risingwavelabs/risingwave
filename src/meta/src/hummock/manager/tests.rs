@@ -17,7 +17,6 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use prometheus::Registry;
@@ -1393,13 +1392,13 @@ async fn test_split_compaction_group_on_demand_basic() {
     assert_eq!(original_groups, vec![2, 3]);
 
     let err = hummock_manager
-        .split_compaction_group(100, &[0])
+        .split_compaction_group(100, &[0], 0)
         .await
         .unwrap_err();
     assert_eq!("compaction group error: invalid group 100", err.to_string());
 
     let err = hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap_err();
     assert_eq!(
@@ -1461,7 +1460,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         .unwrap();
 
     let err = hummock_manager
-        .split_compaction_group(2, &[100, 101])
+        .split_compaction_group(2, &[100, 101], 0)
         .await
         .unwrap_err();
     assert_eq!(
@@ -1477,7 +1476,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         .unwrap();
 
     hummock_manager
-        .split_compaction_group(2, &[100, 101])
+        .split_compaction_group(2, &[100, 101], 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1545,7 +1544,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
         .unwrap();
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
 
@@ -1673,7 +1672,7 @@ async fn test_split_compaction_group_trivial_expired() {
         .unwrap();
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
 
@@ -1845,7 +1844,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     );
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1954,7 +1953,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let compaction_task = get_manual_compact_task(&hummock_manager, context_id).await;
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
 
@@ -2038,7 +2037,7 @@ async fn test_move_tables_between_compaction_group() {
     );
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -2137,11 +2136,9 @@ async fn test_partition_level() {
         .level0_overlapping_sub_level_compact_level_count(3)
         .build();
     let registry = Registry::new();
-    let (_env, hummock_manager, _, worker_node) =
+    let (env, hummock_manager, _, worker_node) =
         setup_compute_env_with_metric(80, config.clone(), Some(MetaMetrics::for_test(&registry)))
             .await;
-    let config = Arc::new(config);
-
     let context_id = worker_node.id;
 
     hummock_manager
@@ -2176,7 +2173,7 @@ async fn test_partition_level() {
         .unwrap());
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], env.opts.partition_vnode_count)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -2318,7 +2315,7 @@ async fn test_unregister_moved_table() {
         .unwrap();
 
     let new_group_id = hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     assert_ne!(new_group_id, 2);
