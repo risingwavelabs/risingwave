@@ -8,10 +8,10 @@ CREATE TABLE diamonds_recursive_read (
     color TEXT,
     depth FLOAT,
 ) WITH (
-  connector = 'posix_fs',
-  match_pattern = 'data*.csv',
-  posix_fs.root = 'e2e_test/source/opendal/data',
-  recursive_scan = 'true',
+    connector = 'posix_fs',
+    match_pattern = 'data*.csv',
+    posix_fs.root = 'e2e_test/source/opendal/data',
+    recursive_scan = 'true',
 ) FORMAT PLAIN ENCODE CSV ( without_header = 'false', delimiter = ',');
 
 sleep 10s
@@ -37,9 +37,9 @@ CREATE TABLE diamonds (
     color TEXT,
     depth FLOAT,
 ) WITH (
-  connector = 'posix_fs',
-  match_pattern = 'data*.csv',
-  posix_fs.root = 'e2e_test/source/opendal',
+    connector = 'posix_fs',
+    match_pattern = 'data*.csv',
+    posix_fs.root = 'e2e_test/source/opendal',
 ) FORMAT PLAIN ENCODE CSV ( without_header = 'false', delimiter = ',');
 
 sleep 10s

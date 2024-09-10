@@ -164,11 +164,11 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     ) WITH (
         connector = 's3',
         match_pattern = '*.parquet',
-    s3.region_name = 'custom',
-    s3.bucket_name = 'hummock001',
-    s3.credentials.access = 'hummockadmin',
-    s3.credentials.secret = 'hummockadmin',
-    s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        s3.region_name = '{config['S3_REGION']}',
+        s3.bucket_name = '{config['S3_BUCKET']}',
+        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
+        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
     ) FORMAT PLAIN ENCODE PARQUET;''')
 
     total_rows = file_num * item_num_per_file
@@ -209,10 +209,10 @@ if __name__ == "__main__":
 
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
-        "127.0.0.1:9301",
-        access_key="hummockadmin",
-        secret_key="hummockadmin",
-        secure=False,
+        config["S3_ENDPOINT"],
+        access_key=config["S3_ACCESS_KEY"],
+        secret_key=config["S3_SECRET_KEY"],
+        secure=True,
     )
     run_id = str(random.randint(1000, 9999))
     _local = lambda idx: f'data_{idx}.parquet'
@@ -224,7 +224,7 @@ if __name__ == "__main__":
         pq.write_table(table, _local(idx))
 
         client.fput_object(
-            "hummock001",
+            config["S3_BUCKET"],
             _s3(idx),
             _local(idx)
         )
@@ -234,11 +234,11 @@ if __name__ == "__main__":
 
     # clean up s3 files
     for idx, _ in enumerate(data):
-       client.remove_object("hummock001", _s3(idx))
+       client.remove_object(config["S3_BUCKET"], _s3(idx))
 
     do_sink(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
 
      # clean up s3 files
     for idx, _ in enumerate(data):
-       client.remove_object("hummock001", _s3(idx))
+       client.remove_object(config["S3_BUCKET"], _s3(idx))
 
