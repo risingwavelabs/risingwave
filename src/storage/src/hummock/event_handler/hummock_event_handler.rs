@@ -50,6 +50,7 @@ use crate::hummock::event_handler::{
     ReadOnlyRwLockRef,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
@@ -197,7 +198,7 @@ pub struct HummockEventHandler {
     local_read_version_mapping: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
-    pinned_version: Arc<ArcSwap<PinnedVersion>>,
+    recent_versions: Arc<ArcSwap<RecentVersions>>,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
     uploader: HummockUploader,
@@ -355,7 +356,10 @@ impl HummockEventHandler {
             hummock_event_rx,
             version_update_rx,
             version_update_notifier_tx,
-            pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
+            recent_versions: Arc::new(ArcSwap::from_pointee(RecentVersions::new(
+                pinned_version,
+                60,
+            ))),
             write_conflict_detector,
             read_version_mapping,
             local_read_version_mapping: Default::default(),
@@ -371,8 +375,8 @@ impl HummockEventHandler {
         self.version_update_notifier_tx.clone()
     }
 
-    pub fn pinned_version(&self) -> Arc<ArcSwap<PinnedVersion>> {
-        self.pinned_version.clone()
+    pub fn recent_versions(&self) -> Arc<ArcSwap<RecentVersions>> {
+        self.recent_versions.clone()
     }
 
     pub fn read_version_mapping(&self) -> ReadOnlyReadVersionMapping {
@@ -629,8 +633,9 @@ impl HummockEventHandler {
             .metrics
             .event_handler_on_apply_version_update
             .start_timer();
-        self.pinned_version
-            .store(Arc::new(new_pinned_version.clone()));
+        self.recent_versions.rcu(|prev_recent_versions| {
+            prev_recent_versions.with_new_version(new_pinned_version.clone())
+        });
 
         {
             self.for_each_read_version(
@@ -663,7 +668,10 @@ impl HummockEventHandler {
         // TODO: should we change the logic when supporting partial ckpt?
         if let Some(sstable_object_id_manager) = &self.sstable_object_id_manager {
             sstable_object_id_manager.remove_watermark_object_id(TrackerId::Epoch(
-                self.pinned_version.load().visible_table_committed_epoch(),
+                self.recent_versions
+                    .load()
+                    .latest_version()
+                    .visible_table_committed_epoch(),
             ));
         }
 
@@ -789,13 +797,13 @@ impl HummockEventHandler {
                 is_replicated,
                 vnodes,
             } => {
-                let pinned_version = self.pinned_version.load();
+                let pinned_version = self.recent_versions.load().latest_version().clone();
                 let instance_id = self.generate_instance_id();
                 let basic_read_version = Arc::new(RwLock::new(
                     HummockReadVersion::new_with_replication_option(
                         table_id,
                         instance_id,
-                        (**pinned_version).clone(),
+                        pinned_version,
                         is_replicated,
                         vnodes,
                     ),
@@ -992,7 +1000,7 @@ mod tests {
         );
 
         let event_tx = event_handler.event_sender();
-        let latest_version = event_handler.pinned_version.clone();
+        let latest_version = event_handler.recent_versions.clone();
         let latest_version_update_tx = event_handler.version_update_notifier_tx.clone();
 
         let send_clear = |version_id| {
@@ -1018,12 +1026,15 @@ mod tests {
             let (old_version, new_version, refill_finish_tx) = refill_task_rx.recv().await.unwrap();
             assert_eq!(old_version.version(), initial_version.version());
             assert_eq!(new_version.version(), &version1);
-            assert_eq!(latest_version.load().version(), initial_version.version());
+            assert_eq!(
+                latest_version.load().latest_version().version(),
+                initial_version.version()
+            );
 
             let mut changed = latest_version_update_tx.subscribe();
             refill_finish_tx.send(()).unwrap();
             changed.changed().await.unwrap();
-            assert_eq!(latest_version.load().version(), &version1);
+            assert_eq!(latest_version.load().latest_version().version(), &version1);
         }
 
         // test recovery with pending refill task
@@ -1050,11 +1061,11 @@ mod tests {
                 refill_task_rx.recv().await.unwrap();
             assert_eq!(old_version3.version(), &version2);
             assert_eq!(new_version3.version(), &version3);
-            assert_eq!(latest_version.load().version(), &version1);
+            assert_eq!(latest_version.load().latest_version().version(), &version1);
 
             let rx = send_clear(version3.id);
             rx.await.unwrap();
-            assert_eq!(latest_version.load().version(), &version3);
+            assert_eq!(latest_version.load().latest_version().version(), &version3);
         }
 
         async fn assert_pending(fut: &mut (impl Future + Unpin)) {
@@ -1081,7 +1092,7 @@ mod tests {
                 )))
                 .unwrap();
             rx.await.unwrap();
-            assert_eq!(latest_version.load().version(), &version5);
+            assert_eq!(latest_version.load().latest_version().version(), &version5);
         }
     }
 
