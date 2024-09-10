@@ -81,7 +81,7 @@ where
             Some(AdditionalColumnType::Key(_)) => self.access_key(&[&desc.name], &desc.data_type),
             // hack here: Get the whole payload as a single column
             // use a special mark "." as column name to represent the whole payload
-            Some(AdditionalColumnType::Payload(_)) => self.access_value(&["."], &desc.data_type),
+            Some(AdditionalColumnType::Payload(_)) => self.access_value(&[], &desc.data_type),
             None => self.access_value(&[&desc.name], &desc.data_type),
             _ => unreachable!(),
         }
