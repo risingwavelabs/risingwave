@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod auto_parallelism;
-mod cascade_materialized_view;
-mod dynamic_filter;
-mod nexmark_chaos;
-mod nexmark_q4;
-mod nexmark_source;
-mod no_shuffle;
-mod schedulability;
-mod shared_source;
-mod singleton_migration;
-mod sink;
-mod streaming_parallelism;
-mod table;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
+
+#[system_catalog(
+    view,
+    "rw_catalog.rw_worker_actor_count",
+    "SELECT t2.id as worker_id, parallelism, count(*) as actor_count
+     FROM rw_actors t1, rw_worker_nodes t2
+     where t1.worker_id = t2.id
+     GROUP  BY t2.id, t2.parallelism;"
+)]
+#[derive(Fields)]
+struct RwWorkerActorCount {
+    worker_id: i32,
+    parallelism: i32,
+    actor_count: i64,
+}

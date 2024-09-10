@@ -86,7 +86,6 @@ pub use self::command::{
     Reschedule, SnapshotBackfillInfo,
 };
 pub use self::info::InflightSubscriptionInfo;
-pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -171,8 +170,6 @@ pub struct GlobalBarrierManagerContext {
     sink_manager: SinkCoordinatorManager,
 
     pub(super) metrics: Arc<MetaMetrics>,
-
-    stream_rpc_manager: StreamRpcManager,
 
     env: MetaSrvEnv,
 }
@@ -596,7 +593,6 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
-        stream_rpc_manager: StreamRpcManager,
         scale_controller: ScaleControllerRef,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
@@ -624,7 +620,6 @@ impl GlobalBarrierManager {
             scale_controller,
             sink_manager,
             metrics,
-            stream_rpc_manager,
             env: env.clone(),
         };
 
@@ -768,7 +763,9 @@ impl GlobalBarrierManager {
                     if let Some(request) = request {
                         match request {
                             BarrierManagerRequest::GetDdlProgress(result_tx) => {
+                                // Progress of normal backfill
                                 let mut progress = self.checkpoint_control.create_mview_tracker.gen_ddl_progress();
+                                // Progress of snapshot backfill
                                 for creating_job in self.checkpoint_control.creating_streaming_job_controls.values() {
                                     progress.extend([(creating_job.info.table_fragments.table_id().table_id, creating_job.gen_ddl_progress())]);
                                 }
@@ -1639,6 +1636,7 @@ impl GlobalBarrierManagerContext {
         Ok(info)
     }
 
+    /// Serving `SHOW JOBS / SELECT * FROM rw_ddl_progress`
     pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
         let mut ddl_progress = {
             let (tx, rx) = oneshot::channel();

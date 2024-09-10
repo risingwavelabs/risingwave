@@ -158,27 +158,16 @@ impl Configuration {
     /// Provides a configuration for scale test which ensures that the arrangement backfill is disabled,
     /// so table scan will use `no_shuffle`.
     pub fn for_scale_no_shuffle() -> Self {
-        // Embed the config file and create a temporary file at runtime. The file will be deleted
-        // automatically when it's dropped.
-        let config_path = {
-            let mut file =
-                tempfile::NamedTempFile::new().expect("failed to create temp config file");
-            file.write_all(include_bytes!("risingwave-scale.toml"))
-                .expect("failed to write config file");
-            file.into_temp_path()
-        };
+        let mut conf = Self::for_scale();
+        conf.per_session_queries =
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into()].into();
+        conf
+    }
 
-        Configuration {
-            config_path: ConfigPath::Temp(config_path.into()),
-            frontend_nodes: 2,
-            compute_nodes: 3,
-            meta_nodes: 3,
-            compactor_nodes: 2,
-            compute_node_cores: 2,
-            per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into()]
-                .into(),
-            ..Default::default()
-        }
+    pub fn for_scale_shared_source() -> Self {
+        let mut conf = Self::for_scale();
+        conf.per_session_queries = vec!["SET RW_ENABLE_SHARED_SOURCE = true;".into()].into();
+        conf
     }
 
     pub fn for_auto_parallelism(

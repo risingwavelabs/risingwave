@@ -1103,8 +1103,8 @@ mod tests {
     }
 
     async fn test_hash_dispatcher_complex_inner() {
-        // This test only works when VirtualNode::COUNT is 256.
-        static_assertions::const_assert_eq!(VirtualNode::COUNT, 256);
+        // This test only works when vnode count is 256.
+        assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
 
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
@@ -1119,9 +1119,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT_FOR_TEST, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
@@ -1226,6 +1226,32 @@ mod tests {
         )
         .unwrap();
 
+        let dispatcher_updates = maplit::hashmap! {
+            actor_id => vec![PbDispatcherUpdate {
+                actor_id,
+                dispatcher_id: broadcast_dispatcher_id,
+                added_downstream_actor_id: vec![new],
+                removed_downstream_actor_id: vec![old],
+                hash_mapping: Default::default(),
+            }]
+        };
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: dispatcher_updates,
+                merges: Default::default(),
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
+        barrier_test_env.inject_barrier(&b1, [actor_id]);
+        barrier_test_env
+            .shared_context
+            .local_barrier_manager
+            .flush_all_events()
+            .await;
+
         let executor = Box::new(DispatchExecutor::new(
             input,
             vec![broadcast_dispatcher, simple_dispatcher],
@@ -1254,27 +1280,6 @@ mod tests {
             .await
             .unwrap();
 
-        // 4. Send a configuration change barrier for broadcast dispatcher.
-        let dispatcher_updates = maplit::hashmap! {
-            actor_id => vec![PbDispatcherUpdate {
-                actor_id,
-                dispatcher_id: broadcast_dispatcher_id,
-                added_downstream_actor_id: vec![new],
-                removed_downstream_actor_id: vec![old],
-                hash_mapping: Default::default(),
-            }]
-        };
-        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
-            UpdateMutation {
-                dispatchers: dispatcher_updates,
-                merges: Default::default(),
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-            },
-        ));
-        barrier_test_env.inject_barrier(&b1, [actor_id]);
         tx.send(Message::Barrier(b1.clone().into_dispatcher()))
             .await
             .unwrap();
@@ -1360,6 +1365,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_dispatcher() {
+        // This test only works when vnode count is 256.
+        assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
+
         let num_outputs = 5; // actor id ranges from 1 to 5
         let cardinality = 10;
         let dimension = 4;
@@ -1375,9 +1383,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT_FOR_TEST, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
@@ -1411,7 +1419,7 @@ mod tests {
                 hasher.update(&bytes);
             }
             let output_idx =
-                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT] as usize - 1;
+                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT_FOR_TEST] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq_fast(one_row.iter()) {
                 builder.append(Some(*val));
             }
