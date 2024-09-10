@@ -622,7 +622,7 @@ fn check_additional_column_compatibility(
         && !matches!(schema.row_encode, Encode::Json)
     {
         return Err(RwError::from(ProtocolError(format!(
-            "Payload column is only allowed when row encode is JSON, but got {:?}",
+            "INCLUDE payload is only allowed when using ENCODE JSON, but got ENCODE {:?}",
             schema.row_encode
         ))));
     }
