@@ -28,7 +28,7 @@ use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
-use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
+use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
@@ -1078,6 +1078,7 @@ impl SourceManager {
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         let current_splits_ref = splits.clone();
         let source_id = source.id;
+        let is_fs_connector = source.with_properties.is_new_fs_connector();
 
         let connector_properties = extract_prop_from_new_source(source)?;
         let enable_scale_in = connector_properties.enable_split_scale_in();
@@ -1109,6 +1110,13 @@ impl SourceManager {
 
             tokio::spawn(async move { worker.run(sync_call_rx).await })
         });
+
+        if is_fs_connector {
+            // fs source does not rely on source manager to manage splits
+            // do connectivity check but not maintained
+            // also avoid storing fs splits in meta store and do related mutations
+            return Ok(());
+        }
 
         managed_sources.insert(
             source_id,
