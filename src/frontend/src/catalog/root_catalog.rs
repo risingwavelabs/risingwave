@@ -170,6 +170,7 @@ impl Catalog {
             .unwrap()
             .create_table(proto);
         self.table_by_id.insert(proto.id.into(), table);
+        println!("heiheihei: create table: {:?}, {:?}", proto.id, proto.name);
     }
 
     pub fn create_index(&mut self, proto: &PbIndex) {
@@ -178,6 +179,12 @@ impl Catalog {
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_index(proto);
+        println!(
+            "heiheihei: create index: {:?}, {:?}, {:?}",
+            proto.id,
+            proto.name,
+            proto.get_stream_job_status()
+        );
     }
 
     pub fn create_source(&mut self, proto: &PbSource) {

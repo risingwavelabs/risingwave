@@ -3024,6 +3024,12 @@ impl CatalogControllerInner {
 
         let users = self.list_users().await?;
 
+        println!(
+            "heiheihei: snapshot, tables: {:?}, indexes: {:?}",
+            tables.iter().map(|t| (t.id, t.name.clone())).collect_vec(),
+            indexes.iter().map(|i| (i.id, i.name.clone())).collect_vec()
+        );
+
         Ok((
             (
                 databases,
@@ -3137,12 +3143,16 @@ impl CatalogControllerInner {
         Ok(table_ids)
     }
 
-    /// `list_tables` return all `CREATED` tables and internal tables that belong to `CREATED` streaming jobs.
+    /// `list_tables` return all `CREATED` tables, `CREATING` materialized views and internal tables that belong to them.
     async fn list_tables(&self) -> MetaResult<Vec<PbTable>> {
         let table_objs = Table::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Created)
+                    .or(table::Column::TableType.eq(TableType::MaterializedView)),
+            )
             .all(&self.db)
             .await?;
 
@@ -3154,12 +3164,18 @@ impl CatalogControllerInner {
             .all(&self.db)
             .await?;
 
+        let job_ids: HashSet<ObjectId> = table_objs
+            .iter()
+            .map(|(t, _)| t.table_id)
+            .chain(created_streaming_job_ids.into_iter())
+            .collect();
+
         let internal_table_objs = Table::find()
             .find_also_related(Object)
             .filter(
                 table::Column::TableType
                     .eq(TableType::Internal)
-                    .and(table::Column::BelongsToJobId.is_in(created_streaming_job_ids)),
+                    .and(table::Column::BelongsToJobId.is_in(job_ids)),
             )
             .all(&self.db)
             .await?;
