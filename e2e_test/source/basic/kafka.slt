@@ -498,7 +498,7 @@ FORMAT DEBEZIUM ENCODE JSON (
   ignore_key = 'true'
 )
 
-statement error Payload column is only allowed when row encode is JSON, but got Bytes
+statement error INCLUDE payload is only allowed when using ENCODE JSON, but got ENCODE Bytes
 CREATE TABLE test_include_payload (a bytea)
 INCLUDE payload
 WITH (
