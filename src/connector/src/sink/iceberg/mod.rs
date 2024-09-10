@@ -672,7 +672,7 @@ impl IcebergConfig {
                     .file_io(storage_catalog.file_io().clone())
                     // Only support readonly table for storage catalog now.
                     .readonly(true)
-                    .build())
+                    .build()?)
             }
             _ => self.load_table_v2().await,
         }

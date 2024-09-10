@@ -92,7 +92,13 @@ impl IcebergScanExecutor {
             .load_table_v2_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
-        let chunk_schema_names = self.schema.names();
+        let chunk_schema_name_to_id = self
+            .schema
+            .names()
+            .iter()
+            .enumerate()
+            .map(|(k, v)| (v.clone(), k))
+            .collect::<HashMap<_, _>>();
 
         let mut eq_delete_file_scan_tasks_map: HashMap<
             String,
@@ -100,9 +106,10 @@ impl IcebergScanExecutor {
         > = HashMap::default();
         let eq_delete_file_scan_tasks = mem::take(&mut self.eq_delete_file_scan_tasks);
 
-        let mut delete_column_names_for_check = vec![];
-        for eq_delete_file_scan_task in eq_delete_file_scan_tasks {
-            let mut sequence_number = eq_delete_file_scan_task.sequence_number();
+        for mut eq_delete_file_scan_task in eq_delete_file_scan_tasks {
+            eq_delete_file_scan_task.project_field_ids =
+                eq_delete_file_scan_task.equality_ids.clone();
+            let mut sequence_number = eq_delete_file_scan_task.sequence_number;
             let reader = table
                 .reader_builder()
                 .with_batch_size(self.batch_size)
@@ -123,15 +130,6 @@ impl IcebergScanExecutor {
                     .cloned()
                     .collect_vec();
 
-                // Todo! xxhZs move check to iceberg source.
-                if delete_column_names_for_check.is_empty() {
-                    delete_column_names_for_check = delete_column_names.clone();
-                } else if delete_column_names_for_check != delete_column_names {
-                    return Err(BatchError::Internal(anyhow::anyhow!(
-                        "The schema of iceberg equality delete file must be consistent"
-                    )));
-                }
-
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
                 for (array, columns_name) in chunk.columns().iter().zip_eq(delete_column_names) {
                     let each_column_seq_num_map = eq_delete_file_scan_tasks_map
@@ -150,7 +148,7 @@ impl IcebergScanExecutor {
         let file_scan_tasks = mem::take(&mut self.file_scan_tasks);
 
         for file_scan_task in file_scan_tasks {
-            let sequence_number = file_scan_task.sequence_number();
+            let sequence_number = file_scan_task.sequence_number;
             let reader = table
                 .reader_builder()
                 .with_batch_size(self.batch_size)
@@ -208,12 +206,12 @@ impl IcebergScanExecutor {
                     .iter()
                     .zip_eq(column_names)
                     .filter_map(|(array, columns)| {
-                        if chunk_schema_names.contains(&columns) {
-                            Some(array.clone())
-                        } else {
-                            None
-                        }
+                        chunk_schema_name_to_id
+                            .get(&columns)
+                            .map(|&id| (id, array.clone()))
                     })
+                    .sorted_by_key(|a| a.0)
+                    .map(|(k, v)| v)
                     .collect_vec();
                 let chunk = DataChunk::new(data, visibility);
                 debug_assert_eq!(chunk.data_types(), data_types);

@@ -15,12 +15,10 @@
 pub mod parquet_file_reader;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures_async_stream::for_await;
-use iceberg::arrow::schema_to_arrow_schema;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table;
@@ -221,10 +219,13 @@ impl IcebergSplitEnumerator {
                 let snapshot = table
                     .metadata()
                     .snapshots()
-                    .filter(|snapshot| snapshot.timestamp().timestamp_millis() <= timestamp)
-                    .max_by_key(|snapshot| snapshot.timestamp().timestamp_millis());
+                    .map(|snapshot| snapshot.timestamp().map(|ts| ts.timestamp_millis()))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .filter(|&snapshot_millis| snapshot_millis <= timestamp)
+                    .max_by_key(|&snapshot_millis| snapshot_millis);
                 match snapshot {
-                    Some(snapshot) => snapshot.snapshot_id(),
+                    Some(snapshot) => snapshot,
                     None => {
                         // convert unix time to human readable time
                         let time = chrono::DateTime::from_timestamp_millis(timestamp);
@@ -241,18 +242,11 @@ impl IcebergSplitEnumerator {
                 None => bail!("Cannot find the current snapshot id in the iceberg table."),
             },
         };
-        let (eq_delete_files, eq_delete_file_schema) =
-            IcebergSplitEnumerator::load_eq_delete_file(&table, snapshot_id).await?;
-        let arrow_schema = schema_to_arrow_schema(&eq_delete_file_schema)?;
-        let mut require_names: HashSet<String> = schema.names().clone().into_iter().collect();
-        require_names.extend(
-            arrow_schema
-                .all_fields()
-                .into_iter()
-                .map(|filed| filed.name().clone()),
-        );
+        let mut require_names = Self::get_eq_delete_names(&table, snapshot_id).await?;
+        require_names.extend(schema.names().clone().into_iter());
 
-        let mut files = vec![];
+        let mut data_files = vec![];
+        let mut eq_delete_files = vec![];
 
         let scan = table
             .scan()
@@ -265,16 +259,26 @@ impl IcebergSplitEnumerator {
 
         #[for_await]
         for task in file_scan_stream {
-            let task = task.map_err(|e| anyhow!(e))?;
-            files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+            let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            match task.data_file_content {
+                iceberg::spec::DataContentType::Data => {
+                    data_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+                }
+                iceberg::spec::DataContentType::EqualityDeletes => {
+                    eq_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+                }
+                iceberg::spec::DataContentType::PositionDeletes => {
+                    bail!("Position delete file is not supported")
+                }
+            }
         }
 
         let table_meta = TableMetadataJsonStr::serialize(table.metadata());
 
         let split_num = batch_parallelism;
         // evenly split the files into splits based on the parallelism.
-        let split_size = files.len() / split_num;
-        let remaining = files.len() % split_num;
+        let split_size = data_files.len() / split_num;
+        let remaining = data_files.len() % split_num;
         let mut splits = vec![];
         for i in 0..split_num {
             let start = i * split_size;
@@ -283,7 +287,7 @@ impl IcebergSplitEnumerator {
                 split_id: i as i64,
                 snapshot_id,
                 table_meta: table_meta.clone(),
-                files: files[start..end].to_vec(),
+                files: data_files[start..end].to_vec(),
                 eq_delete_files: eq_delete_files.clone(),
             };
             splits.push(split);
@@ -291,7 +295,7 @@ impl IcebergSplitEnumerator {
         for i in 0..remaining {
             splits[i]
                 .files
-                .push(files[split_num * split_size + i].clone());
+                .push(data_files[split_num * split_size + i].clone());
         }
         Ok(splits
             .into_iter()
@@ -299,28 +303,36 @@ impl IcebergSplitEnumerator {
             .collect_vec())
     }
 
-    async fn load_eq_delete_file(
+    async fn get_eq_delete_names(
         table: &Table,
         snapshot_id: i64,
-    ) -> ConnectorResult<(Vec<IcebergFileScanTaskJsonStr>, Arc<iceberg::spec::Schema>)> {
-        let mut files = vec![];
-
+    ) -> ConnectorResult<HashSet<String>> {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
             .build()
             .map_err(|e| anyhow!(e))?;
-        // Todo! xxhZs Currently, this schema is the full schema, this is because iceberg_rust's task does not have eq_delete_id.
+        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
         let schema = scan.snapshot().schema(table.metadata())?;
-
-        let file_scan_stream = scan.plan_eq_delete_files().await.map_err(|e| anyhow!(e))?;
-
+        let mut equality_ids = vec![];
         #[for_await]
         for task in file_scan_stream {
-            let task = task.map_err(|e| anyhow!(e))?;
-            files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+            let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            if task.data_file_content == iceberg::spec::DataContentType::EqualityDeletes {
+                if equality_ids.is_empty() {
+                    equality_ids = task.equality_ids;
+                } else if equality_ids != task.equality_ids {
+                    bail!("The schema of iceberg equality delete file must be consistent");
+                }
+            }
         }
-        Ok((files, schema))
+        equality_ids
+            .into_iter()
+            .map(|id| match schema.name_by_field_id(id) {
+                Some(name) => Ok(name.to_string()),
+                None => bail!("Delete field id {} not found in schema", id),
+            })
+            .collect()
     }
 }
 

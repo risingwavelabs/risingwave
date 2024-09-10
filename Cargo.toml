@@ -142,9 +142,9 @@ arrow-array-iceberg = { package = "arrow-array", version = "52" }
 arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
 arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
 arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "2648421c18993edec6853ad5ce978733178b26f1" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "2648421c18993edec6853ad5ce978733178b26f1" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "2648421c18993edec6853ad5ce978733178b26f1" }
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "682b38037dafa78ebbc6e0479844e980c5ed68a4" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "682b38037dafa78ebbc6e0479844e980c5ed68a4" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "682b38037dafa78ebbc6e0479844e980c5ed68a4" }
 opendal = "0.47"
 arrow-array = "50"
 arrow-arith = "50"
@@ -342,7 +342,6 @@ opt-level = 2
 
 [patch.crates-io]
 # Patch third-party crates for deterministic simulation.
-quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
 # Imagine an unpatched dependency depends on the original `tokio` and the patched `tokio-stream`.
