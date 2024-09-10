@@ -488,37 +488,37 @@ impl CatalogController {
         // Get the notification info if the job is a materialized view.
         let table_obj = Table::find_by_id(job_id).one(&txn).await?;
         let mut objs = vec![];
-        if let Some(table) = &table_obj {
-            if table.table_type == TableType::MaterializedView {
-                let obj: Option<PartialObject> = Object::find_by_id(job_id)
-                    .select_only()
-                    .columns([
-                        object::Column::Oid,
-                        object::Column::ObjType,
-                        object::Column::SchemaId,
-                        object::Column::DatabaseId,
-                    ])
-                    .into_partial_model()
-                    .one(&txn)
-                    .await?;
-                let obj =
-                    obj.ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
-                objs.push(obj);
-                let internal_table_objs: Vec<PartialObject> = Object::find()
-                    .select_only()
-                    .columns([
-                        object::Column::Oid,
-                        object::Column::ObjType,
-                        object::Column::SchemaId,
-                        object::Column::DatabaseId,
-                    ])
-                    .join(JoinType::InnerJoin, object::Relation::Table.def())
-                    .filter(table::Column::BelongsToJobId.eq(job_id))
-                    .into_partial_model()
-                    .all(&txn)
-                    .await?;
-                objs.extend(internal_table_objs);
-            }
+        if let Some(table) = &table_obj
+            && table.table_type == TableType::MaterializedView
+        {
+            let obj: Option<PartialObject> = Object::find_by_id(job_id)
+                .select_only()
+                .columns([
+                    object::Column::Oid,
+                    object::Column::ObjType,
+                    object::Column::SchemaId,
+                    object::Column::DatabaseId,
+                ])
+                .into_partial_model()
+                .one(&txn)
+                .await?;
+            let obj =
+                obj.ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+            objs.push(obj);
+            let internal_table_objs: Vec<PartialObject> = Object::find()
+                .select_only()
+                .columns([
+                    object::Column::Oid,
+                    object::Column::ObjType,
+                    object::Column::SchemaId,
+                    object::Column::DatabaseId,
+                ])
+                .join(JoinType::InnerJoin, object::Relation::Table.def())
+                .filter(table::Column::BelongsToJobId.eq(job_id))
+                .into_partial_model()
+                .all(&txn)
+                .await?;
+            objs.extend(internal_table_objs);
         }
 
         Object::delete_by_id(job_id).exec(&txn).await?;
