@@ -29,7 +29,7 @@ use tracing::warn;
 
 use super::group_split::get_sub_level_insert_hint;
 use super::{group_split, StateTableId};
-use crate::change_log::TableChangeLog;
+use crate::change_log::TableChangeLogCommon;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, Levels, OverlappingLevel};
@@ -795,7 +795,7 @@ impl HummockVersion {
                     change_log.0.push(new_change_log.clone());
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(TableChangeLog(vec![new_change_log.clone()]));
+                    entry.insert(TableChangeLogCommon(vec![new_change_log.clone()]));
                 }
             };
         }
