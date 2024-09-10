@@ -185,6 +185,7 @@ impl HummockVersion {
             }))
     }
 
+    // only scan the sst infos from levels in the specified compaction group (without table change log)
     pub fn get_sst_ids_by_group_id(
         &self,
         compaction_group_id: CompactionGroupId,
