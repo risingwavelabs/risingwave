@@ -65,10 +65,8 @@ use with_options::WithOptions;
 use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
-use super::catalog::desc::SinkDesc;
 use super::decouple_checkpoint_log_sink::{
     default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
-    DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
 };
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -76,7 +74,7 @@ use super::{
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::SinkWriter;
-use crate::sink::{Result, SinkCommitCoordinator, SinkDecouple, SinkParam};
+use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{
     deserialize_bool_from_string, deserialize_optional_bool_from_string,
     deserialize_optional_string_seq_from_string,
@@ -843,31 +841,6 @@ impl Sink for IcebergSink {
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let commit_checkpoint_interval =
-            desc.properties
-                .get("commit_checkpoint_interval")
-                .map(|interval| {
-                    interval
-                        .parse::<u64>()
-                        .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
-                });
-
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => {
-                if let Some(commit_checkpoint_interval) = commit_checkpoint_interval
-                    && commit_checkpoint_interval > 1
-                {
-                    return Err(SinkError::Config(anyhow!(
-                        "config conflict: Iceberg config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                    )));
-                }
-                Ok(false)
-            }
-        }
-    }
-
     async fn validate(&self) -> Result<()> {
         if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
             risingwave_common::license::Feature::IcebergSinkWithGlue
@@ -1399,7 +1372,7 @@ mod test {
 
     use risingwave_common::catalog::Field;
 
-    use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
+    use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
     use crate::sink::iceberg::IcebergConfig;
     use crate::source::DataType;
 
@@ -1482,7 +1455,7 @@ mod test {
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
-            commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+            commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
             create_table_if_not_exists: false,
         };
 
