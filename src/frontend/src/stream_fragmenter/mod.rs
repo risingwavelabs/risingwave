@@ -14,6 +14,7 @@
 
 mod graph;
 use graph::*;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::recursive::{self, Recurse as _};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -144,7 +145,8 @@ pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphPro
                 .map(|parallelism| Parallelism {
                     parallelism: parallelism.get(),
                 });
-        fragment_graph.expected_vnode_count = config.vnode_count() as _;
+        // TODO(var-vnode): allow configuring with session variable.
+        fragment_graph.expected_vnode_count = VirtualNode::COUNT as _;
     }
 
     // Set timezone.
