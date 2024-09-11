@@ -9096,9 +9096,12 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55a6a9143ae25c25fa7b6a48d6cc08b10785372060009c25140a4e7c340e95af"
 dependencies = [
+ "base64 0.22.0",
  "once_cell",
  "prost 0.13.1",
  "prost-types 0.13.1",
+ "serde",
+ "serde-value",
 ]
 
 [[package]]

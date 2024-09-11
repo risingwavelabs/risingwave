@@ -17,9 +17,7 @@
 use auto_impl::auto_impl;
 use risingwave_common::types::{DataType, DatumCow};
 use risingwave_connector_codec::decoder::avro::AvroAccess;
-pub use risingwave_connector_codec::decoder::{
-    bail_uncategorized, uncategorized, Access, AccessError, AccessResult,
-};
+pub use risingwave_connector_codec::decoder::{uncategorized, Access, AccessError, AccessResult};
 
 use self::bytes::BytesAccess;
 use self::json::JsonAccess;
