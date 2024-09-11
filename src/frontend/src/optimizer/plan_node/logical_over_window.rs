@@ -548,11 +548,10 @@ impl ColPrunable for LogicalOverWindow {
             let new_window_functions = req_cols_win_func_part
                 .indices()
                 .map(|idx| self.window_functions()[idx - input_len].clone())
-                .map(|func| {
+                .inspect(|func| {
                     tmp.extend(func.args.iter().map(|x| x.index()));
                     tmp.extend(func.partition_by.iter().map(|x| x.index()));
                     tmp.extend(func.order_by.iter().map(|x| x.column_index));
-                    func
                 })
                 .collect_vec();
             (tmp, new_window_functions)
