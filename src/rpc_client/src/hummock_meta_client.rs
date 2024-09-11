@@ -66,5 +66,9 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         BoxStream<'static, CompactionEventItem>,
     )>;
 
-    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion>;
+    async fn get_version_by_epoch(
+        &self,
+        epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<PbHummockVersion>;
 }

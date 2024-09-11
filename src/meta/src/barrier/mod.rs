@@ -763,7 +763,9 @@ impl GlobalBarrierManager {
                     if let Some(request) = request {
                         match request {
                             BarrierManagerRequest::GetDdlProgress(result_tx) => {
+                                // Progress of normal backfill
                                 let mut progress = self.checkpoint_control.create_mview_tracker.gen_ddl_progress();
+                                // Progress of snapshot backfill
                                 for creating_job in self.checkpoint_control.creating_streaming_job_controls.values() {
                                     progress.extend([(creating_job.info.table_fragments.table_id().table_id, creating_job.gen_ddl_progress())]);
                                 }
@@ -1634,6 +1636,7 @@ impl GlobalBarrierManagerContext {
         Ok(info)
     }
 
+    /// Serving `SHOW JOBS / SELECT * FROM rw_ddl_progress`
     pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
         let mut ddl_progress = {
             let (tx, rx) = oneshot::channel();

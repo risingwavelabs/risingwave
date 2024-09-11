@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::hash::{VirtualNode, WorkerSlotMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -57,7 +57,8 @@ impl ServingVnodeMapping {
                 } else {
                     None
                 };
-                place_vnode(old_mapping, workers, max_parallelism)
+                // TODO(var-vnode): use vnode count from config
+                place_vnode(old_mapping, workers, max_parallelism, VirtualNode::COUNT)
             };
             match new_mapping {
                 None => {

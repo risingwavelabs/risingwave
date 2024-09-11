@@ -122,7 +122,7 @@ impl<'a> HummockVersionTransaction<'a> {
         is_visible_table_committed_epoch: bool,
         new_compaction_group: Option<(CompactionGroupId, CompactionConfig)>,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
-        new_table_ids: HashMap<TableId, CompactionGroupId>,
+        new_table_ids: &HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
     ) -> HummockVersionDelta {
@@ -175,7 +175,7 @@ impl<'a> HummockVersionTransaction<'a> {
 
         // update state table info
         new_version_delta.with_latest_version(|version, delta| {
-            for (table_id, cg_id) in &new_table_ids {
+            for (table_id, cg_id) in new_table_ids {
                 assert!(
                     !version.state_table_info.info().contains_key(table_id),
                     "newly added table exists previously: {:?}",

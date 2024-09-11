@@ -30,7 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::hash::table_distribution::TableDistribution;
-use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
@@ -44,7 +44,6 @@ use risingwave_connector::source::{
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
-use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as PbField;
 use risingwave_sqlparser::ast::AsOf;
 use serde::ser::SerializeStruct;
@@ -311,9 +310,11 @@ impl SourceScanInfo {
                 Ok(SourceScanInfo::Complete(split_info))
             }
             ConnectorProperties::OpendalS3(prop) => {
+                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
+
                 let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
-                let stream = build_opendal_fs_list_for_batch(lister);
+                let stream = build_opendal_fs_list_for_batch(lister, recursive_scan);
 
                 let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res
@@ -324,18 +325,22 @@ impl SourceScanInfo {
                 Ok(SourceScanInfo::Complete(res))
             }
             ConnectorProperties::Gcs(prop) => {
+                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
+
                 let lister: OpendalEnumerator<OpendalGcs> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
-                let stream = build_opendal_fs_list_for_batch(lister);
+                let stream = build_opendal_fs_list_for_batch(lister, recursive_scan);
                 let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res.into_iter().map(SplitImpl::Gcs).collect_vec();
 
                 Ok(SourceScanInfo::Complete(res))
             }
             ConnectorProperties::Azblob(prop) => {
+                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
+
                 let lister: OpendalEnumerator<OpendalAzblob> =
                     OpendalEnumerator::new_azblob_source(*prop)?;
-                let stream = build_opendal_fs_list_for_batch(lister);
+                let stream = build_opendal_fs_list_for_batch(lister, recursive_scan);
                 let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res.into_iter().map(SplitImpl::Azblob).collect_vec();
 
@@ -437,7 +442,7 @@ impl TableScanInfo {
 
 #[derive(Clone, Debug)]
 pub struct TablePartitionInfo {
-    pub vnode_bitmap: Buffer,
+    pub vnode_bitmap: Bitmap,
     pub scan_ranges: Vec<ScanRangeProto>,
 }
 
@@ -922,8 +927,7 @@ impl BatchPlanFragmenter {
                                 .drain()
                                 .take(1)
                                 .update(|(_, info)| {
-                                    info.vnode_bitmap =
-                                        Bitmap::ones(VirtualNode::COUNT).to_protobuf();
+                                    info.vnode_bitmap = Bitmap::ones(info.vnode_bitmap.len());
                                 })
                                 .collect();
                         }
@@ -1230,7 +1234,7 @@ fn derive_partitions(
     table_desc: &TableDesc,
     vnode_mapping: &WorkerSlotMapping,
 ) -> SchedulerResult<HashMap<WorkerSlotId, TablePartitionInfo>> {
-    let num_vnodes = vnode_mapping.len();
+    let vnode_count = vnode_mapping.len();
     let mut partitions: HashMap<WorkerSlotId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 
     if scan_ranges.is_empty() {
@@ -1241,7 +1245,7 @@ fn derive_partitions(
                 (
                     k,
                     TablePartitionInfo {
-                        vnode_bitmap: vnode_bitmap.to_protobuf(),
+                        vnode_bitmap,
                         scan_ranges: vec![],
                     },
                 )
@@ -1250,8 +1254,7 @@ fn derive_partitions(
     }
 
     let table_distribution = TableDistribution::new_from_storage_table_desc(
-        // TODO(var-vnode): use vnode count from table desc
-        Some(Bitmap::ones(VirtualNode::COUNT).into()),
+        Some(Bitmap::ones(vnode_count).into()),
         &table_desc.try_to_protobuf()?,
     );
 
@@ -1264,7 +1267,7 @@ fn derive_partitions(
                     |(worker_slot_id, vnode_bitmap)| {
                         let (bitmap, scan_ranges) = partitions
                             .entry(worker_slot_id)
-                            .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
+                            .or_insert_with(|| (BitmapBuilder::zeroed(vnode_count), vec![]));
                         vnode_bitmap
                             .iter()
                             .enumerate()
@@ -1278,7 +1281,7 @@ fn derive_partitions(
                 let worker_slot_id = vnode_mapping[vnode];
                 let (bitmap, scan_ranges) = partitions
                     .entry(worker_slot_id)
-                    .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
+                    .or_insert_with(|| (BitmapBuilder::zeroed(vnode_count), vec![]));
                 bitmap.set(vnode.to_index(), true);
                 scan_ranges.push(scan_range.to_protobuf());
             }
@@ -1291,7 +1294,7 @@ fn derive_partitions(
             (
                 k,
                 TablePartitionInfo {
-                    vnode_bitmap: bitmap.finish().to_protobuf(),
+                    vnode_bitmap: bitmap.finish(),
                     scan_ranges,
                 },
             )

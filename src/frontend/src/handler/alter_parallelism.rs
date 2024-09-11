@@ -103,21 +103,23 @@ pub async fn handle_alter_parallelism(
         .filter(|w| w.is_streaming_schedulable())
         .map(|w| w.parallelism)
         .sum::<u32>();
+    // TODO(var-vnode): use vnode count from config
+    let max_parallelism = VirtualNode::COUNT;
 
     let mut builder = RwPgResponse::builder(stmt_type);
 
     match &target_parallelism.parallelism {
         Some(Parallelism::Adaptive(_)) | Some(Parallelism::Auto(_)) => {
-            if available_parallelism > VirtualNode::COUNT as u32 {
-                builder = builder.notice(format!("Available parallelism exceeds the maximum parallelism limit, the actual parallelism will be limited to {}", VirtualNode::COUNT));
+            if available_parallelism > max_parallelism as u32 {
+                builder = builder.notice(format!("Available parallelism exceeds the maximum parallelism limit, the actual parallelism will be limited to {max_parallelism}"));
             }
         }
         Some(Parallelism::Fixed(FixedParallelism { parallelism })) => {
-            if *parallelism > VirtualNode::COUNT as u32 {
-                builder = builder.notice(format!("Provided parallelism exceeds the maximum parallelism limit, resetting to FIXED({})", VirtualNode::COUNT));
+            if *parallelism > max_parallelism as u32 {
+                builder = builder.notice(format!("Provided parallelism exceeds the maximum parallelism limit, resetting to FIXED({max_parallelism})"));
                 target_parallelism = PbTableParallelism {
                     parallelism: Some(PbParallelism::Fixed(FixedParallelism {
-                        parallelism: VirtualNode::COUNT as u32,
+                        parallelism: max_parallelism as u32,
                     })),
                 };
             }
