@@ -264,6 +264,8 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
+        LOG.info(">>> Resolved Debezium properties: {}", dbzProps);
+
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
