@@ -24,6 +24,10 @@ AzblobProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: recursive_scan
+    field_type: bool
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -75,6 +79,10 @@ GcsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: recursive_scan
+    field_type: bool
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -840,6 +848,10 @@ OpendalS3Properties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: recursive_scan
+    field_type: bool
+    required: false
+    default: Default::default
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -854,6 +866,10 @@ PosixFsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: recursive_scan
+    field_type: bool
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false

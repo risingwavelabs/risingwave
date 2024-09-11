@@ -15,16 +15,13 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::{anyhow, Context as _};
-use futures::pin_mut;
-use futures_async_stream::try_stream;
+use anyhow::anyhow;
+use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_pb::task_service::{permits, GetStreamResponse};
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc;
 
-use super::error::ExchangeChannelClosed;
 use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{DispatcherBarrier, DispatcherMessage};
@@ -64,7 +61,6 @@ pub struct LocalInput {
 
     actor_id: ActorId,
 }
-type LocalInputStreamInner = impl MessageStream;
 
 async fn process_msg<'a>(
     msg: DispatcherMessage,
@@ -110,7 +106,7 @@ impl LocalInput {
         local_barrier_manager: LocalBarrierManager,
     ) -> Self {
         Self {
-            inner: Self::run(
+            inner: local_input::run(
                 channel,
                 upstream_actor_id,
                 self_actor_id,
@@ -119,9 +115,36 @@ impl LocalInput {
             actor_id: upstream_actor_id,
         }
     }
+}
+
+mod local_input {
+    use await_tree::InstrumentAwait;
+
+    use crate::executor::exchange::error::ExchangeChannelClosed;
+    use crate::executor::exchange::input::process_msg;
+    use crate::executor::exchange::permit::Receiver;
+    use crate::executor::prelude::try_stream;
+    use crate::executor::{Message, StreamExecutorError};
+    use crate::task::{ActorId, LocalBarrierManager};
+
+    pub(super) type LocalInputStreamInner = impl crate::executor::MessageStream;
+
+    pub(super) fn run(
+        channel: Receiver,
+        upstream_actor_id: ActorId,
+        self_actor_id: ActorId,
+        local_barrier_manager: LocalBarrierManager,
+    ) -> LocalInputStreamInner {
+        run_inner(
+            channel,
+            upstream_actor_id,
+            self_actor_id,
+            local_barrier_manager,
+        )
+    }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn run(
+    async fn run_inner(
         mut channel: Receiver,
         upstream_actor_id: ActorId,
         self_actor_id: ActorId,
@@ -166,7 +189,8 @@ pub struct RemoteInput {
 
     actor_id: ActorId,
 }
-type RemoteInputStreamInner = impl MessageStream;
+
+use remote_input::RemoteInputStreamInner;
 
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
@@ -184,7 +208,7 @@ impl RemoteInput {
 
         Self {
             actor_id,
-            inner: Self::run(
+            inner: remote_input::run(
                 local_barrier_manager,
                 client_pool,
                 upstream_addr,
@@ -195,9 +219,48 @@ impl RemoteInput {
             ),
         }
     }
+}
+
+mod remote_input {
+    use std::sync::Arc;
+
+    use anyhow::Context;
+    use await_tree::InstrumentAwait;
+    use risingwave_common::util::addr::HostAddr;
+    use risingwave_pb::task_service::{permits, GetStreamResponse};
+    use risingwave_rpc_client::ComputeClientPool;
+
+    use crate::executor::exchange::error::ExchangeChannelClosed;
+    use crate::executor::exchange::input::process_msg;
+    use crate::executor::monitor::StreamingMetrics;
+    use crate::executor::prelude::{pin_mut, try_stream, StreamExt};
+    use crate::executor::{DispatcherMessage, Message, StreamExecutorError};
+    use crate::task::{LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
+
+    pub(super) type RemoteInputStreamInner = impl crate::executor::MessageStream;
+
+    pub(super) fn run(
+        local_barrier_manager: LocalBarrierManager,
+        client_pool: ComputeClientPool,
+        upstream_addr: HostAddr,
+        up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
+        metrics: Arc<StreamingMetrics>,
+        batched_permits_limit: usize,
+    ) -> RemoteInputStreamInner {
+        run_inner(
+            local_barrier_manager,
+            client_pool,
+            upstream_addr,
+            up_down_ids,
+            up_down_frag,
+            metrics,
+            batched_permits_limit,
+        )
+    }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn run(
+    async fn run_inner(
         local_barrier_manager: LocalBarrierManager,
         client_pool: ComputeClientPool,
         upstream_addr: HostAddr,

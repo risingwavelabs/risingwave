@@ -102,7 +102,7 @@ impl BloomFilterReader {
             true
         } else {
             let nbits = self.data.bit_len();
-            let delta = (h >> 17) | (h << 15);
+            let delta = h.rotate_left(15);
             for _ in 0..self.k {
                 let bit_pos = h % (nbits as u32);
                 if !self.data.get_bit(bit_pos as usize) {
@@ -171,7 +171,7 @@ impl FilterBuilder for BloomFilterBuilder {
         filter.resize(nbytes, 0);
         for h in &self.key_hash_entries {
             let mut h = *h;
-            let delta = (h >> 17) | (h << 15);
+            let delta = h.rotate_left(15);
             for _ in 0..k {
                 let bit_pos = (h as usize) % nbits;
                 filter.set_bit(bit_pos, true);
