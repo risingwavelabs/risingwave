@@ -64,21 +64,6 @@ fn stripped_sstable_info(origin: &SstableInfo) -> SstableInfo {
     }
 }
 
-fn stripped_epoch_new_change_log(origin: &EpochNewChangeLog) -> EpochNewChangeLog {
-    EpochNewChangeLog {
-        old_value: origin.old_value.iter().map(stripped_sstable_info).collect(),
-        new_value: origin.new_value.iter().map(stripped_sstable_info).collect(),
-        epochs: origin.epochs.clone(),
-    }
-}
-
-fn stripped_change_log_delta(origin: &ChangeLogDelta) -> ChangeLogDelta {
-    ChangeLogDelta {
-        new_log: origin.new_log.as_ref().map(stripped_epoch_new_change_log),
-        truncate_epoch: origin.truncate_epoch,
-    }
-}
-
 fn stripped_level(origin: &Level) -> Level {
     Level {
         level_idx: origin.level_idx,
