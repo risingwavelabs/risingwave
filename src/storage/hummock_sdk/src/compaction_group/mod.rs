@@ -45,11 +45,242 @@ impl From<StaticCompactionGroupId> for CompactionGroupId {
 }
 
 pub mod group_split {
+
     use std::cmp::Ordering;
+    use std::collections::BTreeSet;
+
+    use bytes::Bytes;
+    use risingwave_pb::hummock::PbLevelType;
 
     use super::hummock_version_ext::insert_new_sub_level;
     use crate::can_concat;
+    use crate::key::FullKey;
+    use crate::key_range::KeyRange;
     use crate::level::{Level, Levels};
+    use crate::sstable_info::SstableInfo;
+
+    #[derive(Debug, PartialEq, Clone)]
+    pub enum SstSplitType {
+        Left,
+        Right,
+        Both,
+    }
+
+    pub fn need_to_split(sst: &SstableInfo, split_key: Bytes) -> SstSplitType {
+        let key_range = &sst.key_range;
+        // 1. compare left
+        if split_key.cmp(&key_range.left).is_le() {
+            return SstSplitType::Right;
+        }
+
+        // 2. compare right
+        if key_range.right_exclusive {
+            if split_key.cmp(&key_range.right).is_ge() {
+                return SstSplitType::Left;
+            }
+        } else if split_key.cmp(&key_range.right).is_gt() {
+            return SstSplitType::Left;
+        }
+
+        SstSplitType::Both
+    }
+
+    pub fn split_sst(
+        origin_sst_info: &mut SstableInfo,
+        new_sst_id: &mut u64,
+        split_key: Bytes,
+        left_size: u64,
+        right_size: u64,
+    ) -> SstableInfo {
+        let mut branch_table_info = origin_sst_info.clone();
+        branch_table_info.sst_id = *new_sst_id;
+        *new_sst_id += 1;
+        origin_sst_info.sst_id = *new_sst_id;
+        *new_sst_id += 1;
+
+        let (key_range_l, key_range_r) = {
+            let key_range = &origin_sst_info.key_range;
+            let l = KeyRange {
+                left: key_range.left.clone(),
+                right: split_key.clone(),
+                right_exclusive: true,
+            };
+
+            let r = KeyRange {
+                left: split_key.clone(),
+                right: key_range.right.clone(),
+                right_exclusive: key_range.right_exclusive,
+            };
+
+            (l, r)
+        };
+        let (table_ids_l, table_ids_r) =
+            split_table_ids(&origin_sst_info.table_ids, split_key.clone());
+
+        // rebuild the key_range and size and sstable file size
+        {
+            // origin_sst_info
+            origin_sst_info.key_range = key_range_l.clone();
+            origin_sst_info.sst_size = left_size;
+            origin_sst_info.table_ids = table_ids_l;
+        }
+
+        {
+            // new sst
+            branch_table_info.key_range = key_range_r.clone();
+            branch_table_info.sst_size = right_size;
+            branch_table_info.table_ids = table_ids_r;
+        }
+
+        branch_table_info
+    }
+
+    pub fn split_sst_for_commit_epoch(
+        sst_info: &mut SstableInfo,
+        new_sst_id: &mut u64,
+        old_sst_size: u64,
+        new_sst_size: u64,
+        new_table_ids: Vec<u32>,
+    ) -> SstableInfo {
+        let mut branch_table_info = sst_info.clone();
+        branch_table_info.sst_id = *new_sst_id;
+        branch_table_info.sst_size = new_sst_size;
+        *new_sst_id += 1;
+
+        sst_info.sst_id = *new_sst_id;
+        sst_info.sst_size = old_sst_size;
+        *new_sst_id += 1;
+
+        {
+            // related github.com/risingwavelabs/risingwave/pull/17898/
+            // This is a temporary implementation that will update `table_ids`` based on the new split rule after PR 17898
+            // sst_info.table_ids = vec[1, 2, 3];
+            // new_table_ids = vec[2, 3, 4];
+            // branch_table_info.table_ids = vec[1, 2, 3] ∩ vec[2, 3, 4] = vec[2, 3]
+            let set1: BTreeSet<_> = sst_info.table_ids.iter().cloned().collect();
+            let set2: BTreeSet<_> = new_table_ids.into_iter().collect();
+            let intersection: Vec<_> = set1.intersection(&set2).cloned().collect();
+
+            // Update table_ids
+            branch_table_info.table_ids = intersection;
+            sst_info
+                .table_ids
+                .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
+        }
+
+        branch_table_info
+    }
+
+    pub fn split_table_ids(table_ids: &Vec<u32>, split_key: Bytes) -> (Vec<u32>, Vec<u32>) {
+        assert!(table_ids.is_sorted());
+        let split_full_key = FullKey::decode(&split_key);
+        let split_user_key = split_full_key.user_key;
+        let vnode = split_user_key.get_vnode_id();
+        let table_id = split_user_key.table_id.table_id();
+
+        // let pos = table_ids.binary_search(&table_id).unwrap();
+        let pos = table_ids.partition_point(|&id| id < table_id);
+        if vnode == 0 {
+            // The split logic binds the vnode and assumes that the incoming split key epoch == 0, so we place the table_id to the right
+            // NOTE: This branch can avoid split same table_id into two groups when vnode == 0, it related to the implementation of `state_table_info` with compaction group
+            (table_ids[..pos].to_vec(), table_ids[pos..].to_vec())
+        } else {
+            (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
+        }
+
+        // split table_id that related to split_key both left and right
+        // let pos = table_ids.binary_search(&table_id).unwrap();
+        // (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
+    }
+
+    pub fn split_sst_info_for_level(
+        level: &mut Level,
+        new_sst_id: &mut u64,
+        split_key: Bytes,
+    ) -> Vec<SstableInfo> {
+        if level.table_infos.is_empty() {
+            return vec![];
+        }
+        if level.level_type == PbLevelType::Overlapping {
+            let mut left_sst = vec![];
+            let mut right_sst = vec![];
+
+            for sst in &mut level.table_infos {
+                let sst_split_type = need_to_split(sst, split_key.clone());
+                println!(
+                    "sub_level {} sst {} object_id {} sst_split_type: {:?}",
+                    level.sub_level_id, sst.sst_id, sst.object_id, sst_split_type
+                );
+                match sst_split_type {
+                    SstSplitType::Left => {
+                        left_sst.push(sst.clone());
+                    }
+                    SstSplitType::Right => {
+                        right_sst.push(sst.clone());
+                    }
+                    SstSplitType::Both => {
+                        let estimated_size = sst.sst_size;
+                        let branch_sst = split_sst(
+                            sst,
+                            new_sst_id,
+                            split_key.clone(),
+                            estimated_size / 2,
+                            estimated_size / 2,
+                        );
+                        right_sst.push(branch_sst.clone());
+                        left_sst.push(sst.clone());
+                    }
+                }
+            }
+
+            level.table_infos = left_sst;
+            right_sst
+        } else {
+            let pos = get_split_pos(&level.table_infos, split_key.clone());
+            if pos >= level.table_infos.len() {
+                return vec![];
+            }
+
+            let mut insert_table_infos = vec![];
+            let sst = &mut level.table_infos[pos];
+            let sst_split_type = need_to_split(sst, split_key.clone());
+
+            match sst_split_type {
+                SstSplitType::Left => {
+                    insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
+                    level.table_infos = level.table_infos[0..=pos].to_vec();
+                }
+                SstSplitType::Right => {
+                    insert_table_infos.extend_from_slice(&level.table_infos[pos..]); // the sst at pos has been split to the right
+                    level.table_infos = level.table_infos[0..pos].to_vec();
+                }
+                SstSplitType::Both => {
+                    // split the sst
+                    let estimated_size = sst.sst_size;
+                    let branch_sst = split_sst(
+                        sst,
+                        new_sst_id,
+                        split_key,
+                        estimated_size / 2,
+                        estimated_size / 2,
+                    );
+                    insert_table_infos.push(branch_sst.clone());
+                    // the sst at pos has been split to both left and right
+                    // the branched sst has been inserted to the `insert_table_infos`
+                    insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
+                    level.table_infos = level.table_infos[0..=pos].to_vec();
+                }
+            };
+
+            insert_table_infos
+        }
+    }
+
+    pub fn get_split_pos(sstables: &Vec<SstableInfo>, split_key: Bytes) -> usize {
+        sstables
+            .partition_point(|sst| sst.key_range.left.cmp(&split_key).is_lt())
+            .saturating_sub(1)
+    }
 
     pub fn merge_levels(left_levels: &mut Levels, right_levels: Levels) {
         let right_l0 = right_levels.l0;

@@ -724,6 +724,7 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::compaction_group::group_split;
     use risingwave_hummock_sdk::key::{next_full_key, prev_full_key, FullKey, FullKeyTracker};
     use risingwave_hummock_sdk::key_range::KeyRange;
 
@@ -735,7 +736,8 @@ mod tests {
         TEST_KEYS_COUNT,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::BlockMeta;
+    use crate::hummock::{BlockMeta, Sstable};
+    use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
     async fn test_concat_iterator() {
@@ -1200,13 +1202,17 @@ mod tests {
         let split_key = test_key_of(5000).encode();
 
         let mut sst_1 = table_info.clone();
-        sst_1.key_range.right = split_key.clone().into();
-        sst_1.key_range.right_exclusive = true;
-
         let total_key_count = sst_1.total_key_count;
-        let mut sst_2 = table_info.clone();
-        sst_2.sst_id = sst_1.sst_id + 1;
-        sst_2.key_range.left = split_key.clone().into();
+
+        let mut new_sst_id = 100;
+        let sst_2 = group_split::split_sst(
+            &mut sst_1,
+            &mut new_sst_id,
+            split_key.clone().into(),
+            table_info.file_size / 2,
+            table_info.file_size / 2,
+        );
+        sst_1.table_ids.push(0);
 
         {
             // test concate

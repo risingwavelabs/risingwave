@@ -291,20 +291,19 @@ pub fn get_sorted_object_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableObje
 pub fn get_sorted_committed_object_ids(
     hummock_version: &HummockVersion,
 ) -> Vec<HummockSstableObjectId> {
-    let levels = match hummock_version
-        .levels
-        .get(&StaticCompactionGroupId::StateDefault.into())
-    {
-        Some(levels) => levels,
-        None => return vec![],
-    };
-    levels
-        .levels
-        .iter()
-        .chain(levels.l0.sub_levels.iter())
-        .flat_map(|levels| levels.table_infos.iter().map(|info| info.object_id))
-        .sorted()
-        .collect_vec()
+    let mut result = vec![];
+
+    for levels in hummock_version.levels.values() {
+        result.extend(
+            levels
+                .levels
+                .iter()
+                .chain(levels.l0.sub_levels.iter())
+                .flat_map(|levels| levels.table_infos.iter().map(|info| info.object_id)),
+        );
+    }
+
+    result
 }
 
 pub async fn setup_compute_env_with_config(

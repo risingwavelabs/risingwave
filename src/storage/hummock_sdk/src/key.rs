@@ -703,11 +703,13 @@ impl<T: AsRef<[u8]>> Debug for FullKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "FullKey {{ {:?}, epoch: {}, epoch_with_gap: {}, spill_offset: {}}}",
+            "FullKey {{ {:?}, epoch: {}, epoch_with_gap: {}, spill_offset: {}}} table_id {} vnode {}",
             self.user_key,
             self.epoch_with_gap.pure_epoch(),
             self.epoch_with_gap.as_u64(),
             self.epoch_with_gap.as_u64() - self.epoch_with_gap.pure_epoch(),
+            self.user_key.table_id.table_id(),
+            self.user_key.get_vnode_id(),
         )
     }
 }
@@ -1036,6 +1038,93 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
         F: AsRef<[u8]>,
     {
         self.observe_multi_version(key.user_key, once(key.epoch_with_gap))
+    }
+
+    pub fn observe_debug<F>(&mut self, key: FullKey<F>) -> (bool, Option<String>)
+    where
+        T: SetSlice<F>,
+        F: AsRef<[u8]>,
+    {
+        let mut epochs = once(key.epoch_with_gap);
+        let user_key = key.user_key;
+        let max_epoch_with_gap = epochs.next().expect("non-empty");
+        let min_epoch_with_gap = epochs.fold(
+            max_epoch_with_gap,
+            |prev_epoch_with_gap, curr_epoch_with_gap| {
+                assert!(
+                    prev_epoch_with_gap > curr_epoch_with_gap,
+                    "epoch list not sorted. prev: {:?}, curr: {:?}, user_key: {:?}",
+                    prev_epoch_with_gap,
+                    curr_epoch_with_gap,
+                    user_key
+                );
+                curr_epoch_with_gap
+            },
+        );
+        match self
+            .latest_full_key
+            .user_key
+            .as_ref()
+            .cmp(&user_key.as_ref())
+        {
+            Ordering::Less => {
+                // Observe a new user key
+
+                // Reset epochs
+                self.last_observed_epoch_with_gap = min_epoch_with_gap;
+
+                // Take the previous key and set latest key
+                self.latest_full_key.set(FullKey {
+                    user_key,
+                    epoch_with_gap: min_epoch_with_gap,
+                });
+                (true, None)
+            }
+            Ordering::Equal => {
+                if max_epoch_with_gap > self.last_observed_epoch_with_gap
+                    || (!SKIP_DEDUP && max_epoch_with_gap == self.last_observed_epoch_with_gap)
+                {
+                    // Epoch from the same user key should be monotonically decreasing
+                    println!(
+                        "key {:?} epoch {:?} >= prev epoch {:?}",
+                        user_key, max_epoch_with_gap, self.last_observed_epoch_with_gap
+                    );
+
+                    return (
+                        false,
+                        Some(format!(
+                            "key {:?} epoch {:?} >= prev epoch {:?}",
+                            user_key, max_epoch_with_gap, self.last_observed_epoch_with_gap
+                        )),
+                    );
+                }
+                self.last_observed_epoch_with_gap = min_epoch_with_gap;
+                (false, None)
+            }
+            Ordering::Greater => {
+                // User key should be monotonically increasing
+                println!(
+                    "key {:?} <= prev key {:?}",
+                    user_key,
+                    FullKey {
+                        user_key: self.latest_full_key.user_key.as_ref(),
+                        epoch_with_gap: self.last_observed_epoch_with_gap
+                    }
+                );
+
+                (
+                    false,
+                    Some(format!(
+                        "key {:?} <= prev key {:?}",
+                        user_key,
+                        FullKey {
+                            user_key: self.latest_full_key.user_key.as_ref(),
+                            epoch_with_gap: self.last_observed_epoch_with_gap,
+                        },
+                    )),
+                )
+            }
+        }
     }
 
     /// `epochs` comes from greater to smaller

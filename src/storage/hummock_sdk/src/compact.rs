@@ -47,6 +47,7 @@ pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
 
+    let mut object_id_set = HashSet::new();
     let mut s = String::new();
     writeln!(
         s,
@@ -74,6 +75,9 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .table_infos
             .iter()
             .map(|table| {
+                if !object_id_set.insert(table.object_id) {
+                    println!("LI)K object_id {} is duplicated", table.object_id);
+                }
                 for tid in &table.table_ids {
                     if !existing_table_ids.contains(tid) {
                         dropped_table_ids.insert(tid);
@@ -211,7 +215,7 @@ pub fn estimate_memory_for_compact_task(
             for sst in &level.table_infos {
                 let meta_size = sst.file_size - sst.meta_offset;
                 task_max_sst_meta_ratio =
-                    std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.file_size);
+                    std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.sst_size);
                 cur_level_max_sst_meta_size = std::cmp::max(meta_size, cur_level_max_sst_meta_size);
             }
             result += max_input_stream_estimated_memory + cur_level_max_sst_meta_size;
@@ -220,7 +224,7 @@ pub fn estimate_memory_for_compact_task(
                 let meta_size = sst.file_size - sst.meta_offset;
                 result += max_input_stream_estimated_memory + meta_size;
                 task_max_sst_meta_ratio =
-                    std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.file_size);
+                    std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.sst_size);
             }
         }
     }

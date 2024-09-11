@@ -58,7 +58,7 @@ pub use context::HummockVersionSafePoint;
 use versioning::*;
 pub(crate) mod checkpoint;
 mod commit_epoch;
-mod compaction;
+pub mod compaction;
 pub mod sequence;
 pub mod time_travel;
 mod timer_task;
@@ -391,12 +391,7 @@ impl HummockManager {
             versioning_guard.checkpoint = c;
             versioning_guard.checkpoint.version.clone()
         } else {
-            let default_compaction_config = self
-                .compaction_group_manager
-                .read()
-                .await
-                .default_compaction_config();
-            let checkpoint_version = HummockVersion::create_init_version(default_compaction_config);
+            let checkpoint_version = HummockVersion::create_init_version();
             tracing::info!("init hummock version checkpoint");
             versioning_guard.checkpoint = HummockVersionCheckpoint {
                 version: checkpoint_version.clone(),
@@ -405,6 +400,7 @@ impl HummockManager {
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
             checkpoint_version
         };
+
         for version_delta in hummock_version_deltas.values() {
             if version_delta.prev_id == redo_state.id {
                 redo_state.apply_version_delta(version_delta);

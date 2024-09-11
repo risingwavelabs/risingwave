@@ -24,15 +24,13 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::group_delta::PbDeltaType;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{
-    CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMerge,
-    PbGroupMetaChange, PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta,
-    PbIntraLevelDelta, PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
+    PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMerge, PbGroupMetaChange,
+    PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta,
+    PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
 use crate::change_log::{ChangeLogDelta, TableChangeLog};
-use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
-use crate::compaction_group::StaticCompactionGroupId;
 use crate::level::Levels;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
@@ -54,7 +52,7 @@ impl HummockVersionStateTableInfo {
         }
     }
 
-    fn build_compaction_group_member_tables(
+    pub fn build_compaction_group_member_tables(
         state_table_info: &HashMap<TableId, PbStateTableInfo>,
     ) -> HashMap<CompactionGroupId, BTreeSet<TableId>> {
         let mut ret: HashMap<_, BTreeSet<_>> = HashMap::new();
@@ -414,8 +412,8 @@ impl HummockVersion {
         self.max_committed_epoch
     }
 
-    pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
-        let mut init_version = HummockVersion {
+    pub fn create_init_version() -> HummockVersion {
+        HummockVersion {
             id: FIRST_VERSION_ID,
             levels: Default::default(),
             max_committed_epoch: INVALID_EPOCH,
@@ -423,17 +421,7 @@ impl HummockVersion {
             table_watermarks: HashMap::new(),
             table_change_log: HashMap::new(),
             state_table_info: HummockVersionStateTableInfo::empty(),
-        };
-        for group_id in [
-            StaticCompactionGroupId::StateDefault as CompactionGroupId,
-            StaticCompactionGroupId::MaterializedView as CompactionGroupId,
-        ] {
-            init_version.levels.insert(
-                group_id,
-                build_initial_compaction_group_levels(group_id, default_compaction_config.as_ref()),
-            );
         }
-        init_version
     }
 
     pub fn version_delta_after(&self) -> HummockVersionDelta {
@@ -529,6 +517,7 @@ impl HummockVersionDelta {
                 } else {
                     &EMPTY_VEC
                 };
+
                 sst_slice.iter()
             })
         });

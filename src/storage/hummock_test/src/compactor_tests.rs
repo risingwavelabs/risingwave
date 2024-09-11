@@ -1530,6 +1530,7 @@ pub(crate) mod tests {
                 sstable_store.clone(),
             )
             .await;
+            println!("generate ssts size: {}", sst.sst_size);
             ssts.push(sst);
         }
         let select_file_count = ssts.len() / 2;
@@ -1876,6 +1877,10 @@ pub(crate) mod tests {
             max_sst_file_size = std::cmp::max(max_sst_file_size, sst_info.file_size);
             sst_infos.push(sst_info);
         }
+        println!(
+            "input data: {}",
+            sst_infos.iter().map(|sst| sst.sst_size).sum::<u64>(),
+        );
 
         let target_file_size = max_sst_file_size / 4;
         let mut table_watermarks = BTreeMap::default();

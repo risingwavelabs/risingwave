@@ -1408,7 +1408,7 @@ pub mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            10 * 1024 * 1024 * 1024 // 10GB
+            4 * 1024 * 1024 * 1024 // 10GB
         }
 
         pub fn split_group_size_limit() -> u64 {
@@ -1663,7 +1663,7 @@ pub mod default {
         }
 
         pub fn table_info_statistic_history_times() -> usize {
-            240
+            60
         }
 
         pub fn block_file_cache_flush_buffer_threshold_mb() -> usize {
