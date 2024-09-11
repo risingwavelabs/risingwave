@@ -156,8 +156,8 @@ impl HummockManager {
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
-            for group_deltas in version_delta.group_deltas.values() {
-                let summary = summarize_group_deltas(group_deltas);
+            for (group_id, group_deltas) in &version_delta.group_deltas {
+                let summary = summarize_group_deltas(group_deltas, *group_id);
                 object_sizes.extend(
                     summary
                         .insert_table_infos

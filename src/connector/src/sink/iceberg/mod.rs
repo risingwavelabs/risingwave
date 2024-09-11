@@ -1348,15 +1348,21 @@ pub fn try_matches_arrow_schema(
             (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
             (ArrowDataType::Binary, ArrowDataType::LargeBinary) => true,
             (ArrowDataType::LargeBinary, ArrowDataType::Binary) => true,
-            (left, right) => left == right,
+            // cases where left != right (metadata, field name mismatch)
+            //
+            // all nested types: in iceberg `field_id` will always be present, but RW doesn't have it:
+            // {"PARQUET:field_id": ".."}
+            //
+            // map: The standard name in arrow is "entries", "key", "value".
+            // in iceberg-rs, it's called "key_value"
+            (left, right) => left.equals_datatype(right),
         };
         if !compatible {
-            bail!("Field {}'s type not compatible, risingwave converted data type {}, iceberg's data type: {}",
+            bail!("field {}'s type is incompatible\nRisingWave converted data type: {}\niceberg's data type: {}",
                     arrow_field.name(), converted_arrow_data_type, arrow_field.data_type()
                 );
         }
     }
-
     Ok(())
 }
 

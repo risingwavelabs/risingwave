@@ -16,6 +16,7 @@ mod graph;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod rewrite;
 
@@ -26,12 +27,13 @@ use educe::Educe;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
+    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode, StreamContext,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
 };
 
 use self::rewrite::build_delta_join_without_arrange;
 use crate::error::Result;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::reorganize_elements_id;
 use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
@@ -116,18 +118,38 @@ impl BuildFragmentGraphState {
 }
 
 pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphProto> {
+    let ctx = plan_node.plan_base().ctx();
     let plan_node = reorganize_elements_id(plan_node);
 
     let mut state = BuildFragmentGraphState::default();
     let stream_node = plan_node.to_stream_prost(&mut state)?;
     generate_fragment_graph(&mut state, stream_node).unwrap();
     let mut fragment_graph = state.fragment_graph.to_protobuf();
+
+    // Set table ids.
     fragment_graph.dependent_table_ids = state
         .dependent_table_ids
         .into_iter()
         .map(|id| id.table_id)
         .collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
+
+    // Set parallelism.
+    {
+        let config = ctx.session_ctx().config();
+        fragment_graph.parallelism =
+            config
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
+    }
+
+    // Set timezone.
+    fragment_graph.ctx = Some(StreamContext {
+        timezone: ctx.get_session_timezone(),
+    });
+
     Ok(fragment_graph)
 }
 

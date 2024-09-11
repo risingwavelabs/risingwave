@@ -1614,6 +1614,7 @@ impl DdlController {
 
         let parallelism = self.resolve_stream_parallelism(specified_parallelism, &cluster_info)?;
 
+        // TODO(var-vnode): use vnode count from config
         const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
 
         let parallelism_limited = parallelism > MAX_PARALLELISM;
@@ -1645,7 +1646,7 @@ impl DdlController {
         // Otherwise, it defaults to FIXED based on deduction.
         let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
             (None, DefaultParallelism::Full) if parallelism_limited => {
-                tracing::warn!("Parallelism limited to 256 in ADAPTIVE mode");
+                tracing::warn!("Parallelism limited to {MAX_PARALLELISM} in ADAPTIVE mode");
                 TableParallelism::Adaptive
             }
             (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
