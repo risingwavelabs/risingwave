@@ -135,7 +135,8 @@ tonic-build = { package = "madsim-tonic-build", version = "0.5" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "e6cd165b9bc85783b42c106e99186b86b73e3507" }
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
-icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "1860eb315183a5f3f72b4097c1e40d49407f8373", features = [
+# branch dylan/fix_parquet_nested_type_field_id
+icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "3f4724158acee37a4785f56670a1427993a58739", features = [
     "prometheus",
 ] }
 arrow-array-iceberg = { package = "arrow-array", version = "52" }
