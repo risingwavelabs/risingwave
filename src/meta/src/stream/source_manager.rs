@@ -188,10 +188,9 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
         let source_is_up = |res: i64| {
             self.source_is_up.set(res);
         };
-        let splits = self.enumerator.list_splits().await.map_err(|e| {
+        let splits = self.enumerator.list_splits().await.inspect_err(|_| {
             source_is_up(0);
             self.fail_cnt += 1;
-            e
         })?;
         source_is_up(1);
         self.fail_cnt = 0;

@@ -15,16 +15,13 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::{anyhow, Context as _};
-use futures::pin_mut;
-use futures_async_stream::try_stream;
+use anyhow::anyhow;
+use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_pb::task_service::{permits, GetStreamResponse};
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc;
 
-use super::error::ExchangeChannelClosed;
 use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{
@@ -65,7 +62,6 @@ pub struct LocalInput {
 
     actor_id: ActorId,
 }
-type LocalInputStreamInner = impl DispatcherMessageStream;
 
 pub(crate) fn assert_equal_dispatcher_barrier<M1, M2>(
     first: &BarrierInner<M1>,
@@ -107,13 +103,29 @@ pub(crate) async fn process_dispatcher_msg(
 impl LocalInput {
     pub fn new(channel: Receiver, upstream_actor_id: ActorId) -> Self {
         Self {
-            inner: Self::run(channel, upstream_actor_id),
+            inner: local_input::run(channel, upstream_actor_id),
             actor_id: upstream_actor_id,
         }
     }
+}
+
+mod local_input {
+    use await_tree::InstrumentAwait;
+
+    use crate::executor::exchange::error::ExchangeChannelClosed;
+    use crate::executor::exchange::permit::Receiver;
+    use crate::executor::prelude::try_stream;
+    use crate::executor::{DispatcherMessage, StreamExecutorError};
+    use crate::task::ActorId;
+
+    pub(super) type LocalInputStreamInner = impl crate::executor::DispatcherMessageStream;
+
+    pub(super) fn run(channel: Receiver, upstream_actor_id: ActorId) -> LocalInputStreamInner {
+        run_inner(channel, upstream_actor_id)
+    }
 
     #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
-    async fn run(mut channel: Receiver, upstream_actor_id: ActorId) {
+    async fn run_inner(mut channel: Receiver, upstream_actor_id: ActorId) {
         let span: await_tree::Span = format!("LocalInput (actor {upstream_actor_id})").into();
         while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
             yield msg;
@@ -147,7 +159,8 @@ pub struct RemoteInput {
 
     actor_id: ActorId,
 }
-type RemoteInputStreamInner = impl DispatcherMessageStream;
+
+use remote_input::RemoteInputStreamInner;
 
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
@@ -164,7 +177,7 @@ impl RemoteInput {
 
         Self {
             actor_id,
-            inner: Self::run(
+            inner: remote_input::run(
                 client_pool,
                 upstream_addr,
                 up_down_ids,
@@ -174,9 +187,45 @@ impl RemoteInput {
             ),
         }
     }
+}
+
+mod remote_input {
+    use std::sync::Arc;
+
+    use anyhow::Context;
+    use await_tree::InstrumentAwait;
+    use risingwave_common::util::addr::HostAddr;
+    use risingwave_pb::task_service::{permits, GetStreamResponse};
+    use risingwave_rpc_client::ComputeClientPool;
+
+    use crate::executor::exchange::error::ExchangeChannelClosed;
+    use crate::executor::monitor::StreamingMetrics;
+    use crate::executor::prelude::{pin_mut, try_stream, StreamExt};
+    use crate::executor::{DispatcherMessage, StreamExecutorError};
+    use crate::task::{UpDownActorIds, UpDownFragmentIds};
+
+    pub(super) type RemoteInputStreamInner = impl crate::executor::DispatcherMessageStream;
+
+    pub(super) fn run(
+        client_pool: ComputeClientPool,
+        upstream_addr: HostAddr,
+        up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
+        metrics: Arc<StreamingMetrics>,
+        batched_permits_limit: usize,
+    ) -> RemoteInputStreamInner {
+        run_inner(
+            client_pool,
+            upstream_addr,
+            up_down_ids,
+            up_down_frag,
+            metrics,
+            batched_permits_limit,
+        )
+    }
 
     #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
-    async fn run(
+    async fn run_inner(
         client_pool: ComputeClientPool,
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,

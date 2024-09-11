@@ -31,7 +31,6 @@ use risingwave_common::must_match;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BuildActorInfo;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use thiserror_ext::AsReport;
@@ -43,7 +42,7 @@ use super::BarrierCompleteResult;
 use crate::error::{StreamError, StreamResult};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, Mutation};
-use crate::task::{await_tree_key, ActorId, PartialGraphId, SharedContext, StreamActorManager};
+use crate::task::{ActorId, PartialGraphId, SharedContext, StreamActorManager};
 
 struct IssuedState {
     pub mutation: Option<Arc<Mutation>>,
@@ -89,8 +88,59 @@ pub(super) struct BarrierState {
     inner: ManagedBarrierStateInner,
 }
 
-type AwaitEpochCompletedFuture =
-    impl Future<Output = (Barrier, StreamResult<BarrierCompleteResult>)> + 'static;
+mod await_epoch_completed_future {
+    use std::future::Future;
+
+    use futures::future::BoxFuture;
+    use futures::FutureExt;
+    use risingwave_hummock_sdk::SyncResult;
+    use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
+
+    use crate::error::StreamResult;
+    use crate::executor::Barrier;
+    use crate::task::{await_tree_key, BarrierCompleteResult};
+
+    pub(super) type AwaitEpochCompletedFuture =
+        impl Future<Output = (Barrier, StreamResult<BarrierCompleteResult>)> + 'static;
+
+    pub(super) fn instrument_complete_barrier_future(
+        complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
+        barrier: Barrier,
+        barrier_await_tree_reg: Option<&await_tree::Registry>,
+        create_mview_progress: Vec<PbCreateMviewProgress>,
+    ) -> AwaitEpochCompletedFuture {
+        let prev_epoch = barrier.epoch.prev;
+        let future = async move {
+            if let Some(future) = complete_barrier_future {
+                let result = future.await;
+                result.map(Some)
+            } else {
+                Ok(None)
+            }
+        }
+        .map(move |result| {
+            (
+                barrier,
+                result.map(|sync_result| BarrierCompleteResult {
+                    sync_result,
+                    create_mview_progress,
+                }),
+            )
+        });
+        if let Some(reg) = barrier_await_tree_reg {
+            reg.register(
+                await_tree_key::BarrierAwait { prev_epoch },
+                format!("SyncEpoch({})", prev_epoch),
+            )
+            .instrument(future)
+            .left_future()
+        } else {
+            future.right_future()
+        }
+    }
+}
+
+use await_epoch_completed_future::*;
 
 fn sync_epoch<S: StateStore>(
     state_store: &S,
@@ -322,7 +372,7 @@ pub(super) struct PartialGraphManagedBarrierState {
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     ///
-    /// This is updated by [`super::CreateMviewProgress::update`] and will be reported to meta
+    /// This is updated by [`super::CreateMviewProgressReporter::update`] and will be reported to meta
     /// in [`BarrierCompleteResult`].
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
@@ -624,18 +674,7 @@ impl PartialGraphManagedBarrierState {
                 .remove(&barrier_state.barrier.epoch.curr)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(actor, state)| CreateMviewProgress {
-                    backfill_actor_id: actor,
-                    done: matches!(state, BackfillState::Done(_)),
-                    consumed_epoch: match state {
-                        BackfillState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
-                        BackfillState::Done(_) => barrier_state.barrier.epoch.curr,
-                    },
-                    consumed_rows: match state {
-                        BackfillState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
-                        BackfillState::Done(consumed_rows) => consumed_rows,
-                    },
-                })
+                .map(|(actor, state)| state.to_pb(actor))
                 .collect();
 
             let complete_barrier_future = match kind {
@@ -671,33 +710,12 @@ impl PartialGraphManagedBarrierState {
             let barrier = barrier_state.barrier.clone();
 
             self.await_epoch_completed_futures.push_back({
-                let future = async move {
-                    if let Some(future) = complete_barrier_future {
-                        let result = future.await;
-                        result.map(Some)
-                    } else {
-                        Ok(None)
-                    }
-                }
-                .map(move |result| {
-                    (
-                        barrier,
-                        result.map(|sync_result| BarrierCompleteResult {
-                            sync_result,
-                            create_mview_progress,
-                        }),
-                    )
-                });
-                if let Some(reg) = &self.barrier_await_tree_reg {
-                    reg.register(
-                        await_tree_key::BarrierAwait { prev_epoch },
-                        format!("SyncEpoch({})", prev_epoch),
-                    )
-                    .instrument(future)
-                    .left_future()
-                } else {
-                    future.right_future()
-                }
+                instrument_complete_barrier_future(
+                    complete_barrier_future,
+                    barrier,
+                    self.barrier_await_tree_reg.as_ref(),
+                    create_mview_progress,
+                )
             });
         }
     }

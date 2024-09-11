@@ -45,7 +45,7 @@ mod progress;
 #[cfg(test)]
 mod tests;
 
-pub use progress::CreateMviewProgress;
+pub use progress::CreateMviewProgressReporter;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
