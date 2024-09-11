@@ -203,13 +203,13 @@ impl IcebergCreateTableArrowConvert {
 impl ToArrow for IcebergCreateTableArrowConvert {
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
-        // Nimtable need a decimal type with precision and scale to be set
+        // To create a iceberg table, we need a decimal type with precision and scale to be set
         // We choose 28 here
         // The decimal type finally will be converted to an iceberg decimal type.
         // Iceberg decimal(P,S)
         // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be 38 or less.
         let data_type =
-            arrow_schema::DataType::Decimal128(NIMTABLE_DECIMAL_PRECISION, NIMTABLE_DECIMAL_SCALE);
+            arrow_schema::DataType::Decimal128(28, 10);
 
         let mut arrow_field = arrow_schema::Field::new(name, data_type, true);
         self.add_field_id(&mut arrow_field);
