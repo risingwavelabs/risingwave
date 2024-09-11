@@ -24,7 +24,6 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{
     generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM,
 };
-use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
@@ -327,7 +326,7 @@ pub struct StreamFragmentGraph {
     /// variable. If not specified, all active worker slots will be used.
     specified_parallelism: Option<NonZeroUsize>,
 
-    vnode_count: usize,
+    expected_vnode_count: usize,
 }
 
 impl StreamFragmentGraph {
@@ -403,7 +402,7 @@ impl StreamFragmentGraph {
             None
         };
 
-        let vnode_count = proto.vnode_count();
+        let expected_vnode_count = proto.expected_vnode_count as usize;
 
         Ok(Self {
             fragments,
@@ -411,7 +410,7 @@ impl StreamFragmentGraph {
             upstreams,
             dependent_table_ids,
             specified_parallelism,
-            vnode_count,
+            expected_vnode_count,
         })
     }
 
@@ -511,8 +510,8 @@ impl StreamFragmentGraph {
         self.specified_parallelism
     }
 
-    pub fn vnode_count(&self) -> usize {
-        self.vnode_count
+    pub fn expected_vnode_count(&self) -> usize {
+        self.expected_vnode_count
     }
 
     /// Get downstreams of a fragment.
@@ -1175,7 +1174,7 @@ impl CompleteStreamFragmentGraph {
         &mut self.building_graph.fragments
     }
 
-    pub(super) fn vnode_count(&self) -> usize {
-        self.building_graph.vnode_count()
+    pub(super) fn expected_vnode_count(&self) -> usize {
+        self.building_graph.expected_vnode_count()
     }
 }

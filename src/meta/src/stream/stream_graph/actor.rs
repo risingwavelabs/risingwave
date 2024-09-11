@@ -666,7 +666,7 @@ impl ActorGraphBuilder {
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
     ) -> MetaResult<Self> {
-        let vnode_count = fragment_graph.vnode_count();
+        let expected_vnode_count = fragment_graph.expected_vnode_count();
         let existing_distributions = fragment_graph.existing_distribution();
 
         // Schedule the distribution of all building fragments.
@@ -674,7 +674,7 @@ impl ActorGraphBuilder {
             streaming_job_id,
             &cluster_info.worker_nodes,
             default_parallelism,
-            vnode_count,
+            expected_vnode_count,
         )?;
         let distributions = scheduler.schedule(&fragment_graph)?;
 
@@ -866,7 +866,10 @@ impl ActorGraphBuilder {
                     .worker_slots()
                     .map(|worker_slot| {
                         let actor_id = state.next_actor_id();
-                        let vnode_bitmap = bitmaps.as_ref().map(|m: &HashMap<WorkerSlotId, Bitmap>| &m[&worker_slot]).cloned();
+                        let vnode_bitmap = bitmaps
+                            .as_ref()
+                            .map(|m: &HashMap<WorkerSlotId, Bitmap>| &m[&worker_slot])
+                            .cloned();
 
                         state.inner.add_actor(
                             actor_id,

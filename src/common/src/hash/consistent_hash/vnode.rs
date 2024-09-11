@@ -220,7 +220,6 @@ macro_rules! delegate_maybe_vnode_count {
 delegate_maybe_vnode_count!(
     risingwave_pb::plan_common::StorageTableDesc,
     risingwave_pb::catalog::Table,
-    risingwave_pb::stream_plan::StreamFragmentGraph,
     risingwave_pb::meta::table_fragments::Fragment,
 );
 

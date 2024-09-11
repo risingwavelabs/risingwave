@@ -1584,7 +1584,7 @@ impl DdlController {
         let specified_parallelism = fragment_graph.specified_parallelism();
         let internal_tables = fragment_graph.internal_tables();
         let expr_context = stream_ctx.to_expr_context();
-        let max_parallelism = NonZeroUsize::new(fragment_graph.vnode_count()).unwrap();
+        let max_parallelism = NonZeroUsize::new(fragment_graph.expected_vnode_count()).unwrap();
 
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.

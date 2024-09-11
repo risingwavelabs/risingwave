@@ -18,6 +18,7 @@ use std::vec;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode};
 use risingwave_pb::data::data_type::TypeName;
@@ -415,7 +416,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
-        maybe_vnode_count: None,
+        expected_vnode_count: VirtualNode::COUNT_FOR_TEST as _,
     }
 }
 

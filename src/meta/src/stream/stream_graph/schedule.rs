@@ -221,7 +221,7 @@ impl Scheduler {
         streaming_job_id: u32,
         workers: &HashMap<u32, WorkerNode>,
         default_parallelism: NonZeroUsize,
-        vnode_count: usize,
+        expected_vnode_count: usize,
     ) -> MetaResult<Self> {
         // Group worker slots with worker node.
 
@@ -232,7 +232,7 @@ impl Scheduler {
 
         let parallelism = default_parallelism.get();
         assert!(
-            parallelism <= vnode_count,
+            parallelism <= expected_vnode_count,
             "parallelism should be limited by vnode count in previous steps"
         );
 
@@ -249,7 +249,7 @@ impl Scheduler {
 
         // Build the default hash mapping uniformly.
         let default_hash_mapping =
-            WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, vnode_count);
+            WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, expected_vnode_count);
 
         let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
         let default_single_worker_id = single_scheduled.keys().exactly_one().cloned().unwrap();

@@ -95,6 +95,12 @@ message TableFragments {
     // and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
 
+    // Total vnode count of the fragment (then all internal tables).
+    // Duplicated from the length of the vnode bitmap in any actor of the fragment.
+    //
+    // Can be unset if the fragment is created in older versions where variable vnode count is not
+    // supported, in which case a default value of 256 should be used.
+    // Use `VnodeCountCompat::vnode_count` to access it.
     optional uint32 maybe_vnode_count = 8;
   }
   uint32 table_id = 1;

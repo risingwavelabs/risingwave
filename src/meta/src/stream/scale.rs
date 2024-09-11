@@ -28,7 +28,7 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCountCompat};
+use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model_v2::{actor, fragment, ObjectId, StreamingParallelism};
 use risingwave_pb::common::{PbActorLocation, WorkerNode, WorkerType};
