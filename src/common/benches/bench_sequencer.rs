@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lint_reasons)]
-
 use std::cell::RefCell;
 use std::hint::black_box;
 use std::sync::atomic::{AtomicUsize, Ordering};

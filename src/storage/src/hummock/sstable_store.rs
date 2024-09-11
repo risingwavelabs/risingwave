@@ -26,7 +26,9 @@ use foyer::{
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
+use risingwave_hummock_sdk::{
+    HummockSstableObjectId, HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH, OBJECT_SUFFIX,
+};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
@@ -519,10 +521,21 @@ impl SstableStore {
         let obj_prefix = self
             .store
             .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
-        format!(
-            "{}/{}{}.{}",
-            self.path, obj_prefix, object_id, OBJECT_SUFFIX
-        )
+        let mut path = String::with_capacity(
+            self.path.len()
+                + "/".len()
+                + obj_prefix.len()
+                + HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH
+                + ".".len()
+                + OBJECT_SUFFIX.len(),
+        );
+        path.push_str(&self.path);
+        path.push('/');
+        path.push_str(&obj_prefix);
+        path.push_str(&object_id.to_string());
+        path.push('.');
+        path.push_str(OBJECT_SUFFIX);
+        path
     }
 
     pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
