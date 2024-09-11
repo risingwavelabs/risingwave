@@ -2160,7 +2160,8 @@ impl DdlController {
             old_table_fragments.assigned_parallelism,
         );
 
-        // TODO(var-vnode): fill vnode count for table catalog in `stream_job`.
+        // TODO(var-vnode): fill vnode count for table catalog in `stream_job`,
+        // like what we do in `build_stream_job`.
 
         let ctx = ReplaceTableContext {
             old_table_fragments,

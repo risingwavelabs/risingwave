@@ -58,6 +58,7 @@ pub struct TableDesc {
     /// the column indices which could receive watermarks.
     pub watermark_columns: FixedBitSet,
 
+    /// Total vnode count of the table.
     pub vnode_count: usize,
 
     /// Whether the table is versioned. If `true`, column-aware row encoding will be used

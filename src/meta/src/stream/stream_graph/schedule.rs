@@ -151,6 +151,9 @@ impl Distribution {
         }
     }
 
+    /// Get the vnode count of the distribution.
+    ///
+    /// For singleton, it's 1. For hash, it's the length of the mapping.
     pub fn vnode_count(&self) -> usize {
         match self {
             Distribution::Singleton(_) => 1,

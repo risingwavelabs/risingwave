@@ -301,7 +301,9 @@ where
     visit_stream_node_internal_tables(fragment.node.as_mut().unwrap(), f)
 }
 
-/// Visit the tables of a [`StreamFragment`], including those in `Materialize` nodes.
+/// Visit the tables of a [`StreamFragment`].
+///
+/// Compared to [`visit_internal_tables`], this function also visits the table of `Materialize` node.
 pub fn visit_tables<F>(fragment: &mut StreamFragment, f: F)
 where
     F: FnMut(&mut Table, &str),

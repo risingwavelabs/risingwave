@@ -133,6 +133,10 @@ impl StreamingJob {
     }
 }
 
+// TODO: basically we want to ensure that the `Table` persisted in the catalog is the same as the
+// one in the `Materialize` node in the actor. However, they are currently handled separately
+// and can be out of sync. Shall we directly copy the whole struct from the actor to the catalog
+// to avoid `set`ting each field separately?
 impl StreamingJob {
     pub fn set_id(&mut self, id: u32) {
         match self {
@@ -160,6 +164,7 @@ impl StreamingJob {
         }
     }
 
+    /// Set the vnode count of the table.
     pub fn set_table_vnode_count(&mut self, vnode_count: usize) {
         match self {
             Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {

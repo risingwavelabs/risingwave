@@ -200,29 +200,6 @@ impl VirtualNode {
     }
 }
 
-pub trait VnodeCountCompat {
-    fn vnode_count(&self) -> usize;
-}
-
-macro_rules! delegate_maybe_vnode_count {
-    ($($ty:ty),* $(,)?) => {
-        $(
-            impl VnodeCountCompat for $ty {
-                fn vnode_count(&self) -> usize {
-                    self.maybe_vnode_count
-                        .map_or(VirtualNode::COUNT, |v| v as _)
-                }
-            }
-        )*
-    };
-}
-
-delegate_maybe_vnode_count!(
-    risingwave_pb::plan_common::StorageTableDesc,
-    risingwave_pb::catalog::Table,
-    risingwave_pb::meta::table_fragments::Fragment,
-);
-
 #[cfg(test)]
 mod tests {
     use super::*;

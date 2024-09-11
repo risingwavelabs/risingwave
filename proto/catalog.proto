@@ -426,6 +426,9 @@ message Table {
   // - The table is created in older versions where variable vnode count is not
   //   supported, in which case a default value of 256 should be used.
   //   Use `VnodeCountCompat::vnode_count` to access it.
+  //
+  // Please note that this field is not intended to describe the expected vnode count
+  // for a streaming job. Instead, refer to `stream_plan.StreamFragmentGraph.expected_vnode_count`.
   optional uint32 maybe_vnode_count = 40;
 
   // Per-table catalog version, used by schema change. `None` for internal
