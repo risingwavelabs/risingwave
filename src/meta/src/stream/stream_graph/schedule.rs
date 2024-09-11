@@ -151,13 +151,13 @@ impl Distribution {
         }
     }
 
-    /// Get the vnode count of the distribution.
-    ///
-    /// For singleton, it's 1. For hash, it's the length of the mapping.
-    pub fn vnode_count(&self) -> usize {
+    /// Get the vnode count of the distribution, if it's hash-distributed.
+    // TODO(var-vnode): after `ServingVnodeMapping::upsert` is made vnode-count-aware,
+    // we may return 1 for singleton.
+    pub fn hash_vnode_count(&self) -> Option<usize> {
         match self {
-            Distribution::Singleton(_) => 1,
-            Distribution::Hash(mapping) => mapping.len(),
+            Distribution::Singleton(_) => None,
+            Distribution::Hash(mapping) => Some(mapping.len()),
         }
     }
 

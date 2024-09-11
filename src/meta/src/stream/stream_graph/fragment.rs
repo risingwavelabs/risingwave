@@ -1093,7 +1093,9 @@ impl CompleteStreamFragmentGraph {
         } = building_fragment;
 
         let distribution_type = distribution.to_distribution_type() as i32;
-        let vnode_count = distribution.vnode_count();
+        let vnode_count = distribution
+            .hash_vnode_count()
+            .unwrap_or(self.expected_vnode_count());
 
         let materialized_fragment_id =
             if inner.fragment_type_mask & FragmentTypeFlag::Mview as u32 != 0 {
