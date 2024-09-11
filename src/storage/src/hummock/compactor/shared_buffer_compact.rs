@@ -51,7 +51,6 @@ use crate::mem_table::ImmutableMemtable;
 use crate::opts::StorageOpts;
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
-const GC_WATERMARK_FOR_FLUSH: u64 = 0;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
@@ -532,7 +531,6 @@ impl SharedBufferCompactRunner {
                 key_range,
                 cache_policy: CachePolicy::Fill(CacheContext::Default),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
-                watermark: GC_WATERMARK_FOR_FLUSH,
                 stats_target_table_ids: None,
                 task_type: compact_task::TaskType::SharedBuffer,
                 table_vnode_partition,

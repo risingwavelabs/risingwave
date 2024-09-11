@@ -122,7 +122,6 @@ pub struct TaskConfig {
     pub key_range: KeyRange,
     pub cache_policy: CachePolicy,
     pub gc_delete_keys: bool,
-    pub watermark: u64,
     /// `stats_target_table_ids` decides whether a dropped key should be counted as table stats
     /// change. For an divided SST as input, a dropped key shouldn't be counted if its table id
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.

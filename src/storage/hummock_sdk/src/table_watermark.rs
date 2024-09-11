@@ -27,7 +27,7 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{PbVnodeWatermark, TableWatermarks as PbTableWatermarks};
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::key::{prefix_slice_with_vnode, vnode, TableKey, TableKeyRange};
 use crate::HummockEpoch;
@@ -492,37 +492,12 @@ impl TableWatermarks {
         );
     }
 
-    pub fn clear_stale_epoch_watermark(&mut self, safe_epoch: u64) {
-        match self.watermarks.first() {
-            None => {
-                // return on empty watermark
-                return;
-            }
-            Some((earliest_epoch, _)) => {
-                if *earliest_epoch >= safe_epoch {
-                    // No stale epoch watermark needs to be cleared.
-                    return;
-                }
-            }
-        }
-        debug!("clear stale table watermark below epoch {}", safe_epoch);
-        let mut result_epoch_watermark = Vec::with_capacity(self.watermarks.len());
+    pub fn clear_stale_epoch_watermark(&mut self) {
+        // retain at most 1 epoch
+        let mut result_epoch_watermark: Option<(HummockEpoch, Arc<[VnodeWatermark]>)> = None;
         let mut unset_vnode: HashSet<VirtualNode> = (0..VirtualNode::COUNT)
             .map(VirtualNode::from_index)
             .collect();
-        while let Some((epoch, _)) = self.watermarks.last() {
-            if *epoch >= safe_epoch {
-                let (epoch, watermarks) = self.watermarks.pop().expect("have check Some");
-                for watermark in watermarks.as_ref() {
-                    for vnode in watermark.vnode_bitmap.iter_vnodes() {
-                        unset_vnode.remove(&vnode);
-                    }
-                }
-                result_epoch_watermark.push((epoch, watermarks));
-            } else {
-                break;
-            }
-        }
         while !unset_vnode.is_empty()
             && let Some((_, watermarks)) = self.watermarks.pop()
         {
@@ -547,9 +522,7 @@ impl TableWatermarks {
                 }
             }
             if !new_vnode_watermarks.is_empty() {
-                if let Some((last_epoch, last_watermarks)) = result_epoch_watermark.last_mut()
-                    && *last_epoch == safe_epoch
-                {
+                if let Some((_last_epoch, last_watermarks)) = result_epoch_watermark.as_mut() {
                     *last_watermarks = Arc::from(
                         last_watermarks
                             .iter()
@@ -558,17 +531,15 @@ impl TableWatermarks {
                             .collect_vec(),
                     );
                 } else {
-                    result_epoch_watermark.push((safe_epoch, Arc::from(new_vnode_watermarks)));
+                    result_epoch_watermark = Some((0, Arc::from(new_vnode_watermarks)));
                 }
             }
         }
-        // epoch watermark are added from later epoch to earlier epoch.
-        // reverse to ensure that earlier epochs are at the front
-        result_epoch_watermark.reverse();
-        assert!(result_epoch_watermark
-            .is_sorted_by(|(first_epoch, _), (second_epoch, _)| { first_epoch < second_epoch }));
+        let Some(result_epoch_watermark) = result_epoch_watermark else {
+            return;
+        };
         *self = TableWatermarks {
-            watermarks: result_epoch_watermark,
+            watermarks: vec![result_epoch_watermark],
             direction: self.direction,
         }
     }

@@ -108,7 +108,6 @@ impl CompactorRunner {
                 key_range: key_range.clone(),
                 cache_policy: CachePolicy::NotFill,
                 gc_delete_keys: task.gc_delete_keys,
-                watermark: task.watermark,
                 stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
                 task_type: task.task_type,
                 use_block_based_filter,
@@ -637,7 +636,6 @@ where
     let max_key = end_key.to_ref();
 
     let mut full_key_tracker = FullKeyTracker::<Vec<u8>>::new(FullKey::default());
-    let mut watermark_can_see_last_key = false;
     let mut local_stats = StoreLocalStatistic::default();
 
     // Keep table stats changes due to dropping KV.
@@ -660,7 +658,6 @@ where
         let mut drop = false;
 
         // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.
-        let epoch = iter_key.epoch_with_gap.pure_epoch();
         let value = iter.value();
         let ValueMeta {
             object_id,
@@ -670,7 +667,6 @@ where
             if !max_key.is_empty() && iter_key >= max_key {
                 break;
             }
-            watermark_can_see_last_key = false;
             if value.is_delete() {
                 local_stats.skip_delete_key_count += 1;
             }
@@ -687,17 +683,13 @@ where
             last_table_id = Some(iter_key.user_key.table_id.table_id);
         }
 
-        // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
-        // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
-        // key which satisfies `epoch` < `watermark`
-        // in our design, frontend avoid to access keys which had be deleted, so we dont
+        // Among keys with same user key, only keep the latest key.
+        // In our design, frontend avoid to access keys which had be deleted, so we don't
         // need to consider the epoch when the compaction_filter match (it
         // means that mv had drop)
         // Because of memtable spill, there may be a PUT key share the same `pure_epoch` with DELETE key.
         // Do not assume that "the epoch of keys behind must be smaller than the current key."
-        if (epoch < task_config.watermark && task_config.gc_delete_keys && value.is_delete())
-            || (epoch < task_config.watermark && watermark_can_see_last_key)
-        {
+        if (task_config.gc_delete_keys && value.is_delete()) || !is_new_user_key {
             drop = true;
         }
 
@@ -705,9 +697,6 @@ where
             drop = true;
         }
 
-        if epoch <= task_config.watermark {
-            watermark_can_see_last_key = true;
-        }
         if drop {
             compaction_statistics.iter_drop_key_counts += 1;
 

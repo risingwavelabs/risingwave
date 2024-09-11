@@ -37,7 +37,6 @@ pub struct IncompleteHummockVersion {
     pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, Levels>,
     max_committed_epoch: u64,
-    safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLog>,
     pub state_table_info: HummockVersionStateTableInfo,
@@ -213,7 +212,6 @@ impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockV
                 })
                 .collect(),
             max_committed_epoch: version.visible_table_committed_epoch(),
-            safe_epoch: version.visible_table_safe_epoch(),
             table_watermarks: version.table_watermarks.clone(),
             // TODO: optimization: strip table change log
             table_change_log: version
@@ -244,7 +242,6 @@ impl IncompleteHummockVersion {
                 .map(|(group_id, levels)| (*group_id as _, levels.to_protobuf()))
                 .collect(),
             max_committed_epoch: self.max_committed_epoch,
-            safe_epoch: self.safe_epoch,
             table_watermarks: self
                 .table_watermarks
                 .iter()
@@ -269,7 +266,6 @@ pub struct IncompleteHummockVersionDelta {
     pub prev_id: HummockVersionId,
     pub group_deltas: HashMap<CompactionGroupId, PbGroupDeltas>,
     pub max_committed_epoch: u64,
-    pub safe_epoch: u64,
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: HashSet<TableId>,
@@ -296,7 +292,6 @@ impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHum
                 })
                 .collect(),
             max_committed_epoch: delta.visible_table_committed_epoch(),
-            safe_epoch: delta.visible_table_safe_epoch(),
             trivial_move: delta.trivial_move,
             new_table_watermarks: delta.new_table_watermarks.clone(),
             removed_table_ids: delta.removed_table_ids.clone(),
@@ -319,7 +314,6 @@ impl IncompleteHummockVersionDelta {
             prev_id: self.prev_id.0,
             group_deltas: self.group_deltas.clone(),
             max_committed_epoch: self.max_committed_epoch,
-            safe_epoch: self.safe_epoch,
             trivial_move: self.trivial_move,
             new_table_watermarks: self
                 .new_table_watermarks

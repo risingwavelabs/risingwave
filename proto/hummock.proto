@@ -165,13 +165,15 @@ message TableChangeLog {
 
 message StateTableInfo {
   uint64 committed_epoch = 1;
-  uint64 safe_epoch = 2;
+  reserved 2;
+  reserved 'safe_epoch';
   uint64 compaction_group_id = 3;
 }
 
 message StateTableInfoDelta {
   uint64 committed_epoch = 1;
-  uint64 safe_epoch = 2;
+  reserved 2;
+  reserved 'safe_epoch';
   uint64 compaction_group_id = 3;
 }
 
@@ -187,9 +189,8 @@ message HummockVersion {
   // Levels of each compaction group
   map<uint64, Levels> levels = 2;
   uint64 max_committed_epoch = 3;
-  // Snapshots with epoch less than the safe epoch have been GCed.
-  // Reads against such an epoch will fail.
-  uint64 safe_epoch = 4;
+  reserved 4;
+  reserved 'safe_epoch';
   map<uint32, TableWatermarks> table_watermarks = 5;
   map<uint32, TableChangeLog> table_change_logs = 6;
   map<uint32, StateTableInfo> state_table_info = 7;
@@ -204,9 +205,8 @@ message HummockVersionDelta {
   // Levels of each compaction group
   map<uint64, GroupDeltas> group_deltas = 3;
   uint64 max_committed_epoch = 4;
-  // Snapshots with epoch less than the safe epoch have been GCed.
-  // Reads against such an epoch will fail.
-  uint64 safe_epoch = 5;
+  reserved 5;
+  reserved 'safe_epoch';
   bool trivial_move = 6;
   reserved 7;
   reserved "gc_object_ids";
@@ -364,8 +364,8 @@ message CompactTask {
   // In ideal case, the compaction will generate splits.len() tables which have key range
   // corresponding to that in [splits], respectively
   repeated KeyRange splits = 2;
-  // low watermark in 'ts-aware compaction'
-  uint64 watermark = 3;
+  reserved 3;
+  reserved 'watermark';
   // compaction output, which will be added to [target_level] of LSM after compaction
   repeated SstableInfo sorted_output_ssts = 4;
   // task id assigned by hummock storage service

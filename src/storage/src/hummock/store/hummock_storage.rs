@@ -406,9 +406,6 @@ impl HummockStorage {
         let ret = if let Some(info) = info
             && epoch <= info.committed_epoch
         {
-            if epoch < info.safe_epoch {
-                return Err(HummockError::expired_epoch(table_id, info.safe_epoch, epoch).into());
-            }
             // read committed_version directly without build snapshot
             get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)
         } else {

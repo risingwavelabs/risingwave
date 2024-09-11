@@ -54,7 +54,6 @@ pub struct MetaSnapshotMetadata {
     pub hummock_version_id: HummockVersionId,
     pub ssts: HashSet<HummockSstableObjectId>,
     pub max_committed_epoch: u64,
-    pub safe_epoch: u64,
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
@@ -75,7 +74,6 @@ impl MetaSnapshotMetadata {
             hummock_version_id: v.id,
             ssts: v.get_object_ids(),
             max_committed_epoch: v.visible_table_committed_epoch(),
-            safe_epoch: v.visible_table_safe_epoch(),
             format_version,
             remarks,
             state_table_info: v.state_table_info.info().clone(),
@@ -115,7 +113,6 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             id: m.id,
             hummock_version_id: m.hummock_version_id.to_u64(),
             max_committed_epoch: m.max_committed_epoch,
-            safe_epoch: m.safe_epoch,
             format_version: Some(m.format_version),
             remarks: m.remarks.clone(),
             state_table_info: m

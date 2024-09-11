@@ -375,7 +375,6 @@ impl CompactorRunner {
             key_range,
             cache_policy: CachePolicy::NotFill,
             gc_delete_keys: task.gc_delete_keys,
-            watermark: task.watermark,
             stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
             task_type: task.task_type,
             table_vnode_partition: task.table_vnode_partition.clone(),
@@ -687,30 +686,23 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             self.may_report_process_key(1);
 
             let mut drop = false;
-            let epoch = iter.key().epoch_with_gap.pure_epoch();
             let value = HummockValue::from_slice(iter.value()).unwrap();
-            if is_new_user_key || self.last_key.is_empty() {
+            let is_first_or_new_user_key = is_new_user_key || self.last_key.is_empty();
+            if is_first_or_new_user_key {
                 self.last_key.set(iter.key());
-                self.watermark_can_see_last_key = false;
                 self.last_key_is_delete = false;
             }
 
             // See note in `compactor_runner.rs`.
-            if epoch < self.task_config.watermark
-                && self.task_config.gc_delete_keys
-                && value.is_delete()
-            {
+            if self.task_config.gc_delete_keys && value.is_delete() {
                 drop = true;
                 self.last_key_is_delete = true;
-            } else if epoch < self.task_config.watermark && self.watermark_can_see_last_key {
+            } else if !is_first_or_new_user_key {
                 drop = true;
             }
             if self.state.has_watermark() && self.state.should_delete(&iter.key()) {
                 drop = true;
                 self.last_key_is_delete = true;
-            }
-            if epoch <= self.task_config.watermark {
-                self.watermark_can_see_last_key = true;
             }
 
             if self.last_table_id.map_or(true, |last_table_id| {
