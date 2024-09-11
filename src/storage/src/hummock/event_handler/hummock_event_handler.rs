@@ -533,17 +533,18 @@ impl HummockEventHandler {
                     .await
                     .expect("should not be empty");
                 let prev_version_id = latest_version_ref.id();
-                let new_version = Self::resolve_version_update_info(
+                if let Some(new_version) = Self::resolve_version_update_info(
                     latest_version_ref.clone(),
                     version_update,
                     None,
-                );
-                info!(
-                    ?prev_version_id,
-                    new_version_id = ?new_version.id(),
-                    "recv new version"
-                );
-                latest_version = Some(new_version);
+                ) {
+                    info!(
+                        ?prev_version_id,
+                        new_version_id = ?new_version.id(),
+                        "recv new version"
+                    );
+                    latest_version = Some(new_version);
+                }
             }
 
             self.apply_version_update(
@@ -586,21 +587,21 @@ impl HummockEventHandler {
             .unwrap_or_else(|| self.uploader.hummock_version().clone());
 
         let mut sst_delta_infos = vec![];
-        let new_pinned_version = Self::resolve_version_update_info(
+        if let Some(new_pinned_version) = Self::resolve_version_update_info(
             pinned_version.clone(),
             version_payload,
             Some(&mut sst_delta_infos),
-        );
-
-        self.refiller
-            .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
+        ) {
+            self.refiller
+                .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
+        }
     }
 
     fn resolve_version_update_info(
         pinned_version: PinnedVersion,
         version_payload: HummockVersionUpdate,
         mut sst_delta_infos: Option<&mut Vec<SstDeltaInfo>>,
-    ) -> PinnedVersion {
+    ) -> Option<PinnedVersion> {
         let newly_pinned_version = match version_payload {
             HummockVersionUpdate::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version().clone();
