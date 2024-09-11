@@ -334,7 +334,6 @@ impl PostgresExternalTableReader {
                 pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
                 let mut builder = SslConnector::builder(SslMethod::tls())?;
                 if let Some(ssl_root_cert) = config.ssl_root_cert {
-                    tracing::info!(">>> use ssl root cert: {}", ssl_root_cert);
                     builder
                         .set_ca_file(ssl_root_cert)
                         .map_err(|e| anyhow!(format!("bad ssl root cert error: {}", e)))?;
