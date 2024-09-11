@@ -42,6 +42,8 @@ use crate::source::{
     SplitMetaData, SplitReader,
 };
 
+const PULSAR_DEFAULT_SUBSCRIPTION_PREFIX: &str = "rw-consumer";
+
 pub enum PulsarSplitReader {
     Broker(PulsarBrokerReader),
     Iceberg(PulsarIcebergReader),
@@ -174,8 +176,12 @@ impl SplitReader for PulsarBrokerReader {
             .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
             .with_subscription(format!(
-                "rw-consumer-{}-{}",
-                source_ctx.fragment_id, source_ctx.actor_id
+                "{}-{}-{}",
+                props
+                    .subscription_name_prefix
+                    .unwrap_or(PULSAR_DEFAULT_SUBSCRIPTION_PREFIX.to_string()),
+                source_ctx.fragment_id,
+                source_ctx.actor_id
             ));
 
         let builder = match split.start_offset.clone() {
