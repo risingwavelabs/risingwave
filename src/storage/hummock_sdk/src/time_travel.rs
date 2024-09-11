@@ -19,7 +19,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta, PbStateTableInfoDelta};
 
-use crate::change_log::{ChangeLogDelta, EpochNewChangeLog, TableChangeLog};
+use crate::change_log::{ChangeLogDelta, TableChangeLog};
 use crate::level::{Level, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
