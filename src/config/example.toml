@@ -247,4 +247,4 @@ max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
 enable_tracing = false
 license_key = ""
-time_travel_retention_ms = 600000
+time_travel_retention_ms = 0
