@@ -93,20 +93,29 @@ impl IcebergScanExecutor {
             .load_table_v2_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
-        let chunk_schema_name_to_id = self
-            .schema
-            .names()
-            .iter()
-            .enumerate()
-            .map(|(k, v)| (v.clone(), k))
-            .collect::<HashMap<_, _>>();
+        let chunk_schema_name = self.schema.names();
 
         let mut eq_delete_file_scan_tasks_map: HashMap<OwnedRow, i64> = HashMap::default();
         let eq_delete_file_scan_tasks = mem::take(&mut self.eq_delete_file_scan_tasks);
 
-        let mut delete_column_names = None;
+        let mut delete_column_names: Option<Vec<String>> = None;
         for eq_delete_file_scan_task in eq_delete_file_scan_tasks {
             let mut sequence_number = eq_delete_file_scan_task.sequence_number;
+
+            if delete_column_names.is_none() {
+                delete_column_names = Some(
+                    eq_delete_file_scan_task
+                        .project_field_ids
+                        .iter()
+                        .filter_map(|id| {
+                            eq_delete_file_scan_task
+                                .schema
+                                .name_by_field_id(*id)
+                                .map(|name| name.to_string())
+                        })
+                        .collect(),
+                );
+            }
 
             let reader = table
                 .reader_builder()
@@ -120,17 +129,6 @@ impl IcebergScanExecutor {
 
             while let Some(record_batch) = delete_record_batch_stream.next().await {
                 let record_batch = record_batch.map_err(BatchError::Iceberg)?;
-                if delete_column_names.is_none() {
-                    delete_column_names = Some(
-                        record_batch
-                            .schema()
-                            .fields()
-                            .iter()
-                            .map(|field| field.name())
-                            .cloned()
-                            .collect_vec(),
-                    );
-                }
 
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
                 for row in chunk.rows() {
@@ -151,6 +149,31 @@ impl IcebergScanExecutor {
         for data_file_scan_task in data_file_scan_tasks {
             let data_sequence_number = data_file_scan_task.sequence_number;
 
+            let column_names: Vec<_> = data_file_scan_task
+                .project_field_ids
+                .iter()
+                .filter_map(|id| {
+                    data_file_scan_task
+                        .schema
+                        .name_by_field_id(*id)
+                        .map(|name| name.to_string())
+                })
+                .collect();
+
+            let delete_column_ids = delete_column_names.as_ref().map(|delete_column_names| {
+                column_names
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(id, column_name)| {
+                        if delete_column_names.contains(column_name) {
+                            Some(id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect_vec()
+            });
+
             let reader = table
                 .reader_builder()
                 .with_batch_size(self.batch_size)
@@ -164,28 +187,11 @@ impl IcebergScanExecutor {
             while let Some(record_batch) = record_batch_stream.next().await {
                 let record_batch = record_batch.map_err(BatchError::Iceberg)?;
 
-                let arrow_schema = record_batch.schema();
-                let column_names = arrow_schema
-                    .fields()
-                    .iter()
-                    .map(|field| field.name())
-                    .collect_vec();
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-                let (data, visibility) = match delete_column_names {
-                    Some(ref delete_column_names) => {
-                        let column_ids = column_names
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(id, column_name)| {
-                                if delete_column_names.contains(column_name) {
-                                    Some(id)
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect_vec();
-                        let visibility =
-                            Bitmap::from_iter(chunk.project(&column_ids).rows().map(|row_ref| {
+                let chunk = match delete_column_ids.as_ref() {
+                    Some(delete_column_ids) => {
+                        let visibility = Bitmap::from_iter(
+                            chunk.project(delete_column_ids).rows().map(|row_ref| {
                                 let row = OwnedRow::new(
                                     row_ref
                                         .iter()
@@ -200,27 +206,27 @@ impl IcebergScanExecutor {
                                 } else {
                                     true
                                 }
-                            }))
-                            .clone();
+                            }),
+                        )
+                        .clone();
                         let (data, _chunk_visibilities) = chunk.into_parts_v2();
-                        (data, visibility)
+                        let data = data
+                            .iter()
+                            .zip_eq_fast(&column_names)
+                            .filter_map(|(array, columns)| {
+                                if chunk_schema_name.contains(columns) {
+                                    Some(array.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect_vec();
+                        let chunk = DataChunk::new(data, visibility);
+                        debug_assert_eq!(chunk.data_types(), data_types);
+                        chunk
                     }
-                    None => chunk.into_parts_v2(),
+                    None => chunk,
                 };
-
-                let data = data
-                    .iter()
-                    .zip_eq_fast(column_names)
-                    .filter_map(|(array, columns)| {
-                        chunk_schema_name_to_id
-                            .get(columns)
-                            .map(|&id| (id, array.clone()))
-                    })
-                    .sorted_by_key(|a| a.0)
-                    .map(|(_k, v)| v)
-                    .collect_vec();
-                let chunk = DataChunk::new(data, visibility);
-                debug_assert_eq!(chunk.data_types(), data_types);
                 yield chunk;
             }
         }

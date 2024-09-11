@@ -14,7 +14,7 @@
 
 pub mod parquet_file_reader;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -242,8 +242,12 @@ impl IcebergSplitEnumerator {
                 None => bail!("Cannot find the current snapshot id in the iceberg table."),
             },
         };
-        let mut require_names = Self::get_eq_delete_names(&table, snapshot_id).await?;
-        require_names.extend(schema.names().clone().into_iter());
+        let mut require_names = schema.names();
+        for name in Self::get_eq_delete_names(&table, snapshot_id).await? {
+            if !require_names.contains(&name) {
+                require_names.push(name);
+            }
+        }
 
         let mut data_files = vec![];
         let mut eq_delete_files = vec![];
@@ -304,10 +308,7 @@ impl IcebergSplitEnumerator {
             .collect_vec())
     }
 
-    async fn get_eq_delete_names(
-        table: &Table,
-        snapshot_id: i64,
-    ) -> ConnectorResult<HashSet<String>> {
+    async fn get_eq_delete_names(table: &Table, snapshot_id: i64) -> ConnectorResult<Vec<String>> {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
