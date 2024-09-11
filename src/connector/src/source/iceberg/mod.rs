@@ -259,12 +259,13 @@ impl IcebergSplitEnumerator {
 
         #[for_await]
         for task in file_scan_stream {
-            let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            let mut task: FileScanTask = task.map_err(|e| anyhow!(e))?;
             match task.data_file_content {
                 iceberg::spec::DataContentType::Data => {
                     data_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
                 }
                 iceberg::spec::DataContentType::EqualityDeletes => {
+                    task.project_field_ids = task.equality_ids.clone();
                     eq_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
                 }
                 iceberg::spec::DataContentType::PositionDeletes => {
