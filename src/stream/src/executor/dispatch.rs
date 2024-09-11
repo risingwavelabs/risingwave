@@ -1103,8 +1103,8 @@ mod tests {
     }
 
     async fn test_hash_dispatcher_complex_inner() {
-        // This test only works when VirtualNode::COUNT is 256.
-        static_assertions::const_assert_eq!(VirtualNode::COUNT, 256);
+        // This test only works when vnode count is 256.
+        assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
 
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
@@ -1119,9 +1119,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT_FOR_TEST, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
@@ -1365,6 +1365,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_dispatcher() {
+        // This test only works when vnode count is 256.
+        assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
+
         let num_outputs = 5; // actor id ranges from 1 to 5
         let cardinality = 10;
         let dimension = 4;
@@ -1380,9 +1383,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT_FOR_TEST, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
@@ -1416,7 +1419,7 @@ mod tests {
                 hasher.update(&bytes);
             }
             let output_idx =
-                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT] as usize - 1;
+                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT_FOR_TEST] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq_fast(one_row.iter()) {
                 builder.append(Some(*val));
             }

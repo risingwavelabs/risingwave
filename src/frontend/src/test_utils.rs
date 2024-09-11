@@ -1013,7 +1013,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok("".to_string())
     }
 
-    async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
+    async fn get_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
         Ok(vec![])
     }
 

@@ -242,7 +242,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         hummock_meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
         &hummock_manager_ref,
-        TableId::from(existing_table_id),
+        &[existing_table_id],
     )
     .await;
     let (compact_ctx, filter_key_extractor_manager) =
