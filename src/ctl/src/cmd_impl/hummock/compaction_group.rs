@@ -131,10 +131,11 @@ pub async fn split_compaction_group(
     context: &CtlContext,
     group_id: CompactionGroupId,
     table_ids_to_new_group: &[StateTableId],
+    partition_vnode_count: u32,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let new_group_id = meta_client
-        .split_compaction_group(group_id, table_ids_to_new_group)
+        .split_compaction_group(group_id, table_ids_to_new_group, partition_vnode_count)
         .await?;
     println!(
         "Succeed: split compaction group {}. tables {:#?} are moved to new group {}.",
@@ -282,5 +283,17 @@ pub async fn cancel_compact_task(context: &CtlContext, task_id: u64) -> anyhow::
         .await?;
     println!("cancel_compact_task {} ret {:?}", task_id, ret);
 
+    Ok(())
+}
+
+pub async fn merge_compaction_group(
+    context: &CtlContext,
+    left_group_id: CompactionGroupId,
+    right_group_id: CompactionGroupId,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client
+        .merge_compaction_group(left_group_id, right_group_id)
+        .await?;
     Ok(())
 }

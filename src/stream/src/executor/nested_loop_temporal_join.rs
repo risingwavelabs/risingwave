@@ -98,8 +98,7 @@ async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S, T> {
-    #[allow(clippy::too_many_arguments)]
-    #[expect(dead_code)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,

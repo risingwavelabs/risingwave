@@ -276,6 +276,8 @@ enum HummockCommands {
         compaction_group_id: u64,
         #[clap(long, value_delimiter = ',')]
         table_ids: Vec<u32>,
+        #[clap(long, default_value_t = 0)]
+        partition_vnode_count: u32,
     },
     /// Pause version checkpoint, which subsequently pauses GC of delta log and SST object.
     PauseVersionCheckpoint,
@@ -339,6 +341,12 @@ enum HummockCommands {
         record_hybrid_remove_threshold_ms: Option<u32>,
         #[clap(long)]
         record_hybrid_fetch_threshold_ms: Option<u32>,
+    },
+    MergeCompactionGroup {
+        #[clap(long)]
+        left_group_id: u64,
+        #[clap(long)]
+        right_group_id: u64,
     },
 }
 
@@ -711,9 +719,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::SplitCompactionGroup {
             compaction_group_id,
             table_ids,
+            partition_vnode_count,
         }) => {
-            cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
-                .await?;
+            cmd_impl::hummock::split_compaction_group(
+                context,
+                compaction_group_id,
+                &table_ids,
+                partition_vnode_count,
+            )
+            .await?;
         }
         Commands::Hummock(HummockCommands::PauseVersionCheckpoint) => {
             cmd_impl::hummock::pause_version_checkpoint(context).await?;
@@ -789,6 +803,13 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 record_hybrid_fetch_threshold_ms,
             )
             .await?
+        }
+        Commands::Hummock(HummockCommands::MergeCompactionGroup {
+            left_group_id,
+            right_group_id,
+        }) => {
+            cmd_impl::hummock::merge_compaction_group(context, left_group_id, right_group_id)
+                .await?
         }
         Commands::Table(TableCommands::Scan {
             mv_name,

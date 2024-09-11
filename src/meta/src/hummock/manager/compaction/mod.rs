@@ -27,7 +27,7 @@
 // limitations under the License.
 
 use std::cmp::min;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
 
@@ -43,7 +43,6 @@ use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::{InputLevel, Level, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -95,6 +94,9 @@ use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
 use crate::manager::{MetadataManager, META_NODE_ID};
 use crate::model::BTreeMapTransaction;
+
+pub mod compaction_group_manager;
+pub mod compaction_group_schedule;
 
 const MAX_SKIP_TIMES: usize = 8;
 const MAX_REPORT_COUNT: usize = 16;
@@ -1565,80 +1567,6 @@ impl HummockManager {
             compact_task
                 .table_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
-        }
-    }
-
-    pub async fn try_move_table_to_dedicated_cg(
-        &self,
-        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-        table_id: &u32,
-        table_size: &u64,
-        is_creating_table: bool,
-        checkpoint_secs: u64,
-        parent_group_id: u64,
-        group_size: u64,
-    ) {
-        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
-        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
-        let partition_vnode_count = self.env.opts.partition_vnode_count;
-        let window_size =
-            self.env.opts.table_info_statistic_history_times / (checkpoint_secs as usize);
-
-        let mut is_high_write_throughput = false;
-        let mut is_low_write_throughput = true;
-        if let Some(history) = table_write_throughput.get(table_id) {
-            if history.len() >= window_size {
-                is_high_write_throughput = history.iter().all(|throughput| {
-                    *throughput / checkpoint_secs > self.env.opts.table_write_throughput_threshold
-                });
-                is_low_write_throughput = history.iter().any(|throughput| {
-                    *throughput / checkpoint_secs < self.env.opts.min_table_split_write_throughput
-                });
-            }
-        }
-
-        let state_table_size = *table_size;
-
-        // 1. Avoid splitting a creating table
-        // 2. Avoid splitting a is_low_write_throughput creating table
-        // 3. Avoid splitting a non-high throughput medium-sized table
-        if is_creating_table
-            || (is_low_write_throughput)
-            || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
-        {
-            return;
-        }
-
-        // do not split a large table and a small table because it would increase IOPS
-        // of small table.
-        if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-            let rest_group_size = group_size - state_table_size;
-            if rest_group_size < state_table_size
-                && rest_group_size < self.env.opts.min_table_split_size
-            {
-                return;
-            }
-        }
-
-        let ret = self
-            .move_state_table_to_compaction_group(
-                parent_group_id,
-                &[*table_id],
-                partition_vnode_count,
-            )
-            .await;
-        match ret {
-            Ok(new_group_id) => {
-                tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, partition_vnode_count);
-            }
-            Err(e) => {
-                tracing::info!(
-                    error = %e.as_report(),
-                    "failed to move state table [{}] from group-{}",
-                    table_id,
-                    parent_group_id,
-                )
-            }
         }
     }
 }
