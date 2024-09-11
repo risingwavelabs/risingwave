@@ -409,7 +409,7 @@ impl TableCatalog {
     /// Panics if it's called on an incomplete (and not yet persisted) table catalog.
     pub fn vnode_count(&self) -> usize {
         self.vnode_count
-            .expect("vnode count unset, are you calling on an incomplete table catalog?")
+            .expect("vnode count unset, called on an incomplete table catalog?")
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
