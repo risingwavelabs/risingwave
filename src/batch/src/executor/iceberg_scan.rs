@@ -123,11 +123,7 @@ impl IcebergScanExecutor {
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
                 for row in chunk.rows() {
                     let entry = eq_delete_file_scan_tasks_map
-                        .entry(OwnedRow::new(
-                            row.iter()
-                                .map(|scalar_ref| scalar_ref.map(Into::into))
-                                .collect_vec(),
-                        ))
+                        .entry(row.to_owned_row())
                         .or_default();
                     *entry = *entry.max(&mut sequence_number);
                 }
@@ -153,15 +149,14 @@ impl IcebergScanExecutor {
 
             // The order of the field_ids in the data file and delete file may be different, so need to correct them here
             let delete_column_ids = delete_equality_ids.as_ref().map(|delete_column_ids| {
-                data_file_scan_task
-                    .project_field_ids
+                delete_column_ids
                     .iter()
-                    .filter_map(|project_field_id| {
-                        if delete_column_ids.contains(project_field_id) {
-                            Some(*project_field_id as usize)
-                        } else {
-                            None
-                        }
+                    .map(|delete_column_id| {
+                        data_file_scan_task
+                            .project_field_ids
+                            .iter()
+                            .position(|project_field_id| delete_column_id == project_field_id)
+                            .expect("delete_column_id not found in delete_equality_ids")
                     })
                     .collect_vec()
             });

@@ -14,7 +14,7 @@
 
 pub mod parquet_file_reader;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -29,7 +29,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
-use crate::error::ConnectorResult;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::sink::iceberg::IcebergConfig;
 use crate::source::{
@@ -242,12 +242,7 @@ impl IcebergSplitEnumerator {
                 None => bail!("Cannot find the current snapshot id in the iceberg table."),
             },
         };
-        let mut require_names = schema.names();
-        for name in Self::get_eq_delete_names(&table, snapshot_id).await? {
-            if !require_names.contains(&name) {
-                require_names.push(name);
-            }
-        }
+        let require_names = Self::get_require_field_names(&table, snapshot_id,schema).await?;
 
         let mut data_files = vec![];
         let mut eq_delete_files = vec![];
@@ -308,7 +303,7 @@ impl IcebergSplitEnumerator {
             .collect_vec())
     }
 
-    async fn get_eq_delete_names(table: &Table, snapshot_id: i64) -> ConnectorResult<Vec<String>> {
+    async fn get_require_field_names(table: &Table, snapshot_id: i64, rw_schema: Schema) -> ConnectorResult<Vec<String>> {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
@@ -328,13 +323,26 @@ impl IcebergSplitEnumerator {
                 }
             }
         }
-        equality_ids
+        let mut delete_columns = equality_ids
             .into_iter()
             .map(|id| match schema.name_by_field_id(id) {
-                Some(name) => Ok(name.to_string()),
+                Some(name) => Ok::<std::string::String, ConnectorError>(name.to_string()),
                 None => bail!("Delete field id {} not found in schema", id),
             })
-            .collect()
+            .collect::<ConnectorResult<HashSet<_>>>()?;
+        delete_columns.extend(rw_schema.names().iter().cloned());
+        let require_field_ids = schema.as_struct()
+            .fields()
+            .iter()
+            .filter_map(|field| {
+                if delete_columns.contains(&field.name) {
+                    Some(field.name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Ok(require_field_ids)
     }
 }
 
