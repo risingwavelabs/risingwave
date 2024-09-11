@@ -681,9 +681,7 @@ impl ActorGraphBuilder {
         // Fill the vnode count for each internal table, based on schedule result.
         let mut fragment_graph = fragment_graph;
         for (id, fragment) in fragment_graph.building_fragments_mut() {
-            let vnode_count = distributions[id]
-                .hash_vnode_count()
-                .unwrap_or(expected_vnode_count);
+            let vnode_count = distributions[id].vnode_count();
             visit_tables(fragment, |table, _| {
                 table.maybe_vnode_count = Some(vnode_count as _);
             })

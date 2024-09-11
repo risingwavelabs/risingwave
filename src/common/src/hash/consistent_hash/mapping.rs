@@ -139,17 +139,10 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         }
     }
 
-    /// Create a vnode mapping with vnode count 1 and the single item.
-    ///
-    /// Should only be used for singleton distribution. This is to be consistent with
-    /// [`VnodeBitmapExt::singleton`].
+    /// Create a vnode mapping with the single item. Should only be used for singletons.
+    // TODO(var-vnode): make vnode count 1.
     pub fn new_single(item: T::Item) -> Self {
-        Self::new_uniform(std::iter::once(item), 1)
-    }
-
-    /// Create a vnode mapping with the same item for all vnodes. Mainly used for testing.
-    pub fn new_all_same(item: T::Item, vnode_count: usize) -> Self {
-        Self::new_uniform(std::iter::once(item), vnode_count)
+        Self::new_uniform(std::iter::once(item), VirtualNode::COUNT)
     }
 
     /// The length (or count) of the vnode in this mapping.

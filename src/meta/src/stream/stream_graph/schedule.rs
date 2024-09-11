@@ -25,7 +25,7 @@ use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{ActorMapping, VirtualNode, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::{bail, hash};
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::{
@@ -151,13 +151,13 @@ impl Distribution {
         }
     }
 
-    /// Get the vnode count of the distribution, if it's hash-distributed.
+    /// Get the vnode count of the distribution.
     // TODO(var-vnode): after `ServingVnodeMapping::upsert` is made vnode-count-aware,
     // we may return 1 for singleton.
-    pub fn hash_vnode_count(&self) -> Option<usize> {
+    pub fn vnode_count(&self) -> usize {
         match self {
-            Distribution::Singleton(_) => None,
-            Distribution::Hash(mapping) => Some(mapping.len()),
+            Distribution::Singleton(_) => VirtualNode::COUNT,
+            Distribution::Hash(mapping) => mapping.len(),
         }
     }
 

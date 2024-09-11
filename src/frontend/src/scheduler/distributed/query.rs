@@ -728,7 +728,8 @@ pub(crate) mod tests {
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        let mapping = WorkerSlotMapping::new_all_same(WorkerSlotId::new(0, 0), vnode_count);
+        let mapping =
+            WorkerSlotMapping::new_uniform(std::iter::once(WorkerSlotId::new(0, 0)), vnode_count);
         worker_node_manager.insert_streaming_fragment_mapping(0, mapping.clone());
         worker_node_manager.set_serving_fragment_mapping(vec![(0, mapping)].into_iter().collect());
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
