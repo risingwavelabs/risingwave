@@ -139,12 +139,17 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         }
     }
 
-    /// Create a vnode mapping where all vnodes are mapped to the same single item.
+    /// Create a vnode mapping with vnode count 1 and the single item.
     ///
-    /// The length of the mapping will be 1, as if there's only one vnode in total.
-    /// This is to be consistent with [`VnodeBitmapExt::singleton`].
+    /// Should only be used for singleton distribution. This is to be consistent with
+    /// [`VnodeBitmapExt::singleton`].
     pub fn new_single(item: T::Item) -> Self {
         Self::new_uniform(std::iter::once(item), 1)
+    }
+
+    /// Create a vnode mapping with the same item for all vnodes. Mainly used for testing.
+    pub fn new_all_same(item: T::Item, vnode_count: usize) -> Self {
+        Self::new_uniform(std::iter::once(item), vnode_count)
     }
 
     /// The length (or count) of the vnode in this mapping.

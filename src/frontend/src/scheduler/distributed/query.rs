@@ -548,6 +548,8 @@ pub(crate) mod tests {
         //
         let ctx = OptimizerContext::mock().await;
         let table_id = 0.into();
+        let vnode_count = VirtualNode::COUNT_FOR_TEST;
+
         let table_catalog: TableCatalog = TableCatalog {
             id: table_id,
             associated_source_id: None,
@@ -597,7 +599,7 @@ pub(crate) mod tests {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             cdc_table_id: None,
-            vnode_count: Some(VirtualNode::COUNT_FOR_TEST),
+            vnode_count: Some(vnode_count),
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
@@ -726,15 +728,9 @@ pub(crate) mod tests {
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        worker_node_manager.insert_streaming_fragment_mapping(
-            0,
-            WorkerSlotMapping::new_single(WorkerSlotId::new(0, 0)),
-        );
-        worker_node_manager.set_serving_fragment_mapping(
-            vec![(0, WorkerSlotMapping::new_single(WorkerSlotId::new(0, 0)))]
-                .into_iter()
-                .collect(),
-        );
+        let mapping = WorkerSlotMapping::new_all_same(WorkerSlotId::new(0, 0), vnode_count);
+        worker_node_manager.insert_streaming_fragment_mapping(0, mapping.clone());
+        worker_node_manager.set_serving_fragment_mapping(vec![(0, mapping)].into_iter().collect());
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);

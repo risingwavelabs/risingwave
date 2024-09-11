@@ -1430,9 +1430,6 @@ impl ScaleController {
                 FragmentDistributionType::Hash => {
                     if !in_degree_types.contains(&DispatcherType::Hash) {
                         None
-                    } else if actors_after_reschedule.len() == 1 {
-                        let actor_id = actors_after_reschedule.keys().next().cloned().unwrap();
-                        Some(ActorMapping::new_single(actor_id))
                     } else {
                         // Changes of the bitmap must occur in the case of HashDistribution
                         Some(ActorMapping::from_bitmaps(
