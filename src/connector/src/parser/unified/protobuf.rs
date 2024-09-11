@@ -32,14 +32,15 @@ impl ProtobufAccess {
     pub fn new(message: DynamicMessage) -> Self {
         Self { message }
     }
+
+    #[cfg(test)]
+    pub fn descriptor(&self) -> prost_reflect::MessageDescriptor {
+        self.message.descriptor()
+    }
 }
 
 impl Access for ProtobufAccess {
-    fn access<'a>(
-        &'a self,
-        path: &[&str],
-        _type_expected: &DataType,
-    ) -> AccessResult<DatumCow<'a>> {
+    fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>> {
         debug_assert_eq!(1, path.len());
         let field_desc = self
             .message
@@ -55,10 +56,10 @@ impl Access for ProtobufAccess {
             })?;
 
         match self.message.get_field(&field_desc) {
-            Cow::Borrowed(value) => from_protobuf_value(&field_desc, value),
+            Cow::Borrowed(value) => from_protobuf_value(&field_desc, value, type_expected),
 
             // `Owned` variant occurs only if there's no such field and the default value is returned.
-            Cow::Owned(value) => from_protobuf_value(&field_desc, &value)
+            Cow::Owned(value) => from_protobuf_value(&field_desc, &value, type_expected)
                 // enforce `Owned` variant to avoid returning a reference to a temporary value
                 .map(|d| d.to_owned_datum().into()),
         }
