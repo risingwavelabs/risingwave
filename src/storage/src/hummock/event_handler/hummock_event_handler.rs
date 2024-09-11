@@ -358,7 +358,7 @@ impl HummockEventHandler {
             version_update_notifier_tx,
             recent_versions: Arc::new(ArcSwap::from_pointee(RecentVersions::new(
                 pinned_version,
-                60,
+                storage_opts.max_cached_recent_versions_number,
             ))),
             write_conflict_detector,
             read_version_mapping,
