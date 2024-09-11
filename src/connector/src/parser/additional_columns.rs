@@ -61,8 +61,6 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                 KINESIS_CONNECTOR,
                 HashSet::from(["key", "partition", "offset", "timestamp", "payload"]),
             ),
-            // remove s3 for no longer use
-            // (S3_CONNECTOR, HashSet::from(["file", "offset"])),
             (
                 OPENDAL_S3_CONNECTOR,
                 HashSet::from(["file", "offset", "payload"]),
