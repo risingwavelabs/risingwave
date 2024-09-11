@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 set -ex
 
 ICEBERG_VERSION=1.4.3
