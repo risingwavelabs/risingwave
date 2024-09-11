@@ -104,19 +104,21 @@ impl RecentVersions {
         table_id: TableId,
         epoch: HummockEpoch,
     ) -> Option<PinnedVersion> {
-        let Some(info) = self
+        if let Some(info) = self
             .latest_version
             .version()
             .state_table_info
             .info()
             .get(&table_id)
-        else {
-            return Some(self.latest_version.clone());
-        };
-        if info.committed_epoch <= epoch {
-            return Some(self.latest_version.clone());
+        {
+            if info.committed_epoch <= epoch {
+                Some(self.latest_version.clone())
+            } else {
+                self.get_safe_version_from_recent(table_id, epoch)
+            }
+        } else {
+            None
         }
-        self.get_safe_version_from_recent(table_id, epoch)
     }
 
     fn get_safe_version_from_recent(
@@ -124,29 +126,61 @@ impl RecentVersions {
         table_id: TableId,
         epoch: HummockEpoch,
     ) -> Option<PinnedVersion> {
+        if cfg!(debug_assertions) {
+            assert!(
+                epoch
+                    < self
+                        .latest_version
+                        .version()
+                        .state_table_info
+                        .info()
+                        .get(&table_id)
+                        .expect("should exist")
+                        .committed_epoch
+            );
+        }
         let result = self.recent_versions.binary_search_by(|version| {
             let committed_epoch = version
                 .version()
                 .state_table_info
                 .info()
                 .get(&table_id)
-                .map(|info| info.committed_epoch)
-                .unwrap_or(0);
-            committed_epoch.cmp(&epoch)
+                .map(|info| info.committed_epoch);
+            if let Some(committed_epoch) = committed_epoch {
+                committed_epoch.cmp(&epoch)
+            } else {
+                // We have ensured that the table_id exists in the latest version, so if the table_id does not exist in a
+                // previous version, the table must have not created yet, and therefore has  less ordering.
+                Ordering::Less
+            }
         });
         match result {
             Ok(index) => Some(self.recent_versions[index].clone()),
             Err(index) => {
                 // `index` is index of the first version that has `committed_epoch` greater than `epoch`
                 // or `index` equals `recent_version.len()` when `epoch` is greater than all `committed_epoch`
-                if index >= self.recent_versions.len() {
+                let version = if index >= self.recent_versions.len() {
                     assert_eq!(index, self.recent_versions.len());
                     self.recent_versions.last().cloned()
                 } else if index == 0 {
+                    // The earliest version has a higher committed epoch
                     None
                 } else {
                     self.recent_versions.get(index - 1).cloned()
-                }
+                };
+                version.and_then(|version| {
+                    if version
+                        .version()
+                        .state_table_info
+                        .info()
+                        .contains_key(&table_id)
+                    {
+                        Some(version)
+                    } else {
+                        // if the table does not exist in the version, return `None` to try get a time travel version
+                        None
+                    }
+                })
             }
         }
     }
@@ -196,8 +230,12 @@ mod tests {
         recent_version: &RecentVersions,
         expected: &[(TableId, u64, Option<&PinnedVersion>)],
     ) {
-        for (table_id, epoch, expected_version) in expected {
-            let version = recent_version.get_safe_version(*table_id, *epoch);
+        for (table_id, epoch, expected_version) in expected
+            .iter()
+            .cloned()
+            .chain([(TEST_TABLE_ID1, 0, None), (TEST_TABLE_ID2, 0, None)])
+        {
+            let version = recent_version.get_safe_version(table_id, epoch);
             assert_eq!(
                 version.as_ref().map(|version| version.id()),
                 expected_version.map(|version| version.id())
@@ -256,7 +294,7 @@ mod tests {
                 (TEST_TABLE_ID1, epoch1, Some(&version1)),
                 (TEST_TABLE_ID1, epoch2, Some(&version4)),
                 (TEST_TABLE_ID1, epoch3, Some(&version4)),
-                (TEST_TABLE_ID2, epoch0, Some(&version3)),
+                (TEST_TABLE_ID2, epoch0, None),
                 (TEST_TABLE_ID2, epoch1, Some(&version4)),
                 (TEST_TABLE_ID2, epoch2, Some(&version4)),
             ],
@@ -274,7 +312,7 @@ mod tests {
                 (TEST_TABLE_ID1, epoch2, Some(&version4)),
                 (TEST_TABLE_ID1, epoch3, Some(&version5)),
                 (TEST_TABLE_ID1, epoch4, Some(&version5)),
-                (TEST_TABLE_ID2, epoch0, Some(&version3)),
+                (TEST_TABLE_ID2, epoch0, None),
                 (TEST_TABLE_ID2, epoch1, Some(&version5)),
                 (TEST_TABLE_ID2, epoch2, Some(&version5)),
             ],

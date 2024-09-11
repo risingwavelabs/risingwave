@@ -261,13 +261,9 @@ impl HummockStorage {
     ) -> StorageResult<Option<Bytes>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
-        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
-            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
-                .await?
-        } else {
-            self.build_read_version_tuple(epoch, read_options.table_id, key_range)
-                .await?
-        };
+        let (key_range, read_version_tuple) = self
+            .build_read_version_tuple(epoch, key_range, &read_options)
+            .await?;
 
         if is_empty_key_range(&key_range) {
             return Ok(None);
@@ -284,13 +280,9 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
-        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
-            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
-                .await?
-        } else {
-            self.build_read_version_tuple(epoch, read_options.table_id, key_range)
-                .await?
-        };
+        let (key_range, read_version_tuple) = self
+            .build_read_version_tuple(epoch, key_range, &read_options)
+            .await?;
 
         self.hummock_version_reader
             .iter(key_range, epoch, read_options, read_version_tuple)
@@ -303,13 +295,9 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageRevIterator> {
-        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
-            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
-                .await?
-        } else {
-            self.build_read_version_tuple(epoch, read_options.table_id, key_range)
-                .await?
-        };
+        let (key_range, read_version_tuple) = self
+            .build_read_version_tuple(epoch, key_range, &read_options)
+            .await?;
 
         self.hummock_version_reader
             .rev_iter(key_range, epoch, read_options, read_version_tuple, None)
@@ -339,6 +327,23 @@ impl HummockStorage {
         Ok(version)
     }
 
+    async fn build_read_version_tuple(
+        &self,
+        epoch: u64,
+        key_range: TableKeyRange,
+        read_options: &ReadOptions,
+    ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
+        if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
+                .await
+        } else if read_options.read_committed {
+            self.build_read_version_tuple_from_committed(epoch, read_options.table_id, key_range)
+                .await
+        } else {
+            self.build_read_version_tuple_from_all(epoch, read_options.table_id, key_range)
+        }
+    }
+
     async fn build_read_version_tuple_from_backup(
         &self,
         epoch: u64,
@@ -365,34 +370,47 @@ impl HummockStorage {
         }
     }
 
-    async fn build_read_version_tuple(
+    async fn build_read_version_tuple_from_committed(
         &self,
         epoch: u64,
         table_id: TableId,
         key_range: TableKeyRange,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
-        let recent_versions = self.recent_versions.load();
-        let pinned_version = recent_versions.latest_version().clone();
-        let state_table_info = pinned_version
+        let version = match self
+            .recent_versions
+            .load()
+            .get_safe_version(table_id, epoch)
+        {
+            Some(version) => version,
+            None => self.get_time_travel_version(epoch, table_id).await?,
+        };
+        Ok(get_committed_read_version_tuple(
+            version, table_id, key_range, epoch,
+        ))
+    }
+
+    fn build_read_version_tuple_from_all(
+        &self,
+        epoch: u64,
+        table_id: TableId,
+        key_range: TableKeyRange,
+    ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
+        let pinned_version = self.recent_versions.load().latest_version().clone();
+        let info = pinned_version
             .version()
             .state_table_info
             .info()
             .get(&table_id);
 
         // check epoch if lower mce
-        let ret = if let Some(info) = state_table_info
+        let ret = if let Some(info) = info
             && epoch <= info.committed_epoch
         {
-            let version = if epoch >= info.safe_epoch {
-                recent_versions.latest_version().clone()
-            } else if let Some(version) = recent_versions.get_safe_version(table_id, epoch) {
-                version
-            } else {
-                drop(recent_versions);
-                self.get_time_travel_version(epoch, table_id).await?
-            };
+            if epoch < info.safe_epoch {
+                return Err(HummockError::expired_epoch(table_id, info.safe_epoch, epoch).into());
+            }
             // read committed_version directly without build snapshot
-            get_committed_read_version_tuple(version, table_id, key_range, epoch)
+            get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)
         } else {
             let vnode = vnode(&key_range);
             let mut matched_replicated_read_version_cnt = 0;
@@ -425,6 +443,7 @@ impl HummockStorage {
             // When the system has just started and no state has been created, the memory state
             // may be empty
             if read_version_vec.is_empty() {
+                let table_committed_epoch = info.map(|info| info.committed_epoch);
                 if matched_replicated_read_version_cnt > 0 {
                     tracing::warn!(
                         "Read(table_id={} vnode={} epoch={}) is not allowed on replicated read version ({} found). Fall back to committed version (epoch={:?})",
@@ -432,7 +451,7 @@ impl HummockStorage {
                         vnode.to_index(),
                         epoch,
                         matched_replicated_read_version_cnt,
-                        state_table_info,
+                        table_committed_epoch,
                     );
                 } else {
                     tracing::debug!(
@@ -440,7 +459,7 @@ impl HummockStorage {
                         table_id,
                         vnode.to_index(),
                         epoch,
-                        state_table_info
+                        table_committed_epoch
                     );
                 }
                 get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)
@@ -526,7 +545,6 @@ impl HummockStorage {
         self.buffer_tracker.get_memory_limiter().clone()
     }
 
-    #[cfg(any(test, feature = "test"))]
     pub fn get_pinned_version(&self) -> PinnedVersion {
         self.recent_versions.load().latest_version().clone()
     }

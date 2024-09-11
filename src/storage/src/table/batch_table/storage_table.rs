@@ -361,6 +361,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
+        let read_committed = matches!(
+            wait_epoch,
+            HummockReadEpoch::TimeTravel(_) | HummockReadEpoch::Committed(_)
+        );
         self.store.try_wait_epoch(wait_epoch).await?;
         let serialized_pk = serialize_pk_with_vnode(
             &pk,
@@ -381,6 +385,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
+            read_committed,
             cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
@@ -485,12 +490,17 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let iterators: Vec<_> = try_join_all(table_key_ranges.map(|table_key_range| {
             let prefix_hint = prefix_hint.clone();
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
+            let read_committed = matches!(
+                wait_epoch,
+                HummockReadEpoch::TimeTravel(_) | HummockReadEpoch::Committed(_)
+            );
             async move {
                 let read_options = ReadOptions {
                     prefix_hint,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     read_version_from_backup: read_backup,
+                    read_committed,
                     prefetch_options,
                     cache_policy,
                     ..Default::default()
