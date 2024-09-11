@@ -15,10 +15,12 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_rpc_client::CoordinatorStreamHandle;
+use thiserror_ext::AsReport;
 use tracing::warn;
 
 use super::SinkCoordinationRpcClientEnum;
@@ -81,6 +83,23 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
     }
 
     async fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> Result<()> {
+        self.coordinator_stream_handle
+            .update_vnode_bitmap(&vnode_bitmap)
+            .await?;
         self.inner.update_vnode_bitmap(vnode_bitmap).await
+    }
+}
+
+impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> Drop for CoordinatedSinkWriter<W> {
+    fn drop(&mut self) {
+        match self.coordinator_stream_handle.stop().now_or_never() {
+            None => {
+                warn!("unable to send stop due to channel full")
+            }
+            Some(Err(e)) => {
+                warn!(e = ?e.as_report(), "failed to stop the coordinator");
+            }
+            Some(Ok(_)) => {}
+        }
     }
 }
