@@ -14,7 +14,6 @@
 
 #[cfg(test)]
 pub(crate) mod tests {
-
     use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
     use std::ops::Bound;
     use std::sync::Arc;
@@ -44,19 +43,15 @@ pub(crate) mod tests {
     };
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
-    use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::selector::{
         default_compaction_selector, ManualCompactionOption,
     };
     use risingwave_meta::hummock::test_utils::{
         get_compaction_group_id_by_table_id, register_table_ids_to_compaction_group,
-        setup_compute_env, setup_compute_env_with_config,
-        unregister_table_ids_from_compaction_group,
+        setup_compute_env, unregister_table_ids_from_compaction_group,
     };
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
-    use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::hummock::TableOption;
-    use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{
         FilterKeyExtractorImpl, FilterKeyExtractorManager, FixedLengthFilterKeyExtractor,
@@ -220,186 +215,6 @@ pub(crate) mod tests {
             task_progress_manager: Default::default(),
             await_tree_reg: None,
         }
-    }
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_compaction_watermark() {
-        let config = CompactionConfigBuilder::new()
-            .level0_tier_compact_file_number(1)
-            .level0_max_compact_file_number(130)
-            .level0_overlapping_sub_level_compact_level_count(1)
-            .build();
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env_with_config(8080, config).await;
-        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        ));
-
-        // 1. add sstables
-        let table_id = 0;
-        let mut key = BytesMut::default();
-        key.put_u16(0);
-        key.put_slice(b"same_key");
-        let storage = get_hummock_storage(
-            hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
-            &hummock_manager_ref,
-            &[table_id],
-        )
-        .await;
-        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
-        {
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                rpc_filter_key_extractor_manager,
-            ) => rpc_filter_key_extractor_manager,
-            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
-        };
-        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            rpc_filter_key_extractor_manager,
-        );
-        let compact_ctx = get_compactor_context(&storage);
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
-            hummock_meta_client.clone(),
-            storage
-                .storage_opts()
-                .clone()
-                .sstable_id_remote_fetch_number,
-        ));
-        let worker_node_id2 = hummock_manager_ref
-            .metadata_manager()
-            .add_worker_node(
-                WorkerType::ComputeNode,
-                HostAddress::default(),
-                Property::default(),
-                Default::default(),
-            )
-            .await
-            .unwrap();
-        let _snapshot = hummock_manager_ref
-            .pin_snapshot(worker_node_id2)
-            .await
-            .unwrap();
-        let key = key.freeze();
-        const SST_COUNT: u64 = 32;
-        const TEST_WATERMARK: u64 = 8;
-        prepare_test_put_data(
-            &storage,
-            &hummock_meta_client,
-            &key,
-            1 << 10,
-            (1..SST_COUNT + 1)
-                .map(|v| test_epoch(v * 1000))
-                .collect_vec(),
-        )
-        .await;
-
-        let compaction_group_id =
-            get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), table_id).await;
-        // 2. get compact task
-        while let Some(mut compact_task) = hummock_manager_ref
-            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
-            .await
-            .unwrap()
-        {
-            let compaction_filter_flag = CompactionFilterFlag::TTL;
-            // compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
-            compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-            compact_task.table_options = BTreeMap::from([(
-                0,
-                TableOption {
-                    retention_seconds: Some(64),
-                },
-            )]);
-            compact_task.current_epoch_time = 0;
-
-            let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats), _) = compact(
-                compact_ctx.clone(),
-                compact_task.clone(),
-                rx,
-                Box::new(sstable_object_id_manager.clone()),
-                filter_key_extractor_manager.clone(),
-            )
-            .await;
-
-            hummock_manager_ref
-                .report_compact_task_for_test(
-                    result_task.task_id,
-                    Some(compact_task),
-                    result_task.task_status,
-                    result_task.sorted_output_ssts,
-                    Some(to_prost_table_stats_map(task_stats)),
-                )
-                .await
-                .unwrap();
-        }
-
-        let mut val = b"0"[..].repeat(1 << 10);
-        val.extend_from_slice(&(TEST_WATERMARK * 1000).to_be_bytes());
-
-        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        let _recv = compactor_manager.add_compactor(worker_node.id);
-
-        // 4. get the latest version and check
-        let version = hummock_manager_ref.get_current_version().await;
-        let group = version.get_compaction_group_levels(compaction_group_id);
-
-        // base level
-        let output_tables = group
-            .levels
-            .iter()
-            .flat_map(|level| level.table_infos.clone())
-            .chain(
-                group
-                    .l0
-                    .sub_levels
-                    .iter()
-                    .flat_map(|level| level.table_infos.clone()),
-            )
-            .collect_vec();
-
-        storage.wait_version(version).await;
-        let mut table_key_count = 0;
-        for output_sst in output_tables {
-            let table = storage
-                .sstable_store()
-                .sstable(&output_sst, &mut StoreLocalStatistic::default())
-                .await
-                .unwrap();
-            table_key_count += table.meta.key_count;
-        }
-
-        // we have removed these 31 keys before watermark 32.
-        assert_eq!(table_key_count, (SST_COUNT - TEST_WATERMARK + 1) as u32);
-        let read_epoch = (TEST_WATERMARK * 1000) << 16;
-
-        let get_ret = storage
-            .get(
-                TableKey(key.clone()),
-                read_epoch,
-                ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
-                    ..Default::default()
-                },
-            )
-            .await;
-        let get_val = get_ret.unwrap().unwrap().to_vec();
-
-        assert_eq!(get_val, val);
-        let ret = storage
-            .get(
-                TableKey(key.clone()),
-                ((TEST_WATERMARK - 1) * 1000) << 16,
-                ReadOptions {
-                    prefix_hint: Some(key.clone()),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
-                    ..Default::default()
-                },
-            )
-            .await;
-        assert!(ret.is_err());
     }
 
     #[tokio::test]
