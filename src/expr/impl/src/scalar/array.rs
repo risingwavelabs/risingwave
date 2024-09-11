@@ -263,7 +263,7 @@ fn map_keys(map: MapRef<'_>) -> ListValue {
 ///
 /// ```slt
 /// query T
-/// select map_keys(map{'a':1, 'b':2, 'c':3});
+/// select map_values(map{'a':1, 'b':2, 'c':3});
 /// ----
 /// {1,2,3}
 /// ```
@@ -274,7 +274,7 @@ fn map_keys(map: MapRef<'_>) -> ListValue {
     }"
 )]
 fn map_values(map: MapRef<'_>) -> ListValue {
-    map.into_kv().1.to_owned()
+    map.into_kv().1.to_owned_scalar()
 }
 
 /// # Example
