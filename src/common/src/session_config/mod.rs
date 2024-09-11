@@ -30,6 +30,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
+use crate::hash::VirtualNode;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -298,6 +299,9 @@ pub struct SessionConfig {
     /// When enabled, `CREATE MATERIALIZED VIEW` will not fail if the cluster limit is hit.
     #[parameter(default = false)]
     bypass_cluster_limits: bool,
+
+    #[parameter(default = VirtualNode::COUNT, check_hook = check_vnode_count)]
+    vnode_count: usize,
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {
@@ -321,6 +325,17 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err("Only support 'hex' for BYTEA_OUTPUT".to_string())
+    }
+}
+
+fn check_vnode_count(val: &usize) -> Result<(), String> {
+    match val {
+        0 => Err("VNODE_COUNT must be greater than 0".to_owned()),
+        1..=VirtualNode::MAX_COUNT => Ok(()),
+        _ => Err(format!(
+            "VNODE_COUNT must be less than or equal to {}",
+            VirtualNode::MAX_COUNT
+        )),
     }
 }
 
