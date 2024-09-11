@@ -457,7 +457,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let new_group_id = self
             .hummock_manager
-            .split_compaction_group(req.group_id, &req.table_ids)
+            .split_compaction_group(req.group_id, &req.table_ids, req.partition_vnode_count)
             .await?;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
@@ -710,8 +710,11 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<GetVersionByEpochRequest>,
     ) -> Result<Response<GetVersionByEpochResponse>, Status> {
-        let GetVersionByEpochRequest { epoch } = request.into_inner();
-        let version = self.hummock_manager.epoch_to_version(epoch).await?;
+        let GetVersionByEpochRequest { epoch, table_id } = request.into_inner();
+        let version = self
+            .hummock_manager
+            .epoch_to_version(epoch, table_id)
+            .await?;
         Ok(Response::new(GetVersionByEpochResponse {
             version: Some(version.to_protobuf()),
         }))

@@ -300,6 +300,9 @@ impl HummockManager {
                 .values()
                 .map(|g| (g.group_id, g.parent_group_id))
                 .collect();
+            let time_travel_tables_to_commit = table_compaction_group_mapping
+                .iter()
+                .filter(|(table_id, _)| tables_to_commit.contains(table_id));
             let mut txn = sql_store.conn.begin().await?;
             let version_snapshot_sst_ids = self
                 .write_time_travel_metadata(
@@ -308,6 +311,8 @@ impl HummockManager {
                     time_travel_delta,
                     &group_parents,
                     &versioning.last_time_travel_snapshot_sst_ids,
+                    time_travel_tables_to_commit,
+                    committed_epoch,
                 )
                 .await?;
             commit_multi_var_with_provided_txn!(
@@ -408,7 +413,7 @@ impl HummockManager {
                 }
             }
 
-            new_sst_id_number += group_table_ids.len();
+            new_sst_id_number += group_table_ids.len() * 2; // `split_sst` will split the SST into two parts and consumer 2 SST IDs
             sst_to_cg_vec.push((commit_sst, group_table_ids));
         }
 

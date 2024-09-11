@@ -320,7 +320,7 @@ pub mod group_split {
             format!("left_levels.l0.sub_levels: {:?}", left_levels.l0.sub_levels)
         );
 
-        // Reinitialise `vnode_partition_count`` to avoid misaligned hierarchies
+        // Reinitialise `vnode_partition_count` to avoid misaligned hierarchies
         // caused by the merge of different compaction groups.(picker might reject the different `vnode_partition_count` sub_level to compact)
         left_levels
             .l0
@@ -333,7 +333,7 @@ pub mod group_split {
                 continue;
             }
 
-            let insert_table_infos = level.table_infos.clone();
+            let insert_table_infos = level.table_infos;
             left_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
                 .map(|sst| sst.sst_size)
@@ -353,8 +353,12 @@ pub mod group_split {
                 can_concat(&left_levels.levels[idx].table_infos),
                 "{}",
                 format!(
-                    "left_levels.levels[{}].table_infos: {:?} level_idx {:?}",
-                    idx, left_levels.levels[idx].table_infos, left_levels.levels[idx].level_idx
+                    "left-group {} right-group {} left_levels.levels[{}].table_infos: {:?} level_idx {:?}",
+                    left_levels.group_id,
+                    right_levels.group_id,
+                    idx,
+                    left_levels.levels[idx].table_infos,
+                    left_levels.levels[idx].level_idx
                 )
             );
         }

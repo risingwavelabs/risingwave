@@ -14,6 +14,8 @@
 
 use std::sync::Mutex;
 
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
@@ -100,7 +102,7 @@ async fn test_merger_sum_aggr() {
     };
 
     // join handles of all actors
-    let mut handles = vec![];
+    let mut actor_futures: Vec<BoxFuture<'static, _>> = vec![];
 
     // input and output channels of the local aggregation actors
     let mut inputs = vec![];
@@ -113,7 +115,7 @@ async fn test_merger_sum_aggr() {
         let (tx, rx) = channel_for_test();
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
-        handles.push(tokio::spawn(actor.run()));
+        actor_futures.push(actor.run().boxed());
         inputs.push(Box::new(LocalOutput::new(233, tx)) as BoxedOutput);
     }
 
@@ -154,7 +156,7 @@ async fn test_merger_sum_aggr() {
             .local_barrier_manager
             .clone(),
     );
-    handles.push(tokio::spawn(actor.run()));
+    actor_futures.push(actor.run().boxed());
 
     let actor_ctx = ActorContext::for_test(gen_next_actor_id());
 
@@ -225,11 +227,21 @@ async fn test_merger_sum_aggr() {
             .local_barrier_manager
             .clone(),
     );
-    handles.push(tokio::spawn(actor.run()));
+    actor_futures.push(actor.run().boxed());
 
     let mut epoch = test_epoch(1);
     let b1 = Barrier::new_test_barrier(epoch);
     barrier_test_env.inject_barrier(&b1, actors.clone());
+    barrier_test_env
+        .shared_context
+        .local_barrier_manager
+        .flush_all_events()
+        .await;
+    let handles = actor_futures
+        .into_iter()
+        .map(|actor_future| tokio::spawn(actor_future))
+        .collect_vec();
+
     input
         .send(Message::Barrier(b1.into_dispatcher()))
         .await

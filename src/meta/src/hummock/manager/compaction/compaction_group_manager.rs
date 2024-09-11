@@ -637,7 +637,7 @@ impl<'a> CompactionGroupTransaction<'a> {
     }
 
     /// Removes stale group configs.
-    pub(crate) fn purge(&mut self, existing_groups: HashSet<CompactionGroupId>) {
+    pub fn purge(&mut self, existing_groups: HashSet<CompactionGroupId>) {
         let stale_group = self
             .tree_ref()
             .keys()

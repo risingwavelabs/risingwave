@@ -31,7 +31,7 @@ struct RwDdlProgress {
 
 #[system_catalog(table, "rw_catalog.rw_ddl_progress")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDdlProgress>> {
-    let ddl_progresses = reader.meta_client.list_ddl_progress().await?;
+    let ddl_progresses = reader.meta_client.get_ddl_progress().await?;
 
     let table_ids = ddl_progresses
         .iter()

@@ -58,7 +58,7 @@ pub struct GroupDeltasSummary {
 
 pub fn summarize_group_deltas(
     group_deltas: &GroupDeltas,
-    default_group_id: CompactionGroupId,
+    compaction_group_id: CompactionGroupId,
 ) -> GroupDeltasSummary {
     let mut delete_sst_levels = Vec::with_capacity(group_deltas.group_deltas.len());
     let mut delete_sst_ids_set = HashSet::new();
@@ -70,7 +70,6 @@ pub fn summarize_group_deltas(
     let mut group_meta_changes = vec![];
     let mut group_table_change = None;
     let mut new_vnode_partition_count = 0;
-
     let mut group_merge = None;
 
     for group_delta in &group_deltas.group_deltas {
@@ -93,7 +92,7 @@ pub fn summarize_group_deltas(
             }
             GroupDelta::GroupDestroy(_) => {
                 assert!(group_destroy.is_none());
-                group_destroy = Some(default_group_id);
+                group_destroy = Some(compaction_group_id);
             }
             GroupDelta::GroupMetaChange(meta_delta) => {
                 group_meta_changes.push(meta_delta.clone());
@@ -103,7 +102,7 @@ pub fn summarize_group_deltas(
             }
             GroupDelta::GroupMerge(merge_delta) => {
                 assert!(group_merge.is_none());
-                group_merge = Some(merge_delta.clone());
+                group_merge = Some(*merge_delta);
                 group_destroy = Some(merge_delta.right_group_id);
             }
         }
@@ -185,6 +184,25 @@ impl HummockVersion {
                         .chain(epoch_change_log.new_value.iter())
                 })
             }))
+    }
+
+    // only scan the sst infos from levels in the specified compaction group (without table change log)
+    pub fn get_sst_ids_by_group_id(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> impl Iterator<Item = u64> + '_ {
+        self.levels
+            .iter()
+            .filter_map(move |(cg_id, level)| {
+                if *cg_id == compaction_group_id {
+                    Some(level)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
+            .flat_map(|level| level.table_infos.iter())
+            .map(|s| s.sst_id)
     }
 
     /// `get_sst_infos_from_groups` doesn't guarantee that all returned sst info belongs to `select_group`.
@@ -425,7 +443,6 @@ impl HummockVersion {
                         l0.total_file_size -= sst_info.sst_size;
                         l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                     });
-
                 match get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
                     Ok(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
@@ -662,9 +679,10 @@ impl HummockVersion {
                     .member_table_ids
                     .append(&mut moving_tables);
             } else if let Some(group_merge) = &summary.group_merge {
-                println!(
+                tracing::info!(
                     "group_merge left {:?} right {:?}",
-                    group_merge.left_group_id, group_merge.right_group_id
+                    group_merge.left_group_id,
+                    group_merge.right_group_id
                 );
                 self.merge_compaction_group(group_merge.left_group_id, group_merge.right_group_id)
             }
@@ -1324,6 +1342,14 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
                 .chain(cg.levels.iter())
                 .flat_map(|level| level.table_infos.iter().map(|t| (t.object_id, t.file_size)))
         })
+        .chain(version.table_change_log.values().flat_map(|c| {
+            c.0.iter().flat_map(|l| {
+                l.old_value
+                    .iter()
+                    .chain(l.new_value.iter())
+                    .map(|t| (t.object_id, t.file_size))
+            })
+        }))
         .collect()
 }
 

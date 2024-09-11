@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -22,13 +22,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compact_task::ReportTask;
 use risingwave_hummock_sdk::compaction_group::group_split::split_table_ids;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, TableGroupInfo,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::TableGroupInfo;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
-use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
@@ -68,17 +66,6 @@ pub(crate) fn build_split_key(
     Bytes::from(FullKey::new(TableId::from(table_id), TableKey(vnode.to_be_bytes()), 0).encode())
 }
 
-pub fn build_split_key_with_table_id(table_id: StateTableId) -> Bytes {
-    Bytes::from(
-        FullKey::new(
-            TableId::from(table_id),
-            TableKey(VNODE_SPLIT_TO_RIGHT.to_be_bytes()),
-            0,
-        )
-        .encode(),
-    )
-}
-
 impl HummockManager {
     /// Splits a compaction group into two. The new one will contain `table_ids`.
     /// Returns the newly created compaction group id.
@@ -86,6 +73,7 @@ impl HummockManager {
         &self,
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
+        partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         if !table_ids.is_sorted() {
             return Err(Error::CompactionGroup(
@@ -93,11 +81,34 @@ impl HummockManager {
             ));
         }
 
-        let result = self
+        let new_group_id = self
             .move_state_tables_to_dedicated_compaction_group(parent_group_id, table_ids)
             .await?;
 
-        Ok(result)
+        if table_ids.len() == 1 {
+            // update compaction config for target_compaction_group_id
+            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
+            if let Err(err) = compaction_groups_txn.update_compaction_config(
+                &[new_group_id],
+                &[MutableConfig::SplitWeightByVnode(partition_vnode_count)],
+            ) {
+                tracing::error!(
+                    error = %err.as_report(),
+                    "failed to update compaction config for group-{}",
+                    new_group_id
+                );
+            }
+            if let Err(err) = commit_multi_var!(self.meta_store_ref(), compaction_groups_txn) {
+                tracing::error!(
+                    error = %err.as_report(),
+                    "failed to update compaction config for group-{}",
+                    new_group_id
+                );
+            }
+        }
+
+        Ok(new_group_id)
     }
 
     async fn split_compaction_group_impl(
@@ -341,39 +352,101 @@ impl HummockManager {
         }
 
         let state_table_info = versioning.current_version.state_table_info.clone();
-        let member_table_ids_1 = state_table_info
+        let mut member_table_ids_1 = state_table_info
             .compaction_group_member_table_ids(group_1)
             .iter()
             .cloned()
             .collect_vec();
 
-        let member_table_ids_2 = state_table_info
+        let mut member_table_ids_2 = state_table_info
             .compaction_group_member_table_ids(group_2)
             .iter()
             .cloned()
             .collect_vec();
 
-        let mut combine_1 = member_table_ids_1.clone();
-        combine_1.extend_from_slice(&member_table_ids_2);
+        debug_assert!(!member_table_ids_1.is_empty());
+        debug_assert!(!member_table_ids_2.is_empty());
+        assert!(member_table_ids_1.is_sorted());
+        assert!(member_table_ids_2.is_sorted());
 
-        let mut combine_2 = member_table_ids_2;
-        combine_2.extend_from_slice(&member_table_ids_1);
+        // Make sure `member_table_ids_1` is smaller than `member_table_ids_2`
+        let (left_group_id, right_group_id) =
+            if member_table_ids_1.first().unwrap() < member_table_ids_2.first().unwrap() {
+                (group_1, group_2)
+            } else {
+                std::mem::swap(&mut member_table_ids_1, &mut member_table_ids_2);
+                (group_2, group_1)
+            };
 
-        if !combine_1.is_sorted() && !combine_2.is_sorted() {
+        // We can only merge two groups with non-overlapping member table ids
+        if member_table_ids_1.last().unwrap() >= member_table_ids_2.first().unwrap() {
             return Err(Error::CompactionGroup(format!(
                 "invalid merge group_1 {} group_2 {}",
-                group_1, group_2
+                left_group_id, right_group_id
             )));
         }
 
-        let mut left_group_id = group_1;
-        let mut right_group_id = group_2;
-        let combine_member_table_ids = if combine_1.is_sorted() {
-            combine_1
-        } else {
-            std::mem::swap(&mut left_group_id, &mut right_group_id);
-            combine_2
-        };
+        let combined_member_table_ids = member_table_ids_1
+            .iter()
+            .chain(member_table_ids_2.iter())
+            .collect_vec();
+        assert!(combined_member_table_ids.is_sorted());
+
+        // check duplicated sst_id
+        let mut sst_id_set = HashSet::new();
+        for sst_id in versioning
+            .current_version
+            .get_sst_ids_by_group_id(left_group_id)
+            .chain(
+                versioning
+                    .current_version
+                    .get_sst_ids_by_group_id(right_group_id),
+            )
+        {
+            if !sst_id_set.insert(sst_id) {
+                return Err(Error::CompactionGroup(format!(
+                    "invalid merge group_1 {} group_2 {} duplicated sst_id {}",
+                    left_group_id, right_group_id, sst_id
+                )));
+            }
+        }
+
+        // check branched sst on non-overlap level
+        {
+            let left_levels = versioning
+                .current_version
+                .get_compaction_group_levels(group_1);
+
+            let right_levels = versioning
+                .current_version
+                .get_compaction_group_levels(group_2);
+
+            // we can not check the l0 sub level, because the sub level id will be rewritten when merge
+            // This check will ensure that other non-overlapping level ssts can be concat and that the key_range is correct.
+            let max_level = std::cmp::max(left_levels.levels.len(), right_levels.levels.len());
+            for level_idx in 1..=max_level {
+                let left_level = left_levels.get_level(level_idx);
+                let right_level = right_levels.get_level(level_idx);
+                if left_level.table_infos.is_empty() || right_level.table_infos.is_empty() {
+                    continue;
+                }
+
+                let left_last_sst = left_level.table_infos.last().unwrap().clone();
+                let right_first_sst = right_level.table_infos.first().unwrap().clone();
+                let left_sst_id = left_last_sst.sst_id;
+                let right_sst_id = right_first_sst.sst_id;
+                let left_obj_id = left_last_sst.object_id;
+                let right_obj_id = right_first_sst.object_id;
+
+                // Since the sst key_range within a group is legal, we only need to check the ssts adjacent to the two groups.
+                if !can_concat(&[left_last_sst, right_first_sst]) {
+                    return Err(Error::CompactionGroup(format!(
+                        "invalid merge group_1 {} group_2 {} level_idx {} left_last_sst_id {} right_first_sst_id {} left_obj_id {} right_obj_id {}",
+                        left_group_id, right_group_id, level_idx, left_sst_id, right_sst_id, left_obj_id, right_obj_id
+                    )));
+                }
+            }
+        }
 
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
@@ -384,27 +457,11 @@ impl HummockManager {
         let mut new_version_delta = version.new_delta();
 
         let target_compaction_group_id = {
-            let mut config = self
-                .compaction_group_manager
-                .read()
-                .await
-                .try_get_compaction_group_config(group_1)
-                .unwrap()
-                .compaction_config()
-                .deref()
-                .clone();
-
-            {
-                // update config
-                config.split_weight_by_vnode = 0;
-            }
-
             // merge right_group_id to left_group_id and remove right_group_id
             new_version_delta.group_deltas.insert(
                 left_group_id,
                 GroupDeltas {
                     group_deltas: vec![GroupDelta::GroupMerge(PbGroupMerge {
-                        group_config: Some(config.clone()),
                         left_group_id,
                         right_group_id,
                     })],
@@ -416,7 +473,7 @@ impl HummockManager {
         // TODO: remove compaciton group_id from state_table_info
         // rewrite compaction_group_id for all tables
         new_version_delta.with_latest_version(|version, new_version_delta| {
-            for table_id in combine_member_table_ids {
+            for table_id in combined_member_table_ids {
                 let table_id = TableId::new(table_id.table_id());
                 let info = version
                     .state_table_info
@@ -458,10 +515,8 @@ impl HummockManager {
 
             new_version_delta.pre_apply();
 
-            // purge right_group_id
-            compaction_groups_txn.purge(HashSet::from_iter(get_compaction_group_ids(
-                version.latest_version(),
-            )));
+            // remove right_group_id
+            compaction_groups_txn.remove(right_group_id);
             commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
         }
 

@@ -38,6 +38,9 @@ pub enum AccessError {
     #[error("Unsupported additional column `{name}`")]
     UnsupportedAdditionalColumn { name: String },
 
+    #[error("Fail to convert protobuf Any into jsonb: {0}")]
+    ProtobufAnyToJson(#[source] serde_json::Error),
+
     /// Errors that are not categorized into variants above.
     #[error("{message}")]
     Uncategorized { message: String },

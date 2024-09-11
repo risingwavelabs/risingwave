@@ -108,7 +108,6 @@ message GroupDestroy {}
 message GroupMerge {
   uint64 left_group_id = 1;
   uint64 right_group_id = 2;
-  CompactionConfig group_config = 3;
 }
 
 message GroupDelta {
@@ -753,6 +752,7 @@ message PinVersionResponse {
 message SplitCompactionGroupRequest {
   uint64 group_id = 1;
   repeated uint32 table_ids = 2;
+  uint32 partition_vnode_count = 3;
 }
 
 message SplitCompactionGroupResponse {
@@ -842,6 +842,7 @@ message CancelCompactTaskResponse {
 
 message GetVersionByEpochRequest {
   uint64 epoch = 1;
+  uint32 table_id = 2;
 }
 
 message GetVersionByEpochResponse {
