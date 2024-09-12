@@ -19,13 +19,16 @@ use std::sync::{Arc, LazyLock};
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
+use futures::FutureExt;
 use hytra::TrAdder;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StreamingConfig;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::{IntGaugeExt, GLOBAL_ERROR_METRICS};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID};
+use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID, VNODE_COUNT};
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::PbStreamActor;
@@ -44,6 +47,7 @@ use crate::task::{ActorId, LocalBarrierManager};
 pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,
+    pub vnode_count: usize,
     pub mview_definition: String,
 
     // TODO(eric): these seem to be useless now?
@@ -71,6 +75,7 @@ impl ActorContext {
         Arc::new(Self {
             id,
             fragment_id: 0,
+            vnode_count: VirtualNode::COUNT_FOR_TEST,
             mview_definition: "".to_string(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
@@ -97,6 +102,9 @@ impl ActorContext {
             id: stream_actor.actor_id,
             fragment_id: stream_actor.fragment_id,
             mview_definition: stream_actor.mview_definition.clone(),
+            vnode_count: (stream_actor.vnode_bitmap.as_ref())
+                // TODO(var-vnode): use 1 for singleton fragment
+                .map_or(VirtualNode::COUNT, |b| Bitmap::from(b).len()),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
@@ -177,18 +185,26 @@ where
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
-        FRAGMENT_ID::scope(
-            self.actor_context.fragment_id,
-            expr_context_scope(self.expr_context.clone(), async move {
-                tokio::join!(
-                    // Drive the subtasks concurrently.
-                    join_all(std::mem::take(&mut self.subtasks)),
-                    self.run_consumer(),
-                )
-                .1
-            }),
-        )
-        .await
+        let expr_context = self.expr_context.clone();
+        let fragment_id = self.actor_context.fragment_id;
+        let vnode_count = self.actor_context.vnode_count;
+
+        let run = async move {
+            tokio::join!(
+                // Drive the subtasks concurrently.
+                join_all(std::mem::take(&mut self.subtasks)),
+                self.run_consumer(),
+            )
+            .1
+        }
+        .boxed();
+
+        // Attach contexts to the future.
+        let run = expr_context_scope(expr_context, run);
+        let run = FRAGMENT_ID::scope(fragment_id, run);
+        let run = VNODE_COUNT::scope(vnode_count, run);
+
+        run.await
     }
 
     async fn run_consumer(self) -> StreamResult<()> {

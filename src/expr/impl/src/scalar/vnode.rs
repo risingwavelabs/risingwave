@@ -19,6 +19,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::expr_context::vnode_count;
 use risingwave_expr::{build_function, Result};
 
 #[derive(Debug)]
@@ -43,8 +44,7 @@ impl Expression for VnodeExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        // TODO(var-vnode): get vnode count from context
-        let vnodes = VirtualNode::compute_chunk(input, &self.dist_key_indices, VirtualNode::COUNT);
+        let vnodes = VirtualNode::compute_chunk(input, &self.dist_key_indices, vnode_count());
         let mut builder = I16ArrayBuilder::new(input.capacity());
         vnodes
             .into_iter()
@@ -53,9 +53,8 @@ impl Expression for VnodeExpression {
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        // TODO(var-vnode): get vnode count from context
         Ok(Some(
-            VirtualNode::compute_row(input, &self.dist_key_indices, VirtualNode::COUNT)
+            VirtualNode::compute_row(input, &self.dist_key_indices, vnode_count())
                 .to_scalar()
                 .into(),
         ))

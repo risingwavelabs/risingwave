@@ -14,6 +14,7 @@
 
 use std::future::Future;
 
+use risingwave_common::hash::VirtualNode;
 use risingwave_expr::{define_context, Result as ExprResult};
 use risingwave_pb::plan_common::ExprContext;
 
@@ -21,11 +22,17 @@ use risingwave_pb::plan_common::ExprContext;
 define_context! {
     pub TIME_ZONE: String,
     pub FRAGMENT_ID: u32,
+    pub VNODE_COUNT: usize,
 }
 
 pub fn capture_expr_context() -> ExprResult<ExprContext> {
     let time_zone = TIME_ZONE::try_with(ToOwned::to_owned)?;
     Ok(ExprContext { time_zone })
+}
+
+/// Get the vnode count from the context, or [`VirtualNode::COUNT`] if not set.
+pub fn vnode_count() -> usize {
+    VNODE_COUNT::try_with(|&x| x).unwrap_or(VirtualNode::COUNT)
 }
 
 pub async fn expr_context_scope<Fut>(expr_context: ExprContext, future: Fut) -> Fut::Output
