@@ -35,7 +35,7 @@ use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
@@ -654,6 +654,7 @@ async fn test_state_store_sync() {
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
                     cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    read_committed: true,
                     ..Default::default()
                 },
             )
@@ -673,6 +674,7 @@ async fn test_state_store_sync() {
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
                     cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    read_committed: true,
                     ..Default::default()
                 },
             )
@@ -996,7 +998,7 @@ async fn test_multiple_epoch_sync() {
         )
         .await
         .unwrap();
-    let test_get = || {
+    let test_get = |read_committed: bool| {
         let hummock_storage_clone = &test_env.storage;
         async move {
             assert_eq!(
@@ -1006,6 +1008,7 @@ async fn test_multiple_epoch_sync() {
                         epoch1,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
+                            read_committed,
                             cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
@@ -1021,7 +1024,7 @@ async fn test_multiple_epoch_sync() {
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-
+                        read_committed,
                         cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
@@ -1036,6 +1039,7 @@ async fn test_multiple_epoch_sync() {
                         epoch3,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
+                            read_committed,
                             cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
@@ -1047,16 +1051,23 @@ async fn test_multiple_epoch_sync() {
             );
         }
     };
-    test_get().await;
+    test_get(false).await;
 
     let epoch4 = epoch3.next_epoch();
     test_env
         .storage
         .start_epoch(epoch4, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch4, SealCurrentEpochOptions::for_test());
+    let sync_result1 = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
     let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     let sync_result3 = test_env.storage.seal_and_sync_epoch(epoch3).await.unwrap();
-    test_get().await;
+    test_get(false).await;
+
+    test_env
+        .meta_client
+        .commit_epoch(epoch1, sync_result1)
+        .await
+        .unwrap();
 
     test_env
         .meta_client
@@ -1070,7 +1081,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(epoch3).await;
-    test_get().await;
+    test_get(true).await;
 }
 
 #[tokio::test]
@@ -1249,6 +1260,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        read_committed: true,
                         ..Default::default()
                     },
                 )
@@ -1939,6 +1951,7 @@ async fn test_get_with_min_epoch() {
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
                     cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    read_committed: true,
                     ..Default::default()
                 },
             )
@@ -1955,7 +1968,7 @@ async fn test_get_with_min_epoch() {
                 epoch1,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-
+                    read_committed: true,
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                     cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
@@ -1963,7 +1976,6 @@ async fn test_get_with_min_epoch() {
             )
             .await
             .unwrap();
-
         assert!(v.is_some());
     }
 
@@ -2329,7 +2341,7 @@ async fn test_table_watermark() {
 
     let (local1, local2) = test_after_epoch2(local1, local2).await;
 
-    let check_version_table_watermark = |version: PinnedVersion| {
+    let check_version_table_watermark = |version: PinnedVersion, epoch: HummockEpoch| {
         let table_watermarks = TableWatermarksIndex::new_committed(
             version
                 .version()
@@ -2342,11 +2354,11 @@ async fn test_table_watermark() {
         assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction());
         assert_eq!(
             gen_inner_key(watermark1),
-            table_watermarks.read_watermark(vnode1, epoch1).unwrap()
+            table_watermarks.read_watermark(vnode1, epoch).unwrap()
         );
         assert_eq!(
             gen_inner_key(watermark1),
-            table_watermarks.read_watermark(vnode2, epoch1).unwrap()
+            table_watermarks.read_watermark(vnode2, epoch).unwrap()
         );
     };
 
@@ -2435,7 +2447,7 @@ async fn test_table_watermark() {
 
     test_global_read(test_env.storage.clone(), epoch2).await;
 
-    check_version_table_watermark(test_env.storage.get_pinned_version());
+    check_version_table_watermark(test_env.storage.get_pinned_version(), epoch1);
 
     let (local1, local2) = test_after_epoch2(local1, local2).await;
 
@@ -2444,7 +2456,7 @@ async fn test_table_watermark() {
 
     test_global_read(test_env.storage.clone(), epoch2).await;
 
-    check_version_table_watermark(test_env.storage.get_pinned_version());
+    check_version_table_watermark(test_env.storage.get_pinned_version(), epoch2);
 
     let (mut local1, mut local2) = test_after_epoch2(local1, local2).await;
 
@@ -2477,7 +2489,7 @@ async fn test_table_watermark() {
     test_env.commit_epoch(epoch3).await;
     test_env.storage.try_wait_epoch_for_test(epoch3).await;
 
-    check_version_table_watermark(test_env.storage.get_pinned_version());
+    check_version_table_watermark(test_env.storage.get_pinned_version(), epoch3);
 
     let (_local1, _local2) = test_after_epoch2(local1, local2).await;
 
