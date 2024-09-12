@@ -203,7 +203,7 @@ pub fn from_protobuf_value<'a>(
             // order matters. We sort by key here to have deterministic order
             // in tests. We might consider removing this, or make all MapValue sorted
             // in the future.
-            for (key, value) in map.into_iter().sorted_by_key(|(k, _v)| *k) {
+            for (key, value) in map.iter().sorted_by_key(|(k, _v)| *k) {
                 key_builder.append(from_protobuf_value(
                     field_desc,
                     &key.clone().into(),
