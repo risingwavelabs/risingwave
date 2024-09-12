@@ -58,7 +58,12 @@ impl ServingVnodeMapping {
                     None
                 };
                 // TODO(var-vnode): also fetch vnode count for each fragment
-                place_vnode(old_mapping, workers, max_parallelism, VirtualNode::COUNT)
+                place_vnode(
+                    old_mapping,
+                    workers,
+                    max_parallelism,
+                    VirtualNode::COUNT_FOR_COMPAT,
+                )
             };
             match new_mapping {
                 None => {

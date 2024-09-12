@@ -153,10 +153,10 @@ impl Distribution {
 
     /// Get the vnode count of the distribution.
     ///
-    /// For backwards compatibility, [`VirtualNode::COUNT`] is used for singleton.
+    /// For backwards compatibility, [`VirtualNode::COUNT_FOR_COMPAT`] is used for singleton.
     pub fn vnode_count(&self) -> usize {
         match self {
-            Distribution::Singleton(_) => VirtualNode::COUNT,
+            Distribution::Singleton(_) => VirtualNode::COUNT_FOR_COMPAT,
             Distribution::Hash(mapping) => mapping.len(),
         }
     }

@@ -300,7 +300,7 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     bypass_cluster_limits: bool,
 
-    #[parameter(default = VirtualNode::COUNT, check_hook = check_vnode_count)]
+    #[parameter(default = VirtualNode::COUNT_FOR_COMPAT, check_hook = check_vnode_count)]
     vnode_count: usize,
 }
 

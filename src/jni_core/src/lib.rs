@@ -320,8 +320,8 @@ impl<'a> Deref for JavaBindingIterator<'a> {
 
 #[no_mangle]
 extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(_env: EnvParam<'_>) -> jint {
-    // TODO(var-vnode): vnode count can vary for different tables.
-    VirtualNode::COUNT as jint
+    // TODO(var-vnode): vnode count can vary for different tables, use real ones.
+    VirtualNode::COUNT_FOR_COMPAT as jint
 }
 
 #[cfg_or_panic(not(madsim))]

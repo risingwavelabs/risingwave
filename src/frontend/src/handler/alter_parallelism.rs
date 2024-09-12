@@ -105,7 +105,7 @@ pub async fn handle_alter_parallelism(
         .sum::<u32>();
     // TODO(var-vnode): get max parallelism from catalogs.
     // Although the meta service will clamp the value for us, we should still check it here for better UI.
-    let max_parallelism = VirtualNode::COUNT;
+    let max_parallelism = VirtualNode::COUNT_FOR_COMPAT;
 
     let mut builder = RwPgResponse::builder(stmt_type);
 

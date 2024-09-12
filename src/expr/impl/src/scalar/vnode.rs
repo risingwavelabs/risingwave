@@ -67,9 +67,11 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::Row;
     use risingwave_expr::expr::build_from_pretty;
+    use risingwave_expr::expr_context::VNODE_COUNT;
 
     #[tokio::test]
     async fn test_vnode_expr_eval() {
+        let vnode_count = 32;
         let expr = build_from_pretty("(vnode:int2 $0:int4 $0:int8 $0:varchar)");
         let input = DataChunk::from_pretty(
             "i  I  T
@@ -79,17 +81,21 @@ mod tests {
         );
 
         // test eval
-        let output = expr.eval(&input).await.unwrap();
+        let output = VNODE_COUNT::scope(vnode_count, expr.eval(&input))
+            .await
+            .unwrap();
         for vnode in output.iter() {
             let vnode = vnode.unwrap().into_int16();
-            assert!((0..VirtualNode::COUNT as i16).contains(&vnode));
+            assert!((0..vnode_count as i16).contains(&vnode));
         }
 
         // test eval_row
         for row in input.rows() {
-            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            let result = VNODE_COUNT::scope(vnode_count, expr.eval_row(&row.to_owned_row()))
+                .await
+                .unwrap();
             let vnode = result.unwrap().into_int16();
-            assert!((0..VirtualNode::COUNT as i16).contains(&vnode));
+            assert!((0..vnode_count as i16).contains(&vnode));
         }
     }
 }

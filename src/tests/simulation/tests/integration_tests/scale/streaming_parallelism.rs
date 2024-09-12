@@ -145,7 +145,7 @@ async fn test_streaming_parallelism_index() -> Result<()> {
 
 #[tokio::test]
 async fn test_parallelism_exceed_virtual_node_max_create() -> Result<()> {
-    let vnode_max = VirtualNode::COUNT;
+    let vnode_max = VirtualNode::COUNT_FOR_COMPAT;
     let mut configuration = Configuration::for_auto_parallelism(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE,
         true,
@@ -177,7 +177,7 @@ async fn test_parallelism_exceed_virtual_node_max_create() -> Result<()> {
 
 #[tokio::test]
 async fn test_parallelism_exceed_virtual_node_max_alter_fixed() -> Result<()> {
-    let vnode_max = VirtualNode::COUNT;
+    let vnode_max = VirtualNode::COUNT_FOR_COMPAT;
     let mut configuration = Configuration::for_scale();
     configuration.compute_nodes = 1;
     configuration.compute_node_cores = vnode_max + 100;
@@ -202,7 +202,7 @@ async fn test_parallelism_exceed_virtual_node_max_alter_fixed() -> Result<()> {
 
 #[tokio::test]
 async fn test_parallelism_exceed_virtual_node_max_alter_adaptive() -> Result<()> {
-    let vnode_max = VirtualNode::COUNT;
+    let vnode_max = VirtualNode::COUNT_FOR_COMPAT;
     let mut configuration = Configuration::for_scale();
     configuration.compute_nodes = 1;
     configuration.compute_node_cores = vnode_max + 100;

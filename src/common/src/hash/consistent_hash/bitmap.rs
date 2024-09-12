@@ -45,16 +45,16 @@ impl Bitmap {
     }
 
     /// Get the reference to a vnode bitmap for singleton actor or table, i.e., with length
-    /// [`VirtualNode::COUNT`] and only the [`SINGLETON_VNODE`] set to 1.
+    /// [`VirtualNode::COUNT_FOR_COMPAT`] and only the [`SINGLETON_VNODE`] set to 1.
     pub fn singleton() -> &'static Self {
         Self::singleton_arc()
     }
 
     /// Get the reference to a vnode bitmap for singleton actor or table, i.e., with length
-    /// [`VirtualNode::COUNT`] and only the [`SINGLETON_VNODE`] set to 1.
+    /// [`VirtualNode::COUNT_FOR_COMPAT`] and only the [`SINGLETON_VNODE`] set to 1.
     pub fn singleton_arc() -> &'static Arc<Self> {
         static SINGLETON: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_COMPAT);
             builder.set(SINGLETON_VNODE.to_index(), true);
             builder.finish().into()
         });
