@@ -589,11 +589,23 @@ impl HummockManager {
         parent_group_id: u64,
     ) {
         let partition_vnode_count = self.env.opts.partition_vnode_count;
+
+        if !table_write_throughput.contains_key(table_id) {
+            tracing::debug!("table {} write throughput history is not exist", table_id);
+            return;
+        }
+
+        let window_size = self.env.opts.table_info_statistic_history_times / 4;
+        if !table_write_throughput.get(table_id).unwrap().len() < window_size {
+            tracing::debug!("table {} write throughput history is not enough", table_id);
+            return;
+        }
+
         let is_high_write_throughput = is_table_high_write_throughput(
             table_write_throughput,
             *table_id,
             checkpoint_secs,
-            self.env.opts.table_info_statistic_history_times / 4,
+            window_size,
             self.env.opts.table_write_throughput_threshold,
         );
 
@@ -717,34 +729,6 @@ impl HummockManager {
             )));
         }
 
-        fn check_is_creating_compaction_group(
-            group: &TableGroupInfo,
-            created_tables: &HashSet<u32>,
-        ) -> bool {
-            group
-                .table_statistic
-                .keys()
-                .any(|table_id| !created_tables.contains(table_id))
-        }
-
-        fn check_is_low_write_throughput_compaction_group(
-            table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-            checkpoint_secs: u64,
-            window_size: usize,
-            threshold: u64,
-            group: &TableGroupInfo,
-        ) -> bool {
-            group.table_statistic.keys().all(|table_id| {
-                is_table_low_write_throughput(
-                    table_write_throughput,
-                    *table_id,
-                    checkpoint_secs,
-                    window_size,
-                    threshold,
-                )
-            })
-        }
-
         // do not merge the compaction group which is creating
         if check_is_creating_compaction_group(group, created_tables) {
             tracing::info!(
@@ -779,20 +763,6 @@ impl HummockManager {
                 "group-{} is high throughput",
                 group.group_id
             )));
-        }
-
-        async fn check_is_huge_group(
-            hummock_manager: &HummockManager,
-            group: &TableGroupInfo,
-        ) -> bool {
-            let group_config = hummock_manager
-                .compaction_group_manager
-                .read()
-                .await
-                .try_get_compaction_group_config(group.group_id)
-                .unwrap();
-
-            group.group_size > (group_config.max_estimated_group_size() * 3 / 10)
         }
 
         if check_is_huge_group(self, group).await {
@@ -890,21 +860,17 @@ pub fn is_table_high_write_throughput(
     window_size: usize,
     threshold: u64,
 ) -> bool {
-    if let Some(history) = table_write_throughput.get(&table_id) {
-        if history.len() >= window_size {
-            // Determine if 1/2 of the values in the interval exceed the threshold.
-            let mut high_write_throughput_count = 0;
-            for throughput in history {
-                if *throughput / checkpoint_secs > threshold {
-                    high_write_throughput_count += 1;
-                }
-            }
+    let history = table_write_throughput.get(&table_id).unwrap();
 
-            return high_write_throughput_count * 2 > window_size;
+    // Determine if 1/2 of the values in the interval exceed the threshold.
+    let mut high_write_throughput_count = 0;
+    for throughput in history {
+        if *throughput / checkpoint_secs > threshold {
+            high_write_throughput_count += 1;
         }
     }
 
-    false
+    return high_write_throughput_count * 2 > window_size;
 }
 
 pub fn is_table_low_write_throughput(
@@ -914,32 +880,66 @@ pub fn is_table_low_write_throughput(
     window_size: usize,
     threshold: u64,
 ) -> bool {
-    if let Some(history) = table_write_throughput.get(&table_id) {
-        // Determine if 2/3 of the values in the interval below the threshold.
-        let mut low_write_throughput_count = 0;
-        if history.len() >= window_size {
-            for throughput in history {
-                if *throughput / checkpoint_secs < threshold {
-                    low_write_throughput_count += 1;
-                }
-            }
-        } else {
-            println!(
-                "table_id {} history.len {} < window_size {}",
-                table_id,
-                history.len(),
-                window_size
-            );
+    let history = table_write_throughput.get(&table_id).unwrap();
+
+    // Determine if 2/3 of the values in the interval below the threshold.
+    let mut low_write_throughput_count = 0;
+    for throughput in history {
+        if *throughput / checkpoint_secs < threshold {
+            low_write_throughput_count += 1;
         }
+    }
+    return low_write_throughput_count * 3 / 2 > window_size;
+}
 
-        println!(
-            "table_id {} low_write_throughput_count {} window_size {}",
-            table_id, low_write_throughput_count, window_size
-        );
+async fn check_is_huge_group(hummock_manager: &HummockManager, group: &TableGroupInfo) -> bool {
+    let group_config = hummock_manager
+        .compaction_group_manager
+        .read()
+        .await
+        .try_get_compaction_group_config(group.group_id)
+        .unwrap();
 
-        return low_write_throughput_count * 3 / 2 > window_size;
+    group.group_size > (group_config.max_estimated_group_size() * 3 / 10)
+}
+
+fn check_is_low_write_throughput_compaction_group(
+    table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+    checkpoint_secs: u64,
+    window_size: usize,
+    threshold: u64,
+    group: &TableGroupInfo,
+) -> bool {
+    // check table exists
+    let live_table = group
+        .table_statistic
+        .keys()
+        .filter(|table_id| table_write_throughput.contains_key(table_id))
+        .filter(|table_id| table_write_throughput.get(&table_id).unwrap().len() >= window_size)
+        .cloned()
+        .collect_vec();
+
+    if live_table.is_empty() {
+        return false;
     }
 
-    println!("table_id {} not found in table_write_throughput", table_id);
-    true
+    live_table.into_iter().all(|table_id| {
+        is_table_low_write_throughput(
+            table_write_throughput,
+            table_id,
+            checkpoint_secs,
+            window_size,
+            threshold,
+        )
+    })
+}
+
+fn check_is_creating_compaction_group(
+    group: &TableGroupInfo,
+    created_tables: &HashSet<u32>,
+) -> bool {
+    group
+        .table_statistic
+        .keys()
+        .any(|table_id| !created_tables.contains(table_id))
 }
