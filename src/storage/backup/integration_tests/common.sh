@@ -167,7 +167,11 @@ function get_total_sst_count() {
 }
 
 function get_table_committed_epoch_in_meta_snapshot() {
-    sql="select state_table_info->'1'->>'committedEpoch' from rw_meta_snapshot;"
+    sql="select id from rw_tables;"
+    table_id=$(execute_sql_t "${sql}")
+    table_id="${table_id#"${table_id%%[![:space:]]*}"}"
+    table_id="${table_id%"${table_id##*[![:space:]]}"}"
+    sql="select state_table_info->'${table_id}'->>'committedEpoch' from rw_meta_snapshot;"
     query_result=$(execute_sql_t "${sql}")
     echo ${query_result}
 }
