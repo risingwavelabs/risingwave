@@ -17,7 +17,7 @@ use itertools::Itertools;
 use prost_reflect::{Cardinality, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{
-    DataType, DatumCow, Decimal, JsonbVal, ScalarImpl, ToOwnedDatum, F32, F64,
+    DataType, DatumCow, Decimal, JsonbVal, MapType, MapValue, ScalarImpl, ToOwnedDatum, F32, F64,
 };
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 use thiserror::Error;
@@ -180,10 +180,43 @@ pub fn from_protobuf_value<'a>(
             ScalarImpl::List(ListValue::new(builder.finish()))
         }
         Value::Bytes(value) => borrowed!(&**value),
-        _ => {
-            return Err(AccessError::UnsupportedType {
-                ty: format!("{kind:?}"),
-            });
+        Value::Map(map) => {
+            let err = || {
+                AccessError::TypeError {
+                    expected: type_expected.to_string(),
+                    got: format!("{:?}", kind),
+                    value: value.to_string(), // Protobuf TEXT
+                }
+            };
+
+            let DataType::Map(map_type) = type_expected else {
+                return Err(err());
+            };
+            let map_desc = kind.as_message().ok_or_else(err)?;
+            if !map_desc.is_map_entry() {
+                return Err(err());
+            }
+
+            let mut key_builder = map_type.key().create_array_builder(map.len());
+            let mut value_builder = map_type.value().create_array_builder(map.len());
+            // NOTE: HashMap's iter order is non-deterministic, but MapValue's
+            // order matters. We sort by key here to have deterministic order
+            // in tests. We might consider removing this, or make all MapValue sorted
+            // in the future.
+            for (key, value) in map.into_iter().sorted_by_key(|(k, _v)| *k) {
+                key_builder.append(from_protobuf_value(
+                    field_desc,
+                    &key.clone().into(),
+                    map_type.key(),
+                )?);
+                value_builder.append(from_protobuf_value(field_desc, &value, map_type.value())?);
+            }
+            let keys = key_builder.finish();
+            let values = value_builder.finish();
+            ScalarImpl::Map(
+                MapValue::try_from_kv(ListValue::new(keys), ListValue::new(values))
+                    .map_err(|e| uncategorized!("failed to convert protobuf map: {e}"))?,
+            )
         }
     };
     Ok(Some(v).into())
@@ -195,8 +228,7 @@ fn protobuf_type_mapping(
     parse_trace: &mut Vec<String>,
 ) -> std::result::Result<DataType, ProtobufTypeError> {
     detect_loop_and_push(parse_trace, field_descriptor)?;
-    let field_type = field_descriptor.kind();
-    let mut t = match field_type {
+    let mut t = match field_descriptor.kind() {
         Kind::Bool => DataType::Boolean,
         Kind::Double => DataType::Float64,
         Kind::Float => DataType::Float32,
@@ -207,10 +239,18 @@ fn protobuf_type_mapping(
         }
         Kind::Uint64 | Kind::Fixed64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
-        Kind::Message(m) => match m.full_name() {
-            // Well-Known Types are identified by their full name
-            "google.protobuf.Any" => DataType::Jsonb,
-            _ => {
+        Kind::Message(m) => {
+            if m.full_name() == "google.protobuf.Any" {
+                // Well-Known Types are identified by their full name
+                DataType::Jsonb
+            } else if m.is_map_entry() {
+                // Map is equivalent to `repeated MapFieldEntry map_field = N;`
+                debug_assert!(field_descriptor.is_map());
+                let key = protobuf_type_mapping(&m.map_entry_key_field(), parse_trace)?;
+                let value = protobuf_type_mapping(&m.map_entry_value_field(), parse_trace)?;
+                _ = parse_trace.pop();
+                return Ok(DataType::Map(MapType::from_kv(key, value)));
+            } else {
                 let fields = m
                     .fields()
                     .map(|f| protobuf_type_mapping(&f, parse_trace))
@@ -218,17 +258,12 @@ fn protobuf_type_mapping(
                 let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
                 DataType::new_struct(fields, field_names)
             }
-        },
+        }
         Kind::Enum(_) => DataType::Varchar,
         Kind::Bytes => DataType::Bytea,
     };
-    if field_descriptor.is_map() {
-        bail_protobuf_type_error!(
-            "protobuf map type (on field `{}`) is not supported",
-            field_descriptor.full_name()
-        );
-    }
     if field_descriptor.cardinality() == Cardinality::Repeated {
+        debug_assert!(!field_descriptor.is_map());
         t = DataType::List(Box::new(t))
     }
     _ = parse_trace.pop();
