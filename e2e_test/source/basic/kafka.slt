@@ -498,6 +498,26 @@ FORMAT DEBEZIUM ENCODE JSON (
   ignore_key = 'true'
 )
 
+statement error INCLUDE payload is only allowed when using ENCODE JSON, but got ENCODE Bytes
+CREATE TABLE test_include_payload (a bytea)
+INCLUDE payload
+WITH (
+    connector = 'kafka',
+    topic = 'kafka_1_partition_topic',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE BYTES
+
+statement ok
+CREATE TABLE test_include_payload (v1 int, v2 varchar)
+INCLUDE payload
+WITH (
+    connector = 'kafka',
+    topic = 'kafka_1_partition_topic',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON
+
 statement ok
 flush;
 
@@ -512,6 +532,13 @@ select v1, v2 from t0;
 3 333
 4 4444
 
+query ITT rowsort
+select v1, v2, _rw_kafka_payload from test_include_payload;
+----
+1 1 {"v1": 1, "v2": "1"}
+2 22 {"v1": 2, "v2": "22"}
+3 333 {"v1": 3, "v2": "333"}
+4 4444 {"v1": 4, "v2": "4444"}
 
 query IT rowsort
 select v1, v2 from s0;
@@ -916,3 +943,6 @@ drop table source_with_rdkafka_props;
 
 statement ok
 drop table debezium_ignore_key;
+
+statement ok
+drop table test_include_payload;

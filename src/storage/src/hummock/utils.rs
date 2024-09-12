@@ -30,11 +30,10 @@ use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
-use super::{HummockError, HummockResult, SstableStoreRef};
+use super::{HummockError, SstableStoreRef};
 use crate::error::StorageResult;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
@@ -70,24 +69,6 @@ where
     };
 
     !too_left && !too_right
-}
-
-pub fn validate_safe_epoch(
-    version: &HummockVersion,
-    table_id: TableId,
-    epoch: u64,
-) -> HummockResult<()> {
-    if let Some(info) = version.state_table_info.info().get(&table_id)
-        && epoch < info.safe_epoch
-    {
-        return Err(HummockError::expired_epoch(
-            table_id,
-            info.safe_epoch,
-            epoch,
-        ));
-    }
-
-    Ok(())
 }
 
 pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool
