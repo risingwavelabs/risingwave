@@ -440,7 +440,7 @@ mod tests {
     #[test]
     fn test_encode_proto_ok() {
         let pool_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/codec/tests/test_data/all-types.pb");
+            .join("codec/tests/test_data/all-types.pb");
         let pool_bytes = std::fs::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
         let descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
@@ -495,7 +495,7 @@ mod tests {
             // Hint: write the binary output to a file `test.binpb`, and view it with `protoc`:
             // ```
             // protoc --decode_raw < test.binpb
-            // protoc --decode=all_types.AllTypes recursive.proto < test.binpb
+            // protoc --decode=all_types.AllTypes all-types.proto < test.binpb
             // ```
             [
                 9, 0, 0, 0, 0, 0, 0, 17, 64, 21, 0, 0, 96, 64, 24, 22, 32, 23, 56, 48, 93, 26, 0,
@@ -509,8 +509,8 @@ mod tests {
     #[test]
     fn test_encode_proto_repeated() {
         let pool_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/test_data/proto_recursive/recursive.pb");
-        let pool_bytes = std::fs::read(pool_path).unwrap();
+            .join("codec/tests/test_data/all-types.pb");
+        let pool_bytes = fs_err::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
         let message_descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
 

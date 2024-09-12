@@ -10611,6 +10611,7 @@ dependencies = [
  "easy-ext",
  "enum-as-inner 0.6.0",
  "expect-test",
+ "fs-err",
  "futures",
  "futures-async-stream",
  "gcp-bigquery-client",
