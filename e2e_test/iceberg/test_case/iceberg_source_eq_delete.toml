@@ -3,7 +3,7 @@ init_sqls = [
     'DROP TABLE IF EXISTS demo_db.t1',
 ]
 
-slt = 'test_case/iceberg_select_empty_table.slt'
+slt = 'test_case/iceberg_source_eq_delete.slt'
 
 drop_sqls = [
     'DROP TABLE IF EXISTS demo_db.t1',

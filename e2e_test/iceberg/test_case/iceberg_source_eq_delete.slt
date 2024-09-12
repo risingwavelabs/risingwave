@@ -75,6 +75,11 @@ select i3,i2 from iceberg_t1_source order by i2;
 '3','2'
 '6','5'
 
+query I
+select i2,i1 from iceberg_t1_source order by i1;
+----
+'2',1
+'5',4
 
 query I
 select i1 from iceberg_t1_source order by i1;
