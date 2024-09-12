@@ -692,9 +692,6 @@ drop table s8_no_schema_field
 # drop table s10
 
 statement ok
-drop table s11
-
-statement ok
 drop table s12
 
 statement ok
