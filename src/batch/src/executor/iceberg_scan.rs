@@ -93,18 +93,24 @@ impl IcebergScanExecutor {
             .load_table_v2_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
-        let chunk_schema_name = self.schema.names();
+        let executor_schema_names = self.schema.names();
 
         let mut eq_delete_file_scan_tasks_map: HashMap<OwnedRow, i64> = HashMap::default();
         let eq_delete_file_scan_tasks = mem::take(&mut self.eq_delete_file_scan_tasks);
 
-        // Iterate all the delete files to get the value and seq_num
-        let mut delete_equality_ids: Option<Vec<_>> = None;
+        // Build hash map for equality delete files
+        // Currently, all equality delete files have the same schema which is guaranteed by `IcebergSplitEnumerator`.
+        let mut eq_delete_ids: Option<Vec<_>> = None;
         for eq_delete_file_scan_task in eq_delete_file_scan_tasks {
             let mut sequence_number = eq_delete_file_scan_task.sequence_number;
 
-            if delete_equality_ids.is_none() {
-                delete_equality_ids = Some(eq_delete_file_scan_task.project_field_ids.clone());
+            if eq_delete_ids.is_none() {
+                eq_delete_ids = Some(eq_delete_file_scan_task.project_field_ids.clone());
+            } else {
+                debug_assert_eq!(
+                    eq_delete_ids.as_ref().unwrap(),
+                    &eq_delete_file_scan_task.project_field_ids
+                );
             }
 
             let reader = table
@@ -136,7 +142,7 @@ impl IcebergScanExecutor {
         for data_file_scan_task in data_file_scan_tasks {
             let data_sequence_number = data_file_scan_task.sequence_number;
 
-            let column_names: Vec<_> = data_file_scan_task
+            let data_chunk_column_names: Vec<_> = data_file_scan_task
                 .project_field_ids
                 .iter()
                 .filter_map(|id| {
@@ -147,16 +153,16 @@ impl IcebergScanExecutor {
                 })
                 .collect();
 
-            // The order of the field_ids in the data file and delete file may be different, so need to correct them here
-            let delete_column_ids = delete_equality_ids.as_ref().map(|delete_column_ids| {
-                delete_column_ids
+            // eq_delete_column_idxes are used to fetch equality delete columns from data files.
+            let eq_delete_column_idxes = eq_delete_ids.as_ref().map(|eq_delete_ids| {
+                eq_delete_ids
                     .iter()
-                    .map(|delete_column_id| {
+                    .map(|eq_delete_id| {
                         data_file_scan_task
                             .project_field_ids
                             .iter()
-                            .position(|project_field_id| delete_column_id == project_field_id)
-                            .expect("delete_column_id not found in delete_equality_ids")
+                            .position(|project_field_id| eq_delete_id == project_field_id)
+                            .expect("eq_delete_id not found in delete_equality_ids")
                     })
                     .collect_vec()
             });
@@ -175,17 +181,12 @@ impl IcebergScanExecutor {
                 let record_batch = record_batch.map_err(BatchError::Iceberg)?;
 
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-                let chunk = match delete_column_ids.as_ref() {
+                let chunk = match eq_delete_column_idxes.as_ref() {
                     Some(delete_column_ids) => {
                         let visibility = Bitmap::from_iter(
                             // Project with the schema of the delete file
                             chunk.project(delete_column_ids).rows().map(|row_ref| {
-                                let row = OwnedRow::new(
-                                    row_ref
-                                        .iter()
-                                        .map(|scalar_ref| scalar_ref.map(Into::into))
-                                        .collect_vec(),
-                                );
+                                let row = row_ref.to_owned_row();
                                 if let Some(delete_sequence_number) =
                                     eq_delete_file_scan_tasks_map.get(&row)
                                     && delete_sequence_number > &data_sequence_number
@@ -199,13 +200,14 @@ impl IcebergScanExecutor {
                             }),
                         )
                         .clone();
-                        let (data, _chunk_visibilities) = chunk.into_parts_v2();
                         // Keep the schema consistent(chunk and executor)
-                        let data = data
+                        // Filter out (equality delete) columns that are not in the executor schema
+                        let data = chunk
+                            .columns()
                             .iter()
-                            .zip_eq_fast(&column_names)
+                            .zip_eq_fast(&data_chunk_column_names)
                             .filter_map(|(array, columns)| {
-                                if chunk_schema_name.contains(columns) {
+                                if executor_schema_names.contains(columns) {
                                     Some(array.clone())
                                 } else {
                                     None

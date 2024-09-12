@@ -348,6 +348,7 @@ impl IcebergSplitEnumerator {
             })
             .collect::<ConnectorResult<Vec<_>>>()?;
         let mut require_field_names: Vec<_> = rw_schema.names().to_vec();
+        // Add the delete columns to the required field names
         for names in delete_columns {
             if !require_field_names.contains(&names) {
                 require_field_names.push(names);
