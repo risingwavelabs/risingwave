@@ -488,6 +488,11 @@ impl SourceStreamChunkRowWriter<'_> {
                             .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
                     ));
                 }
+                (_, &Some(AdditionalColumnType::Payload(_))) => {
+                    // ingest the whole payload as a single column
+                    // do special logic in `KvEvent::access_field`
+                    parse_field(desc)
+                }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
                     parse_field(desc)

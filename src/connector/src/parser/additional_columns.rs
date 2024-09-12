@@ -24,15 +24,15 @@ use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColum
 use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
-    AdditionalColumnPartition, AdditionalColumnTimestamp, AdditionalDatabaseName,
-    AdditionalSchemaName, AdditionalTableName,
+    AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnTimestamp,
+    AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::MONGODB_CDC_CONNECTOR;
 use crate::source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR,
-    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
 
 // Hidden additional columns connectors which do not support `include` syntax.
@@ -44,21 +44,36 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
         HashMap::from([
             (
                 KAFKA_CONNECTOR,
-                HashSet::from(["key", "timestamp", "partition", "offset", "header"]),
+                HashSet::from([
+                    "key",
+                    "timestamp",
+                    "partition",
+                    "offset",
+                    "header",
+                    "payload",
+                ]),
             ),
             (
                 PULSAR_CONNECTOR,
-                HashSet::from(["key", "partition", "offset"]),
+                HashSet::from(["key", "partition", "offset", "payload"]),
             ),
             (
                 KINESIS_CONNECTOR,
-                HashSet::from(["key", "partition", "offset", "timestamp"]),
+                HashSet::from(["key", "partition", "offset", "timestamp", "payload"]),
             ),
-            (OPENDAL_S3_CONNECTOR, HashSet::from(["file", "offset"])),
-            (S3_CONNECTOR, HashSet::from(["file", "offset"])),
-            (GCS_CONNECTOR, HashSet::from(["file", "offset"])),
-            (AZBLOB_CONNECTOR, HashSet::from(["file", "offset"])),
-            (POSIX_FS_CONNECTOR, HashSet::from(["file", "offset"])),
+            (
+                OPENDAL_S3_CONNECTOR,
+                HashSet::from(["file", "offset", "payload"]),
+            ),
+            (GCS_CONNECTOR, HashSet::from(["file", "offset", "payload"])),
+            (
+                AZBLOB_CONNECTOR,
+                HashSet::from(["file", "offset", "payload"]),
+            ),
+            (
+                POSIX_FS_CONNECTOR,
+                HashSet::from(["file", "offset", "payload"]),
+            ),
             // mongodb-cdc doesn't support cdc backfill table
             (
                 MONGODB_CDC_CONNECTOR,
@@ -184,6 +199,14 @@ pub fn build_additional_column_desc(
                 column_type: Some(AdditionalColumnType::Partition(
                     AdditionalColumnPartition {},
                 )),
+            },
+        ),
+        "payload" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Jsonb,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Payload(AdditionalColumnPayload {})),
             },
         ),
         "offset" => ColumnDesc::named_with_additional_column(
