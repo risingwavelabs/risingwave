@@ -92,22 +92,25 @@ impl PinnedVersion {
         }
     }
 
-    pub fn new_pin_version(&self, version: HummockVersion) -> Self {
+    pub fn new_pin_version(&self, version: HummockVersion) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
             version.id,
             self.version.id
         );
+        if version.id == self.version.id {
+            return None;
+        }
         let version_id = version.id;
 
-        PinnedVersion {
+        Some(PinnedVersion {
             version: Arc::new(version),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-        }
+        })
     }
 
     pub fn id(&self) -> HummockVersionId {

@@ -66,7 +66,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         };
 
         let compression_format = azblob_properties.compression_format;
-
         Ok(Self {
             op,
             prefix,

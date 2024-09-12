@@ -130,7 +130,7 @@ echo "> inserted new rows into postgres"
 
 # start cluster w/o clean-data
 unset RISINGWAVE_CI
-export RUST_LOG="risingwave_stream=debug,risingwave_batch=info,risingwave_storage=info" \
+export RUST_LOG="risingwave_stream=debug,risingwave_batch=info,risingwave_storage=info"
 
 risedev dev ci-1cn-1fe-with-recovery
 echo "> wait for cluster recovery finish"

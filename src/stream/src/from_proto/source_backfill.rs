@@ -72,6 +72,9 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
             source_desc_builder,
             state_table_handler,
         );
+        let progress = params
+            .local_barrier_manager
+            .register_create_mview_progress(params.actor_context.id);
 
         let exec = SourceBackfillExecutorInner::new(
             params.actor_context.clone(),
@@ -81,6 +84,7 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
             params.env.system_params_manager_ref().get_params(),
             backfill_state_table,
             node.rate_limit,
+            progress,
         );
         let [input]: [_; 1] = params.input.try_into().unwrap();
 

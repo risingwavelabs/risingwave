@@ -62,7 +62,6 @@ use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
     ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
@@ -1697,15 +1696,7 @@ pub async fn handle_create_source(
             )?;
 
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
-            let mut graph = build_graph(stream_plan)?;
-            graph.parallelism =
-                session
-                    .config()
-                    .streaming_parallelism()
-                    .map(|parallelism| Parallelism {
-                        parallelism: parallelism.get(),
-                    });
-            graph
+            build_graph(stream_plan)?
         };
         catalog_writer
             .create_source_with_graph(source, graph)
