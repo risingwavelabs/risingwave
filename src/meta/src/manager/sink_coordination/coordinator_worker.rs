@@ -23,7 +23,6 @@ use futures::future::{select, Either};
 use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkParam};
 use risingwave_pb::connector_service::SinkMetadata;
@@ -56,7 +55,7 @@ struct EpochCommitRequests {
     epoch: u64,
     metadatas: Vec<SinkMetadata>,
     handle_ids: HashSet<usize>,
-    bitmap: Bitmap,
+    commited_bitmap: Option<Bitmap>, // lazy-initialized on first request
 }
 
 impl EpochCommitRequests {
@@ -65,7 +64,7 @@ impl EpochCommitRequests {
             epoch,
             metadatas: vec![],
             handle_ids: Default::default(),
-            bitmap: Bitmap::zeros(VirtualNode::COUNT),
+            commited_bitmap: None,
         }
     }
 
@@ -75,24 +74,29 @@ impl EpochCommitRequests {
         metadata: SinkMetadata,
         vnode_bitmap: Bitmap,
     ) -> anyhow::Result<()> {
+        let commited_bitmap = self
+            .commited_bitmap
+            .get_or_insert_with(|| Bitmap::zeros(vnode_bitmap.len()));
+        assert_eq!(commited_bitmap.len(), vnode_bitmap.len());
+
         self.metadatas.push(metadata);
         assert!(self.handle_ids.insert(handle_id));
-        let check_bitmap = (&self.bitmap) & &vnode_bitmap;
+        let check_bitmap = (&*commited_bitmap) & &vnode_bitmap;
         if check_bitmap.count_ones() > 0 {
             return Err(anyhow!(
                 "duplicate vnode {:?} on epoch {}. request vnode: {:?}, prev vnode: {:?}",
                 check_bitmap.iter_ones().collect_vec(),
                 self.epoch,
                 vnode_bitmap,
-                self.bitmap
+                commited_bitmap
             ));
         }
-        self.bitmap |= &vnode_bitmap;
+        *commited_bitmap |= &vnode_bitmap;
         Ok(())
     }
 
     fn can_commit(&self) -> bool {
-        self.bitmap.count_ones() == VirtualNode::COUNT
+        self.commited_bitmap.as_ref().map_or(false, |b| b.all())
     }
 }
 
