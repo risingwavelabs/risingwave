@@ -531,6 +531,7 @@ impl SharedBufferCompactRunner {
                 key_range,
                 cache_policy: CachePolicy::Fill(CacheContext::Default),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
+                retain_multiple_version: true,
                 stats_target_table_ids: None,
                 task_type: compact_task::TaskType::SharedBuffer,
                 table_vnode_partition,

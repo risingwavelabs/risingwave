@@ -80,7 +80,7 @@ impl MetaSnapshotMetadata {
                 .state_table_info
                 .info()
                 .iter()
-                .map(|(id, info)| (id.clone(), info.into()))
+                .map(|(id, info)| (*id, info.into()))
                 .collect(),
             rw_version: Some(RW_VERSION.to_owned()),
         }

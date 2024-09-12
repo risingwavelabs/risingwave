@@ -375,6 +375,7 @@ impl CompactorRunner {
             key_range,
             cache_policy: CachePolicy::NotFill,
             gc_delete_keys: task.gc_delete_keys,
+            retain_multiple_version: false,
             stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
             task_type: task.task_type,
             table_vnode_partition: task.table_vnode_partition.clone(),
@@ -694,10 +695,13 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             }
 
             // See note in `compactor_runner.rs`.
-            if self.task_config.gc_delete_keys && value.is_delete() {
+            if !self.task_config.retain_multiple_version
+                && self.task_config.gc_delete_keys
+                && value.is_delete()
+            {
                 drop = true;
                 self.last_key_is_delete = true;
-            } else if !is_first_or_new_user_key {
+            } else if !self.task_config.retain_multiple_version && !is_first_or_new_user_key {
                 drop = true;
             }
             if self.state.has_watermark() && self.state.should_delete(&iter.key()) {

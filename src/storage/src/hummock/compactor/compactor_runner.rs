@@ -108,6 +108,7 @@ impl CompactorRunner {
                 key_range: key_range.clone(),
                 cache_policy: CachePolicy::NotFill,
                 gc_delete_keys: task.gc_delete_keys,
+                retain_multiple_version: false,
                 stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
                 task_type: task.task_type,
                 use_block_based_filter,
@@ -683,13 +684,15 @@ where
             last_table_id = Some(iter_key.user_key.table_id.table_id);
         }
 
-        // Among keys with same user key, only keep the latest key.
+        // Among keys with same user key, only keep the latest key unless retain_multiple_version is true.
         // In our design, frontend avoid to access keys which had be deleted, so we don't
         // need to consider the epoch when the compaction_filter match (it
         // means that mv had drop)
         // Because of memtable spill, there may be a PUT key share the same `pure_epoch` with DELETE key.
         // Do not assume that "the epoch of keys behind must be smaller than the current key."
-        if (task_config.gc_delete_keys && value.is_delete()) || !is_new_user_key {
+        if (!task_config.retain_multiple_version && task_config.gc_delete_keys && value.is_delete())
+            || (!task_config.retain_multiple_version && !is_new_user_key)
+        {
             drop = true;
         }
 
