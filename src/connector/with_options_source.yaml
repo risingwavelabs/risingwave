@@ -24,6 +24,10 @@ AzblobProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: recursive_scan
+    field_type: bool
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -75,6 +79,10 @@ GcsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: recursive_scan
+    field_type: bool
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -840,6 +848,10 @@ OpendalS3Properties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: recursive_scan
+    field_type: bool
+    required: false
+    default: Default::default
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -854,6 +866,10 @@ PosixFsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: recursive_scan
+    field_type: bool
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -1000,6 +1016,17 @@ PulsarProperties:
     field_type: String
     required: false
     default: Default::default
+  - name: subscription.name.prefix
+    field_type: String
+    comments: |-
+      Specify a custom consumer group id prefix for the source.
+      Defaults to `rw-consumer`.
+
+      Notes:
+      - Each job (materialized view) will have multiple subscriptions and
+      contains a generated suffix in the subscription name.
+      The subscription name will be `{subscription_name_prefix}-{fragment_id}-{actor_id}`.
+    required: false
 S3Properties:
   fields:
   - name: s3.region_name

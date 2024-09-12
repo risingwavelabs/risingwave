@@ -13,24 +13,27 @@ init_sqls = [
     v_date date,
     v_timestamp timestamp,
     v_ts_ntz timestamp_ntz,
-    v_decimal decimal(10,5)
+    v_decimal decimal(10,5),
+    v_map map<int, int>,
+    v_array array<int>,
+    v_struct struct<a:int, b:int>
     ) USING iceberg TBLPROPERTIES ('format-version'='2');
     '''
 ]
 
 slt = 'test_case/iceberg_sink_no_partition_append_only_table.slt'
 
-verify_schema = ['long', 'int', 'long', 'float', 'double', 'string', 'boolean', 'date', 'timestamp', 'timestamp_ntz','decimal']
+verify_schema = ['long', 'int', 'long', 'float', 'double', 'string', 'boolean', 'date', 'timestamp', 'timestamp_ntz','decimal', 'map', 'array', 'struct']
 
 verify_sql = 'SELECT * FROM demo_db.no_partition_append_only_table ORDER BY id ASC'
 
 
 verify_data = """
-1,1,1000,1.1,1.11,1-1,true,2022-03-11,2022-03-11 01:00:00+00:00,2022-03-11 01:00:00,1.11
-2,2,2000,2.2,2.22,2-2,false,2022-03-12,2022-03-12 02:00:00+00:00,2022-03-12 02:00:00,2.22
-3,3,3000,3.3,3.33,3-3,true,2022-03-13,2022-03-13 03:00:00+00:00,2022-03-13 03:00:00,99999.99999
-4,4,4000,4.4,4.44,4-4,false,2022-03-14,2022-03-14 04:00:00+00:00,2022-03-14 04:00:00,-99999.99999
-5,5,5000,5.5,5.55,5-5,true,2022-03-15,2022-03-15 05:00:00+00:00,2022-03-15 05:00:00,none
+1,1,1000,1.1,1.11,1-1,true,2022-03-11,2022-03-11 01:00:00+00:00,2022-03-11 01:00:00,1.11,{1: 100, 2: 200},[1, 2, 3],Row(a=1, b=2)
+2,2,2000,2.2,2.22,2-2,false,2022-03-12,2022-03-12 02:00:00+00:00,2022-03-12 02:00:00,2.22,{3: 300},[1, None, 3],Row(a=3, b=None)
+3,3,3000,3.3,3.33,3-3,true,2022-03-13,2022-03-13 03:00:00+00:00,2022-03-13 03:00:00,99999.99999,None,None,None
+4,4,4000,4.4,4.44,4-4,false,2022-03-14,2022-03-14 04:00:00+00:00,2022-03-14 04:00:00,-99999.99999,None,None,None
+5,5,5000,5.5,5.55,5-5,true,2022-03-15,2022-03-15 05:00:00+00:00,2022-03-15 05:00:00,none,None,None,None
 """
 
 verify_slt = 'test_case/iceberg_sink_no_partition_append_only_table_verify.slt'

@@ -25,7 +25,7 @@ use risingwave_common::types::{
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 use thiserror::Error;
-use thiserror_ext::{AsReport, Macro};
+use thiserror_ext::Macro;
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::protobuf::ProtobufAccess;
@@ -205,6 +205,7 @@ fn detect_loop_and_push(
 pub fn from_protobuf_value<'a>(
     field_desc: &FieldDescriptor,
     value: &'a Value,
+    type_expected: &DataType,
 ) -> AccessResult<DatumCow<'a>> {
     let kind = field_desc.kind();
 
@@ -240,32 +241,42 @@ pub fn from_protobuf_value<'a>(
                     serde_json::to_value(dyn_msg).map_err(AccessError::ProtobufAnyToJson)?,
                 ))
             } else {
-                let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
-                // fields is a btree map in descriptor
-                // so it's order is the same as datatype
-                for field_desc in dyn_msg.descriptor().fields() {
-                    // missing field
-                    if !dyn_msg.has_field(&field_desc)
-                        && field_desc.cardinality() == Cardinality::Required
-                    {
-                        return Err(AccessError::Undefined {
-                            name: field_desc.name().to_owned(),
-                            path: dyn_msg.descriptor().full_name().to_owned(),
-                        });
-                    }
-                    // use default value if dyn_msg doesn't has this field
+                let desc = dyn_msg.descriptor();
+                let DataType::Struct(st) = type_expected else {
+                    return Err(AccessError::TypeError {
+                        expected: type_expected.to_string(),
+                        got: desc.full_name().to_string(),
+                        value: value.to_string(), // Protobuf TEXT
+                    });
+                };
+
+                let mut rw_values = Vec::with_capacity(st.len());
+                for (name, expected_field_type) in st.iter() {
+                    let Some(field_desc) = desc.get_field_by_name(name) else {
+                        // Field deleted in protobuf. Fallback to SQL NULL (of proper RW type).
+                        rw_values.push(None);
+                        continue;
+                    };
                     let value = dyn_msg.get_field(&field_desc);
-                    rw_values.push(from_protobuf_value(&field_desc, &value)?.to_owned_datum());
+                    rw_values.push(
+                        from_protobuf_value(&field_desc, &value, expected_field_type)?
+                            .to_owned_datum(),
+                    );
                 }
                 ScalarImpl::Struct(StructValue::new(rw_values))
             }
         }
         Value::List(values) => {
-            let data_type = protobuf_type_mapping(field_desc, &mut vec![])
-                .map_err(|e| uncategorized!("{}", e.to_report_string()))?;
-            let mut builder = data_type.as_list().create_array_builder(values.len());
+            let DataType::List(element_type) = type_expected else {
+                return Err(AccessError::TypeError {
+                    expected: type_expected.to_string(),
+                    got: format!("repeated {:?}", kind),
+                    value: value.to_string(), // Protobuf TEXT
+                });
+            };
+            let mut builder = element_type.create_array_builder(values.len());
             for value in values {
-                builder.append(from_protobuf_value(field_desc, value)?);
+                builder.append(from_protobuf_value(field_desc, value, element_type)?);
             }
             ScalarImpl::List(ListValue::new(builder.finish()))
         }
@@ -389,6 +400,7 @@ mod test {
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
     use serde_json::json;
+    use thiserror_ext::AsReport as _;
 
     use super::*;
     use crate::parser::protobuf::recursive::all_types::{EnumType, ExampleOneof, NestedMessage};
@@ -696,7 +708,8 @@ mod test {
     }
 
     fn pb_eq(a: &ProtobufAccess, field_name: &str, value: ScalarImpl) {
-        let dummy_type = DataType::Varchar;
+        let field = a.descriptor().get_field_by_name(field_name).unwrap();
+        let dummy_type = protobuf_type_mapping(&field, &mut vec![]).unwrap();
         let d = a.access_owned(&[field_name], &dummy_type).unwrap().unwrap();
         assert_eq!(d, value, "field: {} value: {:?}", field_name, d);
     }
@@ -756,48 +769,35 @@ mod test {
         println!("Current conf: {:#?}", conf);
         println!("---------------------------");
 
-        let value =
+        let message =
             DynamicMessage::decode(conf.message_descriptor.clone(), ANY_GEN_PROTO_DATA).unwrap();
 
-        println!("Test ANY_GEN_PROTO_DATA, current value: {:#?}", value);
+        println!("Test ANY_GEN_PROTO_DATA, current value: {:#?}", message);
         println!("---------------------------");
 
-        // This is of no use
-        let field = value.fields().next().unwrap().0;
+        let field = conf
+            .message_descriptor
+            .get_field_by_name("any_value")
+            .unwrap();
+        let value = message.get_field(&field);
 
-        if let Some(ret) = from_protobuf_value(&field, &Value::Message(value))
+        let ret = from_protobuf_value(&field, &value, &DataType::Jsonb)
             .unwrap()
-            .to_owned_datum()
-        {
-            println!("Decoded Value for ANY_GEN_PROTO_DATA: {:#?}", ret);
-            println!("---------------------------");
+            .to_owned_datum();
+        println!("Decoded Value for ANY_GEN_PROTO_DATA: {:#?}", ret);
+        println!("---------------------------");
 
-            let ScalarImpl::Struct(struct_value) = ret else {
-                panic!("Expected ScalarImpl::Struct");
-            };
-
-            let fields = struct_value.fields();
-
-            match fields[0].clone() {
-                Some(ScalarImpl::Int32(v)) => {
-                    println!("Successfully decode field[0]");
-                    assert_eq!(v, 12345);
-                }
-                _ => panic!("Expected ScalarImpl::Int32"),
+        match ret {
+            Some(ScalarImpl::Jsonb(jv)) => {
+                assert_eq!(
+                    jv,
+                    JsonbVal::from(json!({
+                        "@type": "type.googleapis.com/test.StringValue",
+                        "value": "John Doe"
+                    }))
+                );
             }
-
-            match fields[1].clone() {
-                Some(ScalarImpl::Jsonb(jv)) => {
-                    assert_eq!(
-                        jv,
-                        JsonbVal::from(json!({
-                            "@type": "type.googleapis.com/test.StringValue",
-                            "value": "John Doe"
-                        }))
-                    );
-                }
-                _ => panic!("Expected ScalarImpl::Jsonb"),
-            }
+            _ => panic!("Expected ScalarImpl::Jsonb"),
         }
 
         Ok(())
@@ -818,48 +818,35 @@ mod test {
         println!("Current conf: {:#?}", conf);
         println!("---------------------------");
 
-        let value =
+        let message =
             DynamicMessage::decode(conf.message_descriptor.clone(), ANY_GEN_PROTO_DATA_1).unwrap();
 
-        println!("Current Value: {:#?}", value);
+        println!("Current Value: {:#?}", message);
         println!("---------------------------");
 
-        // This is of no use
-        let field = value.fields().next().unwrap().0;
+        let field = conf
+            .message_descriptor
+            .get_field_by_name("any_value")
+            .unwrap();
+        let value = message.get_field(&field);
 
-        if let Some(ret) = from_protobuf_value(&field, &Value::Message(value))
+        let ret = from_protobuf_value(&field, &value, &DataType::Jsonb)
             .unwrap()
-            .to_owned_datum()
-        {
-            println!("Decoded Value for ANY_GEN_PROTO_DATA: {:#?}", ret);
-            println!("---------------------------");
+            .to_owned_datum();
+        println!("Decoded Value for ANY_GEN_PROTO_DATA: {:#?}", ret);
+        println!("---------------------------");
 
-            let ScalarImpl::Struct(struct_value) = ret else {
-                panic!("Expected ScalarImpl::Struct");
-            };
-
-            let fields = struct_value.fields();
-
-            match fields[0].clone() {
-                Some(ScalarImpl::Int32(v)) => {
-                    println!("Successfully decode field[0]");
-                    assert_eq!(v, 12345);
-                }
-                _ => panic!("Expected ScalarImpl::Int32"),
+        match ret {
+            Some(ScalarImpl::Jsonb(jv)) => {
+                assert_eq!(
+                    jv,
+                    JsonbVal::from(json!({
+                        "@type": "type.googleapis.com/test.Int32Value",
+                        "value": 114514
+                    }))
+                );
             }
-
-            match fields[1].clone() {
-                Some(ScalarImpl::Jsonb(jv)) => {
-                    assert_eq!(
-                        jv,
-                        JsonbVal::from(json!({
-                            "@type": "type.googleapis.com/test.Int32Value",
-                            "value": 114514
-                        }))
-                    );
-                }
-                _ => panic!("Expected ScalarImpl::Jsonb"),
-            }
+            _ => panic!("Expected ScalarImpl::Jsonb"),
         }
 
         Ok(())
@@ -888,58 +875,45 @@ mod test {
         println!("Current conf: {:#?}", conf);
         println!("---------------------------");
 
-        let value = DynamicMessage::decode(
+        let message = DynamicMessage::decode(
             conf.message_descriptor.clone(),
             ANY_RECURSIVE_GEN_PROTO_DATA,
         )
         .unwrap();
 
-        println!("Current Value: {:#?}", value);
+        println!("Current Value: {:#?}", message);
         println!("---------------------------");
 
-        // This is of no use
-        let field = value.fields().next().unwrap().0;
+        let field = conf
+            .message_descriptor
+            .get_field_by_name("any_value")
+            .unwrap();
+        let value = message.get_field(&field);
 
-        if let Some(ret) = from_protobuf_value(&field, &Value::Message(value))
+        let ret = from_protobuf_value(&field, &value, &DataType::Jsonb)
             .unwrap()
-            .to_owned_datum()
-        {
-            println!("Decoded Value for ANY_RECURSIVE_GEN_PROTO_DATA: {:#?}", ret);
-            println!("---------------------------");
+            .to_owned_datum();
+        println!("Decoded Value for ANY_RECURSIVE_GEN_PROTO_DATA: {:#?}", ret);
+        println!("---------------------------");
 
-            let ScalarImpl::Struct(struct_value) = ret else {
-                panic!("Expected ScalarImpl::Struct");
-            };
-
-            let fields = struct_value.fields();
-
-            match fields[0].clone() {
-                Some(ScalarImpl::Int32(v)) => {
-                    println!("Successfully decode field[0]");
-                    assert_eq!(v, 12345);
-                }
-                _ => panic!("Expected ScalarImpl::Int32"),
+        match ret {
+            Some(ScalarImpl::Jsonb(jv)) => {
+                assert_eq!(
+                    jv,
+                    JsonbVal::from(json!({
+                        "@type": "type.googleapis.com/test.AnyValue",
+                        "anyValue1": {
+                            "@type": "type.googleapis.com/test.StringValue",
+                            "value": "114514",
+                        },
+                        "anyValue2": {
+                            "@type": "type.googleapis.com/test.Int32Value",
+                            "value": 114514,
+                        }
+                    }))
+                );
             }
-
-            match fields[1].clone() {
-                Some(ScalarImpl::Jsonb(jv)) => {
-                    assert_eq!(
-                        jv,
-                        JsonbVal::from(json!({
-                            "@type": "type.googleapis.com/test.AnyValue",
-                            "anyValue1": {
-                                "@type": "type.googleapis.com/test.StringValue",
-                                "value": "114514",
-                            },
-                            "anyValue2": {
-                                "@type": "type.googleapis.com/test.Int32Value",
-                                "value": 114514,
-                            }
-                        }))
-                    );
-                }
-                _ => panic!("Expected ScalarImpl::Jsonb"),
-            }
+            _ => panic!("Expected ScalarImpl::Jsonb"),
         }
 
         Ok(())
@@ -956,14 +930,17 @@ mod test {
     async fn test_any_invalid() -> crate::error::ConnectorResult<()> {
         let conf = create_recursive_pb_parser_config("/any-schema.pb", "test.TestAny").await;
 
-        let value =
+        let message =
             DynamicMessage::decode(conf.message_descriptor.clone(), ANY_GEN_PROTO_DATA_INVALID)
                 .unwrap();
 
-        // The top-level `Value` is not a proto field, but we need a dummy one.
-        let field = value.fields().next().unwrap().0;
+        let field = conf
+            .message_descriptor
+            .get_field_by_name("any_value")
+            .unwrap();
+        let value = message.get_field(&field);
 
-        let err = from_protobuf_value(&field, &Value::Message(value)).unwrap_err();
+        let err = from_protobuf_value(&field, &value, &DataType::Jsonb).unwrap_err();
 
         let expected = expect_test::expect![[r#"
             Fail to convert protobuf Any into jsonb

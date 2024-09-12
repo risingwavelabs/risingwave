@@ -130,7 +130,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.subscribe_compaction_event().await
     }
 
-    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
-        self.meta_client.get_version_by_epoch(epoch).await
+    async fn get_version_by_epoch(
+        &self,
+        epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<PbHummockVersion> {
+        self.meta_client.get_version_by_epoch(epoch, table_id).await
     }
 }

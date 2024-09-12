@@ -19,7 +19,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(lint_reasons)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
