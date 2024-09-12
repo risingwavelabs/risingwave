@@ -66,7 +66,7 @@ use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
     ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
 };
-use risingwave_sqlparser::parser::IncludeOption;
+use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
@@ -594,8 +594,43 @@ fn bind_columns_from_source_for_cdc(
     Ok((Some(columns), stream_source_info))
 }
 
+// check the additional column compatibility with the format and encode
+fn check_additional_column_compatibility(
+    column_def: &IncludeOptionItem,
+    source_schema: Option<&ConnectorSchema>,
+) -> Result<()> {
+    // only allow header column have inner field
+    if column_def.inner_field.is_some()
+        && !column_def
+            .column_type
+            .real_value()
+            .eq_ignore_ascii_case("header")
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "Only header column can have inner field, but got {:?}",
+            column_def.column_type.real_value(),
+        ))));
+    }
+
+    // Payload column only allowed when encode is JSON
+    if let Some(schema) = source_schema
+        && column_def
+            .column_type
+            .real_value()
+            .eq_ignore_ascii_case("payload")
+        && !matches!(schema.row_encode, Encode::Json)
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "INCLUDE payload is only allowed when using ENCODE JSON, but got ENCODE {:?}",
+            schema.row_encode
+        ))));
+    }
+    Ok(())
+}
+
 /// add connector-spec columns to the end of column catalog
 pub fn handle_addition_columns(
+    source_schema: Option<&ConnectorSchema>,
     with_properties: &BTreeMap<String, String>,
     mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
@@ -619,17 +654,7 @@ pub fn handle_addition_columns(
         .unwrap(); // there must be at least one column in the column catalog
 
     while let Some(item) = additional_columns.pop() {
-        {
-            // only allow header column have inner field
-            if item.inner_field.is_some()
-                && !item.column_type.real_value().eq_ignore_ascii_case("header")
-            {
-                return Err(RwError::from(ProtocolError(format!(
-                    "Only header column can have inner field, but got {:?}",
-                    item.column_type.real_value(),
-                ))));
-            }
-        }
+        check_additional_column_compatibility(&item, source_schema)?;
 
         let data_type_name: Option<String> = item
             .header_inner_expect_type
@@ -1512,6 +1537,7 @@ pub async fn bind_create_source_or_table_with_connector(
 
     // add additional columns before bind pk, because `format upsert` requires the key column
     handle_addition_columns(
+        Some(&source_schema),
         &with_properties,
         include_column_options,
         &mut columns,
