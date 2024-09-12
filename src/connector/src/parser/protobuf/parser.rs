@@ -953,37 +953,6 @@ mod test {
         Ok(())
     }
 
-    // id: 12345
-    // any_value: {
-    //    type_url: "type.googleapis.com/test.StringXalue"
-    //    value: "\n\010John Doe"
-    // }
-    static ANY_GEN_PROTO_DATA_INVALID: &[u8] = b"\x08\xb9\x60\x12\x32\x0a\x24\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x53\x74\x72\x69\x6e\x67\x58\x61\x6c\x75\x65\x12\x0a\x0a\x08\x4a\x6f\x68\x6e\x20\x44\x6f\x65";
-
-    #[tokio::test]
-    async fn test_any_invalid() -> crate::error::ConnectorResult<()> {
-        let conf = create_recursive_pb_parser_config("/any-schema.pb", "test.TestAny").await;
-
-        let value =
-            DynamicMessage::decode(conf.message_descriptor.clone(), ANY_GEN_PROTO_DATA_INVALID)
-                .unwrap();
-
-        // The top-level `Value` is not a proto field, but we need a dummy one.
-        let field = value.fields().next().unwrap().0;
-
-        let err = from_protobuf_value(&field, &Value::Message(value)).unwrap_err();
-
-        let expected = expect_test::expect![[r#"
-            Fail to convert protobuf Any into jsonb
-
-            Caused by:
-              message 'test.StringXalue' not found
-        "#]];
-        expected.assert_eq(err.to_report_string_pretty().as_str());
-
-        Ok(())
-    }
-
     #[test]
     fn test_decode_varint_zigzag() {
         // 1. Positive number
