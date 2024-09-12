@@ -484,6 +484,7 @@ mod tests {
             schema: "".to_string(),
             table: "part".to_string(),
             ssl_mode: Default::default(),
+            ssl_root_cert: None,
         };
 
         let table = MySqlExternalTable::connect(config).await.unwrap();

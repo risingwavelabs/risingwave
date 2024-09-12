@@ -334,9 +334,9 @@ impl PostgresExternalTableReader {
                 pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
                 let mut builder = SslConnector::builder(SslMethod::tls())?;
                 if let Some(ssl_root_cert) = config.ssl_root_cert {
-                    builder
-                        .set_ca_file(ssl_root_cert)
-                        .map_err(|e| anyhow!(format!("bad ssl root cert error: {}", e)))?;
+                    builder.set_ca_file(ssl_root_cert).map_err(|e| {
+                        anyhow!(format!("bad ssl root cert error: {}", e.to_report_string()))
+                    })?;
                 }
                 let mut connector = MakeTlsConnector::new(builder.build());
                 if !verify_hostname {
@@ -515,6 +515,7 @@ mod tests {
             schema: "public".to_string(),
             table: "mytest".to_string(),
             ssl_mode: Default::default(),
+            ssl_root_cert: None,
         };
 
         let table = PostgresExternalTable::connect(config).await.unwrap();
