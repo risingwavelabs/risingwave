@@ -234,7 +234,7 @@ identity_resolution_timeout_s = 5
 [storage.object_store.s3.developer]
 retry_unknown_service_error = false
 retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
-use_opendal = true
+use_opendal = false
 
 [system]
 barrier_interval_ms = 1000
