@@ -59,6 +59,7 @@ fn generate_hash_values(
             .iter()
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>(),
+        consistent_hash_info.vmap.len(),
     );
 
     let hash_values = vnodes

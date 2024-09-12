@@ -173,7 +173,7 @@ mod tests {
             Some(ScalarImpl::from(514)),
         ]);
 
-        let vnode = VirtualNode::compute_row(&row, &[0, 1]);
+        let vnode = VirtualNode::compute_row_for_test(&row, &[0, 1]);
 
         assert_eq!(scan_range.try_compute_vnode(&dist), Some(vnode));
     }
@@ -203,7 +203,7 @@ mod tests {
             Some(ScalarImpl::from(114514)),
         ]);
 
-        let vnode = VirtualNode::compute_row(&row, &[2, 1]);
+        let vnode = VirtualNode::compute_row_for_test(&row, &[2, 1]);
 
         assert_eq!(scan_range.try_compute_vnode(&dist), Some(vnode));
     }

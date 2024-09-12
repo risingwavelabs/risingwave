@@ -22,6 +22,8 @@ use crate::{Epoch, HummockVersionId};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub epoch: Epoch,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub table_id: i64,
     pub version_id: HummockVersionId,
 }
 

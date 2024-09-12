@@ -116,6 +116,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         return 's3_test_parquet'
 
     # Execute a SELECT statement
+    cur.execute(f'''set sink_decouple = false;''')
     cur.execute(f'''CREATE sink test_file_sink as select
         id,
         name,

@@ -162,7 +162,8 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "clippy_config"
-version = "0.1.80"
+version = "0.1.81"
+source = "git+https://github.com/risingwavelabs/clippy?rev=5135d0218365e85f3371405b604a7fb1459eb256#5135d0218365e85f3371405b604a7fb1459eb256"
 dependencies = [
  "rustc-semver",
  "serde",
@@ -171,12 +172,14 @@ dependencies = [
 
 [[package]]
 name = "clippy_utils"
-version = "0.1.80"
+version = "0.1.81"
+source = "git+https://github.com/risingwavelabs/clippy?rev=5135d0218365e85f3371405b604a7fb1459eb256#5135d0218365e85f3371405b604a7fb1459eb256"
 dependencies = [
  "arrayvec",
  "clippy_config",
  "itertools",
  "rustc-semver",
+ "rustc_apfloat",
 ]
 
 [[package]]
@@ -870,6 +873,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5be1bdc7edf596692617627bbfeaba522131b18e06ca4df2b6b689e3c5d5ce84"
 
 [[package]]
+name = "rustc_apfloat"
+version = "0.2.1+llvm-462a31f5a5ab"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "886d94c63c812a8037c4faca2607453a0fa4cf82f734665266876b022244543f"
+dependencies = [
+ "bitflags 1.3.2",
+ "smallvec",
+]
+
+[[package]]
 name = "rustfix"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -974,6 +987,12 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "smallvec"
+version = "1.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "syn"

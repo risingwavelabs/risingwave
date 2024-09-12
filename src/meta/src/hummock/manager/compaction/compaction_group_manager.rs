@@ -54,7 +54,7 @@ use crate::model::{
 type CompactionGroupTransaction<'a> = BTreeMapTransaction<'a, CompactionGroupId, CompactionGroup>;
 
 impl CompactionGroupManager {
-    pub(super) async fn new(env: &MetaSrvEnv) -> Result<CompactionGroupManager> {
+    pub(crate) async fn new(env: &MetaSrvEnv) -> Result<CompactionGroupManager> {
         let default_config = match env.opts.compaction_config.as_ref() {
             None => CompactionConfigBuilder::new().build(),
             Some(opt) => CompactionConfigBuilder::with_opt(opt).build(),
@@ -62,7 +62,7 @@ impl CompactionGroupManager {
         Self::new_with_config(env, default_config).await
     }
 
-    pub(super) async fn new_with_config(
+    pub(crate) async fn new_with_config(
         env: &MetaSrvEnv,
         default_config: CompactionConfig,
     ) -> Result<CompactionGroupManager> {
@@ -231,12 +231,9 @@ impl HummockManager {
                 let mut is_group_init = false;
                 group_id = *new_compaction_group_id
                     .get_or_try_init(|| async {
-                        next_compaction_group_id(&self.env)
-                            .await
-                            .map(|new_group_id| {
-                                is_group_init = true;
-                                new_group_id
-                            })
+                        next_compaction_group_id(&self.env).await.inspect(|_| {
+                            is_group_init = true;
+                        })
                     })
                     .await?;
                 if is_group_init {
@@ -426,24 +423,6 @@ impl HummockManager {
             results.push(group);
         }
         results
-    }
-
-    /// Splits a compaction group into two. The new one will contain `table_ids`.
-    /// Returns the newly created compaction group id.
-    pub async fn split_compaction_group(
-        &self,
-        parent_group_id: CompactionGroupId,
-        table_ids: &[StateTableId],
-    ) -> Result<CompactionGroupId> {
-        let result = self
-            .move_state_table_to_compaction_group(
-                parent_group_id,
-                table_ids,
-                self.env.opts.partition_vnode_count,
-            )
-            .await?;
-
-        Ok(result)
     }
 
     /// move some table to another compaction-group. Create a new compaction group if it does not
@@ -651,7 +630,7 @@ impl HummockManager {
         infos
     }
 
-    pub(super) async fn initial_compaction_group_config_after_load(
+    pub(crate) async fn initial_compaction_group_config_after_load(
         &self,
         versioning_guard: &Versioning,
         compaction_group_manager: &mut CompactionGroupManager,
@@ -675,7 +654,7 @@ impl HummockManager {
 /// 1. initialize default static compaction group.
 /// 2. register new table to new compaction group.
 /// 3. move existent table to new compaction group.
-pub(super) struct CompactionGroupManager {
+pub(crate) struct CompactionGroupManager {
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
     default_config: Arc<CompactionConfig>,
     /// Tables that write limit is trigger for.
@@ -709,7 +688,7 @@ impl CompactionGroupManager {
     }
 
     /// Tries to get compaction group config for `compaction_group_id`.
-    pub(super) fn try_get_compaction_group_config(
+    pub(crate) fn try_get_compaction_group_config(
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Option<CompactionGroup> {
@@ -717,7 +696,7 @@ impl CompactionGroupManager {
     }
 
     /// Tries to get compaction group config for `compaction_group_id`.
-    pub(super) fn default_compaction_config(&self) -> Arc<CompactionConfig> {
+    pub(crate) fn default_compaction_config(&self) -> Arc<CompactionConfig> {
         self.default_config.clone()
     }
 }
@@ -814,7 +793,7 @@ impl<'a> CompactionGroupTransaction<'a> {
     }
 
     /// Tries to get compaction group config for `compaction_group_id`.
-    pub(super) fn try_get_compaction_group_config(
+    pub(crate) fn try_get_compaction_group_config(
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Option<&CompactionGroup> {
@@ -822,7 +801,7 @@ impl<'a> CompactionGroupTransaction<'a> {
     }
 
     /// Removes stale group configs.
-    fn purge(&mut self, existing_groups: HashSet<CompactionGroupId>) {
+    pub fn purge(&mut self, existing_groups: HashSet<CompactionGroupId>) {
         let stale_group = self
             .tree_ref()
             .keys()
@@ -837,7 +816,7 @@ impl<'a> CompactionGroupTransaction<'a> {
         }
     }
 
-    pub(super) fn update_compaction_config(
+    pub(crate) fn update_compaction_config(
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
