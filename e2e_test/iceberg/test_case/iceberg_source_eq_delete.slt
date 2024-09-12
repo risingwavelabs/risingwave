@@ -14,7 +14,6 @@ statement ok
 CREATE SINK sink1 AS select * from mv1 WITH (
     connector = 'iceberg',
     type = 'upsert',
-    force_append_only = 'true',
     database.name = 'demo_db',
     table.name = 't1',
     catalog.name = 'demo',
