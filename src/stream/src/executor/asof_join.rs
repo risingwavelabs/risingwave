@@ -619,19 +619,13 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
 
         let (side_update, side_match) = (side_l, side_r);
 
-        let CHUNK_BUILDER_T = match T {
-            AsOfJoinType::Inner => JoinType::Inner,
-            AsOfJoinType::LeftOuter => JoinType::LeftOuter,
-        };
-
-        let mut join_chunk_builder = JoinChunkBuilder::<CHUNK_BUILDER_T, { SideType::Left }>::new(
-            JoinStreamChunkBuilder::new(
+        let mut join_chunk_builder =
+            JoinChunkBuilder::<T, { SideType::Left }>::new(JoinStreamChunkBuilder::new(
                 chunk_size,
                 actual_output_data_types.to_vec(),
                 side_update.i2o_mapping.clone(),
                 side_match.i2o_mapping.clone(),
-            ),
-        );
+            ));
 
         let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {

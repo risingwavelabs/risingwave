@@ -23,7 +23,7 @@ use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::asof_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, AsOfDesc, AsOfJoinType};
+use crate::executor::{ActorContextRef, AsOfDesc, AsOfJoinType, JoinType};
 use crate::task::AtomicU64Ref;
 
 pub struct AsOfJoinExecutorBuilder;
@@ -36,6 +36,9 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
         node: &Self::Node,
         store: impl StateStore,
     ) -> StreamResult<Executor> {
+        // This assert is to make sure AsOf join can use `JoinChunkBuilder` as Hash join.
+        assert_eq!(AsOfJoinType::Inner, JoinType::Inner);
+        assert_eq!(AsOfJoinType::LeftOuter, JoinType::LeftOuter);
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for AsOf join"));
 
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
