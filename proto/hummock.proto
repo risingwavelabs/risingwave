@@ -85,6 +85,12 @@ message GroupConstruct {
   uint64 group_id = 4;
   uint64 new_sst_start_id = 5;
   CompatibilityVersion version = 6;
+
+  // The split_key is the key that the group is split by.
+  // When GroupConstruct with commit_epoch, split_key will be empty
+  // When split_key is not None, GroupConstruct tells to use split_key to check each level and split the sstable_info in the level into two groups (bounded by split_key).
+  // For the left sstable_info, split_key (right_exclusive=true) will be used as key_range_right.
+  // In the current implementation split_key always contains a table_id, vnode = 0, epoch = 0
   optional bytes split_key = 7;
 }
 
