@@ -140,12 +140,8 @@ impl ToArrow for IcebergArrowConvert {
                         let scale = e.scale() as i8;
                         let diff_scale = abs(max_scale - scale);
                         let value = match scale {
-                            _ if scale < max_scale => {
-                                value.mul(10_i128.pow(diff_scale as u32))
-                            }
-                            _ if scale > max_scale => {
-                                value.div(10_i128.pow(diff_scale as u32))
-                            }
+                            _ if scale < max_scale => value.mul(10_i128.pow(diff_scale as u32)),
+                            _ if scale > max_scale => value.div(10_i128.pow(diff_scale as u32)),
                             _ => value,
                         };
                         Some(value)
@@ -319,7 +315,7 @@ mod test {
                 Some(1234000000000),
                 Some(1234560000000),
             ])
-                .with_data_type(ty),
+            .with_data_type(ty),
         ) as ArrayRef;
         assert_eq!(&arrow_array, &expect_array);
     }
