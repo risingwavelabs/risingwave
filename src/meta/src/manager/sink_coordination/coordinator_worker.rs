@@ -55,7 +55,7 @@ struct EpochCommitRequests {
     epoch: u64,
     metadatas: Vec<SinkMetadata>,
     handle_ids: HashSet<usize>,
-    commited_bitmap: Option<Bitmap>, // lazy-initialized on first request
+    committed_bitmap: Option<Bitmap>, // lazy-initialized on first request
 }
 
 impl EpochCommitRequests {
@@ -64,7 +64,7 @@ impl EpochCommitRequests {
             epoch,
             metadatas: vec![],
             handle_ids: Default::default(),
-            commited_bitmap: None,
+            committed_bitmap: None,
         }
     }
 
@@ -74,29 +74,29 @@ impl EpochCommitRequests {
         metadata: SinkMetadata,
         vnode_bitmap: Bitmap,
     ) -> anyhow::Result<()> {
-        let commited_bitmap = self
-            .commited_bitmap
+        let committed_bitmap = self
+            .committed_bitmap
             .get_or_insert_with(|| Bitmap::zeros(vnode_bitmap.len()));
-        assert_eq!(commited_bitmap.len(), vnode_bitmap.len());
+        assert_eq!(committed_bitmap.len(), vnode_bitmap.len());
 
         self.metadatas.push(metadata);
         assert!(self.handle_ids.insert(handle_id));
-        let check_bitmap = (&*commited_bitmap) & &vnode_bitmap;
+        let check_bitmap = (&*committed_bitmap) & &vnode_bitmap;
         if check_bitmap.count_ones() > 0 {
             return Err(anyhow!(
                 "duplicate vnode {:?} on epoch {}. request vnode: {:?}, prev vnode: {:?}",
                 check_bitmap.iter_ones().collect_vec(),
                 self.epoch,
                 vnode_bitmap,
-                commited_bitmap
+                committed_bitmap
             ));
         }
-        *commited_bitmap |= &vnode_bitmap;
+        *committed_bitmap |= &vnode_bitmap;
         Ok(())
     }
 
     fn can_commit(&self) -> bool {
-        self.commited_bitmap.as_ref().map_or(false, |b| b.all())
+        self.committed_bitmap.as_ref().map_or(false, |b| b.all())
     }
 }
 
