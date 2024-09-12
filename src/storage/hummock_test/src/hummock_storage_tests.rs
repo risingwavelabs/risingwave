@@ -1094,14 +1094,12 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
     test_get().await;
 
-    println!("commit epoch2 {:?} sync_result2 {:?}", epoch2, sync_result2);
     test_env
         .meta_client
         .commit_epoch(epoch2, sync_result2)
         .await
         .unwrap();
 
-    println!("commit epoch3 {:?} sync_result3 {:?}", epoch3, sync_result3);
     test_env
         .meta_client
         .commit_epoch(epoch3, sync_result3)
@@ -2462,7 +2460,6 @@ async fn test_table_watermark() {
                 if index < watermark1 {
                     assert!(value.is_none());
                 } else {
-                    println!("index {} vnode {}", index, vnode);
                     assert_eq!(value.unwrap(), gen_val(index));
                 }
             }

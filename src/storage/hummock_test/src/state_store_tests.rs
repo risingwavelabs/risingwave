@@ -1634,7 +1634,6 @@ async fn test_iter_log() {
                 for end_epoch_idx in start_epoch_idx..epoch_count {
                     let min_epoch = test_log_data[start_epoch_idx].0;
                     let max_epoch = test_log_data[end_epoch_idx].0;
-                    println!("min_epoch: {}, max_epoch: {}", min_epoch, max_epoch);
                     let mut iter = state_store
                         .iter_log(
                             (min_epoch, max_epoch),
