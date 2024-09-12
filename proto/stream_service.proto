@@ -9,14 +9,6 @@ import "stream_plan.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-message BuildActorInfo {
-  stream_plan.StreamActor actor = 1;
-  message SubscriptionIds {
-    repeated uint32 subscription_ids = 1;
-  }
-  map<uint32, SubscriptionIds> related_subscriptions = 2;
-}
-
 message InjectBarrierRequest {
   string request_id = 1;
   stream_plan.Barrier barrier = 2;
@@ -35,7 +27,9 @@ message InjectBarrierRequest {
   repeated uint32 actor_ids_to_pre_sync_barrier_mutation = 7;
 
   repeated common.ActorInfo broadcast_info = 8;
-  repeated BuildActorInfo actors_to_build = 9;
+  repeated stream_plan.StreamActor actors_to_build = 9;
+  repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_add = 10;
+  repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_remove = 11;
 }
 
 message BarrierCompleteResponse {
