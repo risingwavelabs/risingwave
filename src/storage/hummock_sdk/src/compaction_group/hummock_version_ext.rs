@@ -274,28 +274,17 @@ impl HummockVersion {
 
 pub fn safe_epoch_table_watermarks_impl(
     table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
-    state_table_info: &HummockVersionStateTableInfo,
+    _state_table_info: &HummockVersionStateTableInfo,
     existing_table_ids: &[u32],
 ) -> BTreeMap<u32, TableWatermarks> {
     fn extract_single_table_watermark(
         table_watermarks: &TableWatermarks,
-        safe_epoch: u64,
     ) -> Option<TableWatermarks> {
         if let Some((first_epoch, first_epoch_watermark)) = table_watermarks.watermarks.first() {
-            assert!(
-                *first_epoch >= safe_epoch,
-                "smallest epoch {} in table watermark should be at least safe epoch {}",
-                first_epoch,
-                safe_epoch
-            );
-            if *first_epoch == safe_epoch {
-                Some(TableWatermarks {
-                    watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
-                    direction: table_watermarks.direction,
-                })
-            } else {
-                None
-            }
+            Some(TableWatermarks {
+                watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
+                direction: table_watermarks.direction,
+            })
         } else {
             None
         }
@@ -307,15 +296,8 @@ pub fn safe_epoch_table_watermarks_impl(
             if !existing_table_ids.contains(&u32_table_id) {
                 None
             } else {
-                extract_single_table_watermark(
-                    table_watermarks,
-                    state_table_info
-                        .info()
-                        .get(table_id)
-                        .expect("table should exist")
-                        .committed_epoch,
-                )
-                .map(|table_watermarks| (table_id.table_id, table_watermarks))
+                extract_single_table_watermark(table_watermarks)
+                    .map(|table_watermarks| (table_id.table_id, table_watermarks))
             }
         })
         .collect()
