@@ -178,7 +178,7 @@ impl FromArrow for IcebergArrowConvert {}
 /// arrow field metadata, because iceberg-rust and icelake need the field id to be set.
 ///
 /// Note: this is different from [`IcebergArrowConvert`], which is used to read from/write to
-/// an _existing_ iceberg table. In that case, we just need to make sure the data is compatible to the existing schema. 
+/// an _existing_ iceberg table. In that case, we just need to make sure the data is compatible to the existing schema.
 /// But to _create a new table_, we need to meet more requirements of iceberg.
 #[derive(Default)]
 pub struct IcebergCreateTableArrowConvert {
