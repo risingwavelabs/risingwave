@@ -56,7 +56,9 @@ use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
-use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
+use crate::manager::{
+    ActorInfos, FragmentParallelismInfo, InflightFragmentInfo, LocalNotification,
+};
 use crate::model::{TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
@@ -475,8 +477,9 @@ impl CatalogController {
     pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> MetaResult<HashMap<FragmentId, usize>> {
+    ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let inner = self.inner.read().await;
+
         let mut select = Actor::find()
             .select_only()
             .column(actor::Column::FragmentId)
@@ -485,11 +488,25 @@ impl CatalogController {
         if let Some(id_filter) = id_filter {
             select = select.having(actor::Column::FragmentId.is_in(id_filter));
         }
-        let fragment_parallelisms: Vec<(FragmentId, i64)> =
+        select = select
+            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+            .column(fragment::Column::DistributionType)
+            .column(fragment::Column::VnodeCount);
+
+        let fragment_parallelisms: Vec<(FragmentId, i64, DistributionType, i32)> =
             select.into_tuple().all(&inner.db).await?;
         Ok(fragment_parallelisms
             .into_iter()
-            .map(|(fragment_id, count)| (fragment_id, count as usize))
+            .map(|(fragment_id, count, distribution_type, vnode_count)| {
+                (
+                    fragment_id,
+                    FragmentParallelismInfo {
+                        distribution_type: distribution_type.into(),
+                        actor_count: count as usize,
+                        vnode_count: vnode_count as usize,
+                    },
+                )
+            })
             .collect())
     }
 

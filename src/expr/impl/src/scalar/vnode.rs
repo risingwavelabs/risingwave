@@ -64,7 +64,6 @@ impl Expression for VnodeExpression {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
-    use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::Row;
     use risingwave_expr::expr::build_from_pretty;
     use risingwave_expr::expr_context::VNODE_COUNT;
