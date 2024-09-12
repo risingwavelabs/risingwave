@@ -206,10 +206,6 @@ tracing-subscriber = "0.3"
 tracing-test = "0.2"
 walkdir = "2"
 
-[build-dependencies]
-prost-build = "0.12"
-protobuf-src = "1"
-
 [[bench]]
 name = "debezium_json_parser"
 harness = false
