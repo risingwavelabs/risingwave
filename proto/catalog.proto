@@ -431,6 +431,14 @@ message Table {
   // for a streaming job. Instead, refer to `stream_plan.StreamFragmentGraph.max_parallelism`.
   optional uint32 maybe_vnode_count = 40;
 
+  enum BackfillMode {
+    BACKFILL_UNSPECIFIED = 0;
+    BACKFILL_REGULAR = 1;
+    BACKFILL_SERVERLESS = 2;
+  }
+
+  BackfillMode backfill_mode = 41;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.

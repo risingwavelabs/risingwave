@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType};
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbBackfillMode, PbTableType};
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
@@ -60,6 +60,25 @@ impl From<PbTableType> for TableType {
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
             PbTableType::Unspecified => unreachable!("Unspecified table type"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum BackfillMode {
+    #[sea_orm(string_value = "REGULAR")]
+    Regular,
+    #[sea_orm(string_value = "SERVERLESS")]
+    ServerLess,
+}
+
+impl From<PbBackfillMode> for BackfillMode {
+    fn from(value: PbBackfillMode) -> Self {
+        match value {
+            PbBackfillMode::BackfillUnspecified => unreachable!(),
+            PbBackfillMode::BackfillRegular => BackfillMode::Regular,
+            PbBackfillMode::BackfillServerless => BackfillMode::ServerLess,
         }
     }
 }
@@ -135,6 +154,7 @@ pub struct Model {
     pub incoming_sinks: I32Array,
     pub cdc_table_id: Option<String>,
     pub vnode_count: i32,
+    pub backfill_mode: Option<BackfillMode>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -229,6 +249,7 @@ impl From<PbTable> for ActiveModel {
                 NotSet
             };
 
+        let backfill_mode = pb_table.backfill_mode();
         Self {
             table_id: Set(pb_table.id as _),
             name: Set(pb_table.name),
@@ -259,6 +280,8 @@ impl From<PbTable> for ActiveModel {
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
             cdc_table_id: Set(pb_table.cdc_table_id),
             vnode_count: Set(vnode_count as _),
+            // handle none
+            backfill_mode: Set(Some(backfill_mode.into())),
         }
     }
 }
