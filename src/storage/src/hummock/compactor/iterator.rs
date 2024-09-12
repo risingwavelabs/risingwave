@@ -736,8 +736,7 @@ mod tests {
         TEST_KEYS_COUNT,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{BlockMeta, Sstable};
-    use crate::monitor::StoreLocalStatistic;
+    use crate::hummock::BlockMeta;
 
     #[tokio::test]
     async fn test_concat_iterator() {

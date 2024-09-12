@@ -426,7 +426,7 @@ mod tests {
         );
 
         // All committed SST ids should be excluded from GC.
-        let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
+        let sst_infos = add_test_tables(hummock_manager.clone(), context_id).await;
         let committed_object_ids = sst_infos
             .into_iter()
             .flatten()

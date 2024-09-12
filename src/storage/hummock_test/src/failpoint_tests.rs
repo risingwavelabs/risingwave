@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -139,8 +140,12 @@ async fn test_failpoints_state_store_read_upload() {
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
 
+    let table_id = local.table_id();
     // sync epoch1 test the read_error
-    let res = hummock_storage.seal_and_sync_epoch(1).await.unwrap();
+    let res = hummock_storage
+        .seal_and_sync_epoch(1, HashSet::from([table_id]))
+        .await
+        .unwrap();
     meta_client.commit_epoch(1, res).await.unwrap();
     hummock_storage
         .try_wait_epoch(HummockReadEpoch::Committed(1))
@@ -208,11 +213,16 @@ async fn test_failpoints_state_store_read_upload() {
     // test the upload_error
     fail::cfg(mem_upload_err, "return").unwrap();
 
-    let result = hummock_storage.seal_and_sync_epoch(3).await;
+    let result = hummock_storage
+        .seal_and_sync_epoch(3, HashSet::from([table_id]))
+        .await;
     assert!(result.is_err());
     fail::remove(mem_upload_err);
 
-    let res = hummock_storage.seal_and_sync_epoch(3).await.unwrap();
+    let res = hummock_storage
+        .seal_and_sync_epoch(3, HashSet::from([table_id]))
+        .await
+        .unwrap();
     meta_client.commit_epoch(3, res).await.unwrap();
     hummock_storage
         .try_wait_epoch(HummockReadEpoch::Committed(3))

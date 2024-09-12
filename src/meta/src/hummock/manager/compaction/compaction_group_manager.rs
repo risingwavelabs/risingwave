@@ -21,7 +21,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_compaction_group_ids, TableGroupInfo,
 };
-use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::GroupDelta;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_meta_model_v2::compaction_config;
@@ -30,7 +30,6 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     CompactionConfig, CompactionGroupInfo, PbGroupConstruct, PbGroupDestroy, PbStateTableInfoDelta,
 };
-use tokio::sync::OnceCell;
 
 use crate::hummock::compaction::compaction_config::{
     validate_compaction_config, CompactionConfigBuilder,
@@ -41,7 +40,6 @@ use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{commit_multi_var, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::sequence::next_compaction_group_id;
 use crate::manager::{MetaSrvEnv, MetaStoreImpl};
 use crate::model::{
     BTreeMapTransaction, BTreeMapTransactionInner, DerefMutForward, MetadataModel,
@@ -122,6 +120,8 @@ impl HummockManager {
         mv_table: Option<u32>,
         mut internal_tables: Vec<u32>,
     ) -> Result<Vec<StateTableId>> {
+        use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
             if internal_tables.extract_if(|t| *t == mv_table).count() > 0 {
@@ -192,6 +192,14 @@ impl HummockManager {
         }
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
+        let mapping: HashSet<u64> = versioning
+            .current_version
+            .state_table_info
+            .build_table_compaction_group_id()
+            .values()
+            .cloned()
+            .collect();
+
         let mut compaction_group_manager = self.compaction_group_manager.write().await;
         let current_version = &versioning.current_version;
         let default_config = compaction_group_manager.default_compaction_config();
@@ -210,58 +218,55 @@ impl HummockManager {
             }
         }
         // All NewCompactionGroup pairs are mapped to one new compaction group.
-        let new_compaction_group_id: OnceCell<CompactionGroupId> = OnceCell::new();
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
             &self.metrics,
         );
+
         let mut new_version_delta = version.new_delta();
         let epoch = new_version_delta
             .latest_version()
             .visible_table_committed_epoch();
 
+        let mut last_group_id = 0;
         for (table_id, raw_group_id) in pairs {
-            let mut group_id = *raw_group_id;
-            if group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
-                let mut is_group_init = false;
-                group_id = *new_compaction_group_id
-                    .get_or_try_init(|| async {
-                        next_compaction_group_id(&self.env)
-                            .await
-                            .map(|new_group_id| {
-                                is_group_init = true;
-                                new_group_id
-                            })
-                    })
-                    .await?;
-                if is_group_init {
-                    let group_deltas = &mut new_version_delta
-                        .group_deltas
-                        .entry(group_id)
-                        .or_default()
-                        .group_deltas;
+            // let group_id = *raw_group_id;
+            let mut is_group_init = true;
+            let group_id = *raw_group_id;
 
-                    let config =
-                        match compaction_groups_txn.try_get_compaction_group_config(group_id) {
-                            Some(config) => config.compaction_config.as_ref().clone(),
-                            None => {
-                                compaction_groups_txn
-                                    .create_compaction_groups(group_id, default_config.clone());
-                                default_config.as_ref().clone()
-                            }
-                        };
-
-                    let group_delta = GroupDelta::GroupConstruct(PbGroupConstruct {
-                        group_config: Some(config),
-                        group_id,
-                        ..Default::default()
-                    });
-
-                    group_deltas.push(group_delta);
-                }
+            if last_group_id == group_id || mapping.contains(&group_id) {
+                is_group_init = false;
             }
+
+            last_group_id = group_id;
+
+            if is_group_init {
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
+                    .entry(group_id)
+                    .or_default()
+                    .group_deltas;
+
+                let config = match compaction_groups_txn.try_get_compaction_group_config(group_id) {
+                    Some(config) => config.compaction_config.as_ref().clone(),
+                    None => {
+                        compaction_groups_txn
+                            .create_compaction_groups(group_id, default_config.clone());
+                        default_config.as_ref().clone()
+                    }
+                };
+
+                let group_delta = GroupDelta::GroupConstruct(PbGroupConstruct {
+                    group_config: Some(config),
+                    group_id,
+                    ..Default::default()
+                });
+
+                group_deltas.push(group_delta);
+            }
+
             assert!(new_version_delta
                 .state_table_info_delta
                 .insert(
@@ -324,8 +329,7 @@ impl HummockManager {
         let groups_to_remove = modified_groups
             .into_iter()
             .filter_map(|(group_id, member_count)| {
-                if member_count == 0 && group_id > StaticCompactionGroupId::End as CompactionGroupId
-                {
+                if member_count == 0 {
                     return Some((
                         group_id,
                         new_version_delta
@@ -696,7 +700,7 @@ mod tests {
     async fn test_inner() {
         let (env, ..) = setup_compute_env(8080).await;
         let mut inner = CompactionGroupManager::new(&env).await.unwrap();
-        assert_eq!(inner.compaction_groups.len(), 2);
+        assert_eq!(inner.compaction_groups.len(), 0);
 
         async fn update_compaction_config(
             meta: &MetaStoreImpl,
@@ -725,9 +729,9 @@ mod tests {
             .await
             .unwrap_err();
         insert_compaction_group_configs(env.meta_store_ref(), &mut inner, &[100, 200]).await;
-        assert_eq!(inner.compaction_groups.len(), 4);
+        assert_eq!(inner.compaction_groups.len(), 2);
         let mut inner = CompactionGroupManager::new(&env).await.unwrap();
-        assert_eq!(inner.compaction_groups.len(), 4);
+        assert_eq!(inner.compaction_groups.len(), 2);
 
         update_compaction_config(
             env.meta_store_ref(),
@@ -737,7 +741,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(inner.compaction_groups.len(), 4);
+        assert_eq!(inner.compaction_groups.len(), 2);
         assert_eq!(
             inner
                 .try_get_compaction_group_config(100)
@@ -830,7 +834,7 @@ mod tests {
             .unwrap();
         assert_eq!(registered_number().await, 0);
 
-        assert_eq!(group_number().await, 2);
+        assert_eq!(group_number().await, 0);
 
         compaction_group_manager
             .register_table_fragments(
@@ -846,6 +850,6 @@ mod tests {
             .unregister_table_fragments_vec(&[table_fragment_1])
             .await;
         assert_eq!(registered_number().await, 0);
-        assert_eq!(group_number().await, 2);
+        assert_eq!(group_number().await, 0);
     }
 }

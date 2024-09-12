@@ -117,7 +117,6 @@ impl HummockManager {
             tables_to_commit,
             is_visible_table_committed_epoch,
         } = commit_info;
-
         let mut versioning_guard = self.versioning.write().await;
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
         // Prevent commit new epochs if this flag is set
@@ -195,12 +194,16 @@ impl HummockManager {
                     mv_table_id,
                     internal_table_ids,
                 } => {
-                    on_handle_add_new_table(
-                        state_table_info,
-                        &internal_table_ids,
-                        new_compaction_group_id,
-                        &mut table_compaction_group_mapping,
-                    )?;
+                    if !internal_table_ids.is_empty() {
+                        on_handle_add_new_table(
+                            state_table_info,
+                            &internal_table_ids,
+                            new_compaction_group_id,
+                            &mut table_compaction_group_mapping,
+                        )?;
+
+                        new_table_ids.extend(internal_table_ids);
+                    }
 
                     if let Some(mv_table_id) = mv_table_id {
                         on_handle_add_new_table(
@@ -209,7 +212,6 @@ impl HummockManager {
                             new_compaction_group_id,
                             &mut table_compaction_group_mapping,
                         )?;
-                        new_table_ids.extend(internal_table_ids);
                         new_table_ids.push(mv_table_id);
                     }
                 }

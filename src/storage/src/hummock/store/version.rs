@@ -968,6 +968,7 @@ impl HummockVersionReader {
         key_range: TableKeyRange,
         options: ReadLogOptions,
     ) -> HummockResult<ChangeLogIterator> {
+        println!("iter_log version {:?}", version.version());
         let change_log =
             if let Some(change_log) = version.version().table_change_log.get(&options.table_id) {
                 change_log.filter_epoch(epoch_range)

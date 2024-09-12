@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::pin::{pin, Pin};
@@ -316,7 +317,8 @@ async fn run_compare_result(
     let init_epoch = test_epoch(hummock.get_pinned_version().max_committed_epoch() + 1);
 
     let mut normal = NormalState::new(hummock, 1, init_epoch).await;
-    let mut delete_range = DeleteRangeState::new(hummock, 2, init_epoch).await;
+    let table_id = 2;
+    let mut delete_range = DeleteRangeState::new(hummock, table_id, init_epoch).await;
     const RANGE_BASE: u64 = 4000;
     let range_mod = test_range / RANGE_BASE;
 
@@ -381,7 +383,10 @@ async fn run_compare_result(
         normal.commit(next_epoch).await?;
         delete_range.commit(next_epoch).await?;
         // let checkpoint = epoch % 10 == 0;
-        let ret = hummock.seal_and_sync_epoch(epoch).await.unwrap();
+        let ret = hummock
+            .seal_and_sync_epoch(epoch, HashSet::from([TableId::from(table_id)]))
+            .await
+            .unwrap();
         meta_client
             .commit_epoch(epoch, ret)
             .await

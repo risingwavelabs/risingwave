@@ -207,10 +207,6 @@ pub mod group_split {
 
             for sst in &mut level.table_infos {
                 let sst_split_type = need_to_split(sst, split_key.clone());
-                println!(
-                    "sub_level {} sst {} object_id {} sst_split_type: {:?}",
-                    level.sub_level_id, sst.sst_id, sst.object_id, sst_split_type
-                );
                 match sst_split_type {
                     SstSplitType::Left => {
                         left_sst.push(sst.clone());
@@ -244,7 +240,6 @@ pub mod group_split {
             let mut insert_table_infos = vec![];
             let sst = &mut level.table_infos[pos];
             let sst_split_type = need_to_split(sst, split_key.clone());
-
             match sst_split_type {
                 SstSplitType::Left => {
                     insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);

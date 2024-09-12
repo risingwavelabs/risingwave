@@ -1660,7 +1660,7 @@ pub mod default {
         }
 
         pub fn table_info_statistic_history_times() -> usize {
-            60
+            240
         }
 
         pub fn block_file_cache_flush_buffer_threshold_mb() -> usize {

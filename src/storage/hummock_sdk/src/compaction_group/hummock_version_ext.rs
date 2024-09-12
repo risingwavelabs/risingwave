@@ -709,6 +709,7 @@ impl HummockVersion {
                 version_delta.visible_table_committed_epoch(),
                 visible_table_committed_epoch
             );
+
             if is_commit_epoch {
                 // `max_committed_epoch` increases. It must be a `commit_epoch`
                 let GroupDeltasSummary {
@@ -1882,7 +1883,7 @@ mod tests {
             ),
         )]);
 
-        let mut cg1 = version.levels.get_mut(&1).unwrap();
+        let cg1 = version.levels.get_mut(&1).unwrap();
 
         cg1.levels[0] = Level {
             level_idx: 1,
@@ -2058,21 +2059,11 @@ mod tests {
             .into();
 
             let mut new_sst_id = 100;
-            println!("split_key {:?}", split_key);
             let x = group_split::split_sst_info_for_level(
                 &mut cg1.l0.sub_levels[0],
                 &mut new_sst_id,
                 split_key,
             );
-
-            println!(
-                "left {:?} count {}",
-                cg1.l0.sub_levels[0],
-                cg1.l0.sub_levels[0].table_infos.len()
-            );
-
-            println!("right {:?} count {}", x, x.len());
-
             // assert_eq!(3, x.len());
             // assert_eq!(100, x[0].sst_id);
             // assert_eq!(100, x[0].sst_size);
@@ -2102,8 +2093,7 @@ mod tests {
                 ..Default::default()
             };
 
-            merge_levels(&mut cg1, right_levels);
-            println!("left {:?}", cg1.l0.sub_levels[0].table_infos);
+            merge_levels(cg1, right_levels);
         }
 
         {

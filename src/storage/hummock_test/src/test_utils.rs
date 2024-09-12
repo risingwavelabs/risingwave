@@ -133,12 +133,10 @@ pub async fn with_hummock_storage_v2(
     .await
     .unwrap();
 
-    register_tables_with_id_for_test(
+    update_filter_key_extractor_for_table_ids(
         hummock_storage.filter_key_extractor_manager(),
-        &hummock_manager_ref,
-        &[table_id.table_id()],
-    )
-    .await;
+        &[table_id.into()],
+    );
 
     (hummock_storage, meta_client)
 }
@@ -159,20 +157,6 @@ pub fn update_filter_key_extractor_for_table_ids(
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         )
     }
-}
-
-pub async fn register_tables_with_id_for_test(
-    filter_key_extractor_manager: &FilterKeyExtractorManager,
-    hummock_manager_ref: &HummockManagerRef,
-    table_ids: &[u32],
-) {
-    update_filter_key_extractor_for_table_ids(filter_key_extractor_manager, table_ids);
-    register_table_ids_to_compaction_group(
-        hummock_manager_ref,
-        table_ids,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
 }
 
 pub fn update_filter_key_extractor_for_tables(
@@ -221,12 +205,10 @@ impl HummockTestEnv {
     }
 
     pub async fn register_table_id(&self, table_id: TableId) {
-        register_tables_with_id_for_test(
+        update_filter_key_extractor_for_table_ids(
             self.storage.filter_key_extractor_manager(),
-            &self.manager,
-            &[table_id.table_id()],
-        )
-        .await;
+            &[table_id.into()],
+        );
         self.wait_version_sync().await;
     }
 
@@ -243,7 +225,20 @@ impl HummockTestEnv {
     // Seal, sync and commit a epoch.
     // On completion of this function call, the provided epoch should be committed and visible.
     pub async fn commit_epoch(&self, epoch: u64) {
-        let res = self.storage.seal_and_sync_epoch(epoch).await.unwrap();
+        let table_ids = self
+            .manager
+            .get_current_version()
+            .await
+            .state_table_info
+            .info()
+            .keys()
+            .cloned()
+            .collect();
+        let res = self
+            .storage
+            .seal_and_sync_epoch(epoch, table_ids)
+            .await
+            .unwrap();
         self.meta_client.commit_epoch(epoch, res).await.unwrap();
 
         self.storage.try_wait_epoch_for_test(epoch).await;

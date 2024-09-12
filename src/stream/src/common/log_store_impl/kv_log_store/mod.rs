@@ -485,7 +485,7 @@ mod tests {
         let test_env = prepare_hummock_test_env().await;
 
         let table = gen_test_log_store_table(pk_info);
-
+        let table_id = TableId::new(table.id);
         test_env.register_table(table.clone()).await;
 
         let stream_chunk1 = gen_stream_chunk(0);
@@ -511,7 +511,7 @@ mod tests {
             .next_epoch();
         test_env
             .storage
-            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch1, HashSet::from_iter([table_id]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -520,13 +520,17 @@ mod tests {
         let epoch2 = epoch1.next_epoch();
         test_env
             .storage
-            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch2, HashSet::from_iter([table_id]));
         writer.flush_current_epoch(epoch2, false).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
-        let sync_result = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
+        let sync_result = test_env
+            .storage
+            .seal_and_sync_epoch(epoch2, HashSet::from([table_id]))
+            .await
+            .unwrap();
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
         reader.init().await.unwrap();

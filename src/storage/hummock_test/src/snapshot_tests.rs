@@ -113,6 +113,7 @@ async fn test_snapshot_inner(
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
 
+    let table_id = local.table_id();
     let epoch1 = test_epoch(1);
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch1).await.unwrap();
@@ -139,7 +140,10 @@ async fn test_snapshot_inner(
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
+        let res = hummock_storage
+            .seal_and_sync_epoch(epoch1, HashSet::from([table_id]))
+            .await
+            .unwrap();
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch1, res)
@@ -180,7 +184,10 @@ async fn test_snapshot_inner(
     hummock_storage.start_epoch(epoch3, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let res = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
+        let res = hummock_storage
+            .seal_and_sync_epoch(epoch2, HashSet::from([table_id]))
+            .await
+            .unwrap();
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch2, res)
@@ -220,7 +227,10 @@ async fn test_snapshot_inner(
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let res = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
+        let res = hummock_storage
+            .seal_and_sync_epoch(epoch3, HashSet::from([table_id]))
+            .await
+            .unwrap();
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch3, res)
@@ -250,6 +260,8 @@ async fn test_snapshot_range_scan_inner(
     hummock_storage.start_epoch(epoch, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch).await.unwrap();
 
+    let table_id = local.table_id();
+
     local
         .ingest_batch(
             vec![
@@ -270,16 +282,16 @@ async fn test_snapshot_range_scan_inner(
                     StorageValue::new_put("test"),
                 ),
             ],
-            WriteOptions {
-                epoch,
-                table_id: Default::default(),
-            },
+            WriteOptions { epoch, table_id },
         )
         .await
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let res = hummock_storage.seal_and_sync_epoch(epoch).await.unwrap();
+        let res = hummock_storage
+            .seal_and_sync_epoch(epoch, HashSet::from([table_id]))
+            .await
+            .unwrap();
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch, res)

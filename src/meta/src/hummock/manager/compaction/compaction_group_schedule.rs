@@ -52,18 +52,16 @@ pub(super) fn is_vnode_split_to_left(vnode: VirtualNode) -> bool {
 }
 
 // By default, the split key is constructed with vnode = 0 and epoch = 0, so that we can split table_id to the right group
-pub(crate) fn build_split_key(
-    mut table_id: StateTableId,
-    mut vnode: VirtualNode,
-    table_ids: &Vec<u32>,
-) -> Bytes {
+pub(crate) fn build_split_key(mut table_id: StateTableId, mut vnode: VirtualNode) -> Bytes {
     if is_vnode_split_to_left(vnode) {
         // Modify `table_id` to `next_table_id` to satisfy the `split_to_right`` rule, so that the `table_id`` originally passed in will be split to left.
-        table_id = table_ids[table_ids.partition_point(|x| *x <= table_id)]; // use next table_id
+        table_id += 1;
         vnode = VNODE_SPLIT_TO_RIGHT;
     }
 
-    Bytes::from(FullKey::new(TableId::from(table_id), TableKey(vnode.to_be_bytes()), 0).encode())
+    FullKey::new(TableId::from(table_id), TableKey(vnode.to_be_bytes()), 0)
+        .encode()
+        .into()
 }
 
 impl HummockManager {
@@ -75,12 +73,6 @@ impl HummockManager {
         table_ids: &[StateTableId],
         partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
-        if !table_ids.is_sorted() {
-            return Err(Error::CompactionGroup(
-                "table_ids must be sorted".to_string(),
-            ));
-        }
-
         let new_group_id = self
             .move_state_tables_to_dedicated_compaction_group(parent_group_id, table_ids)
             .await?;
@@ -156,7 +148,7 @@ impl HummockManager {
         }
 
         if table_id == *table_ids.last().unwrap() && is_vnode_split_to_left(vnode) {
-            println!("group_id {} table_id {} == *table_ids.first().unwrap() && is_vnode_split_to_left({:?})", parent_group_id, table_id, vnode);
+            println!("group_id {} table_id {} == *table_ids.last().unwrap() && is_vnode_split_to_left({:?})", parent_group_id, table_id, vnode);
             return Ok(parent_group_id);
         }
 
@@ -168,8 +160,7 @@ impl HummockManager {
         );
         let mut new_version_delta = version.new_delta();
 
-        let split_key = build_split_key(table_id, vnode, &table_ids);
-
+        let split_key = build_split_key(table_id, vnode);
         let (_, table_ids_right) = split_table_ids(&table_ids, split_key.clone());
 
         let split_sst_count = new_version_delta
@@ -302,6 +293,25 @@ impl HummockManager {
             return Err(Error::CompactionGroup(
                 "table_ids must be sorted".to_string(),
             ));
+        }
+
+        let parent_table_ids = {
+            let versioning_guard = self.versioning.read().await;
+            // let versioning = versioning_guard.deref_mut();
+            versioning_guard
+                .current_version
+                .state_table_info
+                .compaction_group_member_table_ids(parent_group_id)
+                .iter()
+                .map(|table_id| table_id.table_id)
+                .collect_vec()
+        };
+
+        if parent_table_ids == table_ids {
+            return Err(Error::CompactionGroup(format!(
+                "invalid split attempt for group {}: all member tables are moved",
+                parent_group_id
+            )));
         }
 
         // move [3,4,5,6]
@@ -700,11 +710,6 @@ impl HummockManager {
         checkpoint_secs: u64,
         created_tables: &HashSet<u32>,
     ) -> Result<()> {
-        println!(
-            "try_merge_compaction_group group {} next_group {} created_tables {:?}",
-            group.group_id, next_group.group_id, created_tables
-        );
-
         if group.table_statistic.is_empty() || next_group.table_statistic.is_empty() {
             return Err(Error::CompactionGroup(format!(
                 "group-{} or group-{} is empty",
@@ -730,17 +735,13 @@ impl HummockManager {
             group: &TableGroupInfo,
         ) -> bool {
             group.table_statistic.keys().all(|table_id| {
-                let ret = is_table_low_write_throughput(
+                is_table_low_write_throughput(
                     table_write_throughput,
                     *table_id,
                     checkpoint_secs,
                     window_size,
                     threshold,
-                );
-
-                println!("table_id {} is_low_write_throughput {}", table_id, ret);
-
-                ret
+                )
             })
         }
 

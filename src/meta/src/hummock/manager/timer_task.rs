@@ -463,8 +463,8 @@ impl HummockManager {
         group_infos.sort_by_key(|group| {
             let table_ids = group
                 .table_statistic
-                .iter()
-                .map(|(id, _)| *id)
+                .keys()
+                .cloned()
                 .collect::<BTreeSet<_>>();
             table_ids.iter().next().cloned()
         });
