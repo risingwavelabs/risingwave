@@ -970,10 +970,10 @@ fn test_map() {
                 map_map_int(#2): Jsonb,
             ]"#]],
         expect![[r#"
-            Owned(Jsonb(JsonbRef({"a": "x", "b": "y"})))
-            Owned(Jsonb(JsonbRef({"m1": {"a": Number(1), "b": Number(2)}, "m2": {"c": Number(3), "d": Number(4)}})))
+            Owned(Jsonb({"a": "x", "b": "y"}))
+            Owned(Jsonb({"m1": {"a": 1, "b": 2}, "m2": {"c": 3, "d": 4}}))
             ----
-            Owned(Jsonb(JsonbRef({})))
-            Owned(Jsonb(JsonbRef({})))"#]],
+            Owned(Jsonb({}))
+            Owned(Jsonb({}))"#]],
     );
 }

@@ -94,7 +94,12 @@ impl<'a> std::fmt::Debug for ScalarRefImplTestDisplay<'a> {
                 .entries(m.inner().iter().map(DatumRefTestDisplay))
                 .finish(),
             ScalarRefImpl::Jsonb(j) => {
-                write!(f, "{:#?}", j)
+                let compact_str = format!("{}", j);
+                if compact_str.len() > 50 {
+                    write!(f, "Jsonb({:#?})", jsonbb::ValueRef::from(j))
+                } else {
+                    write!(f, "Jsonb({:#})", j)
+                }
             }
             _ => {
                 // do not use alternative display for simple types

@@ -451,35 +451,29 @@ fn test_any_schema() -> anyhow::Result<()> {
             ]"#]],
         expect![[r#"
             Owned(Int32(12345))
-            Owned(JsonbRef(
-                {
+            Owned(Jsonb({
+                "@type": "type.googleapis.com/test.Int32Value",
+                "value": Number(114514),
+            }))
+            ================================================================
+            Owned(Int32(12345))
+            Owned(Jsonb({
+                "@type": "type.googleapis.com/test.AnyValue",
+                "anyValue1": {
+                    "@type": "type.googleapis.com/test.StringValue",
+                    "value": "114514",
+                },
+                "anyValue2": {
                     "@type": "type.googleapis.com/test.Int32Value",
                     "value": Number(114514),
                 },
-            ))
+            }))
             ================================================================
             Owned(Int32(12345))
-            Owned(JsonbRef(
-                {
-                    "@type": "type.googleapis.com/test.AnyValue",
-                    "anyValue1": {
-                        "@type": "type.googleapis.com/test.StringValue",
-                        "value": "114514",
-                    },
-                    "anyValue2": {
-                        "@type": "type.googleapis.com/test.Int32Value",
-                        "value": Number(114514),
-                    },
-                },
-            ))
-            ================================================================
-            Owned(Int32(12345))
-            Owned(JsonbRef(
-                {
-                    "@type": "type.googleapis.com/test.StringValue",
-                    "value": "John Doe",
-                },
-            ))
+            Owned(Jsonb({
+                "@type": "type.googleapis.com/test.StringValue",
+                "value": "John Doe",
+            }))
             ================================================================
             Owned(Int32(12345))
             ~~~~
