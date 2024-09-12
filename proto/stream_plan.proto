@@ -470,14 +470,10 @@ message AsOfJoinNode {
   // The output indices of current node
   repeated uint32 output_indices = 8;
   // Left deduped input pk indices. The pk of the left_table and
-  // left_degree_table is  [left_join_key | left_deduped_input_pk_indices]
-  // and is expected to be the shortest key which starts with
-  // the join key and satisfies unique constrain.
+  // The pk of the left_table is  [left_join_key | left_inequality_key | left_deduped_input_pk_indices]
   repeated uint32 left_deduped_input_pk_indices = 9;
-  // Right deduped input pk indices. The pk of the right_table and
-  // right_degree_table is  [right_join_key | right_deduped_input_pk_indices]
-  // and is expected to be the shortest key which starts with
-  // the join key and satisfies unique constrain.
+  // Right deduped input pk indices.
+  // The pk of the right_table is  [right_join_key | right_inequality_key | right_deduped_input_pk_indices]
   repeated uint32 right_deduped_input_pk_indices = 10;
   repeated bool null_safe = 11;
   optional plan_common.AsOfJoinDesc asof_desc = 12;

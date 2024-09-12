@@ -281,6 +281,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
         let l2o_indexed = MultiMap::from_iter(left_to_output.iter().copied());
         let r2o_indexed = MultiMap::from_iter(right_to_output.iter().copied());
 
+        // handle inequality watermarks
+        // https://github.com/risingwavelabs/risingwave/issues/18503
         // let inequality_watermarks = None;
         let watermark_buffers = BTreeMap::new();
 
@@ -617,13 +619,19 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
 
         let (side_update, side_match) = (side_l, side_r);
 
-        let mut hashjoin_chunk_builder =
-            JoinChunkBuilder::<T, { SideType::Left }>::new(JoinStreamChunkBuilder::new(
+        let CHUNK_BUILDER_T = match T {
+            AsOfJoinType::Inner => JoinType::Inner,
+            AsOfJoinType::LeftOuter => JoinType::LeftOuter,
+        };
+
+        let mut join_chunk_builder = JoinChunkBuilder::<CHUNK_BUILDER_T, { SideType::Left }>::new(
+            JoinStreamChunkBuilder::new(
                 chunk_size,
                 actual_output_data_types.to_vec(),
                 side_update.i2o_mapping.clone(),
                 side_match.i2o_mapping.clone(),
-            ));
+            ),
+        );
 
         let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
@@ -664,12 +672,12 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                             let matched_row = matched_row_by_inequality?;
 
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.with_match_on_insert(&row, &matched_row)
+                                join_chunk_builder.with_match_on_insert(&row, &matched_row)
                             {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
+                            join_chunk_builder.forward_if_not_matched(Op::Insert, row)
                         {
                             yield chunk;
                         }
@@ -680,12 +688,12 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                             let matched_row = matched_row_by_inequality?;
 
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.with_match_on_delete(&row, &matched_row)
+                                join_chunk_builder.with_match_on_delete(&row, &matched_row)
                             {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
+                            join_chunk_builder.forward_if_not_matched(Op::Delete, row)
                         {
                             yield chunk;
                         }
@@ -700,14 +708,14 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
+                            join_chunk_builder.forward_if_not_matched(Op::Insert, row)
                         {
                             yield chunk;
                         }
                     }
                     Op::Delete | Op::UpdateDelete => {
                         if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
+                            join_chunk_builder.forward_if_not_matched(Op::Delete, row)
                         {
                             yield chunk;
                         }
@@ -715,7 +723,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 }
             }
         }
-        if let Some(chunk) = hashjoin_chunk_builder.take() {
+        if let Some(chunk) = join_chunk_builder.take() {
             yield chunk;
         }
     }
@@ -737,7 +745,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
 
         let (side_update, side_match) = (side_r, side_l);
 
-        let mut hashjoin_chunk_builder = JoinStreamChunkBuilder::new(
+        let mut join_chunk_builder = JoinStreamChunkBuilder::new(
             chunk_size,
             actual_output_data_types.to_vec(),
             side_update.i2o_mapping.clone(),
@@ -889,31 +897,27 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                         join_matched_rows_cnt += 1;
                         let row_l = row_l?.row;
                         if let Some(row_to_delete_r) = &row_to_delete_r {
-                            if let Some(chunk) = hashjoin_chunk_builder.append_row(
-                                Op::Delete,
-                                row_to_delete_r,
-                                &row_l,
-                            ) {
+                            if let Some(chunk) =
+                                join_chunk_builder.append_row(Op::Delete, row_to_delete_r, &row_l)
+                            {
                                 yield chunk;
                             }
                         } else if is_as_of_left_outer(T) {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.append_row_matched(Op::Delete, &row_l)
+                                join_chunk_builder.append_row_matched(Op::Delete, &row_l)
                             {
                                 yield chunk;
                             }
                         }
                         if let Some(row_to_insert_r) = &row_to_insert_r {
-                            if let Some(chunk) = hashjoin_chunk_builder.append_row(
-                                Op::Insert,
-                                row_to_insert_r,
-                                &row_l,
-                            ) {
+                            if let Some(chunk) =
+                                join_chunk_builder.append_row(Op::Insert, row_to_insert_r, &row_l)
+                            {
                                 yield chunk;
                             }
                         } else if is_as_of_left_outer(T) {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.append_row_matched(Op::Insert, &row_l)
+                                join_chunk_builder.append_row_matched(Op::Insert, &row_l)
                             {
                                 yield chunk;
                             }
@@ -952,7 +956,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 );
             }
         }
-        if let Some(chunk) = hashjoin_chunk_builder.take() {
+        if let Some(chunk) = join_chunk_builder.take() {
             yield chunk;
         }
     }
