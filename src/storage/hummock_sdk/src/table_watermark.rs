@@ -810,13 +810,13 @@ mod tests {
             table_watermarks_checkpoint,
             TableWatermarks {
                 watermarks: vec![(
-                    epoch5,
+                    0,
                     vec![
+                        VnodeWatermark::new(build_bitmap(vec![0, 3, 4]), watermark4.clone(),),
                         VnodeWatermark::new(
                             build_bitmap((1..=2).chain(5..VirtualNode::COUNT)),
                             watermark3.clone(),
-                        ),
-                        VnodeWatermark::new(build_bitmap(vec![0, 3, 4]), watermark4.clone(),)
+                        )
                     ]
                     .into()
                 )],
