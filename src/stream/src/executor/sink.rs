@@ -93,7 +93,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         chunk_size: usize,
         input_data_types: Vec<DataType>,
     ) -> StreamExecutorResult<Self> {
-        let sink = build_sink(sink_param.clone())?;
+        let sink = build_sink(sink_param.clone())
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
         let sink_input_schema: Schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
@@ -226,9 +227,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         actor_id,
                     );
 
-                    dispatch_sink!(self.sink, sink, {
+                    let consume_log_stream_future = dispatch_sink!(self.sink, sink, {
                         let consume_log_stream = Self::execute_consume_log(
-                            sink,
+                            *sink,
                             log_reader,
                             self.input_columns,
                             self.sink_param,
@@ -238,9 +239,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         .instrument_await(format!("consume_log (sink_id {sink_id})"))
                         .map_ok(|never| match never {}); // unify return type to `Message`
 
-                        // TODO: may try to remove the boxed
-                        select(consume_log_stream.into_stream(), write_log_stream).boxed()
-                    })
+                        consume_log_stream.boxed()
+                    });
+                    select(consume_log_stream_future.into_stream(), write_log_stream)
                 })
                 .into_stream()
                 .flatten()
@@ -481,6 +482,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     warn!(
                         error = %e.as_report(),
                         executor_id = sink_writer_param.executor_id,
+                        sink_id = sink_param.sink_id.sink_id,
                         "rewind successfully after sink error"
                     );
                     sink_writer_param.vnode_bitmap = curr_vnode_bitmap;
@@ -494,7 +496,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     );
                     Err(e)
                 }
-            }?;
+            }
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
         }
         Err(anyhow!("end of stream").into())
     }

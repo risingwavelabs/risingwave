@@ -529,7 +529,7 @@ impl CatalogController {
                 object::Column::DatabaseId,
             ])
             .join(JoinType::InnerJoin, object::Relation::Table.def())
-            .filter(table::Column::BelongsToJobId.is_in(internal_table_ids.clone()))
+            .filter(table::Column::BelongsToJobId.eq(job_id))
             .into_partial_model()
             .all(&txn)
             .await?;
@@ -565,7 +565,7 @@ impl CatalogController {
             .flatten()
         {
             let err = if is_cancelled {
-                MetaError::cancelled(format!("stremaing job {job_id} is cancelled"))
+                MetaError::cancelled(format!("streaming job {job_id} is cancelled"))
             } else {
                 MetaError::catalog_id_not_found(
                     "stream job",
@@ -989,7 +989,7 @@ impl CatalogController {
         for sink_id in updated_sink_catalogs {
             sink::ActiveModel {
                 sink_id: Set(sink_id as _),
-                original_target_columns: Set(original_table_catalogs.clone()),
+                original_target_columns: Set(Some(original_table_catalogs.clone())),
                 ..Default::default()
             }
             .update(txn)
@@ -1214,12 +1214,23 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let source = Source::find_by_id(source_id)
+        {
+            let active_source = source::ActiveModel {
+                source_id: Set(source_id),
+                rate_limit: Set(rate_limit.map(|v| v as i32)),
+                ..Default::default()
+            };
+            active_source.update(&txn).await?;
+        }
+
+        let (source, obj) = Source::find_by_id(source_id)
+            .find_also_related(Object)
             .one(&txn)
             .await?
             .ok_or_else(|| {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
+
         let streaming_job_ids: Vec<ObjectId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
@@ -1295,6 +1306,19 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        let relation_info = PbRelationInfo::Source(ObjectModel(source, obj.unwrap()).into());
+        let relation = PbRelation {
+            relation_info: Some(relation_info),
+        };
+        let _version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::RelationGroup(PbRelationGroup {
+                    relations: vec![relation],
+                }),
+            )
+            .await;
+
         Ok(fragment_actors)
     }
 
@@ -1330,6 +1354,10 @@ impl CatalogController {
                 || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
             {
                 visit_stream_node(stream_node, |node| match node {
+                    PbNodeBody::StreamCdcScan(node) => {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
                     PbNodeBody::StreamScan(node) => {
                         node.rate_limit = rate_limit;
                         found = true;

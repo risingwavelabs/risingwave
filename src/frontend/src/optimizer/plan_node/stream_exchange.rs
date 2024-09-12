@@ -43,6 +43,7 @@ impl StreamExchange {
         } else {
             MonotonicityMap::new()
         };
+        assert!(!input.schema().is_empty());
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),

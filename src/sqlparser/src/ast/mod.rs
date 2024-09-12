@@ -46,9 +46,9 @@ pub use self::legacy_source::{
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
-    Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr,
-    Query, Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top,
-    Values, With,
+    Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView,
+    OrderByExpr, Query, Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor,
+    TableWithJoins, Top, Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{
@@ -502,8 +502,8 @@ pub enum Expr {
     Array(Array),
     /// An array constructing subquery `ARRAY(SELECT 2 UNION SELECT 3)`
     ArraySubquery(Box<Query>),
-    /// A subscript expression `arr[1]`
-    ArrayIndex {
+    /// A subscript expression `arr[1]` or `map['a']`
+    Index {
         obj: Box<Expr>,
         index: Box<Expr>,
     },
@@ -516,6 +516,9 @@ pub enum Expr {
     LambdaFunction {
         args: Vec<Ident>,
         body: Box<Expr>,
+    },
+    Map {
+        entries: Vec<(Expr, Expr)>,
     },
 }
 
@@ -797,7 +800,7 @@ impl fmt::Display for Expr {
                     .as_slice()
                     .join(", ")
             ),
-            Expr::ArrayIndex { obj, index } => {
+            Expr::Index { obj, index } => {
                 write!(f, "{}[{}]", obj, index)?;
                 Ok(())
             }
@@ -821,6 +824,16 @@ impl fmt::Display for Expr {
                     "|{}| {}",
                     args.iter().map(ToString::to_string).join(", "),
                     body
+                )
+            }
+            Expr::Map { entries } => {
+                write!(
+                    f,
+                    "MAP {{{}}}",
+                    entries
+                        .iter()
+                        .map(|(k, v)| format!("{}: {}", k, v))
+                        .join(", ")
                 )
             }
         }
@@ -1007,6 +1020,8 @@ pub enum ShowObject {
     Cluster,
     Jobs,
     ProcessList,
+    Cursor,
+    SubscriptionCursor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1051,6 +1066,8 @@ impl fmt::Display for ShowObject {
             ShowObject::ProcessList => write!(f, "PROCESSLIST"),
             ShowObject::Subscription { schema } => write!(f, "SUBSCRIPTIONS{}", fmt_schema(schema)),
             ShowObject::Secret { schema } => write!(f, "SECRETS{}", fmt_schema(schema)),
+            ShowObject::Cursor => write!(f, "CURSORS"),
+            ShowObject::SubscriptionCursor => write!(f, "SUBSCRIPTION CURSORS"),
         }
     }
 }
@@ -1827,7 +1844,7 @@ impl fmt::Display for Statement {
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
                         include_column_options.iter().map(|option_item: &IncludeOptionItem| {
-                            format!("INCLUDE {}{}{}",
+                            format!(" INCLUDE {}{}{}",
                                     option_item.column_type,
                                     if let Some(inner_field) = &option_item.inner_field {
                                         format!(" {}", inner_field)
@@ -2477,52 +2494,28 @@ impl fmt::Display for FunctionArg {
     }
 }
 
-/// A function call
+/// A list of function arguments, including additional modifiers like `DISTINCT` or `ORDER BY`.
+/// This basically holds all the information between the `(` and `)` in a function call.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Function {
-    /// Whether the function is prefixed with `aggregate:`
-    pub scalar_as_agg: bool,
-    pub name: ObjectName,
-    pub args: Vec<FunctionArg>,
-    /// whether the last argument is variadic, e.g. `foo(a, b, variadic c)`
-    pub variadic: bool,
-    pub over: Option<WindowSpec>,
-    // aggregate functions may specify eg `COUNT(DISTINCT x)`
+pub struct FunctionArgList {
+    /// Aggregate function calls may have a `DISTINCT`, e.g. `count(DISTINCT x)`.
     pub distinct: bool,
-    // aggregate functions may contain order_by_clause
+    pub args: Vec<FunctionArg>,
+    /// Whether the last argument is variadic, e.g. `foo(a, b, VARIADIC c)`.
+    pub variadic: bool,
+    /// Aggregate function calls may have an `ORDER BY`, e.g. `array_agg(x ORDER BY y)`.
     pub order_by: Vec<OrderByExpr>,
-    pub filter: Option<Box<Expr>>,
-    pub within_group: Option<Box<OrderByExpr>>,
+    /// Window function calls may have an `IGNORE NULLS`, e.g. `first_value(x IGNORE NULLS)`.
+    pub ignore_nulls: bool,
 }
 
-impl Function {
-    pub fn no_arg(name: ObjectName) -> Self {
-        Self {
-            scalar_as_agg: false,
-            name,
-            args: vec![],
-            variadic: false,
-            over: None,
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-            within_group: None,
-        }
-    }
-}
-
-impl fmt::Display for Function {
+impl fmt::Display for FunctionArgList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.scalar_as_agg {
-            write!(f, "aggregate:")?;
+        write!(f, "(")?;
+        if self.distinct {
+            write!(f, "DISTINCT ")?;
         }
-        write!(
-            f,
-            "{}({}",
-            self.name,
-            if self.distinct { "DISTINCT " } else { "" },
-        )?;
         if self.variadic {
             for arg in &self.args[0..self.args.len() - 1] {
                 write!(f, "{}, ", arg)?;
@@ -2534,12 +2527,96 @@ impl fmt::Display for Function {
         if !self.order_by.is_empty() {
             write!(f, " ORDER BY {}", display_comma_separated(&self.order_by))?;
         }
+        if self.ignore_nulls {
+            write!(f, " IGNORE NULLS")?;
+        }
         write!(f, ")")?;
-        if let Some(o) = &self.over {
-            write!(f, " OVER ({})", o)?;
+        Ok(())
+    }
+}
+
+impl FunctionArgList {
+    pub fn empty() -> Self {
+        Self {
+            distinct: false,
+            args: vec![],
+            variadic: false,
+            order_by: vec![],
+            ignore_nulls: false,
+        }
+    }
+
+    pub fn args_only(args: Vec<FunctionArg>) -> Self {
+        Self {
+            distinct: false,
+            args,
+            variadic: false,
+            order_by: vec![],
+            ignore_nulls: false,
+        }
+    }
+
+    pub fn is_args_only(&self) -> bool {
+        !self.distinct && !self.variadic && self.order_by.is_empty() && !self.ignore_nulls
+    }
+
+    pub fn for_agg(distinct: bool, args: Vec<FunctionArg>, order_by: Vec<OrderByExpr>) -> Self {
+        Self {
+            distinct,
+            args,
+            variadic: false,
+            order_by,
+            ignore_nulls: false,
+        }
+    }
+}
+
+/// A function call
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Function {
+    /// Whether the function is prefixed with `AGGREGATE:`
+    pub scalar_as_agg: bool,
+    /// Function name.
+    pub name: ObjectName,
+    /// Argument list of the function call, i.e. things in `()`.
+    pub arg_list: FunctionArgList,
+    /// `WITHIN GROUP` clause of the function call, for ordered-set aggregate functions.
+    /// FIXME(rc): why we only support one expression here?
+    pub within_group: Option<Box<OrderByExpr>>,
+    /// `FILTER` clause of the function call, for aggregate and window (not supported yet) functions.
+    pub filter: Option<Box<Expr>>,
+    /// `OVER` clause of the function call, for window functions.
+    pub over: Option<WindowSpec>,
+}
+
+impl Function {
+    pub fn no_arg(name: ObjectName) -> Self {
+        Self {
+            scalar_as_agg: false,
+            name,
+            arg_list: FunctionArgList::empty(),
+            within_group: None,
+            filter: None,
+            over: None,
+        }
+    }
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.scalar_as_agg {
+            write!(f, "AGGREGATE:")?;
+        }
+        write!(f, "{}{}", self.name, self.arg_list)?;
+        if let Some(within_group) = &self.within_group {
+            write!(f, " WITHIN GROUP (ORDER BY {})", within_group)?;
         }
         if let Some(filter) = &self.filter {
-            write!(f, " FILTER(WHERE {})", filter)?;
+            write!(f, " FILTER (WHERE {})", filter)?;
+        }
+        if let Some(o) = &self.over {
+            write!(f, " OVER ({})", o)?;
         }
         Ok(())
     }
@@ -3302,13 +3379,13 @@ mod tests {
 
     #[test]
     fn test_array_index_display() {
-        let array_index = Expr::ArrayIndex {
+        let array_index = Expr::Index {
             obj: Box::new(Expr::Identifier(Ident::new_unchecked("v1"))),
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1]", format!("{}", array_index));
 
-        let array_index2 = Expr::ArrayIndex {
+        let array_index2 = Expr::Index {
             obj: Box::new(array_index),
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };

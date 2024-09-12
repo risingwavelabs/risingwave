@@ -51,7 +51,8 @@ pub async fn list_version(
     } else {
         println!(
             "Version {} max_committed_epoch {}",
-            version.id, version.max_committed_epoch
+            version.id,
+            version.visible_table_committed_epoch()
         );
 
         for (cg, levels) in &version.levels {

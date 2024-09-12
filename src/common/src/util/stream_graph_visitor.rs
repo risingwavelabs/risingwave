@@ -264,6 +264,11 @@ pub fn visit_stream_node_tables_inner<F>(
             NodeBody::Materialize(node) if !internal_tables_only => {
                 always!(node.table, "Materialize")
             }
+
+            NodeBody::GlobalApproxPercentile(node) => {
+                always!(node.bucket_state_table, "GlobalApproxPercentileBucketState");
+                always!(node.count_state_table, "GlobalApproxPercentileCountState");
+            }
             _ => {}
         }
     };

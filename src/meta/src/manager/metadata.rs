@@ -356,6 +356,16 @@ impl MetadataManager {
         }
     }
 
+    pub async fn list_active_serving_compute_nodes(&self) -> MetaResult<Vec<PbWorkerNode>> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr
+                .cluster_manager
+                .list_active_serving_compute_nodes()
+                .await),
+            MetadataManager::V2(mgr) => mgr.cluster_controller.list_active_serving_workers().await,
+        }
+    }
+
     pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
         match self {
             MetadataManager::V1(mgr) => {
@@ -368,7 +378,7 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 let tables = mgr
                     .catalog_controller
-                    .list_background_creating_mviews()
+                    .list_background_creating_mviews(false)
                     .await?;
 
                 Ok(tables
@@ -565,6 +575,23 @@ impl MetadataManager {
         }
     }
 
+    pub async fn get_table_catalog_by_cdc_table_id(
+        &self,
+        cdc_table_id: &String,
+    ) -> MetaResult<Vec<PbTable>> {
+        match &self {
+            MetadataManager::V1(mgr) => Ok(mgr
+                .catalog_manager
+                .get_table_by_cdc_table_id(cdc_table_id)
+                .await),
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_table_by_cdc_table_id(cdc_table_id)
+                    .await
+            }
+        }
+    }
+
     pub async fn get_downstream_chain_fragments(
         &self,
         job_id: u32,
@@ -733,12 +760,12 @@ impl MetadataManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
+        subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
     ) -> MetaResult<HashMap<WorkerId, Vec<BuildActorInfo>>> {
-        let subscriptions = self.get_mv_depended_subscriptions().await?;
         match &self {
             MetadataManager::V1(mgr) => Ok(mgr
                 .fragment_manager
-                .all_node_actors(include_inactive, &subscriptions)
+                .all_node_actors(include_inactive, subscriptions)
                 .await),
             MetadataManager::V2(mgr) => {
                 let table_fragments = mgr.catalog_controller.table_fragments().await?;
@@ -751,7 +778,7 @@ impl MetadataManager {
                         node_actors.extend(
                             actors
                                 .into_iter()
-                                .map(|actor| to_build_actor_info(actor, &subscriptions, table_id)),
+                                .map(|actor| to_build_actor_info(actor, subscriptions, table_id)),
                         )
                     }
                 }
@@ -802,6 +829,9 @@ impl MetadataManager {
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         match self {
             MetadataManager::V1(mgr) => {
+                mgr.catalog_manager
+                    .update_source_rate_limit_by_source_id(source_id as u32, rate_limit)
+                    .await?;
                 mgr.fragment_manager
                     .update_source_rate_limit_by_source_id(source_id, rate_limit)
                     .await
@@ -881,10 +911,13 @@ impl MetadataManager {
 }
 
 impl MetadataManager {
+    /// Wait for job finishing notification in `TrackingJob::pre_finish`.
+    /// The progress is updated per barrier.
     pub(crate) async fn wait_streaming_job_finished(
         &self,
         job: &StreamingJob,
     ) -> MetaResult<NotificationVersion> {
+        tracing::debug!("wait_streaming_job_finished: {job:?}");
         match self {
             MetadataManager::V1(mgr) => mgr.wait_streaming_job_finished(job).await,
             MetadataManager::V2(mgr) => mgr.wait_streaming_job_finished(job.id() as _).await,

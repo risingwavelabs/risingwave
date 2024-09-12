@@ -71,9 +71,10 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240729
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
     depends_on:
       - mysql
+      - sqlserver-server
       - db
       - message_queue
       - schemaregistry
@@ -84,7 +85,7 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240729
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
     depends_on:
       - mysql
       - db
@@ -107,12 +108,12 @@ services:
 
 
   rw-build-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240729
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240729
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -123,7 +124,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240729
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
     depends_on:
       db:
         condition: service_healthy
@@ -215,6 +216,7 @@ services:
     environment:
       ACCEPT_EULA: 'Y'
       SA_PASSWORD: 'SomeTestOnly@SA'
+      MSSQL_AGENT_ENABLED: "true"
 
   starrocks-fe-server:
     container_name: starrocks-fe-server
@@ -264,7 +266,6 @@ services:
       SCHEMA_REGISTRY_HOST_NAME: schemaregistry
       SCHEMA_REGISTRY_LISTENERS: http://schemaregistry:8082
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: message_queue:29092
-      SCHEMA_REGISTRY_DEBUG: 'true'
 
   pulsar-server:
     container_name: pulsar-server

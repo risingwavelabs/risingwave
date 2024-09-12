@@ -14,8 +14,6 @@
 
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
-#![feature(lazy_cell)]
-#![feature(lint_reasons)]
 #![feature(error_generic_member_access)]
 #![feature(let_chains)]
 

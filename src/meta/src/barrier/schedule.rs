@@ -183,6 +183,7 @@ impl BarrierScheduler {
     /// Try to cancel scheduled cmd for create streaming job, return true if cancelled.
     pub fn try_cancel_scheduled_create(&self, table_id: TableId) -> bool {
         let queue = &mut self.inner.queue.lock();
+
         if let Some(idx) = queue.queue.iter().position(|scheduled| {
             if let Command::CreateStreamingJob { info, .. } = &scheduled.command
                 && info.table_fragments.table_id() == table_id
@@ -276,7 +277,10 @@ impl BarrierScheduler {
         for (injected_rx, collect_rx) in contexts {
             // Wait for this command to be injected, and record the result.
             tracing::trace!("waiting for injected_rx");
-            let info = injected_rx.await.ok().context("failed to inject barrier")?;
+            let info = injected_rx
+                .await
+                .ok()
+                .context("failed to inject barrier")??;
             infos.push(info);
 
             tracing::trace!("waiting for collect_rx");

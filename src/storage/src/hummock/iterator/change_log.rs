@@ -527,8 +527,9 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::hash::table_distribution::TableDistribution;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::EpochWithGap;
@@ -699,7 +700,7 @@ mod tests {
                 },
                 table_option: Default::default(),
                 is_replicated: false,
-                vnodes: TableDistribution::all_vnodes(),
+                vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
             })
             .await;
         let logs = gen_test_data(epoch_count, 10000, 0.05, 0.2);

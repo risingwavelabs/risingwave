@@ -2,6 +2,12 @@
 statement ok
 ALTER SYSTEM SET license_key TO 'eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJydy10ZXN0IiwidGllciI6ImZyZWUiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.ALC3Kc9LI6u0S-jeMB1YTxg1k8Azxwvc750ihuSZgjA_e1OJC9moxMvpLrHdLZDzCXHjBYi0XJ_1lowmuO_0iPEuPqN5AFpDV1ywmzJvGmMCMtw3A2wuN7hhem9OsWbwe6lzdwrefZLipyo4GZtIkg5ZdwGuHzm33zsM-X5gl_Ns4P6axHKiorNSR6nTAyA6B32YVET_FAM2YJQrXqpwA61wn1XLfarZqpdIQyJ5cgyiC33BFBlUL3lcRXLMLeYe6TjYGeV4K63qARCjM9yeOlsRbbW5ViWeGtR2Yf18pN8ysPXdbaXm_P_IVhl3jCTDJt9ctPh6pUCbkt36FZqO9A';
 
+# The key should be redacted when trying to retrieve it.
+query T
+SELECT setting FROM pg_settings WHERE name = 'license_key';
+----
+<redacted>
+
 query error
 SELECT rw_test_paid_tier();
 ----
@@ -36,6 +42,12 @@ Caused by these errors (recent errors listed first):
 statement ok
 ALTER SYSTEM SET license_key TO '';
 
+# Not showing `<redacted>` for license key empty (unset).
+query T
+SELECT setting FROM pg_settings WHERE name = 'license_key';
+----
+(empty)
+
 query error
 SELECT rw_test_paid_tier();
 ----
@@ -52,6 +64,12 @@ Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '..
 # Set the license key to default. In debug mode, this will set the license key to a paid tier key.
 statement ok
 ALTER SYSTEM SET license_key TO DEFAULT;
+
+# Show `<default>` if the license key is set to default.
+query T
+SELECT setting FROM pg_settings WHERE name = 'license_key';
+----
+<default>
 
 query T
 SELECT rw_test_paid_tier();

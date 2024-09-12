@@ -44,7 +44,7 @@ with (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     topic = 'sr_pb_test',
     scan.startup.mode = 'earliest')
-FORMAT plain ENCODE protobuf(
+FORMAT upsert ENCODE protobuf(
         schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
         message = 'test.User'
     );

@@ -16,8 +16,12 @@ profile:
 
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
-    # Specify a configuration file to override the default settings
+    # # Specify a configuration file to override the default settings
     # config-path: src/config/example.toml
+    # # Specify custom environment variables
+    # env:
+    #   RUST_LOG: "info,risingwave_storage::hummock=off"
+    #   RW_ENABLE_PRETTY_LOG: "true"
     steps:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
@@ -477,8 +481,8 @@ profile:
         parallelism: 8
       - use: frontend
       - use: compactor
-      - use: prometheus
-      - use: grafana
+      # - use: prometheus
+      # - use: grafana
       # Do not use kafka here, we will spawn it separately,
       # so we don't have to re-generate data each time.
       # RW will still be ale to talk to it.
@@ -1614,6 +1618,36 @@ template:
 
     # The docker image. Can be overridden to use a different version.
     image: "postgres:15-alpine"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+  # Sql Server service backed by docker.
+  sqlserver:
+    # Note: Sql Server is now only for connector purpose.
+    # Id to be picked-up by services
+    id: sqlserver-${port}
+
+    # address of mssql
+    address: "127.0.0.1"
+
+    # listen port of mssql
+    port: 1433
+
+    # Note:
+    # - This will be used to initialize the Sql Server instance if it's fresh.
+    # - In user-managed mode, these configs are not validated by risedev.
+    #   They are passed as-is to risedev-env default user for Sql Server operations.
+    user: SA
+    password: "YourPassword123"
+    database: "master"
+
+    # The docker image. Can be overridden to use a different version.
+    image: "mcr.microsoft.com/mssql/server:2022-latest"
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true

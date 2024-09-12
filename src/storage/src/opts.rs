@@ -63,6 +63,8 @@ pub struct StorageOpts {
     /// max memory usage for large query.
     pub prefetch_buffer_capacity_mb: usize,
 
+    pub max_cached_recent_versions_number: usize,
+
     pub max_prefetch_block_number: usize,
 
     pub disable_remote_compactor: bool,
@@ -86,6 +88,7 @@ pub struct StorageOpts {
     pub data_file_cache_file_capacity_mb: usize,
     pub data_file_cache_flushers: usize,
     pub data_file_cache_reclaimers: usize,
+    pub data_file_cache_recover_mode: foyer::RecoverMode,
     pub data_file_cache_recover_concurrency: usize,
     pub data_file_cache_insert_rate_limit_mb: usize,
     pub data_file_cache_indexer_shards: usize,
@@ -105,6 +108,7 @@ pub struct StorageOpts {
     pub meta_file_cache_file_capacity_mb: usize,
     pub meta_file_cache_flushers: usize,
     pub meta_file_cache_reclaimers: usize,
+    pub meta_file_cache_recover_mode: foyer::RecoverMode,
     pub meta_file_cache_recover_concurrency: usize,
     pub meta_file_cache_insert_rate_limit_mb: usize,
     pub meta_file_cache_indexer_shards: usize,
@@ -168,6 +172,10 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_cache_shard_num: s.meta_cache_shard_num,
             meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
+            max_cached_recent_versions_number: c
+                .storage
+                .max_cached_recent_versions_number
+                .unwrap_or(60),
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
@@ -181,6 +189,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_file_capacity_mb: c.storage.data_file_cache.file_capacity_mb,
             data_file_cache_flushers: c.storage.data_file_cache.flushers,
             data_file_cache_reclaimers: c.storage.data_file_cache.reclaimers,
+            data_file_cache_recover_mode: c.storage.data_file_cache.recover_mode,
             data_file_cache_recover_concurrency: c.storage.data_file_cache.recover_concurrency,
             data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
             data_file_cache_indexer_shards: c.storage.data_file_cache.indexer_shards,
@@ -191,6 +200,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
             meta_file_cache_flushers: c.storage.meta_file_cache.flushers,
             meta_file_cache_reclaimers: c.storage.meta_file_cache.reclaimers,
+            meta_file_cache_recover_mode: c.storage.meta_file_cache.recover_mode,
             meta_file_cache_recover_concurrency: c.storage.meta_file_cache.recover_concurrency,
             meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
             meta_file_cache_indexer_shards: c.storage.meta_file_cache.indexer_shards,

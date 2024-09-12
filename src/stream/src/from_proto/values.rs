@@ -16,7 +16,6 @@ use itertools::Itertools;
 use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::ValuesNode;
 use risingwave_storage::StateStore;
-use tokio::sync::mpsc::unbounded_channel;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
@@ -35,10 +34,10 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
         node: &ValuesNode,
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let (sender, barrier_receiver) = unbounded_channel();
-        params
-            .create_actor_context
-            .register_sender(params.actor_context.id, sender);
+        let barrier_receiver = params
+            .shared_context
+            .local_barrier_manager
+            .subscribe_barrier(params.actor_context.id);
         let progress = params
             .local_barrier_manager
             .register_create_mview_progress(params.actor_context.id);

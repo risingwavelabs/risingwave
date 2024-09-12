@@ -361,7 +361,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-        let read_time_travel = matches!(wait_epoch, HummockReadEpoch::TimeTravel(_));
+        let read_committed = matches!(
+            wait_epoch,
+            HummockReadEpoch::TimeTravel(_) | HummockReadEpoch::Committed(_)
+        );
         self.store.try_wait_epoch(wait_epoch).await?;
         let serialized_pk = serialize_pk_with_vnode(
             &pk,
@@ -382,14 +385,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
-            read_version_from_time_travel: read_time_travel,
+            read_committed,
             cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
-            // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
-            self.store.validate_read_epoch(wait_epoch)?;
-
             let row = self.row_serde.deserialize(&value)?;
             let result_row_in_value = self.mapping.project(OwnedRow::new(row));
 
@@ -490,14 +490,17 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let iterators: Vec<_> = try_join_all(table_key_ranges.map(|table_key_range| {
             let prefix_hint = prefix_hint.clone();
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-            let read_time_travel = matches!(wait_epoch, HummockReadEpoch::TimeTravel(_));
+            let read_committed = matches!(
+                wait_epoch,
+                HummockReadEpoch::TimeTravel(_) | HummockReadEpoch::Committed(_)
+            );
             async move {
                 let read_options = ReadOptions {
                     prefix_hint,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     read_version_from_backup: read_backup,
-                    read_version_from_time_travel: read_time_travel,
+                    read_committed,
                     prefetch_options,
                     cache_policy,
                     ..Default::default()
@@ -751,7 +754,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         &self,
         start_epoch: u64,
         end_epoch: u64,
-    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
         let pk_prefix = OwnedRow::default();
         let start_key = self.serialize_pk_bound(&pk_prefix, Unbounded, true);
         let end_key = self.serialize_pk_bound(&pk_prefix, Unbounded, false);
@@ -872,11 +875,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         let raw_epoch = epoch.get_epoch();
         store.try_wait_epoch(epoch).await?;
         let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
-        // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
-        // `HummockReadEpoch::Current` read incomplete.
-        // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read
-        // result if any recovery has happened after `try_wait_epoch`.
-        store.validate_read_epoch(epoch)?;
         let iter = Self {
             iter,
             mapping,

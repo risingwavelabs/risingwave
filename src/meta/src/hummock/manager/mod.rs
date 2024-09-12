@@ -50,7 +50,6 @@ use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager};
 use crate::model::{ClusterId, MetadataModel, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
 
-mod compaction_group_manager;
 mod context;
 mod gc;
 mod tests;
@@ -67,7 +66,7 @@ mod transaction;
 mod utils;
 mod worker;
 
-pub(crate) use commit_epoch::*;
+pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 use compaction::*;
 pub use compaction::{check_cg_write_limit, WriteLimitType};
 pub(crate) use utils::*;
@@ -276,7 +275,6 @@ impl HummockManager {
             compactor_manager,
             latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
                 committed_epoch: INVALID_EPOCH,
-                current_epoch: INVALID_EPOCH,
             }),
             event_sender: tx,
             delete_object_tracker: Default::default(),
@@ -378,7 +376,7 @@ impl HummockManager {
                         .into_iter()
                         .map(|m| {
                             (
-                                m.id as HummockVersionId,
+                                HummockVersionId::new(m.id as _),
                                 HummockVersionDelta::from_persisted_protobuf(
                                     &PbHummockVersionDelta::from(m),
                                 ),
@@ -431,8 +429,7 @@ impl HummockManager {
 
         self.latest_snapshot.store(
             HummockSnapshot {
-                committed_epoch: redo_state.max_committed_epoch,
-                current_epoch: redo_state.max_committed_epoch,
+                committed_epoch: redo_state.visible_table_committed_epoch(),
             }
             .into(),
         );

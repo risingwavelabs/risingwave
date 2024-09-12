@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -26,6 +26,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -35,9 +36,10 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamScanNode, StreamScanType,
 };
 
+use crate::barrier::SnapshotBackfillInfo;
 use crate::manager::{DdlType, IdGenManagerImpl, MetaSrvEnv, StreamingJob, WorkerId};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
@@ -204,26 +206,30 @@ impl BuildingFragment {
         table_columns
     }
 
-    pub fn has_arrangement_backfill(&self) -> bool {
-        fn has_arrangement_backfill_node(stream_node: &StreamNode) -> bool {
-            let is_backfill = if let Some(node) = &stream_node.node_body
-                && let Some(node) = node.as_stream_scan()
-            {
-                node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
-            } else {
-                false
-            };
-            is_backfill
-                || stream_node
-                    .get_input()
-                    .iter()
-                    .any(has_arrangement_backfill_node)
-        }
+    pub fn has_shuffled_backfill(&self) -> bool {
         let stream_node = match self.inner.node.as_ref() {
             Some(node) => node,
             _ => return false,
         };
-        has_arrangement_backfill_node(stream_node)
+        let mut has_shuffled_backfill = false;
+        let has_shuffled_backfill_mut_ref = &mut has_shuffled_backfill;
+        visit_stream_node_cont(stream_node, |node| {
+            let is_shuffled_backfill = if let Some(node) = &node.node_body
+                && let Some(node) = node.as_stream_scan()
+            {
+                node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
+                    || node.stream_scan_type == StreamScanType::SnapshotBackfill as i32
+            } else {
+                false
+            };
+            if is_shuffled_backfill {
+                *has_shuffled_backfill_mut_ref = true;
+                false
+            } else {
+                true
+            }
+        });
+        has_shuffled_backfill
     }
 }
 
@@ -508,6 +514,70 @@ impl StreamFragmentGraph {
     ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
+
+    pub fn collect_snapshot_backfill_info(&self) -> MetaResult<Option<SnapshotBackfillInfo>> {
+        let mut prev_stream_scan: Option<(Option<SnapshotBackfillInfo>, StreamScanNode)> = None;
+        let mut result = Ok(());
+        for (node, fragment_type_mask) in self
+            .fragments
+            .values()
+            .map(|fragment| (fragment.node.as_ref().unwrap(), fragment.fragment_type_mask))
+        {
+            visit_stream_node_cont(node, |node| {
+                if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_ref() {
+                    let is_snapshot_backfill =
+                        stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32;
+                    if is_snapshot_backfill {
+                        assert!(
+                            (fragment_type_mask
+                                & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32))
+                                > 0
+                        );
+                    }
+
+                    match &mut prev_stream_scan {
+                        Some((prev_snapshot_backfill_info, prev_stream_scan)) => {
+                            match (prev_snapshot_backfill_info, is_snapshot_backfill) {
+                                (Some(prev_snapshot_backfill_info), true) => {
+                                    prev_snapshot_backfill_info
+                                        .upstream_mv_table_ids
+                                        .insert(TableId::new(stream_scan.table_id));
+                                    true
+                                }
+                                (None, false) => true,
+                                (_, _) => {
+                                    result = Err(anyhow!("must be either all snapshot_backfill or no snapshot_backfill. Curr: {stream_scan:?} Prev: {prev_stream_scan:?}").into());
+                                    false
+                                }
+                            }
+                        }
+                        None => {
+                            prev_stream_scan = Some((
+                                if is_snapshot_backfill {
+                                    Some(SnapshotBackfillInfo {
+                                        upstream_mv_table_ids: HashSet::from_iter([TableId::new(
+                                            stream_scan.table_id,
+                                        )]),
+                                    })
+                                } else {
+                                    None
+                                },
+                                stream_scan.clone(),
+                            ));
+                            true
+                        }
+                    }
+                } else {
+                    true
+                }
+            })
+        }
+        result.map(|_| {
+            prev_stream_scan
+                .map(|(is_snapshot_backfill, _)| is_snapshot_backfill)
+                .unwrap_or(None)
+        })
+    }
 }
 
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
@@ -660,7 +730,7 @@ impl CompleteStreamFragmentGraph {
         }) = upstream_ctx
         {
             for (&id, fragment) in &mut graph.fragments {
-                let uses_arrangement_backfill = fragment.has_arrangement_backfill();
+                let uses_shuffled_backfill = fragment.has_shuffled_backfill();
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                     let (up_fragment_id, edge) = match ddl_type {
                         DdlType::Table(TableJobType::SharedCdcSource) => {
@@ -735,7 +805,7 @@ impl CompleteStreamFragmentGraph {
                                     (dist_key_indices, output_indices)
                                 };
                                 let dispatch_strategy = mv_on_mv_dispatch_strategy(
-                                    uses_arrangement_backfill,
+                                    uses_shuffled_backfill,
                                     dist_key_indices,
                                     output_indices,
                                 );
@@ -877,11 +947,11 @@ impl CompleteStreamFragmentGraph {
 }
 
 fn mv_on_mv_dispatch_strategy(
-    uses_arrangement_backfill: bool,
+    uses_shuffled_backfill: bool,
     dist_key_indices: Vec<u32>,
     output_indices: Vec<u32>,
 ) -> DispatchStrategy {
-    if uses_arrangement_backfill {
+    if uses_shuffled_backfill {
         if !dist_key_indices.is_empty() {
             DispatchStrategy {
                 r#type: DispatcherType::Hash as _,

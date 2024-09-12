@@ -38,6 +38,7 @@ pub mod cluster;
 pub mod fragment;
 pub mod id;
 pub mod rename;
+pub mod scale;
 pub mod session_params;
 pub mod streaming_job;
 pub mod system_param;
@@ -161,6 +162,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
+            cdc_table_id: value.0.cdc_table_id,
         }
     }
 }
@@ -200,6 +202,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
+            rate_limit: value.0.rate_limit.map(|v| v as _),
         }
     }
 }
@@ -240,7 +243,11 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
             secret_refs: secret_ref_map,
-            original_target_columns: value.0.original_target_columns.to_protobuf(),
+            original_target_columns: value
+                .0
+                .original_target_columns
+                .map(|cols| cols.to_protobuf())
+                .unwrap_or_default(),
         }
     }
 }
@@ -280,7 +287,11 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             index_table_id: value.0.index_table_id as _,
             primary_table_id: value.0.primary_table_id as _,
             index_item: value.0.index_items.to_protobuf(),
-            index_column_properties: value.0.index_column_properties.to_protobuf(),
+            index_column_properties: value
+                .0
+                .index_column_properties
+                .map(|p| p.to_protobuf())
+                .unwrap_or_default(),
             index_columns_len: value.0.index_columns_len as _,
             initialized_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,

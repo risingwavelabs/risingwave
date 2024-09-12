@@ -147,22 +147,24 @@ public class EsSink extends SinkWriterBase {
 
         this.config = config;
         this.requestTracker = new RequestTracker();
-
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
         if (config.getConnector().equals("elasticsearch")) {
             ElasticRestHighLevelClientAdapter client =
                     new ElasticRestHighLevelClientAdapter(host, config);
-            this.bulkProcessor = new ElasticBulkProcessorAdapter(this.requestTracker, client);
+            this.bulkProcessor =
+                    new ElasticBulkProcessorAdapter(this.requestTracker, client, config);
         } else if (config.getConnector().equals("opensearch")) {
             OpensearchRestHighLevelClientAdapter client =
                     new OpensearchRestHighLevelClientAdapter(host, config);
-            this.bulkProcessor = new OpensearchBulkProcessorAdapter(this.requestTracker, client);
+            this.bulkProcessor =
+                    new OpensearchBulkProcessorAdapter(this.requestTracker, client, config);
         } else {
             throw new RuntimeException("Sink type must be elasticsearch or opensearch");
         }
     }
 
-    private void writeRow(SinkRow row) throws JsonMappingException, JsonProcessingException {
+    private void writeRow(SinkRow row)
+            throws JsonMappingException, JsonProcessingException, InterruptedException {
         final String key = (String) row.get(1);
         String doc = (String) row.get(2);
         final String index;

@@ -93,7 +93,7 @@ pub struct DatabaseManager {
     pub(super) in_progress_creation_tracker: HashSet<RelationKey>,
     // In-progress creating streaming job tracker: this is a temporary workaround to avoid clean up
     // creating streaming jobs.
-    pub(super) in_progress_creation_streaming_job: HashMap<TableId, RelationKey>,
+    pub(super) in_progress_creating_streaming_job: HashMap<TableId, RelationKey>,
     // In-progress creating tables, including internal tables.
     pub(super) in_progress_creating_tables: HashMap<TableId, Table>,
 
@@ -193,7 +193,7 @@ impl DatabaseManager {
             secrets,
             secret_ref_count,
             in_progress_creation_tracker: HashSet::default(),
-            in_progress_creation_streaming_job: HashMap::default(),
+            in_progress_creating_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
             creating_table_finish_notifier: Default::default(),
         })
@@ -248,6 +248,15 @@ impl DatabaseManager {
             .collect()
     }
 
+    pub fn get_table_by_cdc_table_id(&self, cdc_table_id: &String) -> Vec<Table> {
+        let cdc_table_id = Some(cdc_table_id);
+        self.tables
+            .values()
+            .filter(|t| t.cdc_table_id.as_ref() == cdc_table_id)
+            .cloned()
+            .collect()
+    }
+
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
         if let Some(t) = self.tables.values().find(|x| {
             x.database_id == relation_key.0
@@ -255,7 +264,7 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             if t.stream_job_status == StreamJobStatus::Creating as i32 {
-                bail!("table is in creating procedure, table id: {}", t.id);
+                bail!("The table is being created, table id: {}", t.id);
             } else {
                 Err(MetaError::catalog_duplicated("table", &relation_key.2))
             }
@@ -566,7 +575,7 @@ impl DatabaseManager {
 
     /// Only for streaming DDL
     pub fn mark_creating_streaming_job(&mut self, table_id: TableId, key: RelationKey) {
-        self.in_progress_creation_streaming_job
+        self.in_progress_creating_streaming_job
             .insert(table_id, key);
     }
 
@@ -575,7 +584,7 @@ impl DatabaseManager {
     }
 
     pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {
-        self.in_progress_creation_streaming_job.remove(&table_id);
+        self.in_progress_creating_streaming_job.remove(&table_id);
         for tx in self
             .creating_table_finish_notifier
             .remove(&table_id)
@@ -589,7 +598,7 @@ impl DatabaseManager {
     }
 
     pub fn find_creating_streaming_job_id(&self, key: &RelationKey) -> Option<TableId> {
-        self.in_progress_creation_streaming_job
+        self.in_progress_creating_streaming_job
             .iter()
             .find(|(_, v)| *v == key)
             .map(|(k, _)| *k)
@@ -608,7 +617,7 @@ impl DatabaseManager {
     }
 
     pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
-        self.in_progress_creation_streaming_job.keys().cloned()
+        self.in_progress_creating_streaming_job.keys().cloned()
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {

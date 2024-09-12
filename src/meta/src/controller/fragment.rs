@@ -47,8 +47,8 @@ use risingwave_pb::stream_plan::{
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter, QuerySelect,
-    RelationTrait, TransactionTrait, Value,
+    ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
+    QuerySelect, RelationTrait, TransactionTrait, Value,
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
@@ -209,7 +209,7 @@ impl CatalogController {
         for mut actor in pb_actors {
             let mut upstream_actors = BTreeMap::new();
 
-            let node = actor.nodes.as_mut().context("nodes is empty")?;
+            let node = actor.nodes.as_mut().context("nodes are empty")?;
 
             visit_stream_node(node, |body| {
                 if let NodeBody::Merge(m) = body {
@@ -1099,19 +1099,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
         for assignments in split_assignment.values() {
             for (actor_id, splits) in assignments {
-                let actor_splits: Option<ConnectorSplits> = Actor::find_by_id(*actor_id as ActorId)
-                    .select_only()
-                    .column(actor::Column::Splits)
-                    .into_tuple()
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("actor_id", actor_id))?;
-
-                let mut actor_splits = actor_splits
-                    .map(|splits| splits.to_protobuf().splits)
-                    .unwrap_or_default();
-                actor_splits.extend(splits.iter().map(Into::into));
-
+                let actor_splits = splits.iter().map(Into::into).collect_vec();
                 Actor::update(actor::ActiveModel {
                     actor_id: Set(*actor_id as _),
                     splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
@@ -1120,7 +1108,14 @@ impl CatalogController {
                     ..Default::default()
                 })
                 .exec(&txn)
-                .await?;
+                .await
+                .map_err(|err| {
+                    if err == DbErr::RecordNotUpdated {
+                        MetaError::catalog_id_not_found("actor_id", actor_id)
+                    } else {
+                        err.into()
+                    }
+                })?;
             }
         }
         txn.commit().await?;
@@ -1416,7 +1411,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use itertools::Itertools;
-    use risingwave_common::hash::ActorMapping;
+    use risingwave_common::hash::{ActorMapping, VirtualNode};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
     use risingwave_meta_model_v2::actor::ActorStatus;
@@ -1502,8 +1497,11 @@ mod tests {
             })
             .collect();
 
-        let actor_bitmaps =
-            ActorMapping::new_uniform((0..actor_count).map(|i| i as _)).to_bitmaps();
+        let actor_bitmaps = ActorMapping::new_uniform(
+            (0..actor_count).map(|i| i as _),
+            VirtualNode::COUNT_FOR_TEST,
+        )
+        .to_bitmaps();
 
         let pb_actors = (0..actor_count)
             .map(|actor_id| {
@@ -1615,8 +1613,11 @@ mod tests {
             })
             .collect();
 
-        let mut actor_bitmaps =
-            ActorMapping::new_uniform((0..actor_count).map(|i| i as _)).to_bitmaps();
+        let mut actor_bitmaps = ActorMapping::new_uniform(
+            (0..actor_count).map(|i| i as _),
+            VirtualNode::COUNT_FOR_TEST,
+        )
+        .to_bitmaps();
 
         let actors = (0..actor_count)
             .map(|actor_id| {

@@ -18,7 +18,7 @@ normal = ["workspace-hack"]
 async-trait = "0.1"
 axum = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = "0.14" # required by tonic
+http = "1"
 prometheus = { version = "0.13" }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }

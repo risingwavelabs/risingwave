@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lazy_cell)]
-
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, LazyLock};
@@ -31,7 +29,7 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::StateTableInfoDelta;
+use risingwave_pb::hummock::{PbHummockVersion, StateTableInfoDelta};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use spin::Mutex;
 use tokio::sync::mpsc::unbounded_channel;
@@ -117,10 +115,12 @@ fn gen_version(
         new_epoch_idx,
         vnode_part_count,
     ));
-    let mut version = HummockVersion::default();
     let committed_epoch = test_epoch(new_epoch_idx as _);
-    version.id = new_epoch_idx as _;
-    version.max_committed_epoch = committed_epoch;
+    let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
+        id: new_epoch_idx as _,
+        max_committed_epoch: committed_epoch,
+        ..Default::default()
+    });
     version.table_watermarks = (0..table_count)
         .map(|table_id| (TableId::new(table_id as _), table_watermarks.clone()))
         .collect();
@@ -166,7 +166,7 @@ fn bench_table_watermarks(c: &mut Criterion) {
                 let mut pinned_version =
                     PinnedVersion::new(versions.pop_front().unwrap(), unbounded_channel().0);
                 while let Some(version) = versions.pop_front() {
-                    pinned_version = pinned_version.new_pin_version(version);
+                    pinned_version = pinned_version.new_pin_version(version).unwrap();
                 }
             },
             BatchSize::SmallInput,

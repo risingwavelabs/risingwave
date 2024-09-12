@@ -109,7 +109,7 @@ pub struct TracedReadOptions {
     pub retention_seconds: Option<u32>,
     pub table_id: TracedTableId,
     pub read_version_from_backup: bool,
-    pub read_version_from_time_travel: bool,
+    pub read_committed: bool,
 }
 
 impl TracedReadOptions {
@@ -125,7 +125,7 @@ impl TracedReadOptions {
             retention_seconds: None,
             table_id: TracedTableId { table_id },
             read_version_from_backup: false,
-            read_version_from_time_travel: false,
+            read_committed: false,
         }
     }
 }
@@ -194,7 +194,6 @@ pub type TracedHummockEpoch = u64;
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub enum TracedHummockReadEpoch {
     Committed(TracedHummockEpoch),
-    Current(TracedHummockEpoch),
     NoWait(TracedHummockEpoch),
     Backup(TracedHummockEpoch),
     TimeTravel(TracedHummockEpoch),
@@ -204,7 +203,6 @@ impl From<HummockReadEpoch> for TracedHummockReadEpoch {
     fn from(value: HummockReadEpoch) -> Self {
         match value {
             HummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
-            HummockReadEpoch::Current(epoch) => Self::Current(epoch),
             HummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             HummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
             HummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
@@ -216,7 +214,6 @@ impl From<TracedHummockReadEpoch> for HummockReadEpoch {
     fn from(value: TracedHummockReadEpoch) -> Self {
         match value {
             TracedHummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
-            TracedHummockReadEpoch::Current(epoch) => Self::Current(epoch),
             TracedHummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             TracedHummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
             TracedHummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),

@@ -23,10 +23,7 @@
 #![allow(non_snake_case)] // for `ctor` generated code
 #![feature(let_chains)]
 #![feature(assert_matches)]
-#![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
-#![feature(exclusive_range_pattern)]
-#![feature(lazy_cell)]
 #![feature(coroutines)]
 #![feature(test)]
 #![feature(iter_array_chunks)]

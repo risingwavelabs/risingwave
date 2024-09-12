@@ -14,6 +14,7 @@
 
 use std::marker::PhantomData;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
@@ -29,7 +30,7 @@ use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 #[derive(Debug, Clone)]
 pub struct OpendalEnumerator<Src: OpendalSource> {
-    pub(crate) op: Operator,
+    pub op: Operator,
     // prefix is used to reduce the number of objects to be listed
     pub(crate) prefix: Option<String>,
     pub(crate) matcher: Option<glob::Pattern>,
@@ -51,19 +52,27 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<OpendalFsSplit<Src>>> {
         let empty_split: OpendalFsSplit<Src> = OpendalFsSplit::empty_split();
+        let prefix = self.prefix.as_deref().unwrap_or("/");
 
-        Ok(vec![empty_split])
+        match self.op.list(prefix).await {
+            Ok(_) => return Ok(vec![empty_split]),
+            Err(e) => {
+                return Err(anyhow!(e)
+                    .context("fail to create source, please check your config.")
+                    .into())
+            }
+        }
     }
 }
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
-    pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
-        let prefix = self.prefix.as_deref().unwrap_or("");
+    pub async fn list(&self, recursive_scan: bool) -> ConnectorResult<ObjectMetadataIter> {
+        let prefix = self.prefix.as_deref().unwrap_or("/");
 
         let object_lister = self
             .op
             .lister_with(prefix)
-            .recursive(true)
+            .recursive(recursive_scan)
             .metakey(Metakey::ContentLength | Metakey::LastModified)
             .await?;
         let stream = stream::unfold(object_lister, |mut object_lister| async move {

@@ -17,7 +17,7 @@ use futures::stream;
 use futures::stream::select_with_strategy;
 
 use crate::executor::prelude::*;
-use crate::task::CreateMviewProgress;
+use crate::task::CreateMviewProgressReporter;
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, `ChainExecutor` is mainly used to implement MV on MV
@@ -31,7 +31,7 @@ pub struct RearrangedChainExecutor {
 
     upstream: Executor,
 
-    progress: CreateMviewProgress,
+    progress: CreateMviewProgressReporter,
 
     actor_id: ActorId,
 }
@@ -74,7 +74,11 @@ impl RearrangedMessage {
 }
 
 impl RearrangedChainExecutor {
-    pub fn new(snapshot: Executor, upstream: Executor, progress: CreateMviewProgress) -> Self {
+    pub fn new(
+        snapshot: Executor,
+        upstream: Executor,
+        progress: CreateMviewProgressReporter,
+    ) -> Self {
         Self {
             snapshot,
             upstream,

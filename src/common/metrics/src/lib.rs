@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lazy_cell)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 use std::ops::Deref;
@@ -27,12 +26,14 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 
 mod error_metrics;
+mod gauge_ext;
 mod guarded_metrics;
 mod metrics;
 pub mod monitor;
 mod relabeled_metric;
 
 pub use error_metrics::*;
+pub use gauge_ext::*;
 pub use guarded_metrics::*;
 pub use metrics::*;
 pub use relabeled_metric::*;

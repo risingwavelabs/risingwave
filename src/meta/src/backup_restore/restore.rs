@@ -227,6 +227,7 @@ mod tests {
     use risingwave_backup::storage::MetaSnapshotStorage;
     use risingwave_common::config::{MetaBackend, SystemConfig};
     use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::HummockVersionId;
     use risingwave_pb::hummock::HummockVersionStats;
     use risingwave_pb::meta::SystemParams;
 
@@ -289,7 +290,7 @@ mod tests {
             metadata: ClusterMetadata {
                 hummock_version: {
                     let mut version = HummockVersion::default();
-                    version.id = 123;
+                    version.id = HummockVersionId::new(123);
                     version
                 },
                 system_param: system_param.clone(),
@@ -472,7 +473,7 @@ mod tests {
                 ]),
                 hummock_version: {
                     let mut version = HummockVersion::default();
-                    version.id = 123;
+                    version.id = HummockVersionId::new(123);
                     version
                 },
                 system_param: system_param.clone(),

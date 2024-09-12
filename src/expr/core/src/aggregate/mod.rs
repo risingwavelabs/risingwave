@@ -160,16 +160,7 @@ pub fn build(agg: &AggCall, prefer_append_only: bool) -> Result<BoxedAggregateFu
     };
 
     // find the signature for builtin aggregation
-    let sig = crate::sig::FUNCTION_REGISTRY
-        .get(*kind, agg.args.arg_types(), &agg.return_type)
-        .ok_or_else(|| {
-            ExprError::UnsupportedFunction(format!(
-                "{}({}) -> {}",
-                kind.as_str_name().to_ascii_lowercase(),
-                agg.args.arg_types().iter().format(", "),
-                agg.return_type,
-            ))
-        })?;
+    let sig = crate::sig::FUNCTION_REGISTRY.get(*kind, agg.args.arg_types(), &agg.return_type)?;
 
     if let FuncBuilder::Aggregate {
         append_only: Some(f),

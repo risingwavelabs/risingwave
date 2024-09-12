@@ -88,6 +88,9 @@ impl Sink for DynamoDbSink {
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
 
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::DynamoDbSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
         let client = (self.config.build_client().await)
             .context("validate DynamoDB sink error")
             .map_err(SinkError::DynamoDb)?;
@@ -395,6 +398,7 @@ fn map_data_type(
             }
             AttributeValue::M(map)
         }
+        DataType::Map(_) => todo!(),
     };
     Ok(attr)
 }

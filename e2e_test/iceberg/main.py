@@ -55,16 +55,23 @@ def execute_slt(args, slt):
 
 def verify_result(args, verify_sql, verify_schema, verify_data):
     tc = unittest.TestCase()
-    print(f"Executing sql: {verify_sql}")
+
+    time.sleep(3)
+    print(f"verify_result:\nExecuting sql: {verify_sql}")
     spark = get_spark(args)
     df = spark.sql(verify_sql).collect()
+    print(f"Result:")
+    print(f"================")
     for row in df:
         print(row)
+    print(f"================")
     rows = verify_data.splitlines()
-    tc.assertEqual(len(df), len(rows))
+    tc.assertEqual(len(df), len(rows), "row length mismatch")
+    tc.assertEqual(len(verify_schema), len(df[0]), "column length mismatch")
     for row1, row2 in zip(df, rows):
         print(f"Row1: {row1}, Row 2: {row2}")
-        row2 = row2.split(",")
+        # New parsing logic for row2
+        row2 = parse_row(row2)
         for idx, ty in enumerate(verify_schema):
             if ty == "int" or ty == "long":
                 tc.assertEqual(row1[idx], int(row2[idx]))
@@ -89,7 +96,7 @@ def verify_result(args, verify_sql, verify_schema, verify_data):
                 else:
                     tc.assertEqual(row1[idx], decimal.Decimal(row2[idx]))
             else:
-                tc.fail(f"Unsupported type {ty}")
+                tc.assertEqual(str(row1[idx]), str(row2[idx]))
 
 def compare_sql(args, cmp_sqls):
     assert len(cmp_sqls) == 2
@@ -111,6 +118,32 @@ def drop_table(args, drop_sqls):
     for sql in drop_sqls:
         print(f"Executing sql: {sql}")
         spark.sql(sql)
+
+
+def parse_row(row):
+    result = []
+    current = ""
+    parenthesis_count = {"{": 0, "[": 0, "(": 0}
+    for char in row:
+        if char in parenthesis_count:
+            parenthesis_count[char] += 1
+        elif char == "}":
+            parenthesis_count["{"] -= 1
+        elif char == "]":
+            parenthesis_count["["] -= 1
+        elif char == ")":
+            parenthesis_count["("] -= 1
+
+        if char == "," and all(value == 0 for value in parenthesis_count.values()):
+            result.append(current.strip())
+            current = ""
+        else:
+            current += char
+
+    if current:
+        result.append(current.strip())
+
+    return result
 
 
 if __name__ == "__main__":
@@ -151,4 +184,3 @@ if __name__ == "__main__":
             execute_slt(config, verify_slt)
         if drop_sqls is not None and drop_sqls != "":
             drop_table(config, drop_sqls)
-

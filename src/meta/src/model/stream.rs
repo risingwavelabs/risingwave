@@ -106,7 +106,8 @@ pub struct TableFragments {
     /// The status of actors
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
 
-    /// The splits of actors
+    /// The splits of actors,
+    /// incl. both `Source` and `SourceBackfill` actors.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// The streaming context associated with this stream plan and its fragments
@@ -323,12 +324,14 @@ impl TableFragments {
     }
 
     /// Returns the actor ids with the given fragment type.
-    pub fn filter_actor_ids(&self, check_type: impl Fn(u32) -> bool) -> Vec<ActorId> {
+    pub fn filter_actor_ids(
+        &self,
+        check_type: impl Fn(u32) -> bool + 'static,
+    ) -> impl Iterator<Item = ActorId> + '_ {
         self.fragments
             .values()
-            .filter(|fragment| check_type(fragment.get_fragment_type_mask()))
+            .filter(move |fragment| check_type(fragment.get_fragment_type_mask()))
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
-            .collect()
     }
 
     /// Check if the fragment type mask is injectable.
@@ -337,7 +340,8 @@ impl TableFragments {
             & (PbFragmentTypeFlag::Source as u32
                 | PbFragmentTypeFlag::Now as u32
                 | PbFragmentTypeFlag::Values as u32
-                | PbFragmentTypeFlag::BarrierRecv as u32))
+                | PbFragmentTypeFlag::BarrierRecv as u32
+                | PbFragmentTypeFlag::SnapshotBackfillStreamScan as u32))
             != 0
     }
 
@@ -346,6 +350,7 @@ impl TableFragments {
         Self::filter_actor_ids(self, |fragment_type_mask| {
             (fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0
         })
+        .collect()
     }
 
     /// Returns actor ids that need to be tracked when creating MV.
@@ -358,7 +363,9 @@ impl TableFragments {
                 return vec![];
             }
             if (fragment.fragment_type_mask
-                & (FragmentTypeFlag::Values as u32 | FragmentTypeFlag::StreamScan as u32))
+                & (FragmentTypeFlag::Values as u32
+                    | FragmentTypeFlag::StreamScan as u32
+                    | FragmentTypeFlag::SourceScan as u32))
                 != 0
             {
                 actor_ids.extend(fragment.actors.iter().map(|actor| actor.actor_id));
@@ -400,7 +407,13 @@ impl TableFragments {
         Self::filter_actor_ids(self, |fragment_type_mask| {
             (fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
         })
-        .into_iter()
+        .collect()
+    }
+
+    pub fn snapshot_backfill_actor_ids(&self) -> HashSet<ActorId> {
+        Self::filter_actor_ids(self, |mask| {
+            (mask & FragmentTypeFlag::SnapshotBackfillStreamScan as u32) != 0
+        })
         .collect()
     }
 
@@ -517,14 +530,19 @@ impl TableFragments {
         actors
     }
 
-    /// Returns actor map: `actor_id` => `StreamActor`.
-    pub fn actor_map(&self) -> HashMap<ActorId, StreamActor> {
-        let mut actor_map = HashMap::default();
-        self.fragments.values().for_each(|fragment| {
-            fragment.actors.iter().for_each(|actor| {
-                actor_map.insert(actor.actor_id, actor.clone());
+    pub fn actors_to_create(&self) -> HashMap<WorkerId, Vec<StreamActor>> {
+        let mut actor_map: HashMap<_, Vec<_>> = HashMap::new();
+        self.fragments
+            .values()
+            .flat_map(|fragment| fragment.actors.iter())
+            .for_each(|actor| {
+                let worker_id = self
+                    .actor_status
+                    .get(&actor.actor_id)
+                    .expect("should exist")
+                    .worker_id();
+                actor_map.entry(worker_id).or_default().push(actor.clone());
             });
-        });
         actor_map
     }
 

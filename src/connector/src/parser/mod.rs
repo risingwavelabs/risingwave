@@ -47,6 +47,7 @@ pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
+pub use self::sql_server::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
 pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 pub use self::unified::Access;
 use self::unified::AccessImpl;
@@ -82,6 +83,7 @@ mod mysql;
 pub mod parquet_parser;
 pub mod plain_parser;
 mod postgres;
+mod sql_server;
 
 mod protobuf;
 pub mod scalar_adapter;
@@ -89,6 +91,7 @@ mod unified;
 mod upsert_parser;
 mod util;
 
+use debezium::schema_change::SchemaChangeEnvelope;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use risingwave_common::bitmap::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
@@ -485,6 +488,11 @@ impl SourceStreamChunkRowWriter<'_> {
                             .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
                     ));
                 }
+                (_, &Some(AdditionalColumnType::Payload(_))) => {
+                    // ingest the whole payload as a single column
+                    // do special logic in `KvEvent::access_field`
+                    parse_field(desc)
+                }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
                     parse_field(desc)
@@ -579,6 +587,9 @@ pub enum ParseResult {
     Rows,
     /// A transaction control message is parsed.
     TransactionControl(TransactionControl),
+
+    /// A schema change message is parsed.
+    SchemaChange(SchemaChangeEnvelope),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -829,6 +840,28 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         }
                     }
                 },
+
+                Ok(ParseResult::SchemaChange(schema_change)) => {
+                    if schema_change.is_empty() {
+                        continue;
+                    }
+
+                    let (oneshot_tx, oneshot_rx) = tokio::sync::oneshot::channel();
+                    // we bubble up the schema change event to the source executor via channel,
+                    // and wait for the source executor to finish the schema change process before
+                    // parsing the following messages.
+                    if let Some(ref tx) = parser.source_ctx().schema_change_tx {
+                        tx.send((schema_change, oneshot_tx))
+                            .await
+                            .expect("send schema change to executor");
+                        match oneshot_rx.await {
+                            Ok(()) => {}
+                            Err(e) => {
+                                tracing::error!(error = %e.as_report(), "failed to wait for schema change");
+                            }
+                        }
+                    }
+                }
             }
         }
 

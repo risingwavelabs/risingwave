@@ -132,8 +132,17 @@ impl LevelCompactionPicker {
         }
 
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-        let trivial_move_picker =
-            TrivialMovePicker::new(0, self.target_level, overlap_strategy.clone());
+        let trivial_move_picker = TrivialMovePicker::new(
+            0,
+            self.target_level,
+            overlap_strategy.clone(),
+            if self.compaction_task_validator.is_enable() {
+                // tips: Older versions of the compaction group will be upgraded without this configuration, we leave it with its default behaviour and enable it manually when needed.
+                self.config.sst_allowed_trivial_move_min_size.unwrap_or(0)
+            } else {
+                0
+            },
+        );
 
         trivial_move_picker.pick_trivial_move_task(
             &l0.sub_levels[0].table_infos,
@@ -209,7 +218,7 @@ impl LevelCompactionPicker {
                     break;
                 }
 
-                target_level_size += sst.file_size;
+                target_level_size += sst.sst_size;
             }
 
             if pending_compact {

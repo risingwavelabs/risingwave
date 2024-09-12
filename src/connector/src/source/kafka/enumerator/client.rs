@@ -82,7 +82,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             Some("latest") => KafkaEnumeratorOffset::Latest,
             None => KafkaEnumeratorOffset::Earliest,
             _ => bail!(
-                "properties `scan_startup_mode` only support earliest and latest or leave it empty"
+                "properties `scan_startup_mode` only supports earliest and latest or leaving it empty"
             ),
         };
 
@@ -170,6 +170,7 @@ impl KafkaSplitEnumerator {
             self.report_high_watermark(*partition, high);
             map.insert(*partition, (low, high));
         }
+        tracing::debug!("fetch kafka watermarks: {map:?}");
         Ok(map)
     }
 

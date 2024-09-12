@@ -34,16 +34,3 @@ pub fn env_var_is_true_or(key: impl AsRef<OsStr>, default: bool) -> bool {
         })
         .unwrap_or(default)
 }
-
-/// Checks whether the environment variable `key` is set to `false` or `f` or `0`.
-///
-/// Returns `default` if the environment variable is not set, or contains invalid characters.
-pub fn env_var_is_false_or(key: impl AsRef<OsStr>, default: bool) -> bool {
-    env::var(key)
-        .map(|value| {
-            ["0", "f", "false"]
-                .iter()
-                .any(|&s| value.eq_ignore_ascii_case(s))
-        })
-        .unwrap_or(default)
-}

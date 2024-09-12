@@ -18,7 +18,6 @@ use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::stream_plan::now_node::PbMode as PbNowMode;
 use risingwave_pb::stream_plan::{NowNode, PbNowModeGenerateSeries};
 use risingwave_storage::StateStore;
-use tokio::sync::mpsc::unbounded_channel;
 
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
@@ -36,10 +35,10 @@ impl ExecutorBuilder for NowExecutorBuilder {
         node: &NowNode,
         store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let (sender, barrier_receiver) = unbounded_channel();
-        params
-            .create_actor_context
-            .register_sender(params.actor_context.id, sender);
+        let barrier_receiver = params
+            .shared_context
+            .local_barrier_manager
+            .subscribe_barrier(params.actor_context.id);
 
         let mode = if let Ok(pb_mode) = node.get_mode() {
             match pb_mode {

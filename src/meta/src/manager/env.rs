@@ -23,7 +23,9 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
-use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
+use risingwave_rpc_client::{
+    FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
+};
 use sea_orm::EntityTrait;
 
 use super::{
@@ -36,7 +38,7 @@ use crate::controller::session_params::{SessionParamsController, SessionParamsCo
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
 use crate::hummock::sequence::SequenceGenerator;
-use crate::manager::event_log::{start_event_log_manager, EventLogMangerRef};
+use crate::manager::event_log::{start_event_log_manager, EventLogManagerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -123,10 +125,13 @@ pub struct MetaSrvEnv {
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
 
+    /// rpc client pool for frontend nodes.
+    frontend_client_pool: FrontendClientPoolRef,
+
     /// idle status manager.
     idle_manager: IdleManagerRef,
 
-    event_log_manager: EventLogMangerRef,
+    event_log_manager: EventLogManagerRef,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
@@ -289,6 +294,10 @@ pub struct MetaOpts {
     pub temp_secret_file_dir: String,
 
     pub table_info_statistic_history_times: usize,
+
+    // Cluster limits
+    pub actor_cnt_per_worker_parallelism_hard_limit: usize,
+    pub actor_cnt_per_worker_parallelism_soft_limit: usize,
 }
 
 impl MetaOpts {
@@ -353,6 +362,8 @@ impl MetaOpts {
             secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
             temp_secret_file_dir: "./secrets".to_string(),
             table_info_statistic_history_times: 240,
+            actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
+            actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
         }
     }
 }
@@ -385,6 +396,7 @@ impl MetaSrvEnv {
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let stream_client_pool = Arc::new(StreamClientPool::new(1)); // typically no need for plural clients
+        let frontend_client_pool = Arc::new(FrontendClientPool::new(1));
         let event_log_manager = Arc::new(start_event_log_manager(
             opts.event_log_enabled,
             opts.event_log_channel_max_size,
@@ -402,9 +414,11 @@ impl MetaSrvEnv {
                         (ClusterId::new(), true)
                     };
 
-                // For new clusters, the name of the object store needs to be prefixed according to the object id.
-                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
-
+                // For new clusters:
+                // - the name of the object store needs to be prefixed according to the object id.
+                //
+                // For old clusters
+                // - the prefix is ​​not divided for the sake of compatibility.
                 init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
                 let system_params_manager = Arc::new(
                     SystemParamsManager::new(
@@ -440,6 +454,7 @@ impl MetaSrvEnv {
                     meta_store_impl: meta_store_impl.clone(),
                     notification_manager,
                     stream_client_pool,
+                    frontend_client_pool,
                     idle_manager,
                     event_log_manager,
                     cluster_id,
@@ -448,7 +463,7 @@ impl MetaSrvEnv {
                 }
             }
             MetaStoreImpl::Sql(sql_meta_store) => {
-                let is_sql_backend_cluster_first_launch =
+                let cluster_first_launch =
                     is_first_launch_for_sql_backend_cluster(sql_meta_store).await?;
                 // Try to upgrade if any new model changes are added.
                 Migrator::up(&sql_meta_store.conn, None)
@@ -462,10 +477,14 @@ impl MetaSrvEnv {
                     .await?
                     .map(|c| c.cluster_id.to_string().into())
                     .unwrap();
-                init_system_params.use_new_object_prefix_strategy =
-                    Some(is_sql_backend_cluster_first_launch);
-                // For new clusters, the name of the object store needs to be prefixed according to the object id.
-                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
+
+                // For new clusters:
+                // - the name of the object store needs to be prefixed according to the object id.
+                //
+                // For old clusters
+                // - the prefix is ​​not divided for the sake of compatibility.
+                init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
+
                 let system_param_controller = Arc::new(
                     SystemParamsController::new(
                         sql_meta_store.clone(),
@@ -495,6 +514,7 @@ impl MetaSrvEnv {
                     meta_store_impl: meta_store_impl.clone(),
                     notification_manager,
                     stream_client_pool,
+                    frontend_client_pool,
                     idle_manager,
                     event_log_manager,
                     cluster_id,
@@ -559,11 +579,15 @@ impl MetaSrvEnv {
         self.stream_client_pool.deref()
     }
 
+    pub fn frontend_client_pool(&self) -> &FrontendClientPool {
+        self.frontend_client_pool.deref()
+    }
+
     pub fn cluster_id(&self) -> &ClusterId {
         &self.cluster_id
     }
 
-    pub fn event_log_manager_ref(&self) -> EventLogMangerRef {
+    pub fn event_log_manager_ref(&self) -> EventLogManagerRef {
         self.event_log_manager.clone()
     }
 }

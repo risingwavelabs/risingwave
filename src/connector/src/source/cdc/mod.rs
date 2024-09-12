@@ -45,11 +45,18 @@ pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
+pub const CDC_AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
 pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
 pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
+pub const SQL_SERVER_CDC_CONNECTOR: &str = SqlServer::CDC_CONNECTOR_NAME;
+
+/// Build a unique CDC table identifier from a source ID and external table name
+pub fn build_cdc_table_id(source_id: u32, external_table_name: &str) -> String {
+    format!("{}.{}", source_id, external_table_name)
+}
 
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
@@ -65,6 +72,7 @@ impl<'a> From<&'a str> for CdcSourceType {
             POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
             CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
             MONGODB_CDC_CONNECTOR => CdcSourceType::Mongodb,
+            SQL_SERVER_CDC_CONNECTOR => CdcSourceType::SqlServer,
             _ => CdcSourceType::Unspecified,
         }
     }
@@ -77,6 +85,7 @@ impl CdcSourceType {
             CdcSourceType::Postgres => "Postgres",
             CdcSourceType::Citus => "Citus",
             CdcSourceType::Mongodb => "MongoDB",
+            CdcSourceType::SqlServer => "SQL Server",
             CdcSourceType::Unspecified => "Unspecified",
         }
     }

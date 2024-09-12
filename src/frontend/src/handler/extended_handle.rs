@@ -23,7 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
 
 use super::query::BoundResult;
-use super::{handle, query, HandlerArgs, RwPgResponse};
+use super::{fetch_cursor, handle, query, HandlerArgs, RwPgResponse};
 use crate::error::Result;
 use crate::session::SessionImpl;
 
@@ -94,7 +94,7 @@ impl std::fmt::Display for PortalResult {
     }
 }
 
-pub fn handle_parse(
+pub async fn handle_parse(
     session: Arc<SessionImpl>,
     statement: Statement,
     specific_param_types: Vec<Option<DataType>>,
@@ -108,6 +108,9 @@ pub fn handle_parse(
         | Statement::Delete { .. }
         | Statement::Update { .. } => {
             query::handle_parse(handler_args, statement, specific_param_types)
+        }
+        Statement::FetchCursor { .. } => {
+            fetch_cursor::handle_parse(handler_args, statement, specific_param_types).await
         }
         Statement::CreateView {
             query,
@@ -198,8 +201,11 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
             let _guard = session.txn_begin_implicit(); // TODO(bugen): is this behavior correct?
             let sql: Arc<str> = Arc::from(portal.statement.to_string());
             let handler_args = HandlerArgs::new(session, &portal.statement, sql)?;
-
-            query::handle_execute(handler_args, portal).await
+            if let Statement::FetchCursor { .. } = &portal.statement {
+                fetch_cursor::handle_fetch_cursor_execute(handler_args, portal).await
+            } else {
+                query::handle_execute(handler_args, portal).await
+            }
         }
         Portal::PureStatement(stmt) => {
             let sql: Arc<str> = Arc::from(stmt.to_string());
