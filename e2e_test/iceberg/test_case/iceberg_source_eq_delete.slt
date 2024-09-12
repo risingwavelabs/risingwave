@@ -64,26 +64,26 @@ WITH (
 query I
 select * from iceberg_t1_source order by i1;
 ----
-1,2,3
-4,5,6
+1 2 3
+4 5 6
 
 query I
-select i1,i2,i3 from iceberg_t1_source order by v1;
+select i1,i2,i3 from iceberg_t1_source order by i1;
 ----
-1,2,3
-4,5,6
+1 2 3
+4 5 6
 
 query I
 select i3,i2 from iceberg_t1_source order by i2;
 ----
-3,2
-6,5
+3 2
+6 5
 
 query I
 select i2,i1 from iceberg_t1_source order by i1;
 ----
-2,1
-5,4
+2 1
+5 4
 
 query I
 select i1 from iceberg_t1_source order by i1;
