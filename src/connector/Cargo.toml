@@ -105,7 +105,6 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = { version = "0.14", features = ["serde"] }
 prost-types = "0.13"
-protobuf-native = "0.2.2"
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
     "telemetry",

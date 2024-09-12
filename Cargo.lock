@@ -10651,7 +10651,6 @@ dependencies = [
  "prost 0.13.1",
  "prost-reflect",
  "prost-types 0.13.1",
- "protobuf-native",
  "pulsar",
  "quote",
  "rand",
