@@ -17,9 +17,10 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    safe_epoch_read_table_watermarks_impl, table_watermarks_by_table_ids_impl,
+    safe_epoch_read_table_watermarks_impl, safe_epoch_table_watermarks_impl,
 };
 use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, TableWatermarks};
+use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task::TaskType;
 
@@ -41,6 +42,7 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
             level_handlers,
             developer_config,
             table_watermarks,
+            state_table_info,
             member_table_ids,
             ..
         } = context;
@@ -48,7 +50,8 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let mut picker = VnodeWatermarkCompactionPicker::new();
-        let table_watermarks = safe_epoch_read_table_watermarks(table_watermarks, member_table_ids);
+        let table_watermarks =
+            safe_epoch_read_table_watermarks(table_watermarks, state_table_info, member_table_ids);
         let compaction_input = picker.pick_compaction(levels, level_handlers, &table_watermarks)?;
         compaction_input.add_pending_task(task_id, level_handlers);
         Some(create_compaction_task(
@@ -70,10 +73,12 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
 
 fn safe_epoch_read_table_watermarks(
     table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
+    state_table_info: &HummockVersionStateTableInfo,
     member_table_ids: &BTreeSet<TableId>,
 ) -> BTreeMap<TableId, ReadTableWatermark> {
-    safe_epoch_read_table_watermarks_impl(&table_watermarks_by_table_ids_impl(
+    safe_epoch_read_table_watermarks_impl(&safe_epoch_table_watermarks_impl(
         table_watermarks,
+        state_table_info,
         &member_table_ids
             .iter()
             .map(TableId::table_id)

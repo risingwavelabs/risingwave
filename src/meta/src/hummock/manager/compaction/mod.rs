@@ -824,7 +824,7 @@ impl HummockManager {
                     .await;
                     compact_task.table_watermarks = version
                         .latest_version()
-                        .table_watermarks_by_table_ids(&compact_task.existing_table_ids);
+                        .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
                     if self.env.opts.enable_dropped_column_reclaim {
                         // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.

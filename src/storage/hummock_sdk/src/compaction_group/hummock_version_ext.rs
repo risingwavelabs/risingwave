@@ -36,7 +36,8 @@ use crate::level::{Level, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
-    GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta,
+    GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
+    IntraLevelDelta,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
@@ -259,26 +260,42 @@ impl HummockVersion {
             .unwrap_or(0)
     }
 
-    pub fn table_watermarks_by_table_ids(
+    pub fn safe_epoch_table_watermarks(
         &self,
         existing_table_ids: &[u32],
     ) -> BTreeMap<u32, TableWatermarks> {
-        table_watermarks_by_table_ids_impl(&self.table_watermarks, existing_table_ids)
+        safe_epoch_table_watermarks_impl(
+            &self.table_watermarks,
+            &self.state_table_info,
+            existing_table_ids,
+        )
     }
 }
 
-pub fn table_watermarks_by_table_ids_impl(
+pub fn safe_epoch_table_watermarks_impl(
     table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
+    state_table_info: &HummockVersionStateTableInfo,
     existing_table_ids: &[u32],
 ) -> BTreeMap<u32, TableWatermarks> {
     fn extract_single_table_watermark(
         table_watermarks: &TableWatermarks,
+        safe_epoch: u64,
     ) -> Option<TableWatermarks> {
         if let Some((first_epoch, first_epoch_watermark)) = table_watermarks.watermarks.first() {
-            Some(TableWatermarks {
-                watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
-                direction: table_watermarks.direction,
-            })
+            assert!(
+                *first_epoch >= safe_epoch,
+                "smallest epoch {} in table watermark should be at least safe epoch {}",
+                first_epoch,
+                safe_epoch
+            );
+            if *first_epoch == safe_epoch {
+                Some(TableWatermarks {
+                    watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
+                    direction: table_watermarks.direction,
+                })
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -290,8 +307,15 @@ pub fn table_watermarks_by_table_ids_impl(
             if !existing_table_ids.contains(&u32_table_id) {
                 None
             } else {
-                extract_single_table_watermark(table_watermarks)
-                    .map(|table_watermarks| (table_id.table_id, table_watermarks))
+                extract_single_table_watermark(
+                    table_watermarks,
+                    state_table_info
+                        .info()
+                        .get(table_id)
+                        .expect("table should exist")
+                        .committed_epoch,
+                )
+                .map(|table_watermarks| (table_id.table_id, table_watermarks))
             }
         })
         .collect()
@@ -727,11 +751,22 @@ impl HummockVersion {
             }
         }
         for (table_id, table_watermarks) in &self.table_watermarks {
+            let safe_epoch = if let Some(state_table_info) =
+                self.state_table_info.info().get(table_id)
+                && let Some((oldest_epoch, _)) = table_watermarks.watermarks.first()
+                && state_table_info.committed_epoch > *oldest_epoch
+            {
+                // safe epoch has progressed, need further clear.
+                state_table_info.committed_epoch
+            } else {
+                // safe epoch not progressed or the table has been removed. No need to truncate
+                continue;
+            };
             let table_watermarks = modified_table_watermarks
                 .entry(*table_id)
                 .or_insert_with(|| Some((**table_watermarks).clone()));
             if let Some(table_watermarks) = table_watermarks {
-                table_watermarks.clear_stale_epoch_watermark();
+                table_watermarks.clear_stale_epoch_watermark(safe_epoch);
             }
         }
         // apply the staging table watermark to hummock version
@@ -1266,7 +1301,6 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
 /// Currently this method is only used by risectl validate-version.
 pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     let mut res = Vec::new();
-
     // Ensure each table maps to only one compaction group
     for (group_id, levels) in &version.levels {
         // Ensure compaction group id matches
