@@ -11,4 +11,5 @@ WITH (
     url='tcp://mqtt-server',
     topic= 'test',
     qos = 'at_least_once',
+    max_packet_size =  '200000'
 ) FORMAT PLAIN ENCODE JSON;
