@@ -805,107 +805,18 @@ mod tests {
         );
 
         let mut table_watermarks_checkpoint = table_watermarks.clone();
-        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch1);
-        assert_eq!(table_watermarks_checkpoint, table_watermarks);
-
-        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch2);
-        assert_eq!(
-            table_watermarks_checkpoint,
-            TableWatermarks {
-                watermarks: vec![
-                    (
-                        epoch2,
-                        vec![VnodeWatermark::new(
-                            build_bitmap(vec![0, 1, 2, 3]),
-                            watermark2.clone(),
-                        )]
-                        .into()
-                    ),
-                    (
-                        epoch3,
-                        vec![VnodeWatermark::new(
-                            build_bitmap(0..VirtualNode::COUNT),
-                            watermark3.clone(),
-                        )]
-                        .into()
-                    ),
-                    (
-                        epoch5,
-                        vec![VnodeWatermark::new(
-                            build_bitmap(vec![0, 3, 4]),
-                            watermark4.clone(),
-                        )]
-                        .into()
-                    )
-                ],
-                direction,
-            }
-        );
-
-        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch3);
-        assert_eq!(
-            table_watermarks_checkpoint,
-            TableWatermarks {
-                watermarks: vec![
-                    (
-                        epoch3,
-                        vec![VnodeWatermark::new(
-                            build_bitmap(0..VirtualNode::COUNT),
-                            watermark3.clone(),
-                        )]
-                        .into()
-                    ),
-                    (
-                        epoch5,
-                        vec![VnodeWatermark::new(
-                            build_bitmap(vec![0, 3, 4]),
-                            watermark4.clone(),
-                        )]
-                        .into()
-                    )
-                ],
-                direction,
-            }
-        );
-
-        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch4);
-        assert_eq!(
-            table_watermarks_checkpoint,
-            TableWatermarks {
-                watermarks: vec![
-                    (
-                        epoch4,
-                        vec![VnodeWatermark::new(
-                            build_bitmap((1..3).chain(5..VirtualNode::COUNT)),
-                            watermark3.clone()
-                        )]
-                        .into()
-                    ),
-                    (
-                        epoch5,
-                        vec![VnodeWatermark::new(
-                            build_bitmap(vec![0, 3, 4]),
-                            watermark4.clone(),
-                        )]
-                        .into()
-                    )
-                ],
-                direction,
-            }
-        );
-
-        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch5);
+        table_watermarks_checkpoint.clear_stale_epoch_watermark();
         assert_eq!(
             table_watermarks_checkpoint,
             TableWatermarks {
                 watermarks: vec![(
                     epoch5,
                     vec![
-                        VnodeWatermark::new(build_bitmap(vec![0, 3, 4]), watermark4.clone()),
                         VnodeWatermark::new(
-                            build_bitmap((1..3).chain(5..VirtualNode::COUNT)),
-                            watermark3.clone()
-                        )
+                            build_bitmap((1..=2).chain(5..VirtualNode::COUNT)),
+                            watermark3.clone(),
+                        ),
+                        VnodeWatermark::new(build_bitmap(vec![0, 3, 4]), watermark4.clone(),)
                     ]
                     .into()
                 )],
