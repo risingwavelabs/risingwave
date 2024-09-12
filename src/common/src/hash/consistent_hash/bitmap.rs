@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::ops::RangeInclusive;
+use std::sync::{Arc, LazyLock};
 
-use crate::bitmap::Bitmap;
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::hash::table_distribution::SINGLETON_VNODE;
 use crate::hash::VirtualNode;
 
@@ -39,15 +40,24 @@ impl Bitmap {
     }
 
     /// Returns whether only the [`SINGLETON_VNODE`] is set in the bitmap.
-    ///
-    /// Note that this method returning `true` does not imply that the bitmap was created by
-    /// [`VnodeBitmapExt::singleton`], or that the bitmap has length 1.
     pub fn is_singleton(&self) -> bool {
         self.count_ones() == 1 && self.iter_vnodes().next().unwrap() == SINGLETON_VNODE
     }
 
-    /// Creates a bitmap with length 1 and the single bit set.
-    pub fn singleton() -> Self {
-        Self::ones(1)
+    /// Get the reference to a vnode bitmap for singleton actor or table, i.e., with length
+    /// [`VirtualNode::COUNT`] and only the [`SINGLETON_VNODE`] set to 1.
+    pub fn singleton() -> &'static Self {
+        Self::singleton_arc()
+    }
+
+    /// Get the reference to a vnode bitmap for singleton actor or table, i.e., with length
+    /// [`VirtualNode::COUNT`] and only the [`SINGLETON_VNODE`] set to 1.
+    pub fn singleton_arc() -> &'static Arc<Self> {
+        static SINGLETON: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            builder.set(SINGLETON_VNODE.to_index(), true);
+            builder.finish().into()
+        });
+        &SINGLETON
     }
 }
