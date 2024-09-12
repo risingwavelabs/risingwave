@@ -209,7 +209,7 @@ pub fn from_protobuf_value<'a>(
                     &key.clone().into(),
                     map_type.key(),
                 )?);
-                value_builder.append(from_protobuf_value(field_desc, &value, map_type.value())?);
+                value_builder.append(from_protobuf_value(field_desc, value, map_type.value())?);
             }
             let keys = key_builder.finish();
             let values = value_builder.finish();
