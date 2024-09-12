@@ -14,7 +14,7 @@
 
 pub mod parquet_file_reader;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -208,12 +208,13 @@ impl IcebergSplitEnumerator {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
         let table = self.config.load_table_v2().await?;
+
         let current_snapshot = table.metadata().current_snapshot();
         if current_snapshot.is_none() {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
             return Ok(vec![IcebergSplit {
                 split_id: 0,
-                snapshot_id: 0,
+                snapshot_id: 0, // unused
                 table_meta: TableMetadataJsonStr::serialize(table.metadata()),
                 files: vec![],
                 eq_delete_files: vec![],
@@ -339,27 +340,20 @@ impl IcebergSplitEnumerator {
                 }
             }
         }
-        let mut delete_columns = equality_ids
+        let delete_columns = equality_ids
             .into_iter()
             .map(|id| match schema.name_by_field_id(id) {
                 Some(name) => Ok::<std::string::String, ConnectorError>(name.to_string()),
                 None => bail!("Delete field id {} not found in schema", id),
             })
-            .collect::<ConnectorResult<HashSet<_>>>()?;
-        delete_columns.extend(rw_schema.names().iter().cloned());
-        let require_field_ids = schema
-            .as_struct()
-            .fields()
-            .iter()
-            .filter_map(|field| {
-                if delete_columns.contains(&field.name) {
-                    Some(field.name.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        Ok(require_field_ids)
+            .collect::<ConnectorResult<Vec<_>>>()?;
+        let mut require_field_names: Vec<_> = rw_schema.names().to_vec();
+        for names in delete_columns {
+            if !require_field_names.contains(&names) {
+                require_field_names.push(names);
+            }
+        }
+        Ok(require_field_names)
     }
 }
 

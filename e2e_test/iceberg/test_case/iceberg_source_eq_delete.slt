@@ -56,6 +56,8 @@ delete from s1 where i1 = 7;
 statement ok
 flush;
 
+sleep 5s
+
 query I
 select * from iceberg_t1_source order by i1;
 ----
