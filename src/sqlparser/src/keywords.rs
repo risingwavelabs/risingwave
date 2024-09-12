@@ -88,6 +88,7 @@ define_keywords!(
     AS,
     ASC,
     ASENSITIVE,
+    ASOF,
     ASYMMETRIC,
     ASYNC,
     AT,

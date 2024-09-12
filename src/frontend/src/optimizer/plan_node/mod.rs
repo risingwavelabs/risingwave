@@ -897,6 +897,7 @@ mod stream_global_approx_percentile;
 mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
+mod stream_asof_join;
 mod stream_hop_window;
 mod stream_local_approx_percentile;
 mod stream_materialize;

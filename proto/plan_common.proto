@@ -139,6 +139,8 @@ enum JoinType {
   JOIN_TYPE_LEFT_ANTI = 6;
   JOIN_TYPE_RIGHT_SEMI = 7;
   JOIN_TYPE_RIGHT_ANTI = 8;
+  JOIN_TYPE_ASOF_INNER = 9;
+  JOIN_TYPE_ASOF_LEFT_OUTER = 10;
 }
 
 // https://github.com/tokio-rs/prost/issues/80

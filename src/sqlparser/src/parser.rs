@@ -4610,7 +4610,13 @@ impl Parser<'_> {
                     join_operator,
                 }
             } else {
-                let natural = self.parse_keyword(Keyword::NATURAL);
+                let (natural, asof) =
+                    match self.parse_one_of_keywords(&[Keyword::NATURAL, Keyword::ASOF]) {
+                        Some(Keyword::NATURAL) => (true, false),
+                        Some(Keyword::ASOF) => (false, true),
+                        Some(_) => unreachable!(),
+                        None => (false, false),
+                    };
                 let peek_keyword = if let Token::Word(w) = self.peek_token().token {
                     w.keyword
                 } else {
@@ -4621,7 +4627,11 @@ impl Parser<'_> {
                     Keyword::INNER | Keyword::JOIN => {
                         let _ = self.parse_keyword(Keyword::INNER);
                         self.expect_keyword(Keyword::JOIN)?;
-                        JoinOperator::Inner
+                        if asof {
+                            JoinOperator::AsOfInner
+                        } else {
+                            JoinOperator::Inner
+                        }
                     }
                     kw @ Keyword::LEFT | kw @ Keyword::RIGHT | kw @ Keyword::FULL => {
                         let _ = self.next_token();
@@ -4639,6 +4649,9 @@ impl Parser<'_> {
                     }
                     _ if natural => {
                         return self.expected("a join type after NATURAL");
+                    }
+                    _ if asof => {
+                        return self.expected("a join type after ASOF");
                     }
                     _ => break,
                 };

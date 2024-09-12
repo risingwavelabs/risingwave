@@ -837,14 +837,13 @@ impl PredicatePushdown for LogicalJoin {
 }
 
 impl LogicalJoin {
-    fn to_stream_hash_join(
+    fn get_stream_input_for_hash_join(
         &self,
-        predicate: EqJoinPredicate,
+        predicate: &EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    ) -> Result<(PlanRef, PlanRef)> {
         use super::stream::prelude::*;
 
-        assert!(predicate.has_eq());
         let mut right = self.right().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
             ctx,
@@ -888,6 +887,18 @@ impl LogicalJoin {
             }
             _ => unreachable!(),
         }
+        Ok((left, right))
+    }
+
+    fn to_stream_hash_join(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
+        assert!(predicate.has_eq());
+        let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
 
         let logical_join = self.clone_with_left_right(left, right);
 
@@ -1259,6 +1270,23 @@ impl LogicalJoin {
             .to_batch_lookup_join(predicate, logical_join)
             .expect("Fail to convert to lookup join")
             .into())
+    }
+
+    fn to_stream_asof_join(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+        
+        assert!(predicate.has_eq());
+        let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
+        let logical_join = self.clone_with_left_right(left, right);
+
+        
+
+
+        
     }
 }
 
