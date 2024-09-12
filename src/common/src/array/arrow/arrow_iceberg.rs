@@ -141,10 +141,10 @@ impl ToArrow for IcebergArrowConvert {
                         let diff_scale = abs(max_scale - scale);
                         let value = match scale {
                             _ if scale < max_scale => {
-                                value.mul(10_i32.pow(diff_scale as u32) as i128)
+                                value.mul(10_i128.pow(diff_scale as u32))
                             }
                             _ if scale > max_scale => {
-                                value.div(10_i32.pow(diff_scale as u32) as i128)
+                                value.div(10_i128.pow(diff_scale as u32))
                             }
                             _ => value,
                         };
@@ -294,6 +294,32 @@ mod test {
                 Some(123456),
             ])
             .with_data_type(ty),
+        ) as ArrayRef;
+        assert_eq!(&arrow_array, &expect_array);
+    }
+
+    #[test]
+    fn decimal_with_large_scale() {
+        let array = DecimalArray::from_iter([
+            None,
+            Some(Decimal::NaN),
+            Some(Decimal::PositiveInf),
+            Some(Decimal::NegativeInf),
+            Some(Decimal::Normalized("123.4".parse().unwrap())),
+            Some(Decimal::Normalized("123.456".parse().unwrap())),
+        ]);
+        let ty = DataType::Decimal128(28, 10);
+        let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
+        let expect_array = Arc::new(
+            Decimal128Array::from(vec![
+                None,
+                None,
+                Some(9999999999999999999999999999),
+                Some(-9999999999999999999999999999),
+                Some(1234000000000),
+                Some(1234560000000),
+            ])
+                .with_data_type(ty),
         ) as ArrayRef;
         assert_eq!(&arrow_array, &expect_array);
     }
