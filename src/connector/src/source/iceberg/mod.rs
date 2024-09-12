@@ -213,9 +213,10 @@ impl IcebergSplitEnumerator {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
             return Ok(vec![IcebergSplit {
                 split_id: 0,
-                snapshot_id: 0, // unused
+                snapshot_id: 0,
                 table_meta: TableMetadataJsonStr::serialize(table.metadata()),
                 files: vec![],
+                eq_delete_files: vec![],
             }]);
         }
 
@@ -253,7 +254,7 @@ impl IcebergSplitEnumerator {
                 current_snapshot.unwrap().snapshot_id()
             }
         };
-        let require_names = Self::get_require_field_names(&table, snapshot_id,schema).await?;
+        let require_names = Self::get_require_field_names(&table, snapshot_id, schema).await?;
 
         let mut data_files = vec![];
         let mut eq_delete_files = vec![];
@@ -314,7 +315,11 @@ impl IcebergSplitEnumerator {
             .collect_vec())
     }
 
-    async fn get_require_field_names(table: &Table, snapshot_id: i64, rw_schema: Schema) -> ConnectorResult<Vec<String>> {
+    async fn get_require_field_names(
+        table: &Table,
+        snapshot_id: i64,
+        rw_schema: Schema,
+    ) -> ConnectorResult<Vec<String>> {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
@@ -342,7 +347,8 @@ impl IcebergSplitEnumerator {
             })
             .collect::<ConnectorResult<HashSet<_>>>()?;
         delete_columns.extend(rw_schema.names().iter().cloned());
-        let require_field_ids = schema.as_struct()
+        let require_field_ids = schema
+            .as_struct()
             .fields()
             .iter()
             .filter_map(|field| {
