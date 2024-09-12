@@ -284,7 +284,7 @@ impl FrontendObserverNode {
                             ),
                             Operation::Update => {
                                 println!(
-                                    "heiheihei, update table: {:?}, {:?}",
+                                    "[fe]heiheihei, update table: {:?}, {:?}",
                                     table.id, table.name
                                 );
                                 let old_fragment_id = catalog_guard

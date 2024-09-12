@@ -448,6 +448,7 @@ impl CatalogController {
         job_id: ObjectId,
         is_cancelled: bool,
     ) -> MetaResult<bool> {
+        println!("heiheihei[meta]: abort job: {}", job_id);
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -551,6 +552,8 @@ impl CatalogController {
             let _ = tx.send(Err(err));
         }
         txn.commit().await?;
+
+        println!("heiheihei[meta]: notify delete job: {}, {:?}", job_id, objs);
 
         if !objs.is_empty() {
             self.notify_frontend(Operation::Delete, build_relation_group(objs))
@@ -718,6 +721,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+        println!("heiheihei[meta]: finish job: {}, {:?}", job_id, job_type);
 
         // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
         let res = Object::update_many()

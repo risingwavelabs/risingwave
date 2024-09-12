@@ -728,11 +728,11 @@ impl CatalogController {
     }
 
     /// `clean_dirty_creating_jobs` cleans up creating jobs that are creating in Foreground mode or in Initial status.
-    pub async fn clean_dirty_creating_jobs(&self) -> MetaResult<ReleaseContext> {
+    pub async fn clean_dirty_creating_jobs(&self) -> MetaResult<Vec<SourceId>> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let mut dirty_objs: Vec<PartialObject> = streaming_job::Entity::find()
+        let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .columns([
@@ -755,36 +755,46 @@ impl CatalogController {
 
         let changed = Self::clean_dirty_sink_downstreams(&txn).await?;
 
-        if dirty_objs.is_empty() {
+        if dirty_job_objs.is_empty() {
             if changed {
                 txn.commit().await?;
             }
 
-            return Ok(ReleaseContext::default());
+            return Ok(vec![]);
         }
 
-        self.log_cleaned_dirty_jobs(&dirty_objs, &txn).await?;
+        self.log_cleaned_dirty_jobs(&dirty_job_objs, &txn).await?;
 
-        let dirty_job_ids = dirty_objs.iter().map(|obj| obj.oid).collect::<Vec<_>>();
+        let dirty_job_ids = dirty_job_objs.iter().map(|obj| obj.oid).collect::<Vec<_>>();
 
         // Filter out dummy objs for replacement.
         // todo: we'd better introduce a new dummy object type for replacement.
-        let all_dirty_table_ids = dirty_objs
+        let all_dirty_table_ids = dirty_job_objs
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Table)
             .map(|obj| obj.oid)
             .collect_vec();
-        let dirty_table_ids: HashSet<ObjectId> = Table::find()
+        let dirty_table_type_map: HashMap<ObjectId, TableType> = Table::find()
             .select_only()
             .column(table::Column::TableId)
+            .column(table::Column::TableType)
             .filter(table::Column::TableId.is_in(all_dirty_table_ids))
-            .into_tuple::<ObjectId>()
+            .into_tuple::<(ObjectId, TableType)>()
             .all(&txn)
             .await?
             .into_iter()
             .collect();
-        dirty_objs
-            .retain(|obj| obj.obj_type != ObjectType::Table || dirty_table_ids.contains(&obj.oid));
+
+        // Only notify delete for failed materialized views.
+        let dirty_mview_objs = dirty_job_objs
+            .into_iter()
+            .filter(|obj| {
+                matches!(
+                    dirty_table_type_map.get(&obj.oid),
+                    Some(TableType::MaterializedView)
+                )
+            })
+            .collect_vec();
 
         let associated_source_ids: Vec<SourceId> = Table::find()
             .select_only()
@@ -797,15 +807,16 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-        let dirty_source_objs: Vec<PartialObject> = Object::find()
-            .filter(object::Column::Oid.is_in(associated_source_ids.clone()))
-            .into_partial_model()
+
+        let dirty_state_table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(table::Column::BelongsToJobId.is_in(dirty_job_ids.clone()))
+            .into_tuple()
             .all(&txn)
             .await?;
-        dirty_objs.extend(dirty_source_objs);
 
-        let mut dirty_state_table_ids = vec![];
-        let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
+        let dirty_mview_internal_table_objs = Object::find()
             .select_only()
             .columns([
                 object::Column::Oid,
@@ -814,17 +825,15 @@ impl CatalogController {
                 object::Column::DatabaseId,
             ])
             .join(JoinType::InnerJoin, object::Relation::Table.def())
-            .filter(table::Column::BelongsToJobId.is_in(dirty_job_ids.clone()))
+            .filter(table::Column::BelongsToJobId.is_in(dirty_mview_objs.iter().map(|obj| obj.oid)))
             .into_partial_model()
             .all(&txn)
             .await?;
-        dirty_state_table_ids.extend(to_drop_internal_table_objs.iter().map(|obj| obj.oid));
-        dirty_objs.extend(to_drop_internal_table_objs);
 
         let to_delete_objs: HashSet<ObjectId> = dirty_job_ids
             .clone()
             .into_iter()
-            .chain(dirty_state_table_ids.clone().into_iter())
+            .chain(dirty_state_table_ids.into_iter())
             .chain(associated_source_ids.clone().into_iter())
             .collect();
 
@@ -836,17 +845,18 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let relation_group = build_relation_group(dirty_objs);
+        let relation_group = build_relation_group(
+            dirty_mview_objs
+                .into_iter()
+                .chain(dirty_mview_internal_table_objs.into_iter())
+                .collect_vec(),
+        );
 
         let _version = self
             .notify_frontend(NotificationOperation::Delete, relation_group)
             .await;
 
-        Ok(ReleaseContext {
-            state_table_ids: dirty_state_table_ids,
-            source_ids: associated_source_ids,
-            ..Default::default()
-        })
+        Ok(associated_source_ids)
     }
 
     async fn log_cleaned_dirty_jobs(

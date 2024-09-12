@@ -84,6 +84,7 @@ impl DdlController {
         let id = streaming_job.id();
         let name = streaming_job.name();
         let definition = streaming_job.definition();
+        println!("heiheihei[meta]: create streaming job: {}, {}", id, name);
         let source_id = match &streaming_job {
             StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
             _ => None,
