@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lint_reasons)]
 #![feature(let_chains)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
@@ -457,6 +456,14 @@ pub fn start(
                 table_info_statistic_history_times: config
                     .storage
                     .table_info_statistic_history_times,
+                actor_cnt_per_worker_parallelism_hard_limit: config
+                    .meta
+                    .developer
+                    .actor_cnt_per_worker_parallelism_hard_limit,
+                actor_cnt_per_worker_parallelism_soft_limit: config
+                    .meta
+                    .developer
+                    .actor_cnt_per_worker_parallelism_soft_limit,
             },
             config.system.into_init_system_params(),
             Default::default(),

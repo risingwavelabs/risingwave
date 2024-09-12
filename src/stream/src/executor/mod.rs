@@ -164,13 +164,17 @@ pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
 
-pub type MessageStreamItem = StreamExecutorResult<Message>;
+pub type MessageStreamItemInner<M> = StreamExecutorResult<MessageInner<M>>;
+pub type MessageStreamItem = MessageStreamItemInner<BarrierMutationType>;
+pub type DispatcherMessageStreamItem = MessageStreamItemInner<()>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
-pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
+pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
+pub trait MessageStream = Stream<Item = MessageStreamItem> + Send;
+pub trait DispatcherMessageStream = Stream<Item = DispatcherMessageStreamItem> + Send;
 
 /// Static information of an executor.
 #[derive(Debug, Default, Clone)]
@@ -264,6 +268,7 @@ where
 pub const INVALID_EPOCH: u64 = 0;
 
 type UpstreamFragmentId = FragmentId;
+type SplitAssignments = HashMap<ActorId, Vec<SplitImpl>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateMutation {
@@ -271,7 +276,7 @@ pub struct UpdateMutation {
     pub merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
     pub vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
     pub dropped_actors: HashSet<ActorId>,
-    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub actor_splits: SplitAssignments,
     pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
 }
 
@@ -280,7 +285,7 @@ pub struct AddMutation {
     pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
     pub added_actors: HashSet<ActorId>,
     // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
-    pub splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub splits: SplitAssignments,
     pub pause: bool,
     /// (`upstream_mv_table_id`,  `subscriber_id`)
     pub subscriptions_to_add: Vec<(TableId, u32)>,
@@ -292,7 +297,7 @@ pub enum Mutation {
     Stop(HashSet<ActorId>),
     Update(UpdateMutation),
     Add(AddMutation),
-    SourceChangeSplit(HashMap<ActorId, Vec<SplitImpl>>),
+    SourceChangeSplit(SplitAssignments),
     Pause,
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
@@ -380,6 +385,51 @@ impl Barrier {
     pub fn is_stop(&self, actor_id: ActorId) -> bool {
         self.all_stop_actors()
             .map_or(false, |actors| actors.contains(&actor_id))
+    }
+
+    /// Get the initial split assignments for the actor with `actor_id`.
+    ///
+    /// This should only be called on the initial barrier received by the executor. It must be
+    ///
+    /// - `Add` mutation when it's a new streaming job, or recovery.
+    /// - `Update` mutation when it's created for scaling.
+    /// - `AddAndUpdate` mutation when it's created for sink-into-table.
+    ///
+    /// Note that `SourceChangeSplit` is **not** included, because it's only used for changing splits
+    /// of existing executors.
+    pub fn initial_split_assignment(&self, actor_id: ActorId) -> Option<&[SplitImpl]> {
+        match self.mutation.as_deref()? {
+            Mutation::Update(UpdateMutation { actor_splits, .. })
+            | Mutation::Add(AddMutation {
+                splits: actor_splits,
+                ..
+            }) => actor_splits.get(&actor_id),
+
+            Mutation::AddAndUpdate(
+                AddMutation {
+                    splits: add_actor_splits,
+                    ..
+                },
+                UpdateMutation {
+                    actor_splits: update_actor_splits,
+                    ..
+                },
+            ) => add_actor_splits
+                .get(&actor_id)
+                // `Add` and `Update` should apply to different fragments, so we don't need to merge them.
+                .or_else(|| update_actor_splits.get(&actor_id)),
+
+            _ => {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "the initial mutation of the barrier should not be {:?}",
+                        self.mutation
+                    );
+                }
+                None
+            }
+        }
+        .map(|s| s.as_slice())
     }
 
     /// Get all actors that to be stopped (dropped) by this barrier.
@@ -563,7 +613,7 @@ impl Mutation {
     }
 
     fn to_protobuf(&self) -> PbMutation {
-        let actor_splits_to_protobuf = |actor_splits: &HashMap<ActorId, Vec<SplitImpl>>| {
+        let actor_splits_to_protobuf = |actor_splits: &SplitAssignments| {
             actor_splits
                 .iter()
                 .map(|(&actor_id, splits)| {
@@ -867,6 +917,16 @@ impl<M> BarrierInner<M> {
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
         })
     }
+
+    pub fn map_mutation<M2>(self, f: impl FnOnce(M) -> M2) -> BarrierInner<M2> {
+        BarrierInner {
+            epoch: self.epoch,
+            mutation: f(self.mutation),
+            kind: self.kind,
+            tracing_context: self.tracing_context,
+            passed_actors: self.passed_actors,
+        }
+    }
 }
 
 impl DispatcherBarrier {
@@ -971,6 +1031,16 @@ pub enum MessageInner<M> {
     Watermark(Watermark),
 }
 
+impl<M> MessageInner<M> {
+    pub fn map_mutation<M2>(self, f: impl FnOnce(M) -> M2) -> MessageInner<M2> {
+        match self {
+            MessageInner::Chunk(chunk) => MessageInner::Chunk(chunk),
+            MessageInner::Barrier(barrier) => MessageInner::Barrier(barrier.map_mutation(f)),
+            MessageInner::Watermark(watermark) => MessageInner::Watermark(watermark),
+        }
+    }
+}
+
 pub type Message = MessageInner<BarrierMutationType>;
 pub type DispatcherMessage = MessageInner<()>;
 
@@ -1056,9 +1126,9 @@ pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
-pub async fn expect_first_barrier(
-    stream: &mut (impl MessageStream + Unpin),
-) -> StreamExecutorResult<Barrier> {
+pub async fn expect_first_barrier<M: Debug>(
+    stream: &mut (impl MessageStreamInner<M> + Unpin),
+) -> StreamExecutorResult<BarrierInner<M>> {
     let message = stream
         .next()
         .instrument_await("expect_first_barrier")

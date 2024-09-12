@@ -14,11 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{anyhow, Context};
-use futures::future::try_join_all;
-use futures::prelude::future::FutureExt;
-use futures::prelude::TryFuture;
-use futures::TryFutureExt;
+use anyhow::anyhow;
 use google_cloud_gax::conn::Environment;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_pubsub::apiv1;
@@ -26,7 +22,7 @@ use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile
 use google_cloud_pubsub::client::google_cloud_auth::project;
 use google_cloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
 use google_cloud_pubsub::client::{Client, ClientConfig};
-use google_cloud_pubsub::publisher::{Awaiter, Publisher};
+use google_cloud_pubsub::publisher::Publisher;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde_derive::Deserialize;
@@ -46,18 +42,32 @@ use crate::dispatch_sink_formatter_str_key_impl;
 pub const PUBSUB_SINK: &str = "google_pubsub";
 const PUBSUB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;
 
-fn may_delivery_future(awaiter: Vec<Awaiter>) -> GooglePubSubSinkDeliveryFuture {
-    try_join_all(awaiter.into_iter().map(|awaiter| {
-        awaiter.get().map(|result| {
-            result
-                .context("Google Pub/Sub sink error")
-                .map_err(SinkError::GooglePubSub)
-                .map(|_| ())
-        })
-    }))
-    .map_ok(|_: Vec<()>| ())
-    .boxed()
+mod delivery_future {
+    use anyhow::Context;
+    use futures::future::try_join_all;
+    use futures::{FutureExt, TryFuture, TryFutureExt};
+    use google_cloud_pubsub::publisher::Awaiter;
+
+    use crate::sink::SinkError;
+
+    pub type GooglePubSubSinkDeliveryFuture =
+        impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+
+    pub(super) fn may_delivery_future(awaiter: Vec<Awaiter>) -> GooglePubSubSinkDeliveryFuture {
+        try_join_all(awaiter.into_iter().map(|awaiter| {
+            awaiter.get().map(|result| {
+                result
+                    .context("Google Pub/Sub sink error")
+                    .map_err(SinkError::GooglePubSub)
+                    .map(|_| ())
+            })
+        }))
+        .map_ok(|_: Vec<()>| ())
+        .boxed()
+    }
 }
+
+use delivery_future::*;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -171,9 +181,6 @@ struct GooglePubSubPayloadWriter<'w> {
     message_vec: Vec<PubsubMessage>,
     add_future: DeliveryFutureManagerAddFuture<'w, GooglePubSubSinkDeliveryFuture>,
 }
-
-pub type GooglePubSubSinkDeliveryFuture =
-    impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
 impl GooglePubSubSinkWriter {
     pub async fn new(

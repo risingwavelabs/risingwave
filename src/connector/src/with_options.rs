@@ -126,6 +126,10 @@ pub trait WithPropertiesExt: Get + Sized {
         CdcTableType::from_properties(self).enable_transaction_metadata()
     }
 
+    fn is_shareable_non_cdc_connector(&self) -> bool {
+        self.is_kafka_connector()
+    }
+
     #[inline(always)]
     fn is_iceberg_connector(&self) -> bool {
         let Some(connector) = self.get_connector() else {

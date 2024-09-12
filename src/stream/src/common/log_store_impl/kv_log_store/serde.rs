@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -42,7 +42,7 @@ use risingwave_storage::error::StorageResult;
 use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{StateStoreIterExt, StateStoreReadIter};
-use risingwave_storage::table::{compute_vnode, TableDistribution, SINGLETON_VNODE};
+use risingwave_storage::table::{compute_vnode, SINGLETON_VNODE};
 use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
@@ -201,8 +201,7 @@ impl LogStoreRowSerde {
 
         let vnodes = match vnodes {
             Some(vnodes) => vnodes,
-
-            None => TableDistribution::singleton_vnode_bitmap(),
+            None => Bitmap::singleton().into(),
         };
 
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type
@@ -216,7 +215,7 @@ impl LogStoreRowSerde {
         );
 
         let dist_key_indices = if dist_key_indices.is_empty() {
-            if &vnodes != TableDistribution::singleton_vnode_bitmap_ref() {
+            if !vnodes.is_singleton() {
                 warn!(
                     ?vnodes,
                     "singleton log store gets non-singleton vnode bitmap"
@@ -946,7 +945,7 @@ mod tests {
     use risingwave_storage::store::{
         FromStreamStateStoreIter, StateStoreIterItem, StateStoreReadIter,
     };
-    use risingwave_storage::table::DEFAULT_VNODE;
+    use risingwave_storage::table::SINGLETON_VNODE;
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Sender;
 
@@ -1024,7 +1023,7 @@ mod tests {
             seq_id += 1;
         }
 
-        let (key, encoded_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, false);
+        let (key, encoded_barrier) = serde.serialize_barrier(epoch, SINGLETON_VNODE, false);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
@@ -1062,7 +1061,8 @@ mod tests {
             seq_id += 1;
         }
 
-        let (key, encoded_checkpoint_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, true);
+        let (key, encoded_checkpoint_barrier) =
+            serde.serialize_barrier(epoch, SINGLETON_VNODE, true);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_checkpoint_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
@@ -1200,7 +1200,7 @@ mod tests {
     ) {
         let (ops, rows) = gen_test_data(base);
         let first_barrier = {
-            let (key, value) = serde.serialize_barrier(EPOCH0, DEFAULT_VNODE, true);
+            let (key, value) = serde.serialize_barrier(EPOCH0, SINGLETON_VNODE, true);
             Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH0), value))
         };
         let stream = stream::once(async move { first_barrier });
@@ -1210,7 +1210,7 @@ mod tests {
         let stream = stream.chain(stream::once({
             let serde = serde.clone();
             async move {
-                let (key, value) = serde.serialize_barrier(EPOCH1, DEFAULT_VNODE, false);
+                let (key, value) = serde.serialize_barrier(EPOCH1, SINGLETON_VNODE, false);
                 Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH1), value))
             }
         }));
@@ -1218,7 +1218,7 @@ mod tests {
             gen_row_stream(serde.clone(), ops.clone(), rows.clone(), EPOCH2, seq_id);
         let stream = stream.chain(row_stream).chain(stream::once({
             async move {
-                let (key, value) = serde.serialize_barrier(EPOCH2, DEFAULT_VNODE, true);
+                let (key, value) = serde.serialize_barrier(EPOCH2, SINGLETON_VNODE, true);
                 Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH2), value))
             }
         }));

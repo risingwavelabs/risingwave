@@ -35,7 +35,6 @@ use risingwave_connector::sink::{
 };
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
 use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_sqlparser::ast::{
@@ -342,6 +341,10 @@ pub async fn get_partition_compute_info(
 async fn get_partition_compute_info_for_iceberg(
     iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
+    // TODO: check table if exists
+    if iceberg_config.create_table_if_not_exists {
+        return Ok(None);
+    }
     let table = iceberg_config.load_table().await?;
     let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok() else {
         return Ok(None);
@@ -415,6 +418,8 @@ pub async fn handle_create_sink(
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
 
+    session.check_cluster_limits().await?;
+
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         stmt.sink_name.clone(),
         StatementType::CREATE_SINK,
@@ -439,15 +444,7 @@ pub async fn handle_create_sink(
             );
         }
 
-        let mut graph = build_graph(plan)?;
-
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
+        let graph = build_graph(plan)?;
 
         (sink, graph, target_table_catalog)
     };
@@ -692,6 +689,7 @@ pub(crate) async fn reparse_table_for_sink(
         append_only,
         on_conflict,
         with_version_column,
+        None,
         None,
     )
     .await?;

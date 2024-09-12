@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
 #![feature(coroutines)]
 #![feature(never_type)]

@@ -625,19 +625,20 @@ impl CatalogManager {
                 .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
-            let catalog_deleted_ids = tables_to_drop
+            let streaming_job_deleted_ids = tables_to_drop
                 .into_iter()
                 .filter(|table| valid_table_name(&table.name))
                 .map(|table| StreamingJobId::new(table.id))
+                .chain(sources_to_drop.iter().filter_map(|source| {
+                    source
+                        .info
+                        .as_ref()
+                        .and_then(|info| info.is_shared().then(|| StreamingJobId::new(source.id)))
+                }))
                 .chain(
                     sinks_to_drop
                         .into_iter()
                         .map(|sink| StreamingJobId::new(sink.id)),
-                )
-                .chain(
-                    subscriptions_to_drop
-                        .into_iter()
-                        .map(|subscription| StreamingJobId::new(subscription.id)),
                 )
                 .collect_vec();
             let source_deleted_ids = sources_to_drop
@@ -647,7 +648,7 @@ impl CatalogManager {
 
             Ok((
                 version,
-                catalog_deleted_ids,
+                streaming_job_deleted_ids,
                 source_deleted_ids,
                 connections_dropped,
             ))
@@ -1810,15 +1811,11 @@ impl CatalogManager {
                     all_table_ids.extend(index_table_ids.iter().cloned());
 
                     for index_table_id in &index_table_ids {
-                        let internal_table_ids = match fragment_manager
+                        let internal_table_ids = fragment_manager
                             .select_table_fragments_by_table_id(&(index_table_id.into()))
                             .await
                             .map(|fragments| fragments.internal_table_ids())
-                        {
-                            Ok(v) => v,
-                            // Handle backwards compat with no state persistence.
-                            Err(_) => vec![],
-                        };
+                            .unwrap_or_default();
 
                         // 1 should be used by table scan.
                         if internal_table_ids.len() == 1 {
@@ -1900,15 +1897,11 @@ impl CatalogManager {
                     }
                     all_table_ids.insert(index.index_table_id);
 
-                    let internal_table_ids = match fragment_manager
+                    let internal_table_ids = fragment_manager
                         .select_table_fragments_by_table_id(&(index.index_table_id.into()))
                         .await
                         .map(|fragments| fragments.internal_table_ids())
-                    {
-                        Ok(v) => v,
-                        // Handle backwards compat with no state persistence.
-                        Err(_) => vec![],
-                    };
+                        .unwrap_or_default();
 
                     // 1 should be used by table scan.
                     if internal_table_ids.len() == 1 {

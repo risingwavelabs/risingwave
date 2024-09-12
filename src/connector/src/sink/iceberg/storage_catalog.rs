@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use iceberg::io::{FileIO, S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
-use iceberg::spec::TableMetadata;
+use iceberg::spec::{TableMetadata, TableMetadataBuilder};
 use iceberg::table::Table;
 use iceberg::{
     Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
@@ -218,10 +218,42 @@ impl Catalog for StorageCatalog {
     /// Create a new table inside the namespace.
     async fn create_table(
         &self,
-        _namespace: &NamespaceIdent,
-        _creation: TableCreation,
+        namespace: &NamespaceIdent,
+        creation: TableCreation,
     ) -> iceberg::Result<Table> {
-        todo!()
+        let table_ident = TableIdent::new(namespace.clone(), creation.name.clone());
+        let table_path = {
+            let mut names = table_ident.namespace.clone().inner();
+            names.push(table_ident.name.to_string());
+            if self.warehouse.ends_with('/') {
+                format!("{}{}", self.warehouse, names.join("/"))
+            } else {
+                format!("{}/{}", self.warehouse, names.join("/"))
+            }
+        };
+
+        // Create the metadata directory
+        let metadata_path = format!("{table_path}/metadata");
+
+        // Create the initial table metadata
+        let table_metadata = TableMetadataBuilder::from_table_creation(creation)?.build()?;
+
+        // Write the initial metadata file
+        let metadata_file_path = format!("{metadata_path}/v1.metadata.json");
+        let metadata_json = serde_json::to_string(&table_metadata)?;
+        let output = self.file_io.new_output(&metadata_file_path)?;
+        output.write(metadata_json.into()).await?;
+
+        // Write the version hint file
+        let version_hint_path = format!("{table_path}/metadata/version-hint.text");
+        let version_hint_output = self.file_io.new_output(&version_hint_path)?;
+        version_hint_output.write("1".into()).await?;
+
+        Ok(Table::builder()
+            .metadata(table_metadata)
+            .identifier(table_ident)
+            .file_io(self.file_io.clone())
+            .build())
     }
 
     /// Load table from the catalog.
@@ -229,7 +261,11 @@ impl Catalog for StorageCatalog {
         let table_path = {
             let mut names = table.namespace.clone().inner();
             names.push(table.name.to_string());
-            format!("{}/{}", self.warehouse, names.join("/"))
+            if self.warehouse.ends_with('/') {
+                format!("{}{}", self.warehouse, names.join("/"))
+            } else {
+                format!("{}/{}", self.warehouse, names.join("/"))
+            }
         };
         let path = if self.is_version_hint_exist(&table_path).await? {
             let version_hint = self.read_version_hint(&table_path).await?;
@@ -262,8 +298,23 @@ impl Catalog for StorageCatalog {
     }
 
     /// Check if a table exists in the catalog.
-    async fn table_exists(&self, _table: &TableIdent) -> iceberg::Result<bool> {
-        todo!()
+    async fn table_exists(&self, table: &TableIdent) -> iceberg::Result<bool> {
+        let table_path = {
+            let mut names = table.namespace.clone().inner();
+            names.push(table.name.to_string());
+            if self.warehouse.ends_with('/') {
+                format!("{}{}", self.warehouse, names.join("/"))
+            } else {
+                format!("{}/{}", self.warehouse, names.join("/"))
+            }
+        };
+        let metadata_path = format!("{table_path}/metadata/version-hint.text");
+        self.file_io.is_exist(&metadata_path).await.map_err(|err| {
+            Error::new(
+                ErrorKind::Unexpected,
+                format!("Failed to check if table exists: {}", err.as_report()),
+            )
+        })
     }
 
     /// Rename a table in the catalog.

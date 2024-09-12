@@ -59,9 +59,10 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::cluster_limit::ActorCountPerParallelism;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::{cluster_limit, resource_util};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
@@ -1193,6 +1194,47 @@ impl SessionImpl {
 
     pub fn temporary_source_manager(&self) -> TemporarySourceManager {
         self.temporary_source_manager.lock().clone()
+    }
+
+    pub async fn check_cluster_limits(&self) -> Result<()> {
+        if self.config().bypass_cluster_limits() {
+            return Ok(());
+        }
+
+        let gen_message = |violated_limit: &ActorCountPerParallelism,
+                           exceed_hard_limit: bool|
+         -> String {
+            let (limit_type, action) = if exceed_hard_limit {
+                ("critical", "Please scale the cluster before proceeding!")
+            } else {
+                ("recommended", "Scaling the cluster is recommended.")
+            };
+            format!(
+                "\n- {}\n- {}\n- {}\n- {}\n- {}\n{}",
+                format_args!("Actor count per parallelism exceeds the {} limit.", limit_type),
+                format_args!("Depending on your workload, this may overload the cluster and cause performance/stability issues. {}", action),
+                "Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.",
+                "You can bypass this check via SQL `SET bypass_cluster_limits TO true`.",
+                "You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.",
+                violated_limit,
+            )
+        };
+
+        let limits = self.env().meta_client().get_cluster_limits().await?;
+        for limit in limits {
+            match limit {
+                cluster_limit::ClusterLimit::ActorCount(l) => {
+                    if l.exceed_hard_limit() {
+                        return Err(RwError::from(ErrorCode::ProtocolError(gen_message(
+                            &l, true,
+                        ))));
+                    } else if l.exceed_soft_limit() {
+                        self.notice_to_user(gen_message(&l, false));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 

@@ -15,7 +15,6 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
-#![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(extract_if)]
 #![feature(hash_extract_if)]

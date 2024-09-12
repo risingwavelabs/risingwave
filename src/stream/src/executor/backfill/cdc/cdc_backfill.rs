@@ -43,7 +43,7 @@ use crate::executor::backfill::CdcScanOptions;
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
 use crate::executor::UpdateMutation;
-use crate::task::CreateMviewProgress;
+use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
@@ -68,7 +68,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     // TODO: introduce a CdcBackfillProgress to report finish to Meta
     // This object is just a stub right now
-    progress: Option<CreateMviewProgress>,
+    progress: Option<CreateMviewProgressReporter>,
 
     metrics: CdcBackfillMetrics,
 
@@ -86,7 +86,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         upstream: Executor,
         output_indices: Vec<usize>,
         output_columns: Vec<ColumnDesc>,
-        progress: Option<CreateMviewProgress>,
+        progress: Option<CreateMviewProgressReporter>,
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
