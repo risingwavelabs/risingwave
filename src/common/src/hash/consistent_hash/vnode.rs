@@ -20,7 +20,7 @@ use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
 use crate::types::{DataType, Datum, DatumRef, ScalarImpl, ScalarRefImpl};
 use crate::util::hash_util::Crc32FastBuilder;
-use crate::util::row_id::extract_vnode_id_from_row_id;
+use crate::util::row_id::compute_vnode_from_row_id;
 
 /// `VirtualNode` (a.k.a. Vnode) is a minimal partition that a set of keys belong to. It is used for
 /// consistent hashing.
@@ -158,7 +158,7 @@ impl VirtualNode {
                 .enumerate()
                 .map(|(idx, serial)| {
                     if let Some(serial) = serial {
-                        extract_vnode_id_from_row_id(serial.as_row_id(), vnode_count)
+                        compute_vnode_from_row_id(serial.as_row_id(), vnode_count)
                     } else {
                         // NOTE: here it will hash the entire row when the `_row_id` is missing,
                         // which could result in rows from the same chunk being allocated to different chunks.
@@ -188,7 +188,7 @@ impl VirtualNode {
     pub fn compute_row(row: impl Row, indices: &[usize], vnode_count: usize) -> VirtualNode {
         let project = row.project(indices);
         if let Ok(Some(ScalarRefImpl::Serial(s))) = project.iter().exactly_one().as_ref() {
-            return extract_vnode_id_from_row_id(s.as_row_id(), vnode_count);
+            return compute_vnode_from_row_id(s.as_row_id(), vnode_count);
         }
 
         project.hash(Crc32FastBuilder).to_vnode(vnode_count)
