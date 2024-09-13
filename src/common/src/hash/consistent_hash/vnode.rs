@@ -209,7 +209,8 @@ mod tests {
 
     #[test]
     fn test_serial_key_chunk() {
-        let mut gen = RowIdGenerator::new([VirtualNode::from_index(100)]);
+        let mut gen =
+            RowIdGenerator::new([VirtualNode::from_index(100)], VirtualNode::COUNT_FOR_TEST);
         let chunk = format!(
             "SRL I
              {} 1
@@ -229,7 +230,8 @@ mod tests {
 
     #[test]
     fn test_serial_key_row() {
-        let mut gen = RowIdGenerator::new([VirtualNode::from_index(100)]);
+        let mut gen =
+            RowIdGenerator::new([VirtualNode::from_index(100)], VirtualNode::COUNT_FOR_TEST);
         let row = OwnedRow::new(vec![
             Some(ScalarImpl::Serial(gen.next().into())),
             Some(ScalarImpl::Int64(12345)),
@@ -242,7 +244,10 @@ mod tests {
 
     #[test]
     fn test_serial_key_chunk_multiple_vnodes() {
-        let mut gen = RowIdGenerator::new([100, 200].map(VirtualNode::from_index));
+        let mut gen = RowIdGenerator::new(
+            [100, 200].map(VirtualNode::from_index),
+            VirtualNode::COUNT_FOR_TEST,
+        );
         let chunk = format!(
             "SRL I
              {} 1
