@@ -172,8 +172,7 @@ pub fn get_from_batch(
     read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
-    imm.get(table_key, read_epoch, read_options).map(|v| {
+    imm.get(table_key, read_epoch, read_options).inspect(|_| {
         local_stats.get_shared_buffer_hit_counts += 1;
-        v
     })
 }

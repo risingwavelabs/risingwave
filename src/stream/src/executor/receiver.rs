@@ -231,6 +231,35 @@ mod tests {
 
         let (upstream_fragment_id, fragment_id) = (10, 18);
 
+        // 4. Send a configuration change barrier.
+        let merge_updates = maplit::hashmap! {
+            (actor_id, upstream_fragment_id) => MergeUpdate {
+                actor_id,
+                upstream_fragment_id,
+                new_upstream_fragment_id: None,
+                added_upstream_actor_id: vec![new],
+                removed_upstream_actor_id: vec![old],
+            }
+        };
+
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: Default::default(),
+                merges: merge_updates,
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
+
+        barrier_test_env.inject_barrier(&b1, [actor_id]);
+        barrier_test_env
+            .shared_context
+            .local_barrier_manager
+            .flush_all_events()
+            .await;
+
         let input = new_input(
             &ctx,
             metrics.clone(),
@@ -296,30 +325,6 @@ mod tests {
         send!([old], Message::Chunk(StreamChunk::default()));
         recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk.
         assert_recv_pending!();
-
-        // 4. Send a configuration change barrier.
-        let merge_updates = maplit::hashmap! {
-            (actor_id, upstream_fragment_id) => MergeUpdate {
-                actor_id,
-                upstream_fragment_id,
-                new_upstream_fragment_id: None,
-                added_upstream_actor_id: vec![new],
-                removed_upstream_actor_id: vec![old],
-            }
-        };
-
-        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
-            UpdateMutation {
-                dispatchers: Default::default(),
-                merges: merge_updates,
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-            },
-        ));
-
-        barrier_test_env.inject_barrier(&b1, [actor_id]);
 
         send!([new], Message::Barrier(b1.clone().into_dispatcher()));
         assert_recv_pending!(); // We should not receive the barrier, as new is not the upstream.

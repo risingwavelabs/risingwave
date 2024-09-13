@@ -8,32 +8,6 @@ statement ok
 CREATE TABLE t (k INT);
 
 statement error
-CREATE SINK file_sink
-FROM
-  t
-WITH
-(
-  connector = 's3',
-  s3.region_name = 'us-east-1',
-  s3.bucket_name = 'test',
-  s3.path = '',
-  s3.file_type = 'parquet',
-  type = 'append-only',
-  force_append_only='true'
-) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');
-----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
-  2: failed to validate sink
-  3: Internal error
-  4: feature FileSink is only available for tier Paid and above, while the current tier is Free
-
-Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
-
-
-statement error
 CREATE SINK dynamodb_sink
 FROM
   t

@@ -1,0 +1,50 @@
+control substitution on
+
+system ok
+rpk topic create test-topic-18308
+
+statement ok
+CREATE SOURCE kafkasource (
+    id int,
+    name string,
+)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test-topic-18308',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE compact_table (
+  id int,
+  name varchar,
+  PRIMARY KEY (id)
+);
+
+statement ok
+CREATE SINK table_sink INTO compact_table AS SELECT * FROM kafkasource;
+
+system ok
+echo '{ "id": 1, "name": "xxchan" }' | rpk topic produce test-topic-18308
+
+sleep 5s
+
+statement ok
+flush;
+
+query IT
+SELECT * FROM compact_table;
+----
+1 xxchan
+
+statement ok
+DROP SINK table_sink;
+
+statement ok
+DROP TABLE compact_table;
+
+statement ok
+DROP SOURCE kafkasource;
+
+system ok
+rpk topic delete test-topic-18308

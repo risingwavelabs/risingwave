@@ -16,7 +16,10 @@ v_bool boolean,
 v_date date,
 v_timestamp timestamptz,
 v_ts_ntz timestamp,
-v_decimal decimal
+v_decimal decimal,
+v_map map(int, int),
+v_array int[],
+v_struct struct<a int,b int>
 );
 
 statement ok
@@ -36,15 +39,15 @@ CREATE SINK s6 AS select * from mv6 WITH (
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
-    commit_checkpoint_interval = 1
+    create_table_if_not_exists = 'true'
 );
 
 statement ok
 INSERT INTO t6 VALUES
-(1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11),
-(2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22),
-(3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf'),
-(4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf');
+(1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11, map {1:100,2:200}, array[1,2,3], row(1,2)),
+(2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22, map {3:300}, array[1,null,3], row(3,null)),
+(3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf', null, null, null),
+(4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf', null, null, null);
 
 statement ok
 FLUSH;
@@ -53,12 +56,36 @@ sleep 5s
 
 statement ok
 INSERT INTO t6 VALUES
-(5, 5, 5000, 5.5, 5.55, '5-5', true, '2022-03-15', '2022-03-15 05:00:00Z'::timestamptz, '2022-03-15 05:00:00','nan');
+(5, 5, 5000, 5.5, 5.55, '5-5', true, '2022-03-15', '2022-03-15 05:00:00Z'::timestamptz, '2022-03-15 05:00:00','nan', null, null, null);
 
 statement ok
 FLUSH;
 
 sleep 5s
+
+statement ok
+CREATE Source iceberg_s WITH (
+    connector = 'iceberg',
+    database.name = 'demo_db',
+    table.name = 'no_partition_append_only_table',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+query ?????????????? rowsort
+select * from iceberg_s
+----
+1 1 1000 1.1 1.11 1-1 t 2022-03-11 2022-03-11 01:00:00+00:00 2022-03-11 01:00:00 1.11000 {1:100,2:200} {1,2,3} (1,2)
+2 2 2000 2.2 2.22 2-2 f 2022-03-12 2022-03-12 02:00:00+00:00 2022-03-12 02:00:00 2.22000 {3:300} {1,NULL,3} (3,)
+3 3 3000 3.3 3.33 3-3 t 2022-03-13 2022-03-13 03:00:00+00:00 2022-03-13 03:00:00 99999.99999 NULL NULL NULL
+4 4 4000 4.4 4.44 4-4 f 2022-03-14 2022-03-14 04:00:00+00:00 2022-03-14 04:00:00 -99999.99999 NULL NULL NULL
+5 5 5000 5.5 5.55 5-5 t 2022-03-15 2022-03-15 05:00:00+00:00 2022-03-15 05:00:00 NULL NULL NULL NULL
+
 
 statement ok
 DROP SINK s6;
@@ -68,3 +95,6 @@ DROP MATERIALIZED VIEW mv6;
 
 statement ok
 DROP TABLE t6;
+
+statement ok
+DROP SOURCE iceberg_s;

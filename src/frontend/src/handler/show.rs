@@ -450,7 +450,7 @@ pub async fn handle_show_object(
                 .into());
         }
         ShowObject::Jobs => {
-            let resp = session.env().meta_client().list_ddl_progress().await?;
+            let resp = session.env().meta_client().get_ddl_progress().await?;
             let rows = resp.into_iter().map(|job| ShowJobRow {
                 id: job.id as i64,
                 statement: job.statement,

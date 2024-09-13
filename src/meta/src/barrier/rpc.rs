@@ -14,14 +14,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::future::Future;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
-use futures::{pin_mut, FutureExt, StreamExt};
+use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
@@ -34,11 +33,9 @@ use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
 use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
-    BuildActorInfo, DropActorsRequest, InjectBarrierRequest, StreamingControlStreamRequest,
+    BuildActorInfo, InjectBarrierRequest, StreamingControlStreamRequest,
     StreamingControlStreamResponse,
 };
-use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::StreamClient;
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
@@ -50,7 +47,7 @@ use uuid::Uuid;
 use super::command::CommandContext;
 use super::{BarrierKind, GlobalBarrierManagerContext, TracedEpoch};
 use crate::barrier::info::InflightGraphInfo;
-use crate::manager::{MetaSrvEnv, WorkerId};
+use crate::manager::WorkerId;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -60,33 +57,47 @@ struct ControlStreamNode {
     sender: UnboundedSender<StreamingControlStreamRequest>,
 }
 
-fn into_future(
-    worker_id: WorkerId,
-    stream: BoxStream<
-        'static,
-        risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
-    >,
-) -> ResponseStreamFuture {
-    stream.into_future().map(move |(opt, stream)| {
-        (
-            worker_id,
-            stream,
-            opt.ok_or_else(|| anyhow!("end of stream").into())
-                .and_then(|result| result.map_err(|e| e.into())),
-        )
-    })
+mod response_stream_future {
+    use std::future::Future;
+
+    use anyhow::anyhow;
+    use futures::stream::BoxStream;
+    use futures::{FutureExt, StreamExt};
+    use risingwave_pb::stream_service::StreamingControlStreamResponse;
+
+    use crate::manager::WorkerId;
+    use crate::MetaResult;
+
+    pub(super) fn into_future(
+        worker_id: WorkerId,
+        stream: BoxStream<
+            'static,
+            risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
+        >,
+    ) -> ResponseStreamFuture {
+        stream.into_future().map(move |(opt, stream)| {
+            (
+                worker_id,
+                stream,
+                opt.ok_or_else(|| anyhow!("end of stream").into())
+                    .and_then(|result| result.map_err(|e| e.into())),
+            )
+        })
+    }
+
+    pub(super) type ResponseStreamFuture = impl Future<
+            Output = (
+                WorkerId,
+                BoxStream<
+                    'static,
+                    risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
+                >,
+                MetaResult<StreamingControlStreamResponse>,
+            ),
+        > + 'static;
 }
 
-type ResponseStreamFuture = impl Future<
-        Output = (
-            WorkerId,
-            BoxStream<
-                'static,
-                risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
-            >,
-            MetaResult<StreamingControlStreamResponse>,
-        ),
-    > + 'static;
+use response_stream_future::*;
 
 pub(super) struct ControlStreamManager {
     context: GlobalBarrierManagerContext,
@@ -263,39 +274,42 @@ impl ControlStreamManager {
             pre_applied_graph_info,
             applied_graph_info,
             actor_ids_to_pre_sync_mutation,
-            command_ctx.actors_to_create().map(|actors_to_create| {
-                actors_to_create
-                    .into_iter()
-                    .map(|(worker_id, actors)| {
-                        (
-                            worker_id,
-                            actors
-                                .into_iter()
-                                .map(|actor| BuildActorInfo {
-                                    actor: Some(actor),
-                                    // TODO: consider subscriber of backfilling mv
-                                    related_subscriptions: command_ctx
-                                        .subscription_info
-                                        .mv_depended_subscriptions
-                                        .iter()
-                                        .map(|(table_id, subscriptions)| {
-                                            (
-                                                table_id.table_id,
-                                                SubscriptionIds {
-                                                    subscription_ids: subscriptions
-                                                        .keys()
-                                                        .cloned()
-                                                        .collect(),
-                                                },
-                                            )
-                                        })
-                                        .collect(),
-                                })
-                                .collect_vec(),
-                        )
-                    })
-                    .collect()
-            }),
+            command_ctx
+                .command
+                .actors_to_create()
+                .map(|actors_to_create| {
+                    actors_to_create
+                        .into_iter()
+                        .map(|(worker_id, actors)| {
+                            (
+                                worker_id,
+                                actors
+                                    .into_iter()
+                                    .map(|actor| BuildActorInfo {
+                                        actor: Some(actor),
+                                        // TODO: consider subscriber of backfilling mv
+                                        related_subscriptions: command_ctx
+                                            .subscription_info
+                                            .mv_depended_subscriptions
+                                            .iter()
+                                            .map(|(table_id, subscriptions)| {
+                                                (
+                                                    table_id.table_id,
+                                                    SubscriptionIds {
+                                                        subscription_ids: subscriptions
+                                                            .keys()
+                                                            .cloned()
+                                                            .collect(),
+                                                    },
+                                                )
+                                            })
+                                            .collect(),
+                                    })
+                                    .collect_vec(),
+                            )
+                        })
+                        .collect()
+                }),
         )
     }
 
@@ -359,7 +373,7 @@ impl ControlStreamManager {
 
         self.nodes
             .iter_mut()
-            .map(|(node_id, node)| {
+            .try_for_each(|(node_id, node)| {
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
                     .actor_ids_to_collect(*node_id)
                     .collect();
@@ -390,7 +404,7 @@ impl ControlStreamManager {
                             request: Some(
                                 streaming_control_stream_request::Request::InjectBarrier(
                                     InjectBarrierRequest {
-                                        request_id: StreamRpcManager::new_request_id(),
+                                        request_id: Uuid::new_v4().to_string(),
                                         barrier: Some(barrier),
                                         actor_ids_to_collect,
                                         table_ids_to_sync,
@@ -426,7 +440,6 @@ impl ControlStreamManager {
                     Result::<_, MetaError>::Ok(())
                 }
             })
-            .try_collect()
             .inspect_err(|e| {
                 // Record failure in event log.
                 use risingwave_pb::meta::event_log;
@@ -507,95 +520,6 @@ impl GlobalBarrierManagerContext {
             .event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
     }
-}
-
-#[derive(Clone)]
-pub struct StreamRpcManager {
-    env: MetaSrvEnv,
-}
-
-impl StreamRpcManager {
-    pub fn new(env: MetaSrvEnv) -> Self {
-        Self { env }
-    }
-
-    async fn make_request<REQ, RSP, Fut: Future<Output = Result<RSP, RpcError>> + 'static>(
-        &self,
-        request: impl Iterator<Item = (&WorkerNode, REQ)>,
-        f: impl Fn(StreamClient, REQ) -> Fut,
-    ) -> MetaResult<Vec<RSP>> {
-        let pool = self.env.stream_client_pool();
-        let f = &f;
-        let iters = request.map(|(node, input)| async move {
-            let client = pool.get(node).await.map_err(|e| (node.id, e))?;
-            f(client, input).await.map_err(|e| (node.id, e))
-        });
-        let result = try_join_all_with_error_timeout(iters, COLLECT_ERROR_TIMEOUT).await;
-        result.map_err(|results_err| merge_node_rpc_errors("merged RPC Error", results_err))
-    }
-
-    fn new_request_id() -> String {
-        Uuid::new_v4().to_string()
-    }
-
-    pub async fn drop_actors(
-        &self,
-        node_map: &HashMap<WorkerId, WorkerNode>,
-        node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
-    ) -> MetaResult<()> {
-        self.make_request(
-            node_actors
-                .map(|(worker_id, actor_ids)| (node_map.get(&worker_id).unwrap(), actor_ids)),
-            |client, actor_ids| async move {
-                client
-                    .drop_actors(DropActorsRequest {
-                        request_id: Self::new_request_id(),
-                        actor_ids,
-                    })
-                    .await
-            },
-        )
-        .await?;
-        Ok(())
-    }
-}
-
-/// This function is similar to `try_join_all`, but it attempts to collect as many error as possible within `error_timeout`.
-async fn try_join_all_with_error_timeout<I, RSP, E, F>(
-    iters: I,
-    error_timeout: Duration,
-) -> Result<Vec<RSP>, Vec<E>>
-where
-    I: IntoIterator<Item = F>,
-    F: Future<Output = Result<RSP, E>>,
-{
-    let stream = FuturesUnordered::from_iter(iters);
-    pin_mut!(stream);
-    let mut results_ok = vec![];
-    let mut results_err = vec![];
-    while let Some(result) = stream.next().await {
-        match result {
-            Ok(rsp) => {
-                results_ok.push(rsp);
-            }
-            Err(err) => {
-                results_err.push(err);
-                break;
-            }
-        }
-    }
-    if results_err.is_empty() {
-        return Ok(results_ok);
-    }
-    let _ = timeout(error_timeout, async {
-        while let Some(result) = stream.next().await {
-            if let Err(err) = result {
-                results_err.push(err);
-            }
-        }
-    })
-    .await;
-    Err(results_err)
 }
 
 pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(

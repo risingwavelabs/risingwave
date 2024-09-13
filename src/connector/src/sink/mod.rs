@@ -53,6 +53,13 @@ use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use clickhouse::CLICKHOUSE_SINK;
+use decouple_checkpoint_log_sink::{
+    COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+};
+use deltalake::DELTALAKE_SINK;
+use iceberg::ICEBERG_SINK;
 use opendal::Error as OpendalError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::bitmap::Bitmap;
@@ -66,6 +73,7 @@ use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
+use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 pub use tracing;
@@ -366,13 +374,54 @@ impl SinkWriterParam {
     }
 }
 
+fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
+    matches!(
+        sink_name,
+        ICEBERG_SINK | CLICKHOUSE_SINK | STARROCKS_SINK | DELTALAKE_SINK
+    )
+}
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
+    fn set_default_commit_checkpoint_interval(
+        desc: &mut SinkDesc,
+        user_specified: &SinkDecouple,
+    ) -> Result<()> {
+        if is_sink_support_commit_checkpoint_interval(Self::SINK_NAME) {
+            match desc.properties.get(COMMIT_CHECKPOINT_INTERVAL) {
+                Some(commit_checkpoint_interval) => {
+                    let commit_checkpoint_interval = commit_checkpoint_interval
+                        .parse::<u64>()
+                        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+                    if matches!(user_specified, SinkDecouple::Disable)
+                        && commit_checkpoint_interval > 1
+                    {
+                        return Err(SinkError::Config(anyhow!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")));
+                    }
+                }
+                None => match user_specified {
+                    SinkDecouple::Default | SinkDecouple::Enable => {
+                        desc.properties.insert(
+                            COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
+                        );
+                    }
+                    SinkDecouple::Disable => {
+                        desc.properties.insert(
+                            COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
+                        );
+                    }
+                },
+            }
+        }
+        Ok(())
+    }
+
     /// `user_specified` is the value of `sink_decouple` config.
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
             SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),

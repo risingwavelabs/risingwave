@@ -19,6 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
+use crate::util::stylized_risedev_subcmd;
 use crate::MinioConfig;
 
 pub struct MinioService {
@@ -91,7 +92,11 @@ impl Task for MinioService {
 
         let path = self.minio_path()?;
         if !path.exists() {
-            return Err(anyhow!("minio binary not found in {:?}\nDid you enable minio feature in `./risedev configure`?", path));
+            return Err(anyhow!(
+                "minio binary not found in {:?}\nDid you enable minio feature in `{}`?",
+                path,
+                stylized_risedev_subcmd("configure")
+            ));
         }
 
         let mut cmd = self.minio()?;

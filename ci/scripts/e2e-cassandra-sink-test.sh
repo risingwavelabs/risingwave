@@ -42,8 +42,9 @@ tar xfvz cassandra_latest.tar.gz
 export LATEST_CASSANDRA_VERSION=$(get_latest_cassandra_version)
 export CASSANDRA_DIR="./apache-cassandra-${LATEST_CASSANDRA_VERSION}"
 # remove bundled packages, and use installed packages, because Python 3.12 has removed asyncore, but I failed to install libev support for bundled Python driver.
-rm ${CASSANDRA_DIR}/lib/six-1.12.0-py2.py3-none-any.zip
-rm ${CASSANDRA_DIR}/lib/cassandra-driver-internal-only-3.25.0.zip
+
+rm ${CASSANDRA_DIR}/lib/futures-2.1.6-py2.py3-none-any.zip
+rm ${CASSANDRA_DIR}/lib/cassandra-driver-internal-only-3.29.0.zip
 apt-get install -y libev4 libev-dev
 pip3 install --break-system-packages cassandra-driver
 export CQLSH_HOST=cassandra-server

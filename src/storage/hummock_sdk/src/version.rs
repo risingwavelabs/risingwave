@@ -24,16 +24,16 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::group_delta::PbDeltaType;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{
-    CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMetaChange,
-    PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta,
-    PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
+    CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMerge,
+    PbGroupMetaChange, PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta,
+    PbIntraLevelDelta, PbSstableInfo, PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
-use crate::change_log::{ChangeLogDelta, TableChangeLog};
+use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
 use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
 use crate::compaction_group::StaticCompactionGroupId;
-use crate::level::Levels;
+use crate::level::LevelsCommon;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID};
@@ -209,15 +209,17 @@ impl HummockVersionStateTableInfo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct HummockVersion {
+pub struct HummockVersionCommon<T> {
     pub id: HummockVersionId,
-    pub levels: HashMap<CompactionGroupId, Levels>,
-    max_committed_epoch: u64,
-    safe_epoch: u64,
+    pub levels: HashMap<CompactionGroupId, LevelsCommon<T>>,
+    pub(crate) max_committed_epoch: u64,
+    pub(crate) safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
-    pub table_change_log: HashMap<TableId, TableChangeLog>,
+    pub table_change_log: HashMap<TableId, TableChangeLogCommon<T>>,
     pub state_table_info: HummockVersionStateTableInfo,
 }
+
+pub type HummockVersion = HummockVersionCommon<SstableInfo>;
 
 impl Default for HummockVersion {
     fn default() -> Self {
@@ -225,17 +227,21 @@ impl Default for HummockVersion {
     }
 }
 
-impl HummockVersion {
+impl<T> HummockVersionCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+    PbSstableInfo: for<'a> From<&'a T>,
+{
     /// Convert the `PbHummockVersion` received from rpc to `HummockVersion`. No need to
     /// maintain backward compatibility.
     pub fn from_rpc_protobuf(pb_version: &PbHummockVersion) -> Self {
-        HummockVersion::from(pb_version)
+        pb_version.into()
     }
 
     /// Convert the `PbHummockVersion` deserialized from persisted state to `HummockVersion`.
     /// We should maintain backward compatibility.
     pub fn from_persisted_protobuf(pb_version: &PbHummockVersion) -> Self {
-        HummockVersion::from(pb_version)
+        pb_version.into()
     }
 
     pub fn to_protobuf(&self) -> PbHummockVersion {
@@ -260,14 +266,19 @@ impl HummockVersion {
     }
 }
 
-impl From<&PbHummockVersion> for HummockVersion {
+impl<T> From<&PbHummockVersion> for HummockVersionCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+{
     fn from(pb_version: &PbHummockVersion) -> Self {
         Self {
             id: HummockVersionId(pb_version.id),
             levels: pb_version
                 .levels
                 .iter()
-                .map(|(group_id, levels)| (*group_id as CompactionGroupId, Levels::from(levels)))
+                .map(|(group_id, levels)| {
+                    (*group_id as CompactionGroupId, LevelsCommon::from(levels))
+                })
                 .collect(),
             max_committed_epoch: pb_version.max_committed_epoch,
             safe_epoch: pb_version.safe_epoch,
@@ -287,7 +298,7 @@ impl From<&PbHummockVersion> for HummockVersion {
                 .map(|(table_id, change_log)| {
                     (
                         TableId::new(*table_id),
-                        TableChangeLog::from_protobuf(change_log),
+                        TableChangeLogCommon::from_protobuf(change_log),
                     )
                 })
                 .collect(),
@@ -298,8 +309,11 @@ impl From<&PbHummockVersion> for HummockVersion {
     }
 }
 
-impl From<&HummockVersion> for PbHummockVersion {
-    fn from(version: &HummockVersion) -> Self {
+impl<T> From<&HummockVersionCommon<T>> for PbHummockVersion
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    fn from(version: &HummockVersionCommon<T>) -> Self {
         Self {
             id: version.id.0,
             levels: version
@@ -324,8 +338,12 @@ impl From<&HummockVersion> for PbHummockVersion {
     }
 }
 
-impl From<HummockVersion> for PbHummockVersion {
-    fn from(version: HummockVersion) -> Self {
+impl<T> From<HummockVersionCommon<T>> for PbHummockVersion
+where
+    PbSstableInfo: From<T>,
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    fn from(version: HummockVersionCommon<T>) -> Self {
         Self {
             id: version.id.0,
             levels: version
@@ -453,18 +471,20 @@ impl HummockVersion {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct HummockVersionDelta {
+pub struct HummockVersionDeltaCommon<T> {
     pub id: HummockVersionId,
     pub prev_id: HummockVersionId,
-    pub group_deltas: HashMap<CompactionGroupId, GroupDeltas>,
-    max_committed_epoch: u64,
-    safe_epoch: u64,
+    pub group_deltas: HashMap<CompactionGroupId, GroupDeltasCommon<T>>,
+    pub(crate) max_committed_epoch: u64,
+    pub(crate) safe_epoch: u64,
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: HashSet<TableId>,
-    pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
+    pub change_log_delta: HashMap<TableId, ChangeLogDeltaCommon<T>>,
     pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
 }
+
+pub type HummockVersionDelta = HummockVersionDeltaCommon<SstableInfo>;
 
 impl Default for HummockVersionDelta {
     fn default() -> Self {
@@ -472,17 +492,21 @@ impl Default for HummockVersionDelta {
     }
 }
 
-impl HummockVersionDelta {
+impl<T> HummockVersionDeltaCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+    PbSstableInfo: for<'a> From<&'a T>,
+{
     /// Convert the `PbHummockVersionDelta` deserialized from persisted state to `HummockVersionDelta`.
     /// We should maintain backward compatibility.
     pub fn from_persisted_protobuf(delta: &PbHummockVersionDelta) -> Self {
-        Self::from(delta)
+        delta.into()
     }
 
     /// Convert the `PbHummockVersionDelta` received from rpc to `HummockVersionDelta`. No need to
     /// maintain backward compatibility.
     pub fn from_rpc_protobuf(delta: &PbHummockVersionDelta) -> Self {
-        Self::from(delta)
+        delta.into()
     }
 
     pub fn to_protobuf(&self) -> PbHummockVersionDelta {
@@ -501,12 +525,10 @@ impl HummockVersionDelta {
             .flat_map(|group_deltas| {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
                     static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                    let sst_slice = match group_delta {
-                        GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
-                        GroupDelta::GroupConstruct(_)
-                        | GroupDelta::GroupDestroy(_)
-                        | GroupDelta::GroupMetaChange(_)
-                        | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                    let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
+                        &level_delta.inserted_table_infos
+                    } else {
+                        &EMPTY_VEC
                     };
                     sst_slice.iter().map(|sst| sst.object_id)
                 })
@@ -526,12 +548,10 @@ impl HummockVersionDelta {
         let ssts_from_group_deltas = self.group_deltas.values().flat_map(|group_deltas| {
             group_deltas.group_deltas.iter().flat_map(|group_delta| {
                 static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                let sst_slice = match group_delta {
-                    GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
-                    GroupDelta::GroupConstruct(_)
-                    | GroupDelta::GroupDestroy(_)
-                    | GroupDelta::GroupMetaChange(_)
-                    | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
+                    &level_delta.inserted_table_infos
+                } else {
+                    &EMPTY_VEC
                 };
                 sst_slice.iter()
             })
@@ -564,12 +584,10 @@ impl HummockVersionDelta {
             .flat_map(|group_deltas| {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
                     static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                    let sst_slice = match group_delta {
-                        GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
-                        GroupDelta::GroupConstruct(_)
-                        | GroupDelta::GroupDestroy(_)
-                        | GroupDelta::GroupMetaChange(_)
-                        | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                    let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
+                        &level_delta.inserted_table_infos
+                    } else {
+                        &EMPTY_VEC
                     };
                     sst_slice.iter()
                 })
@@ -598,7 +616,10 @@ impl HummockVersionDelta {
     }
 }
 
-impl From<&PbHummockVersionDelta> for HummockVersionDelta {
+impl<T> From<&PbHummockVersionDelta> for HummockVersionDeltaCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+{
     fn from(pb_version_delta: &PbHummockVersionDelta) -> Self {
         Self {
             id: HummockVersionId(pb_version_delta.id),
@@ -607,7 +628,10 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
                 .group_deltas
                 .iter()
                 .map(|(group_id, deltas)| {
-                    (*group_id as CompactionGroupId, GroupDeltas::from(deltas))
+                    (
+                        *group_id as CompactionGroupId,
+                        GroupDeltasCommon::from(deltas),
+                    )
                 })
                 .collect(),
             max_committed_epoch: pb_version_delta.max_committed_epoch,
@@ -631,8 +655,8 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
                 .map(|(table_id, log_delta)| {
                     (
                         TableId::new(*table_id),
-                        ChangeLogDelta {
-                            new_log: log_delta.new_log.clone().map(Into::into),
+                        ChangeLogDeltaCommon {
+                            new_log: log_delta.new_log.as_ref().map(Into::into),
                             truncate_epoch: log_delta.truncate_epoch,
                         },
                     )
@@ -648,8 +672,11 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
     }
 }
 
-impl From<&HummockVersionDelta> for PbHummockVersionDelta {
-    fn from(version_delta: &HummockVersionDelta) -> Self {
+impl<T> From<&HummockVersionDeltaCommon<T>> for PbHummockVersionDelta
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    fn from(version_delta: &HummockVersionDeltaCommon<T>) -> Self {
         Self {
             id: version_delta.id.0,
             prev_id: version_delta.prev_id.0,
@@ -685,8 +712,11 @@ impl From<&HummockVersionDelta> for PbHummockVersionDelta {
     }
 }
 
-impl From<HummockVersionDelta> for PbHummockVersionDelta {
-    fn from(version_delta: HummockVersionDelta) -> Self {
+impl<T> From<HummockVersionDeltaCommon<T>> for PbHummockVersionDelta
+where
+    PbSstableInfo: From<T>,
+{
+    fn from(version_delta: HummockVersionDeltaCommon<T>) -> Self {
         Self {
             id: version_delta.id.0,
             prev_id: version_delta.prev_id.0,
@@ -722,7 +752,10 @@ impl From<HummockVersionDelta> for PbHummockVersionDelta {
     }
 }
 
-impl From<PbHummockVersionDelta> for HummockVersionDelta {
+impl<T> From<PbHummockVersionDelta> for HummockVersionDeltaCommon<T>
+where
+    T: From<PbSstableInfo>,
+{
     fn from(pb_version_delta: PbHummockVersionDelta) -> Self {
         Self {
             id: HummockVersionId(pb_version_delta.id),
@@ -751,7 +784,7 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
                 .map(|(table_id, log_delta)| {
                     (
                         TableId::new(*table_id),
-                        ChangeLogDelta {
+                        ChangeLogDeltaCommon {
                             new_log: log_delta.new_log.clone().map(Into::into),
                             truncate_epoch: log_delta.truncate_epoch,
                         },
@@ -768,13 +801,15 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct IntraLevelDelta {
+pub struct IntraLevelDeltaCommon<T> {
     pub level_idx: u32,
     pub l0_sub_level_id: u64,
     pub removed_table_ids: Vec<u64>,
-    pub inserted_table_infos: Vec<SstableInfo>,
+    pub inserted_table_infos: Vec<T>,
     pub vnode_partition_count: u32,
 }
+
+pub type IntraLevelDelta = IntraLevelDeltaCommon<SstableInfo>;
 
 impl IntraLevelDelta {
     pub fn estimated_encode_len(&self) -> usize {
@@ -790,40 +825,49 @@ impl IntraLevelDelta {
     }
 }
 
-impl From<PbIntraLevelDelta> for IntraLevelDelta {
+impl<T> From<PbIntraLevelDelta> for IntraLevelDeltaCommon<T>
+where
+    T: From<PbSstableInfo>,
+{
     fn from(pb_intra_level_delta: PbIntraLevelDelta) -> Self {
         Self {
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
-            removed_table_ids: pb_intra_level_delta.removed_table_ids.clone(),
+            removed_table_ids: pb_intra_level_delta.removed_table_ids,
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
                 .into_iter()
-                .map(SstableInfo::from)
+                .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: pb_intra_level_delta.vnode_partition_count,
         }
     }
 }
 
-impl From<IntraLevelDelta> for PbIntraLevelDelta {
-    fn from(intra_level_delta: IntraLevelDelta) -> Self {
+impl<T> From<IntraLevelDeltaCommon<T>> for PbIntraLevelDelta
+where
+    PbSstableInfo: From<T>,
+{
+    fn from(intra_level_delta: IntraLevelDeltaCommon<T>) -> Self {
         Self {
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
-            removed_table_ids: intra_level_delta.removed_table_ids.clone(),
+            removed_table_ids: intra_level_delta.removed_table_ids,
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
                 .into_iter()
-                .map(|sst| sst.into())
+                .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: intra_level_delta.vnode_partition_count,
         }
     }
 }
 
-impl From<&IntraLevelDelta> for PbIntraLevelDelta {
-    fn from(intra_level_delta: &IntraLevelDelta) -> Self {
+impl<T> From<&IntraLevelDeltaCommon<T>> for PbIntraLevelDelta
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    fn from(intra_level_delta: &IntraLevelDeltaCommon<T>) -> Self {
         Self {
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
@@ -831,14 +875,17 @@ impl From<&IntraLevelDelta> for PbIntraLevelDelta {
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
                 .iter()
-                .map(|sst| sst.into())
+                .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: intra_level_delta.vnode_partition_count,
         }
     }
 }
 
-impl From<&PbIntraLevelDelta> for IntraLevelDelta {
+impl<T> From<&PbIntraLevelDelta> for IntraLevelDeltaCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+{
     fn from(pb_intra_level_delta: &PbIntraLevelDelta) -> Self {
         Self {
             level_idx: pb_intra_level_delta.level_idx,
@@ -847,7 +894,7 @@ impl From<&PbIntraLevelDelta> for IntraLevelDelta {
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
                 .iter()
-                .map(SstableInfo::from)
+                .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: pb_intra_level_delta.vnode_partition_count,
         }
@@ -873,100 +920,128 @@ impl IntraLevelDelta {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum GroupDelta {
-    IntraLevel(IntraLevelDelta),
+pub enum GroupDeltaCommon<T> {
+    IntraLevel(IntraLevelDeltaCommon<T>),
     GroupConstruct(PbGroupConstruct),
     GroupDestroy(PbGroupDestroy),
     GroupMetaChange(PbGroupMetaChange),
 
     #[allow(dead_code)]
     GroupTableChange(PbGroupTableChange),
+
+    GroupMerge(PbGroupMerge),
 }
 
-impl From<PbGroupDelta> for GroupDelta {
+pub type GroupDelta = GroupDeltaCommon<SstableInfo>;
+
+impl<T> From<PbGroupDelta> for GroupDeltaCommon<T>
+where
+    T: From<PbSstableInfo>,
+{
     fn from(pb_group_delta: PbGroupDelta) -> Self {
         match pb_group_delta.delta_type {
             Some(PbDeltaType::IntraLevel(pb_intra_level_delta)) => {
-                GroupDelta::IntraLevel(IntraLevelDelta::from(pb_intra_level_delta))
+                GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon::from(pb_intra_level_delta))
             }
             Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
-                GroupDelta::GroupConstruct(pb_group_construct)
+                GroupDeltaCommon::GroupConstruct(pb_group_construct)
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
-                GroupDelta::GroupDestroy(pb_group_destroy)
+                GroupDeltaCommon::GroupDestroy(pb_group_destroy)
             }
             Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)) => {
-                GroupDelta::GroupMetaChange(pb_group_meta_change)
+                GroupDeltaCommon::GroupMetaChange(pb_group_meta_change)
             }
             Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
-                GroupDelta::GroupTableChange(pb_group_table_change)
+                GroupDeltaCommon::GroupTableChange(pb_group_table_change)
+            }
+            Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
+                GroupDeltaCommon::GroupMerge(pb_group_merge)
             }
             None => panic!("delta_type is not set"),
         }
     }
 }
 
-impl From<GroupDelta> for PbGroupDelta {
-    fn from(group_delta: GroupDelta) -> Self {
+impl<T> From<GroupDeltaCommon<T>> for PbGroupDelta
+where
+    PbSstableInfo: From<T>,
+{
+    fn from(group_delta: GroupDeltaCommon<T>) -> Self {
         match group_delta {
-            GroupDelta::IntraLevel(intra_level_delta) => PbGroupDelta {
+            GroupDeltaCommon::IntraLevel(intra_level_delta) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
             },
-            GroupDelta::GroupConstruct(pb_group_construct) => PbGroupDelta {
+            GroupDeltaCommon::GroupConstruct(pb_group_construct) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct)),
             },
-            GroupDelta::GroupDestroy(pb_group_destroy) => PbGroupDelta {
+            GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy)),
             },
-            GroupDelta::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
+            GroupDeltaCommon::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)),
             },
-            GroupDelta::GroupTableChange(pb_group_table_change) => PbGroupDelta {
+            GroupDeltaCommon::GroupTableChange(pb_group_table_change) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change)),
             },
+            GroupDeltaCommon::GroupMerge(pb_group_merge) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupMerge(pb_group_merge)),
+            },
         }
     }
 }
 
-impl From<&GroupDelta> for PbGroupDelta {
-    fn from(group_delta: &GroupDelta) -> Self {
+impl<T> From<&GroupDeltaCommon<T>> for PbGroupDelta
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    fn from(group_delta: &GroupDeltaCommon<T>) -> Self {
         match group_delta {
-            GroupDelta::IntraLevel(intra_level_delta) => PbGroupDelta {
+            GroupDeltaCommon::IntraLevel(intra_level_delta) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
             },
-            GroupDelta::GroupConstruct(pb_group_construct) => PbGroupDelta {
+            GroupDeltaCommon::GroupConstruct(pb_group_construct) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct.clone())),
             },
-            GroupDelta::GroupDestroy(pb_group_destroy) => PbGroupDelta {
+            GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(*pb_group_destroy)),
             },
-            GroupDelta::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
+            GroupDeltaCommon::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMetaChange(pb_group_meta_change.clone())),
             },
-            GroupDelta::GroupTableChange(pb_group_table_change) => PbGroupDelta {
+            GroupDeltaCommon::GroupTableChange(pb_group_table_change) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change.clone())),
+            },
+            GroupDeltaCommon::GroupMerge(pb_group_merge) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupMerge(*pb_group_merge)),
             },
         }
     }
 }
 
-impl From<&PbGroupDelta> for GroupDelta {
+impl<T> From<&PbGroupDelta> for GroupDeltaCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+{
     fn from(pb_group_delta: &PbGroupDelta) -> Self {
         match &pb_group_delta.delta_type {
             Some(PbDeltaType::IntraLevel(pb_intra_level_delta)) => {
-                GroupDelta::IntraLevel(IntraLevelDelta::from(pb_intra_level_delta))
+                GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon::from(pb_intra_level_delta))
             }
             Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
-                GroupDelta::GroupConstruct(pb_group_construct.clone())
+                GroupDeltaCommon::GroupConstruct(pb_group_construct.clone())
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
-                GroupDelta::GroupDestroy(*pb_group_destroy)
+                GroupDeltaCommon::GroupDestroy(*pb_group_destroy)
             }
             Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)) => {
-                GroupDelta::GroupMetaChange(pb_group_meta_change.clone())
+                GroupDeltaCommon::GroupMetaChange(pb_group_meta_change.clone())
             }
             Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
-                GroupDelta::GroupTableChange(pb_group_table_change.clone())
+                GroupDeltaCommon::GroupTableChange(pb_group_table_change.clone())
+            }
+            Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
+                GroupDeltaCommon::GroupMerge(*pb_group_merge)
             }
             None => panic!("delta_type is not set"),
         }
@@ -974,24 +1049,32 @@ impl From<&PbGroupDelta> for GroupDelta {
 }
 
 #[derive(Debug, PartialEq, Clone, Default)]
-pub struct GroupDeltas {
-    pub group_deltas: Vec<GroupDelta>,
+pub struct GroupDeltasCommon<T> {
+    pub group_deltas: Vec<GroupDeltaCommon<T>>,
 }
 
-impl From<PbGroupDeltas> for GroupDeltas {
+pub type GroupDeltas = GroupDeltasCommon<SstableInfo>;
+
+impl<T> From<PbGroupDeltas> for GroupDeltasCommon<T>
+where
+    T: From<PbSstableInfo>,
+{
     fn from(pb_group_deltas: PbGroupDeltas) -> Self {
         Self {
             group_deltas: pb_group_deltas
                 .group_deltas
                 .into_iter()
-                .map(GroupDelta::from)
+                .map(GroupDeltaCommon::from)
                 .collect_vec(),
         }
     }
 }
 
-impl From<GroupDeltas> for PbGroupDeltas {
-    fn from(group_deltas: GroupDeltas) -> Self {
+impl<T> From<GroupDeltasCommon<T>> for PbGroupDeltas
+where
+    PbSstableInfo: From<T>,
+{
+    fn from(group_deltas: GroupDeltasCommon<T>) -> Self {
         Self {
             group_deltas: group_deltas
                 .group_deltas
@@ -1002,8 +1085,11 @@ impl From<GroupDeltas> for PbGroupDeltas {
     }
 }
 
-impl From<&GroupDeltas> for PbGroupDeltas {
-    fn from(group_deltas: &GroupDeltas) -> Self {
+impl<T> From<&GroupDeltasCommon<T>> for PbGroupDeltas
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    fn from(group_deltas: &GroupDeltasCommon<T>) -> Self {
         Self {
             group_deltas: group_deltas
                 .group_deltas
@@ -1014,19 +1100,25 @@ impl From<&GroupDeltas> for PbGroupDeltas {
     }
 }
 
-impl From<&PbGroupDeltas> for GroupDeltas {
+impl<T> From<&PbGroupDeltas> for GroupDeltasCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+{
     fn from(pb_group_deltas: &PbGroupDeltas) -> Self {
         Self {
             group_deltas: pb_group_deltas
                 .group_deltas
                 .iter()
-                .map(GroupDelta::from)
+                .map(GroupDeltaCommon::from)
                 .collect_vec(),
         }
     }
 }
 
-impl GroupDeltas {
+impl<T> GroupDeltasCommon<T>
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
     pub fn to_protobuf(&self) -> PbGroupDeltas {
         self.into()
     }

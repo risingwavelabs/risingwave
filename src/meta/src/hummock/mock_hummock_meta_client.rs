@@ -348,7 +348,11 @@ impl HummockMetaClient for MockHummockMetaClient {
         ))
     }
 
-    async fn get_version_by_epoch(&self, _epoch: HummockEpoch) -> Result<PbHummockVersion> {
+    async fn get_version_by_epoch(
+        &self,
+        _epoch: HummockEpoch,
+        _table_id: u32,
+    ) -> Result<PbHummockVersion> {
         unimplemented!()
     }
 }
