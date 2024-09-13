@@ -23,7 +23,7 @@ http = "1"
 hyper = "1"
 itertools = { workspace = true }
 lru = { workspace = true }
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12.0", features = ["future"] }
 paste = "1"
 rand = { workspace = true }
 risingwave_common = { workspace = true }

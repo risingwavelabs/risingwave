@@ -288,7 +288,7 @@ impl CatalogV2 for JniCatalog {
                 "Failed to crete iceberg table.",
             )
             .with_source(e)
-        })
+        })?
     }
 
     /// Load table from the catalog.
@@ -338,7 +338,7 @@ impl CatalogV2 for JniCatalog {
                 "Failed to load iceberg table.",
             )
             .with_source(e)
-        })
+        })?
     }
 
     /// Drop a table from the catalog.

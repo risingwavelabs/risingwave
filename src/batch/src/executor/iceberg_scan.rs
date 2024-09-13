@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::mem;
 
 use futures_async_stream::try_stream;
@@ -20,8 +21,11 @@ use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
@@ -38,7 +42,8 @@ pub struct IcebergScanExecutor {
     #[allow(dead_code)]
     snapshot_id: Option<i64>,
     table_meta: TableMetadata,
-    file_scan_tasks: Vec<FileScanTask>,
+    data_file_scan_tasks: Vec<FileScanTask>,
+    eq_delete_file_scan_tasks: Vec<FileScanTask>,
     batch_size: usize,
     schema: Schema,
     identity: String,
@@ -63,7 +68,8 @@ impl IcebergScanExecutor {
         iceberg_config: IcebergConfig,
         snapshot_id: Option<i64>,
         table_meta: TableMetadata,
-        file_scan_tasks: Vec<FileScanTask>,
+        data_file_scan_tasks: Vec<FileScanTask>,
+        eq_delete_file_scan_tasks: Vec<FileScanTask>,
         batch_size: usize,
         schema: Schema,
         identity: String,
@@ -72,7 +78,8 @@ impl IcebergScanExecutor {
             iceberg_config,
             snapshot_id,
             table_meta,
-            file_scan_tasks,
+            data_file_scan_tasks,
+            eq_delete_file_scan_tasks,
             batch_size,
             schema,
             identity,
@@ -86,33 +93,136 @@ impl IcebergScanExecutor {
             .load_table_v2_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
+        let executor_schema_names = self.schema.names();
 
-        let file_scan_tasks = mem::take(&mut self.file_scan_tasks);
+        let mut eq_delete_file_scan_tasks_map: HashMap<OwnedRow, i64> = HashMap::default();
+        let eq_delete_file_scan_tasks = mem::take(&mut self.eq_delete_file_scan_tasks);
 
-        let file_scan_stream = {
-            #[try_stream]
-            async move {
-                for file_scan_task in file_scan_tasks {
-                    yield file_scan_task;
+        // Build hash map for equality delete files
+        // Currently, all equality delete files have the same schema which is guaranteed by `IcebergSplitEnumerator`.
+        let mut eq_delete_ids: Option<Vec<_>> = None;
+        for eq_delete_file_scan_task in eq_delete_file_scan_tasks {
+            let mut sequence_number = eq_delete_file_scan_task.sequence_number;
+
+            if eq_delete_ids.is_none() {
+                eq_delete_ids = Some(eq_delete_file_scan_task.project_field_ids.clone());
+            } else {
+                debug_assert_eq!(
+                    eq_delete_ids.as_ref().unwrap(),
+                    &eq_delete_file_scan_task.project_field_ids
+                );
+            }
+
+            let reader = table
+                .reader_builder()
+                .with_batch_size(self.batch_size)
+                .build();
+            let delete_file_scan_stream = tokio_stream::once(Ok(eq_delete_file_scan_task));
+
+            let mut delete_record_batch_stream = reader
+                .read(Box::pin(delete_file_scan_stream))
+                .map_err(BatchError::Iceberg)?;
+
+            while let Some(record_batch) = delete_record_batch_stream.next().await {
+                let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+
+                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                for row in chunk.rows() {
+                    let entry = eq_delete_file_scan_tasks_map
+                        .entry(row.to_owned_row())
+                        .or_default();
+                    *entry = *entry.max(&mut sequence_number);
                 }
             }
-        };
+        }
 
-        let reader = table
-            .reader_builder()
-            .with_batch_size(self.batch_size)
-            .build();
+        let data_file_scan_tasks = mem::take(&mut self.data_file_scan_tasks);
 
-        let record_batch_stream = reader
-            .read(Box::pin(file_scan_stream))
-            .map_err(BatchError::Iceberg)?;
+        // Delete rows in the data file that need to be deleted by map
+        for data_file_scan_task in data_file_scan_tasks {
+            let data_sequence_number = data_file_scan_task.sequence_number;
 
-        #[for_await]
-        for record_batch in record_batch_stream {
-            let record_batch = record_batch.map_err(BatchError::Iceberg)?;
-            let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-            debug_assert_eq!(chunk.data_types(), data_types);
-            yield chunk;
+            let data_chunk_column_names: Vec<_> = data_file_scan_task
+                .project_field_ids
+                .iter()
+                .filter_map(|id| {
+                    data_file_scan_task
+                        .schema
+                        .name_by_field_id(*id)
+                        .map(|name| name.to_string())
+                })
+                .collect();
+
+            // eq_delete_column_idxes are used to fetch equality delete columns from data files.
+            let eq_delete_column_idxes = eq_delete_ids.as_ref().map(|eq_delete_ids| {
+                eq_delete_ids
+                    .iter()
+                    .map(|eq_delete_id| {
+                        data_file_scan_task
+                            .project_field_ids
+                            .iter()
+                            .position(|project_field_id| eq_delete_id == project_field_id)
+                            .expect("eq_delete_id not found in delete_equality_ids")
+                    })
+                    .collect_vec()
+            });
+
+            let reader = table
+                .reader_builder()
+                .with_batch_size(self.batch_size)
+                .build();
+            let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
+
+            let mut record_batch_stream = reader
+                .read(Box::pin(file_scan_stream))
+                .map_err(BatchError::Iceberg)?;
+
+            while let Some(record_batch) = record_batch_stream.next().await {
+                let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+
+                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                let chunk = match eq_delete_column_idxes.as_ref() {
+                    Some(delete_column_ids) => {
+                        let visibility = Bitmap::from_iter(
+                            // Project with the schema of the delete file
+                            chunk.project(delete_column_ids).rows().map(|row_ref| {
+                                let row = row_ref.to_owned_row();
+                                if let Some(delete_sequence_number) =
+                                    eq_delete_file_scan_tasks_map.get(&row)
+                                    && delete_sequence_number > &data_sequence_number
+                                {
+                                    // delete_sequence_number > data_sequence_number means the delete file is written later than data file,
+                                    // so it needs to be deleted
+                                    false
+                                } else {
+                                    true
+                                }
+                            }),
+                        )
+                        .clone();
+                        // Keep the schema consistent(chunk and executor)
+                        // Filter out (equality delete) columns that are not in the executor schema
+                        let data = chunk
+                            .columns()
+                            .iter()
+                            .zip_eq_fast(&data_chunk_column_names)
+                            .filter_map(|(array, columns)| {
+                                if executor_schema_names.contains(columns) {
+                                    Some(array.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect_vec();
+                        let chunk = DataChunk::new(data, visibility);
+                        debug_assert_eq!(chunk.data_types(), data_types);
+                        chunk
+                    }
+                    // If there is no delete file, the data file is directly output
+                    None => chunk,
+                };
+                yield chunk;
+            }
         }
     }
 }
@@ -171,6 +281,11 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 Some(split.snapshot_id),
                 split.table_meta.deserialize(),
                 split.files.into_iter().map(|x| x.deserialize()).collect(),
+                split
+                    .eq_delete_files
+                    .into_iter()
+                    .map(|x| x.deserialize())
+                    .collect(),
                 source.context.get_config().developer.chunk_size,
                 schema,
                 source.plan_node().get_identity().clone(),

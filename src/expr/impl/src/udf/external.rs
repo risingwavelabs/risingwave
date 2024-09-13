@@ -25,6 +25,7 @@ use ginepro::{LoadBalancedChannel, ResolutionStrategy};
 use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
 use risingwave_common::util::addr::HostAddr;
 use thiserror_ext::AsReport;
+use tokio::runtime::Runtime;
 
 use super::*;
 
@@ -174,9 +175,16 @@ fn get_or_create_flight_client(link: &str) -> Result<Arc<Client>> {
         // reuse existing client
         Ok(client)
     } else {
+        static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .thread_name("rw-udf")
+                .enable_all()
+                .build()
+                .expect("failed to build udf runtime")
+        });
         // create new client
         let client = Arc::new(tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
+            RUNTIME.block_on(async {
                 let channel = connect_tonic(link).await?;
                 Ok(Client::new(channel).await?) as Result<_>
             })
