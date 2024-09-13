@@ -102,7 +102,6 @@ impl From<TracedTableId> for TableId {
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedReadOptions {
     pub prefix_hint: Option<TracedBytes>,
-    pub ignore_range_tombstone: bool,
     pub prefetch_options: TracedPrefetchOptions,
     pub cache_policy: TracedCachePolicy,
 
@@ -116,7 +115,6 @@ impl TracedReadOptions {
     pub fn for_test(table_id: u32) -> Self {
         Self {
             prefix_hint: Some(TracedBytes::from(vec![0])),
-            ignore_range_tombstone: true,
             prefetch_options: TracedPrefetchOptions {
                 prefetch: true,
                 for_large_query: true,

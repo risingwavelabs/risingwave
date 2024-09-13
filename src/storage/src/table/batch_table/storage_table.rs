@@ -497,7 +497,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     read_version_from_time_travel: read_time_travel,
                     prefetch_options,
                     cache_policy,
-                    ..Default::default()
                 };
                 let pk_serializer = match self.output_row_in_key_indices.is_empty() {
                     true => None,
