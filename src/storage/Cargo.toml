@@ -96,7 +96,7 @@ workspace-hack = { path = "../workspace-hack" }
 bincode = "1"
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
-risingwave_hummock_sdk = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 

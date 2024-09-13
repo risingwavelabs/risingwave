@@ -1811,15 +1811,11 @@ impl CatalogManager {
                     all_table_ids.extend(index_table_ids.iter().cloned());
 
                     for index_table_id in &index_table_ids {
-                        let internal_table_ids = match fragment_manager
+                        let internal_table_ids = fragment_manager
                             .select_table_fragments_by_table_id(&(index_table_id.into()))
                             .await
                             .map(|fragments| fragments.internal_table_ids())
-                        {
-                            Ok(v) => v,
-                            // Handle backwards compat with no state persistence.
-                            Err(_) => vec![],
-                        };
+                            .unwrap_or_default();
 
                         // 1 should be used by table scan.
                         if internal_table_ids.len() == 1 {
@@ -1901,15 +1897,11 @@ impl CatalogManager {
                     }
                     all_table_ids.insert(index.index_table_id);
 
-                    let internal_table_ids = match fragment_manager
+                    let internal_table_ids = fragment_manager
                         .select_table_fragments_by_table_id(&(index.index_table_id.into()))
                         .await
                         .map(|fragments| fragments.internal_table_ids())
-                    {
-                        Ok(v) => v,
-                        // Handle backwards compat with no state persistence.
-                        Err(_) => vec![],
-                    };
+                        .unwrap_or_default();
 
                     // 1 should be used by table scan.
                     if internal_table_ids.len() == 1 {

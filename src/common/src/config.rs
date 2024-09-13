@@ -699,6 +699,9 @@ pub struct StorageConfig {
     #[serde(default)]
     pub prefetch_buffer_capacity_mb: Option<usize>,
 
+    #[serde(default)]
+    pub max_cached_recent_versions_number: Option<usize>,
+
     /// max prefetch block number
     #[serde(default = "default::storage::max_prefetch_block_number")]
     pub max_prefetch_block_number: usize,

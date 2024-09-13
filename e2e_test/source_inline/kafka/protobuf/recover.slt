@@ -1,0 +1,97 @@
+control substitution on
+
+system ok
+rpk topic create 'test-pb-struct'
+
+
+system ok
+jq -sR '{"schema":.,"schemaType":"PROTOBUF"}' << EOF | curl -X POST -H 'content-type: application/json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/test-pb-struct-value/versions"
+syntax = "proto3";
+package test;
+message User {
+  int32 id = 1;
+  Name name = 2;
+}
+message Name {
+  string first_name = 1;
+  string last_name = 2;
+}
+EOF
+
+
+# create a source with v1 schema
+statement ok
+create source s with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-struct')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.User');
+
+
+# register a v2 schema
+system ok
+jq -sR '{"schema":.,"schemaType":"PROTOBUF"}' << EOF | curl -X POST -H 'content-type: application/json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/test-pb-struct-value/versions"
+syntax = "proto3";
+package test;
+message User {
+  int32 id = 1;
+  Name name = 2;
+}
+message Name {
+  string first_name = 1;
+  string last_name = 2;
+  string middle_name = 3;
+}
+EOF
+
+
+# trigger recovery
+statement ok
+recover;
+
+
+sleep 2s
+
+
+# produce a v2 message
+statement ok
+create sink sk as select
+  1 as id,
+  row('Alan', 'Turing', 'Mathison')::struct<first_name varchar, last_name varchar, middle_name varchar> as name
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-struct')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.User');
+
+
+sleep 1s
+
+
+# reading as v1 shall not panic
+query IT
+select * from s;
+----
+1 (Alan,Turing)
+
+
+statement ok
+drop sink sk;
+
+
+statement ok
+drop source s;
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/test-pb-struct-value"
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/test-pb-struct-value?permanent=true"
+
+
+system ok
+rpk topic delete 'test-pb-struct'
