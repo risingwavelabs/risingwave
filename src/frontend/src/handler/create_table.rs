@@ -1311,7 +1311,7 @@ pub async fn handle_create_table(
         }
         Engine::Iceberg => {
             // nimtable_dev means we are running in nimtable development mode
-            let nimtable_dev = matches!(std::env::var("NIMTABLE_DEV"), Ok(_));
+            let nimtable_dev = std::env::var("NIMTABLE_DEV").is_ok();
 
             let s3_endpoint = if let Ok(s3_endpoint) = std::env::var("AWS_ENDPOINT_URL") {
                 Some(s3_endpoint)

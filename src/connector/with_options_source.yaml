@@ -125,6 +125,9 @@ IcebergProperties:
   - name: catalog.jdbc.password
     field_type: String
     required: false
+  - name: nimtable
+    field_type: bool
+    required: false
 KafkaProperties:
   fields:
   - name: bytes.per.second
