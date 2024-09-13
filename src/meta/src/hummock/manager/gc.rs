@@ -22,6 +22,7 @@ use anyhow::Context;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
+use rand::Rng;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -325,6 +326,74 @@ pub async fn collect_global_gc_watermark(
     Ok(global_watermark)
 }
 
+pub(crate) struct FullGcPrefixManager {
+    max_shard: u32,
+    current_shard: u32,
+    name_prefix_start: u32,
+    name_prefix_end: u32,
+    current_name_prefix: u32,
+}
+
+impl FullGcPrefixManager {
+    pub(crate) fn new(set_max_shard: Option<u32>, set_name_prefix_digits: Option<u32>) -> Self {
+        // skip shard rotation
+        let mut max_shard = 1;
+        // skip name prefix rotation
+        let (mut name_prefix_start, mut name_prefix_end) = (0, 0);
+        match (set_max_shard, set_name_prefix_digits) {
+            (Some(new_max_shard), None) => {
+                max_shard = cmp::max(new_max_shard, 1);
+            }
+            (Some(new_max_shard), Some(new_name_prefix_digits)) => {
+                max_shard = cmp::max(new_max_shard, 1);
+                if new_name_prefix_digits > 0 {
+                    // names with fewer digits will never be visited
+                    name_prefix_start = 10u32.pow(new_name_prefix_digits - 1);
+                    name_prefix_end = 10u32.pow(new_name_prefix_digits) - 1;
+                }
+            }
+            (None, _) => {}
+        };
+        Self {
+            max_shard,
+            current_shard: rand::thread_rng().gen_range(0..max_shard),
+            name_prefix_start,
+            name_prefix_end,
+            current_name_prefix: rand::thread_rng().gen_range(name_prefix_start..=name_prefix_end),
+        }
+    }
+
+    /// Rotates name prefix first, then shard.
+    pub(crate) fn next_prefix(&mut self) -> String {
+        let full_prefix = format!("{}{}", self.get_shard(), self.get_name_prefix());
+        if self.current_name_prefix + 1 > self.name_prefix_end {
+            self.current_shard = (self.current_shard + 1) % self.max_shard;
+            self.current_name_prefix = self.name_prefix_start;
+        } else {
+            self.current_name_prefix += 1;
+        }
+        full_prefix
+    }
+
+    fn get_shard(&self) -> String {
+        // no shard prefix
+        if self.max_shard == 1 {
+            "".into()
+        } else {
+            format!("{}/", self.current_shard)
+        }
+    }
+
+    fn get_name_prefix(&self) -> String {
+        // In our state store, object names cannot be 0 or have leading zeros.
+        if self.current_name_prefix == 0 {
+            "".into()
+        } else {
+            format!("{}", self.current_name_prefix)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -333,7 +402,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_hummock_sdk::HummockSstableObjectId;
 
-    use super::ResponseEvent;
+    use super::{FullGcPrefixManager, ResponseEvent};
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::MetaOpts;
 
@@ -444,5 +513,88 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn test_full_gc_prefix_manager_default() {
+        let mut manager = FullGcPrefixManager::new(None, None);
+        for _ in 0..10 {
+            assert_eq!(manager.next_prefix(), "".to_string());
+        }
+
+        let mut manager = FullGcPrefixManager::new(None, Some(2));
+        for _ in 0..10 {
+            assert_eq!(manager.next_prefix(), "".to_string());
+        }
+
+        let mut manager = FullGcPrefixManager::new(Some(0), None);
+        for _ in 0..10 {
+            assert_eq!(manager.next_prefix(), "".to_string());
+        }
+
+        let mut manager = FullGcPrefixManager::new(Some(1), None);
+        for _ in 0..10 {
+            assert_eq!(manager.next_prefix(), "".to_string());
+        }
+
+        let mut manager = FullGcPrefixManager::new(Some(1), Some(0));
+        for _ in 0..10 {
+            assert_eq!(manager.next_prefix(), "".to_string());
+        }
+    }
+
+    #[test]
+    fn test_full_gc_prefix_manager_shard() {
+        let mut manager = FullGcPrefixManager::new(Some(16), None);
+        assert_eq!(manager.max_shard, 16);
+        let init_shard = manager.current_shard;
+        let expect = (init_shard..manager.max_shard)
+            .chain(0..init_shard)
+            .cycle()
+            .take(100);
+        for e in expect {
+            assert_eq!(manager.next_prefix(), format!("{e}/"));
+        }
+    }
+
+    #[test]
+    fn test_full_gc_prefix_manager_name_prefix() {
+        let mut manager = FullGcPrefixManager::new(Some(1), Some(2));
+        assert_eq!(manager.name_prefix_start, 10);
+        assert_eq!(manager.name_prefix_end, 99);
+        let init_name_prefix = manager.current_name_prefix;
+        let expect = (init_name_prefix..=manager.name_prefix_end)
+            .chain(manager.name_prefix_start..init_name_prefix)
+            .cycle()
+            .take(300);
+        for e in expect {
+            assert_eq!(manager.next_prefix(), format!("{e}"));
+        }
+    }
+
+    #[test]
+    fn test_full_gc_prefix_manager_both() {
+        let mut manager = FullGcPrefixManager::new(Some(16), Some(2));
+        assert_eq!(manager.max_shard, 16);
+        assert_eq!(manager.name_prefix_start, 10);
+        assert_eq!(manager.name_prefix_end, 99);
+        let init_shard = manager.current_shard;
+        let init_name_prefix = manager.current_name_prefix;
+        let expect_name_prefix = init_name_prefix..=manager.name_prefix_end;
+        for e_n in expect_name_prefix {
+            assert_eq!(manager.next_prefix(), format!("{init_shard}/{e_n}"));
+        }
+        assert_eq!(init_shard + 1, manager.current_shard);
+        let init_shard = manager.current_shard;
+        let expect_shard = (init_shard..manager.max_shard)
+            .chain(0..init_shard)
+            .cycle()
+            .take(100);
+        for e_s in expect_shard {
+            let expect_name_prefix = manager.name_prefix_start..=manager.name_prefix_end;
+            for e_n in expect_name_prefix {
+                assert_eq!(manager.next_prefix(), format!("{e_s}/{e_n}"));
+            }
+        }
     }
 }

@@ -192,6 +192,20 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_interval_sec")]
     pub full_gc_interval_sec: u64,
 
+    /// In certain scenarios, objects path are prefixed by an additional shard id and a slash. i.e. [`data_dir`]/[`shard id`]/[`object name`].
+    /// When enabled, full GC will list objects with a prefix of rotational shard ids.
+    /// For instance, setting it to 256 leads to a rotation through the range [0..255].
+    /// Set it to 1 leads for scenarios where object sharding is not applied, i.e.[`data_dir`]/[`object name`].
+    /// By default it's disabled, indicating the full GC will list objects without any prefix.
+    #[serde(default = "default::meta::full_gc_shard_num")]
+    pub full_gc_shard_num: Option<u32>,
+
+    /// `full_gc_name_prefix_digits` requires `full_gc_shard_num` to be enabled to take effects.
+    /// When enabled, in addition to `full_gc_shard_num`, full GC will list objects with a prefix of rotational name prefixes.
+    /// For instance, setting it to 2 leads to a rotation through the range [10..99].
+    #[serde(default = "default::meta::full_gc_name_prefix_digits")]
+    pub full_gc_name_prefix_digits: Option<u32>,
+
     /// The spin interval when collecting global GC watermark in hummock.
     #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
     pub collect_gc_watermark_spin_interval_sec: u64,
@@ -1337,6 +1351,14 @@ pub mod default {
 
         pub fn full_gc_interval_sec() -> u64 {
             86400
+        }
+
+        pub fn full_gc_shard_num() -> Option<u32> {
+            None
+        }
+
+        pub fn full_gc_name_prefix_digits() -> Option<u32> {
+            None
         }
 
         pub fn collect_gc_watermark_spin_interval_sec() -> u64 {

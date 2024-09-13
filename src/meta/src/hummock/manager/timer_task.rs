@@ -31,6 +31,7 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
+use crate::hummock::manager::gc::FullGcPrefixManager;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
 use crate::hummock::{HummockManager, TASK_NORMAL};
 
@@ -53,7 +54,7 @@ impl HummockManager {
                 TtlCompactionTrigger,
                 TombstoneCompactionTrigger,
 
-                FullGc,
+                FullGc(Option<String>),
             }
             let mut check_compact_trigger_interval =
                 tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
@@ -118,8 +119,11 @@ impl HummockManager {
             ));
             full_gc_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             full_gc_interval.reset();
-            let full_gc_trigger =
-                IntervalStream::new(full_gc_interval).map(|_| HummockTimerEvent::FullGc);
+            let env = &hummock_manager.env.opts;
+            let mut full_gc_prefix_manager =
+                FullGcPrefixManager::new(env.full_gc_shard_num, env.full_gc_name_prefix_digits);
+            let full_gc_trigger = IntervalStream::new(full_gc_interval)
+                .map(|_| HummockTimerEvent::FullGc(Some(full_gc_prefix_manager.next_prefix())));
 
             let mut tombstone_reclaim_trigger_interval =
                 tokio::time::interval(Duration::from_secs(
@@ -134,7 +138,7 @@ impl HummockManager {
             let tombstone_reclaim_trigger = IntervalStream::new(tombstone_reclaim_trigger_interval)
                 .map(|_| HummockTimerEvent::TombstoneCompactionTrigger);
 
-            let mut triggers: Vec<BoxStream<'static, HummockTimerEvent>> = vec![
+            let mut triggers: Vec<BoxStream<'_, HummockTimerEvent>> = vec![
                 Box::pin(check_compact_trigger),
                 Box::pin(stat_report_trigger),
                 Box::pin(compaction_heartbeat_trigger),
@@ -338,12 +342,15 @@ impl HummockManager {
                                         .await;
                                 }
 
-                                HummockTimerEvent::FullGc => {
+                                HummockTimerEvent::FullGc(prefix) => {
                                     if hummock_manager
-                                        .start_full_gc(Duration::from_secs(3600), None)
+                                        .start_full_gc(Duration::from_secs(3600), prefix.clone())
                                         .is_ok()
                                     {
-                                        tracing::info!("Start full GC from meta node.");
+                                        tracing::info!(
+                                            prefix = prefix.unwrap_or_else(|| "".to_string()),
+                                            "start full GC from meta node"
+                                        );
                                     }
                                 }
                             }
