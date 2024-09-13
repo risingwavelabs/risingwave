@@ -1081,15 +1081,28 @@ impl SessionImpl {
 
     pub async fn list_change_log_epochs(
         &self,
-        table_id: u32,
+        schema_id: u32,
+        table_id: &TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
-        // Ok(self
-        //     .env
-        //     .meta_client()
-        //     .list_change_log_epochs(table_id, min_epoch, max_count)
-        //     .await?)
+        let db_name = self.database();
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+        let schema = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
+        let epochs = schema.list_change_log_epochs(table_id).ok_or_else(|| {
+            RwError::from(ErrorCode::ItemNotFound(format!(
+                "table {} not found",
+                table_id
+            )))
+        })?;
+        let epochs = epochs
+            .into_iter()
+            .filter(|&epoch| epoch >= &min_epoch)
+            .take(max_count as usize)
+            .cloned().collect::<Vec<_>>();
+        Ok(epochs)
     }
 
     pub fn clear_cancel_query_flag(&self) {

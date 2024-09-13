@@ -893,7 +893,6 @@ service HummockManagerService {
   rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
   rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
-  rpc ListChangeLogEpochs(ListChangeLogEpochsRequest) returns (ListChangeLogEpochsResponse);
   rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
   rpc MergeCompactionGroup(MergeCompactionGroupRequest) returns (MergeCompactionGroupResponse);
 }
@@ -964,14 +963,4 @@ message BranchedObject {
   repeated uint64 sst_id = 2;
   // Compaction group id the SST belongs to.
   uint64 compaction_group_id = 3;
-}
-
-message ListChangeLogEpochsRequest {
-  uint32 table_id = 1;
-  uint64 min_epoch = 2;
-  uint32 max_count = 3;
-}
-
-message ListChangeLogEpochsResponse {
-  repeated uint64 epochs = 1;
 }

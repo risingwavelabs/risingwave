@@ -432,6 +432,7 @@ message MetaSnapshot {
   reserved "parallel_unit_mappings";
   GetSessionParamsResponse session_params = 20;
   repeated catalog.Secret secrets = 23;
+  ChangeLogEpochs change_log_epochs = 24;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
@@ -498,6 +499,7 @@ message SubscribeResponse {
     FragmentWorkerSlotMapping streaming_worker_slot_mapping = 27;
     FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
     catalog.Secret secret = 29;
+    ChangeLogEpochs change_log_epochs = 30;
   }
   reserved 12;
   reserved "parallel_unit_mapping";
@@ -817,4 +819,15 @@ message GetClusterLimitsResponse {
 
 service ClusterLimitService {
   rpc GetClusterLimits(GetClusterLimitsRequest) returns (GetClusterLimitsResponse);
+}
+
+
+message ChangeLogEpochs {
+  message Uint64List {
+    repeated uint64 epochs = 1;
+    uint64 truncate_epoch = 2;
+  }
+  uint32 database_id = 1;
+  uint32 schema_id = 2;
+  map<uint32, Uint64List> change_log_epochs = 3;
 }

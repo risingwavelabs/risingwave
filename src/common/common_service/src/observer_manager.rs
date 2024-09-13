@@ -132,6 +132,7 @@ where
                         .streaming_worker_slot_mapping_version
             }
             Info::ServingWorkerSlotMappings(_) => true,
+            Info::ChangeLogEpochs(_) => todo!(),
         });
 
         self.observer_states

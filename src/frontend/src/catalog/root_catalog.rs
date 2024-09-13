@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::meta::PbChangeLogEpochs;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
@@ -210,6 +211,16 @@ impl Catalog {
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_secret(proto);
+    }
+
+    pub fn init_change_log_epochs(&mut self, proto: &Option<PbChangeLogEpochs>) {
+        if let Some(proto) = proto {
+            self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .init_change_log_epochs(&proto.change_log_epochs);
+        }
     }
 
     pub fn create_view(&mut self, proto: &PbView) {
