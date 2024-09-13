@@ -106,6 +106,16 @@ impl S3FileReader {
         let mut offset: usize = split.offset;
         let mut batch_size: usize = 0;
         let mut batch = Vec::new();
+        let partition_input_bytes_metrics = source_ctx
+            .metrics
+            .partition_input_bytes
+            .with_guarded_label_values(&[
+                &actor_id,
+                &source_id,
+                &split_id,
+                &source_name,
+                &fragment_id,
+            ]);
         #[for_await]
         for read in stream {
             let bytes = read?;
@@ -121,34 +131,14 @@ impl S3FileReader {
             batch_size += len;
             batch.push(msg);
             if batch.len() >= max_chunk_size {
-                source_ctx
-                    .metrics
-                    .partition_input_bytes
-                    .with_guarded_label_values(&[
-                        &actor_id,
-                        &source_id,
-                        &split_id,
-                        &source_name,
-                        &fragment_id,
-                    ])
-                    .inc_by(batch_size as u64);
+                partition_input_bytes_metrics.inc_by(batch_size as u64);
                 let yield_batch = std::mem::take(&mut batch);
                 batch_size = 0;
                 yield yield_batch;
             }
         }
         if !batch.is_empty() {
-            source_ctx
-                .metrics
-                .partition_input_bytes
-                .with_guarded_label_values(&[
-                    &actor_id,
-                    &source_id,
-                    &split_id,
-                    &source_name,
-                    &fragment_id,
-                ])
-                .inc_by(batch_size as u64);
+            partition_input_bytes_metrics.inc_by(batch_size as u64);
             yield batch;
         }
     }
