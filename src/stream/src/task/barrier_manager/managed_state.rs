@@ -635,6 +635,9 @@ impl ManagedBarrierState {
                 .or_default()
                 .insert(subscription_to_add.subscriber_id)
             {
+                if cfg!(debug_assertions) {
+                    panic!("add an existing subscription: {:?}", subscription_to_add);
+                }
                 warn!(?subscription_to_add, "add an existing subscription");
             }
         }
@@ -642,6 +645,12 @@ impl ManagedBarrierState {
             let upstream_table_id = TableId::new(subscription_to_remove.upstream_mv_table_id);
             let Some(subscribers) = self.mv_depended_subscriptions.get_mut(&upstream_table_id)
             else {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "unable to find upstream mv table to remove: {:?}",
+                        subscription_to_remove
+                    );
+                }
                 warn!(
                     ?subscription_to_remove,
                     "unable to find upstream mv table to remove"
@@ -649,6 +658,12 @@ impl ManagedBarrierState {
                 continue;
             };
             if !subscribers.remove(&subscription_to_remove.subscriber_id) {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "unable to find subscriber to remove: {:?}",
+                        subscription_to_remove
+                    );
+                }
                 warn!(
                     ?subscription_to_remove,
                     "unable to find subscriber to remove"
