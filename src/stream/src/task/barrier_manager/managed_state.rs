@@ -141,6 +141,7 @@ mod await_epoch_completed_future {
 }
 
 use await_epoch_completed_future::*;
+use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
 fn sync_epoch<S: StateStore>(
@@ -623,12 +624,8 @@ impl ManagedBarrierState {
             .register_barrier_sender(tx)
     }
 
-    pub(super) fn transform_to_issued(
-        &mut self,
-        barrier: &Barrier,
-        request: InjectBarrierRequest,
-    ) -> StreamResult<()> {
-        for subscription_to_add in request.subscriptions_to_add {
+    pub(super) fn add_subscriptions(&mut self, subscriptions: Vec<SubscriptionUpstreamInfo>) {
+        for subscription_to_add in subscriptions {
             if !self
                 .mv_depended_subscriptions
                 .entry(TableId::new(subscription_to_add.upstream_mv_table_id))
@@ -641,7 +638,10 @@ impl ManagedBarrierState {
                 warn!(?subscription_to_add, "add an existing subscription");
             }
         }
-        for subscription_to_remove in request.subscriptions_to_remove {
+    }
+
+    pub(super) fn remove_subscriptions(&mut self, subscriptions: Vec<SubscriptionUpstreamInfo>) {
+        for subscription_to_remove in subscriptions {
             let upstream_table_id = TableId::new(subscription_to_remove.upstream_mv_table_id);
             let Some(subscribers) = self.mv_depended_subscriptions.get_mut(&upstream_table_id)
             else {
@@ -673,6 +673,15 @@ impl ManagedBarrierState {
                 self.mv_depended_subscriptions.remove(&upstream_table_id);
             }
         }
+    }
+
+    pub(super) fn transform_to_issued(
+        &mut self,
+        barrier: &Barrier,
+        request: InjectBarrierRequest,
+    ) -> StreamResult<()> {
+        self.add_subscriptions(request.subscriptions_to_add);
+        self.remove_subscriptions(request.subscriptions_to_remove);
         let partial_graph_id = PartialGraphId::new(request.partial_graph_id);
         let actor_to_stop = barrier.all_stop_actors();
         let is_stop_actor = |actor_id| {

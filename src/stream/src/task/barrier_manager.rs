@@ -342,6 +342,7 @@ impl LocalBarrierWorker {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
                                 self.reset(HummockVersionId::new(init_request.version_id)).await;
+                                self.state.add_subscriptions(init_request.subscriptions);
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
@@ -942,7 +943,10 @@ pub(crate) mod barrier_test_utils {
                     response_tx,
                     UnboundedReceiverStream::new(request_rx).boxed(),
                 ),
-                init_request: InitRequest { version_id: 0 },
+                init_request: InitRequest {
+                    version_id: 0,
+                    subscriptions: vec![],
+                },
             });
 
             assert_matches!(

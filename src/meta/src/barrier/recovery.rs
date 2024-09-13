@@ -26,7 +26,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, StreamActor, SubscriptionUpstreamInfo};
+use risingwave_pb::stream_plan::{AddMutation, StreamActor};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -346,17 +346,6 @@ impl GlobalBarrierManager {
                     let mut control_stream_manager =
                         ControlStreamManager::new(self.context.clone());
 
-                    let reset_start_time = Instant::now();
-                    control_stream_manager
-                        .reset(version_id, active_streaming_nodes.current())
-                        .await
-                        .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "reset compute nodes failed");
-                        })?;
-                    info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
-
-                    self.context.sink_manager.reset().await;
-
                     let subscription_info = InflightSubscriptionInfo {
                         mv_depended_subscriptions: self
                             .context
@@ -364,6 +353,21 @@ impl GlobalBarrierManager {
                             .get_mv_depended_subscriptions()
                             .await?,
                     };
+
+                    let reset_start_time = Instant::now();
+                    control_stream_manager
+                        .reset(
+                            version_id,
+                            &subscription_info,
+                            active_streaming_nodes.current(),
+                        )
+                        .await
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "reset compute nodes failed");
+                        })?;
+                    info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
+
+                    self.context.sink_manager.reset().await;
 
                     // update and build all actors.
                     let node_actors = self
@@ -398,18 +402,7 @@ impl GlobalBarrierManager {
                         Some(&info),
                         HashMap::new(),
                         Some(node_actors),
-                        subscription_info
-                            .mv_depended_subscriptions
-                            .iter()
-                            .flat_map(|(upstream_table_id, subscriptions)| {
-                                subscriptions
-                                    .keys()
-                                    .map(|subscriber_id| SubscriptionUpstreamInfo {
-                                        subscriber_id: *subscriber_id,
-                                        upstream_mv_table_id: upstream_table_id.table_id,
-                                    })
-                            })
-                            .collect(),
+                        vec![],
                         vec![],
                     )?;
                     debug!(?node_to_collect, "inject initial barrier");

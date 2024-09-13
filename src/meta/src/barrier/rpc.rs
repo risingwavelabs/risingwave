@@ -43,7 +43,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::command::CommandContext;
-use super::{BarrierKind, GlobalBarrierManagerContext, TracedEpoch};
+use super::{BarrierKind, GlobalBarrierManagerContext, InflightSubscriptionInfo, TracedEpoch};
 use crate::barrier::info::InflightGraphInfo;
 use crate::manager::WorkerId;
 use crate::{MetaError, MetaResult};
@@ -112,7 +112,11 @@ impl ControlStreamManager {
         }
     }
 
-    pub(super) async fn add_worker(&mut self, node: WorkerNode) {
+    pub(super) async fn add_worker(
+        &mut self,
+        node: WorkerNode,
+        subscription: &InflightSubscriptionInfo,
+    ) {
         if self.nodes.contains_key(&node.id) {
             warn!(id = node.id, host = ?node.host, "node already exists");
             return;
@@ -131,7 +135,11 @@ impl ControlStreamManager {
         for i in 1..=MAX_RETRY {
             match self
                 .context
-                .new_control_stream_node(node.clone(), version_id)
+                .new_control_stream_node(
+                    node.clone(),
+                    version_id,
+                    &subscription.mv_depended_subscriptions,
+                )
                 .await
             {
                 Ok((stream_node, response_stream)) => {
@@ -156,12 +164,17 @@ impl ControlStreamManager {
     pub(super) async fn reset(
         &mut self,
         version_id: HummockVersionId,
+        subscriptions: &InflightSubscriptionInfo,
         nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async {
             let node = self
                 .context
-                .new_control_stream_node(node.clone(), version_id)
+                .new_control_stream_node(
+                    node.clone(),
+                    version_id,
+                    &subscriptions.mv_depended_subscriptions,
+                )
                 .await?;
             Result::<_, MetaError>::Ok((*worker_id, node))
         }))
@@ -464,6 +477,7 @@ impl GlobalBarrierManagerContext {
         &self,
         node: WorkerNode,
         initial_version_id: HummockVersionId,
+        mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
     ) -> MetaResult<(
         ControlStreamNode,
         BoxStream<'static, risingwave_rpc_client::error::Result<StreamingControlStreamResponse>>,
@@ -473,7 +487,7 @@ impl GlobalBarrierManagerContext {
             .stream_client_pool()
             .get(&node)
             .await?
-            .start_streaming_control(initial_version_id)
+            .start_streaming_control(initial_version_id, mv_depended_subscriptions)
             .await?;
         Ok((
             ControlStreamNode {
