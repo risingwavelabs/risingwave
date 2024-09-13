@@ -421,6 +421,11 @@ pub fn trigger_gc_stat(
     checkpoint: &HummockVersionCheckpoint,
     min_pinned_version_id: HummockVersionId,
 ) {
+    println!(
+        "trigger_gc_stat min_pinned_version_id {:?}",
+        min_pinned_version_id
+    );
+
     let current_version_object_size_map = object_size_map(&checkpoint.version);
     let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
     let current_version_object_count = current_version_object_size_map.len();

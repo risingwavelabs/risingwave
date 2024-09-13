@@ -31,11 +31,13 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
+    SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::meta::add_worker_node_request::Property;
+use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{default_compaction_selector, LocalSelectorStatistic};
@@ -44,9 +46,7 @@ use crate::hummock::level_handler::LevelHandler;
 pub use crate::hummock::manager::CommitEpochInfo;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
-use crate::manager::{
-    ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv, META_NODE_ID,
-};
+use crate::manager::{ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv};
 use crate::rpc::metrics::MetaMetrics;
 
 pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
@@ -385,34 +385,22 @@ pub async fn get_sst_ids(
     (range.start_id..range.end_id).collect_vec()
 }
 
-pub async fn commit_from_meta_node(
-    hummock_manager_ref: &HummockManager,
-    epoch: HummockEpoch,
-    ssts: Vec<LocalSstableInfo>,
-) -> crate::hummock::error::Result<()> {
-    let sst_to_worker = ssts
-        .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, META_NODE_ID))
-        .collect();
-    hummock_manager_ref
-        .commit_epoch_for_test(epoch, ssts, sst_to_worker)
-        .await
-}
-
 pub async fn add_ssts(
     epoch: HummockEpoch,
     hummock_manager: &HummockManager,
-    context_id: HummockContextId,
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
 ) -> Vec<SstableInfo> {
     let table_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(test_epoch(epoch), 1, table_ids);
     let ssts = to_local_sstable_info(&test_tables);
-    let sst_to_worker = ssts
-        .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, context_id))
-        .collect();
-    hummock_manager
-        .commit_epoch_for_test(epoch, ssts, sst_to_worker)
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: ssts,
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     test_tables
@@ -440,4 +428,13 @@ pub fn compaction_selector_context<'a>(
         table_watermarks,
         state_table_info,
     }
+}
+
+pub async fn get_compaction_group_id_by_table_id(
+    hummock_manager_ref: HummockManagerRef,
+    table_id: u32,
+) -> u64 {
+    let version = hummock_manager_ref.get_current_version().await;
+    let mapping = version.state_table_info.build_table_compaction_group_id();
+    *mapping.get(&(table_id.into())).unwrap()
 }

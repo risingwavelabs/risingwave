@@ -139,7 +139,10 @@ async fn test_snapshot_inner(
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
+        let res = hummock_storage
+            .seal_and_sync_epoch(epoch1, HashSet::from_iter([local.table_id()]))
+            .await
+            .unwrap();
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch1, res)
@@ -180,7 +183,10 @@ async fn test_snapshot_inner(
     hummock_storage.start_epoch(epoch3, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let res = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
+        let res = hummock_storage
+            .seal_and_sync_epoch(epoch2, HashSet::from_iter([local.table_id()]))
+            .await
+            .unwrap();
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch2, res)
@@ -220,7 +226,10 @@ async fn test_snapshot_inner(
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let res = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
+        let res = hummock_storage
+            .seal_and_sync_epoch(epoch3, HashSet::from_iter([local.table_id()]))
+            .await
+            .unwrap();
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch3, res)
@@ -279,7 +288,10 @@ async fn test_snapshot_range_scan_inner(
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let res = hummock_storage.seal_and_sync_epoch(epoch).await.unwrap();
+        let res = hummock_storage
+            .seal_and_sync_epoch(epoch, HashSet::from_iter([local.table_id()]))
+            .await
+            .unwrap();
         if enable_commit {
             mock_hummock_meta_client
                 .commit_epoch(epoch, res)

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -22,6 +23,7 @@ use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -164,6 +166,42 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn commit_epoch(&self, epoch: HummockEpoch, sync_result: SyncResult) -> Result<()> {
         let version: HummockVersion = self.hummock_manager.get_current_version().await;
+        let table_ids = version
+            .state_table_info
+            .info()
+            .keys()
+            .map(|table_id| table_id.table_id)
+            .collect::<BTreeSet<_>>();
+
+        let commit_table_ids = sync_result
+            .uncommitted_ssts
+            .iter()
+            .flat_map(|sstable| sstable.sst_info.table_ids.clone())
+            .chain(
+                sync_result
+                    .old_value_ssts
+                    .iter()
+                    .flat_map(|sstable| sstable.sst_info.table_ids.clone()),
+            )
+            .collect::<BTreeSet<_>>();
+
+        let new_table_fragment_info = if commit_table_ids
+            .iter()
+            .all(|table_id| table_ids.contains(table_id))
+        {
+            NewTableFragmentInfo::None
+        } else {
+            NewTableFragmentInfo::Normal {
+                mv_table_id: None,
+                internal_table_ids: commit_table_ids
+                    .iter()
+                    .cloned()
+                    .map(TableId::from)
+                    .collect_vec(),
+            }
+        };
+
+        println!("self.context_id: {}", self.context_id);
         let sst_to_worker = sync_result
             .uncommitted_ssts
             .iter()
@@ -177,11 +215,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                 .map(|sst| sst.sst_info),
             sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
             &vec![epoch],
-            version
-                .state_table_info
-                .info()
-                .keys()
-                .map(|table_id| (table_id.table_id, 0)),
+            commit_table_ids
+                .iter()
+                .cloned()
+                .map(|table_id| (table_id, 0)),
         );
 
         self.hummock_manager
@@ -189,10 +226,14 @@ impl HummockMetaClient for MockHummockMetaClient {
                 sstables: sync_result.uncommitted_ssts,
                 new_table_watermarks: new_table_watermark,
                 sst_to_context: sst_to_worker,
-                new_table_fragment_info: NewTableFragmentInfo::None,
+                new_table_fragment_info,
                 change_log_delta: table_change_log,
                 committed_epoch: epoch,
-                tables_to_commit: version.state_table_info.info().keys().cloned().collect(),
+                tables_to_commit: commit_table_ids
+                    .iter()
+                    .cloned()
+                    .map(TableId::from)
+                    .collect(),
                 is_visible_table_committed_epoch: true,
             })
             .await
