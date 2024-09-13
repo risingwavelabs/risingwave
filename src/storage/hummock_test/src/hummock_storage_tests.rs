@@ -35,7 +35,7 @@ use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
