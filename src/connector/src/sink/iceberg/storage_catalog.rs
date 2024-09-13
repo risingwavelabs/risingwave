@@ -249,11 +249,11 @@ impl Catalog for StorageCatalog {
         let version_hint_output = self.file_io.new_output(&version_hint_path)?;
         version_hint_output.write("1".into()).await?;
 
-        Ok(Table::builder()
+        Table::builder()
             .metadata(table_metadata)
             .identifier(table_ident)
             .file_io(self.file_io.clone())
-            .build())
+            .build()
     }
 
     /// Load table from the catalog.
@@ -283,13 +283,13 @@ impl Catalog for StorageCatalog {
         let metadata_file_content = metadata_file.read().await?;
         let table_metadata = serde_json::from_slice::<TableMetadata>(&metadata_file_content)?;
 
-        Ok(Table::builder()
+        Table::builder()
             .metadata(table_metadata)
             .identifier(table.clone())
             .file_io(self.file_io.clone())
             // Only support readonly table for storage catalog now.
             .readonly(true)
-            .build())
+            .build()
     }
 
     /// Drop a table from the catalog.
