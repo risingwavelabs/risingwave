@@ -584,7 +584,7 @@ mod tests {
         for e_n in expect_name_prefix {
             assert_eq!(manager.next_prefix(), format!("{init_shard}/{e_n}"));
         }
-        assert_eq!(init_shard + 1, manager.current_shard);
+        assert_eq!((init_shard + 1) % manager.max_shard, manager.current_shard);
         let init_shard = manager.current_shard;
         let expect_shard = (init_shard..manager.max_shard)
             .chain(0..init_shard)
