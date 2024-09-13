@@ -68,6 +68,9 @@ pub struct IcebergProperties {
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
 
+    #[serde(rename = "nimtable")]
+    pub nimtable: Option<bool>,
+
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
@@ -81,7 +84,7 @@ impl IcebergProperties {
         if let Some(jdbc_password) = self.jdbc_password.clone() {
             java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
         }
-        IcebergConfig {
+        let mut config = IcebergConfig {
             catalog_name: self.catalog_name.clone(),
             database_name: self.database_name.clone(),
             table_name: self.table_name.clone(),
@@ -93,8 +96,11 @@ impl IcebergProperties {
             secret_key: self.s3_secret.clone(),
             region: self.region.clone(),
             java_catalog_props,
+            nimtable: self.nimtable.unwrap_or(false),
             ..Default::default()
-        }
+        };
+        config = config.fill_for_nimtable().unwrap();
+        config
     }
 }
 

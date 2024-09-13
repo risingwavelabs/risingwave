@@ -1310,6 +1310,9 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
+            // nimtable_dev means we are running in nimtable development mode
+            let nimtable_dev = matches!(std::env::var("NIMTABLE_DEV"), Ok(_));
+
             let s3_endpoint = if let Ok(s3_endpoint) = std::env::var("AWS_ENDPOINT_URL") {
                 Some(s3_endpoint)
             } else {
@@ -1320,8 +1323,12 @@ pub async fn handle_create_table(
                 bail!("To create an iceberg engine table, AWS_REGION needed to be set");
             };
 
-            let Ok(s3_bucket) = std::env::var("AWS_BUCKET") else {
+            let Ok(s3_bucket) = std::env::var("AWS_S3_BUCKET") else {
                 bail!("To create an iceberg engine table, AWS_BUCKET needed to be set");
+            };
+
+            let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
+                bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
             };
 
             let Ok(s3_ak) = std::env::var("AWS_ACCESS_KEY_ID") else {
@@ -1332,16 +1339,20 @@ pub async fn handle_create_table(
                 bail!("To create an iceberg engine table, AWS_SECRET_ACCESS_KEY needed to be set");
             };
 
-            let Ok(meta_store_uri) = std::env::var("META_STORE_URI") else {
-                bail!("To create an iceberg engine table, META_STORE_URI needed to be set");
+            let Ok(meta_store_endpoint) = std::env::var("RW_SQL_ENDPOINT") else {
+                bail!("To create an iceberg engine table, RW_SQL_ENDPOINT needed to be set");
             };
 
-            let Ok(meta_store_user) = std::env::var("META_STORE_USER") else {
-                bail!("To create an iceberg engine table, META_STORE_USER needed to be set");
+            let Ok(meta_store_database) = std::env::var("RW_SQL_DATABASE") else {
+                bail!("To create an iceberg engine table, RW_SQL_DATABASE needed to be set");
             };
 
-            let Ok(meta_store_password) = std::env::var("META_STORE_PASSWORD") else {
-                bail!("To create an iceberg engine table, META_STORE_PASSWORD needed to be set");
+            let Ok(meta_store_user) = std::env::var("RW_POSTGRES_USERNAME") else {
+                bail!("To create an iceberg engine table, RW_POSTGRES_USERNAME needed to be set");
+            };
+
+            let Ok(meta_store_password) = std::env::var("RW_POSTGRES_PASSWORD") else {
+                bail!("To create an iceberg engine table, RW_POSTGRES_PASSWORD needed to be set");
             };
 
             let rw_db_name = session
@@ -1431,6 +1442,20 @@ pub async fn handle_create_table(
                 into_table_name: None,
             };
 
+            let catalog_uri = if nimtable_dev {
+                // development mode
+                format!("jdbc:sqlite:{}", meta_store_database.clone())
+            } else {
+                // production mode
+                format!(
+                    "jdbc:postgresql://{}/{}",
+                    meta_store_endpoint.clone(),
+                    meta_store_database.clone()
+                )
+            };
+
+            let warehouse_path = format!("s3://{}/{}/nimtable", s3_bucket, data_directory);
+
             let mut sink_handler_args = handler_args.clone();
             let mut with = BTreeMap::new();
             with.insert("connector".to_string(), "iceberg".to_string());
@@ -1438,14 +1463,14 @@ pub async fn handle_create_table(
             with.insert("primary_key".to_string(), pks.join(","));
             with.insert("type".to_string(), "upsert".to_string());
             with.insert("catalog.type".to_string(), "jdbc".to_string());
-            with.insert("warehouse.path".to_string(), format!("s3://{}", s3_bucket));
+            with.insert("warehouse.path".to_string(), warehouse_path.clone());
             if let Some(s3_endpoint) = s3_endpoint.clone() {
                 with.insert("s3.endpoint".to_string(), s3_endpoint);
             }
             with.insert("s3.access.key".to_string(), s3_ak.clone());
             with.insert("s3.secret.key".to_string(), s3_sk.clone());
             with.insert("s3.region".to_string(), s3_region.clone());
-            with.insert("catalog.uri".to_string(), meta_store_uri.clone());
+            with.insert("catalog.uri".to_string(), catalog_uri.clone());
             with.insert("catalog.jdbc.user".to_string(), meta_store_user.clone());
             with.insert(
                 "catalog.jdbc.password".to_string(),
@@ -1456,6 +1481,10 @@ pub async fn handle_create_table(
             with.insert("table.name".to_string(), iceberg_table_name.to_string());
             with.insert("commit_checkpoint_interval".to_string(), "1".to_string());
             with.insert("create_table_if_not_exists".to_string(), "true".to_string());
+            if !nimtable_dev {
+                // production mode
+                with.insert("nimtable".to_string(), "true".to_string());
+            }
             sink_handler_args.with_options = WithOptions::new_with_options(with);
 
             let mut source_name = table_name.clone();
@@ -1480,14 +1509,14 @@ pub async fn handle_create_table(
             let mut with = BTreeMap::new();
             with.insert("connector".to_string(), "iceberg".to_string());
             with.insert("catalog.type".to_string(), "jdbc".to_string());
-            with.insert("warehouse.path".to_string(), format!("s3://{}", s3_bucket));
+            with.insert("warehouse.path".to_string(), warehouse_path.clone());
             if let Some(s3_endpoint) = s3_endpoint {
                 with.insert("s3.endpoint".to_string(), s3_endpoint.clone());
             }
             with.insert("s3.access.key".to_string(), s3_ak.clone());
             with.insert("s3.secret.key".to_string(), s3_sk.clone());
             with.insert("s3.region".to_string(), s3_region.clone());
-            with.insert("catalog.uri".to_string(), meta_store_uri.clone());
+            with.insert("catalog.uri".to_string(), catalog_uri.clone());
             with.insert("catalog.jdbc.user".to_string(), meta_store_user.clone());
             with.insert(
                 "catalog.jdbc.password".to_string(),
@@ -1496,6 +1525,10 @@ pub async fn handle_create_table(
             with.insert("catalog.name".to_string(), iceberg_catalog_name.clone());
             with.insert("database.name".to_string(), iceberg_database_name.clone());
             with.insert("table.name".to_string(), iceberg_table_name.to_string());
+            if !nimtable_dev {
+                // production mode
+                with.insert("nimtable".to_string(), "true".to_string());
+            }
             source_handler_args.with_options = WithOptions::new_with_options(with);
 
             catalog_writer

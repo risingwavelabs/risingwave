@@ -152,6 +152,9 @@ pub struct IcebergConfig {
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
+
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub nimtable: bool,
 }
 
 impl IcebergConfig {
@@ -208,8 +211,60 @@ impl IcebergConfig {
                 "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
+        config = config.fill_for_nimtable()?;
 
         Ok(config)
+    }
+
+    pub fn fill_for_nimtable(mut self) -> Result<Self> {
+        if self.nimtable {
+            if self.catalog_type.as_deref() != Some("jdbc") {
+                return Err(SinkError::Config(anyhow!(
+                    "nimtable only support jdbc catalog"
+                )));
+            }
+
+            let Ok(s3_region) = std::env::var("AWS_REGION") else {
+                bail!("To create an iceberg engine table, AWS_REGION needed to be set");
+            };
+            self.region = Some(s3_region);
+
+            let Ok(s3_bucket) = std::env::var("AWS_S3_BUCKET") else {
+                bail!("To create an iceberg engine table, AWS_S3_BUCKET needed to be set");
+            };
+
+            let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
+                bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
+            };
+            self.path = format!("s3://{}/{}/nimtable", s3_bucket, data_directory);
+
+            let Ok(meta_store_endpoint) = std::env::var("RW_SQL_ENDPOINT") else {
+                bail!("To create an iceberg engine table, RW_SQL_ENDPOINT needed to be set");
+            };
+
+            let Ok(meta_store_database) = std::env::var("RW_SQL_DATABASE") else {
+                bail!("To create an iceberg engine table, RW_SQL_DATABASE needed to be set");
+            };
+
+            self.uri = Some(format!(
+                "jdbc:postgresql://{}/{}",
+                meta_store_endpoint.clone(),
+                meta_store_database.clone()
+            ));
+
+            let Ok(meta_store_user) = std::env::var("RW_POSTGRES_USERNAME") else {
+                bail!("To create an iceberg engine table, RW_POSTGRES_USERNAME needed to be set");
+            };
+
+            let Ok(meta_store_password) = std::env::var("RW_POSTGRES_PASSWORD") else {
+                bail!("To create an iceberg engine table, RW_POSTGRES_PASSWORD needed to be set");
+            };
+
+            let java_catalog_props = &mut self.java_catalog_props;
+            java_catalog_props.insert("jdbc.user".to_string(), meta_store_user);
+            java_catalog_props.insert("jdbc.password".to_string(), meta_store_password);
+        }
+        Ok(self)
     }
 
     pub fn catalog_type(&self) -> &str {
@@ -320,7 +375,88 @@ impl IcebergConfig {
         Ok(iceberg_configs)
     }
 
+    fn build_jni_catalog_configs_for_nimtable(
+        &self,
+    ) -> Result<(BaseCatalogConfig, HashMap<String, String>)> {
+        let mut iceberg_configs = HashMap::new();
+
+        let base_catalog_config = {
+            let catalog_type = self.catalog_type().to_string();
+
+            iceberg_configs.insert(CATALOG_TYPE.to_string(), catalog_type.clone());
+            iceberg_configs.insert(CATALOG_NAME.to_string(), self.catalog_name());
+
+            if let Some(region) = &self.region {
+                // icelake
+                iceberg_configs.insert(
+                    "iceberg.table.io.region".to_string(),
+                    region.clone().to_string(),
+                );
+                // iceberg-rust
+                iceberg_configs.insert(
+                    ("iceberg.table.io.".to_string() + S3_REGION).to_string(),
+                    region.clone().to_string(),
+                );
+            }
+
+            let (bucket, _) = {
+                let url = Url::parse(&self.path).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
+                let bucket = url
+                    .host_str()
+                    .ok_or_else(|| {
+                        SinkError::Iceberg(anyhow!(
+                            "Invalid s3 path: {}, bucket is missing",
+                            self.path
+                        ))
+                    })?
+                    .to_string();
+                let root = url.path().trim_start_matches('/').to_string();
+                (bucket, root)
+            };
+
+            iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
+            // #TODO
+            // Support load config file
+            iceberg_configs.insert(
+                "iceberg.table.io.disable_config_load".to_string(),
+                "true".to_string(),
+            );
+
+            load_iceberg_base_catalog_config(&iceberg_configs)?
+        };
+
+        // Prepare jni configs, for details please see https://iceberg.apache.org/docs/latest/aws/
+        let mut java_catalog_configs = HashMap::new();
+        {
+            if let Some(uri) = self.uri.as_deref() {
+                java_catalog_configs.insert("uri".to_string(), uri.to_string());
+            }
+
+            java_catalog_configs.insert("warehouse".to_string(), self.path.clone());
+            java_catalog_configs.extend(self.java_catalog_props.clone());
+
+            // Currently we only support s3, so let's set it to s3
+            java_catalog_configs.insert(
+                "io-impl".to_string(),
+                "org.apache.iceberg.aws.s3.S3FileIO".to_string(),
+            );
+
+            if let Some(path_style_access) = self.path_style_access {
+                java_catalog_configs.insert(
+                    "s3.path-style-access".to_string(),
+                    path_style_access.to_string(),
+                );
+            }
+        }
+
+        Ok((base_catalog_config, java_catalog_configs))
+    }
+
     fn build_jni_catalog_configs(&self) -> Result<(BaseCatalogConfig, HashMap<String, String>)> {
+        if self.nimtable {
+            return self.build_jni_catalog_configs_for_nimtable();
+        }
+
         let mut iceberg_configs = HashMap::new();
 
         let base_catalog_config = {
