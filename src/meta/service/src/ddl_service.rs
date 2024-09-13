@@ -455,11 +455,6 @@ impl DdlService for DdlServiceImpl {
         let index_table = req.get_index_table()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
 
-        println!(
-            "heiheihei[meta]: create index: {:?}, type: {:?}",
-            index.name, index_table.table_type
-        );
-
         let stream_job = StreamingJob::Index(index, index_table);
         let version = self
             .ddl_controller
@@ -486,7 +481,6 @@ impl DdlService for DdlServiceImpl {
         let request = request.into_inner();
         let index_id = request.index_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
-        println!("heiheihei[meta]: drop index: {:?}", index_id);
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(

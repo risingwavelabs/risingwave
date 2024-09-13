@@ -168,17 +168,9 @@ impl ObserverState for FrontendObserverNode {
             catalog_guard.create_subscription(&subscription)
         }
         for table in tables {
-            println!(
-                "[init] heiheihei, create table: {:?}, {:?}",
-                table.id, table.name
-            );
             catalog_guard.create_table(&table)
         }
         for index in indexes {
-            println!(
-                "[init] heiheihei, create index: {:?}, {:?}",
-                index.id, index.name
-            );
             catalog_guard.create_index(&index)
         }
         for view in views {
@@ -283,10 +275,6 @@ impl FrontendObserverNode {
                                 table.id.into(),
                             ),
                             Operation::Update => {
-                                println!(
-                                    "[fe]heiheihei, update table: {:?}, {:?}",
-                                    table.id, table.name
-                                );
                                 let old_fragment_id = catalog_guard
                                     .get_any_table_by_id(&table.id.into())
                                     .unwrap()

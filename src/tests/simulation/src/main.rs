@@ -35,7 +35,7 @@ pub struct Args {
     files: String,
 
     /// The number of frontend nodes.
-    #[clap(long, default_value = "1")]
+    #[clap(long, default_value = "2")]
     frontend_nodes: usize,
 
     /// The number of compute nodes.

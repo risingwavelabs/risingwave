@@ -40,7 +40,7 @@ use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
-    PbSubscription, PbTable, PbView,
+    PbStreamJobStatus, PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
@@ -3034,12 +3034,6 @@ impl CatalogControllerInner {
 
         let users = self.list_users().await?;
 
-        println!(
-            "heiheihei: snapshot, tables: {:?}, indexes: {:?}",
-            tables.iter().map(|t| (t.id, t.name.clone())).collect_vec(),
-            indexes.iter().map(|i| (i.id, i.name.clone())).collect_vec()
-        );
-
         Ok((
             (
                 databases,
@@ -3177,7 +3171,7 @@ impl CatalogControllerInner {
         let job_ids: HashSet<ObjectId> = table_objs
             .iter()
             .map(|(t, _)| t.table_id)
-            .chain(created_streaming_job_ids.into_iter())
+            .chain(created_streaming_job_ids.iter().cloned())
             .collect();
 
         let internal_table_objs = Table::find()
@@ -3193,7 +3187,19 @@ impl CatalogControllerInner {
         Ok(table_objs
             .into_iter()
             .chain(internal_table_objs.into_iter())
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .map(|(table, obj)| {
+                // Correctly set the stream job status for creating materialized views and internal tables.
+                let is_created = created_streaming_job_ids.contains(&table.table_id)
+                    || (table.table_type == TableType::Internal
+                        && created_streaming_job_ids.contains(&table.belongs_to_job_id.unwrap()));
+                let mut pb_table: PbTable = ObjectModel(table, obj.unwrap()).into();
+                pb_table.stream_job_status = if is_created {
+                    PbStreamJobStatus::Created.into()
+                } else {
+                    PbStreamJobStatus::Creating.into()
+                };
+                pb_table
+            })
             .collect())
     }
 
