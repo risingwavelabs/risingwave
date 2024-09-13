@@ -114,7 +114,6 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
     for cg in version.levels.into_values() {
         for level in cg.levels.into_iter().chain(cg.l0.sub_levels) {
             for sst in level.table_infos {
-                let estimated_sst_file_size = sst.sst_size;
                 let key_range = &sst.key_range;
                 sstables.push(RwHummockSstable {
                     sstable_id: sst.sst_id as _,
@@ -126,7 +125,7 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     key_range_left: key_range.left.to_vec(),
                     key_range_right: key_range.right.to_vec(),
                     right_exclusive: key_range.right_exclusive,
-                    file_size: estimated_sst_file_size as _,
+                    file_size: sst.file_size as _,
                     meta_offset: sst.meta_offset as _,
                     stale_key_count: sst.stale_key_count as _,
                     total_key_count: sst.total_key_count as _,

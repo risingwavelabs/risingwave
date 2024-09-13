@@ -47,7 +47,6 @@ pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
 
-    let mut object_id_set = HashSet::new();
     let mut s = String::new();
     writeln!(
         s,
@@ -75,9 +74,6 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .table_infos
             .iter()
             .map(|table| {
-                if !object_id_set.insert(table.object_id) {
-                    println!("LI)K object_id {} is duplicated", table.object_id);
-                }
                 for tid in &table.table_ids {
                     if !existing_table_ids.contains(tid) {
                         dropped_table_ids.insert(tid);

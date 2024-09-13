@@ -50,6 +50,7 @@ pub mod group_split {
     use std::collections::BTreeSet;
 
     use bytes::Bytes;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_pb::hummock::PbLevelType;
 
     use super::hummock_version_ext::insert_new_sub_level;
@@ -69,16 +70,16 @@ pub mod group_split {
     pub fn need_to_split(sst: &SstableInfo, split_key: Bytes) -> SstSplitType {
         let key_range = &sst.key_range;
         // 1. compare left
-        if split_key.cmp(&key_range.left).is_le() {
+        if split_key.le(&key_range.left) {
             return SstSplitType::Right;
         }
 
         // 2. compare right
         if key_range.right_exclusive {
-            if split_key.cmp(&key_range.right).is_ge() {
+            if split_key.ge(&key_range.right) {
                 return SstSplitType::Left;
             }
-        } else if split_key.cmp(&key_range.right).is_gt() {
+        } else if split_key.gt(&key_range.right) {
             return SstSplitType::Left;
         }
 
@@ -120,14 +121,14 @@ pub mod group_split {
         // rebuild the key_range and size and sstable file size
         {
             // origin_sst_info
-            origin_sst_info.key_range = key_range_l.clone();
+            origin_sst_info.key_range = key_range_l;
             origin_sst_info.sst_size = left_size;
             origin_sst_info.table_ids = table_ids_l;
         }
 
         {
             // new sst
-            branch_table_info.key_range = key_range_r.clone();
+            branch_table_info.key_range = key_range_r;
             branch_table_info.sst_size = right_size;
             branch_table_info.table_ids = table_ids_r;
         }
@@ -171,6 +172,7 @@ pub mod group_split {
         branch_table_info
     }
 
+    // Should avoid split same table_id into two groups
     pub fn split_table_ids(table_ids: &Vec<u32>, split_key: Bytes) -> (Vec<u32>, Vec<u32>) {
         assert!(table_ids.is_sorted());
         let split_full_key = FullKey::decode(&split_key);
@@ -178,19 +180,9 @@ pub mod group_split {
         let vnode = split_user_key.get_vnode_id();
         let table_id = split_user_key.table_id.table_id();
 
-        // let pos = table_ids.binary_search(&table_id).unwrap();
+        assert_eq!(VirtualNode::ZERO, VirtualNode::from_index(vnode));
         let pos = table_ids.partition_point(|&id| id < table_id);
-        if vnode == 0 {
-            // The split logic binds the vnode and assumes that the incoming split key epoch == 0, so we place the table_id to the right
-            // NOTE: This branch can avoid split same table_id into two groups when vnode == 0, it related to the implementation of `state_table_info` with compaction group
-            (table_ids[..pos].to_vec(), table_ids[pos..].to_vec())
-        } else {
-            (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
-        }
-
-        // split table_id that related to split_key both left and right
-        // let pos = table_ids.binary_search(&table_id).unwrap();
-        // (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
+        (table_ids[..pos].to_vec(), table_ids[pos..].to_vec())
     }
 
     pub fn split_sst_info_for_level(

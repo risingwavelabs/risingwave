@@ -426,14 +426,6 @@ impl HummockVersion {
                     continue;
                 }
 
-                tracing::info!(
-                    "sub_level {:?} insert_table_infos {:?} split_key {:?} sub_level_type {:?}",
-                    sub_level.sub_level_id,
-                    insert_table_infos,
-                    split_key,
-                    sub_level.level_type
-                );
-
                 sub_level
                     .table_infos
                     .extract_if(|sst_info| sst_info.table_ids.is_empty())
@@ -471,12 +463,6 @@ impl HummockVersion {
                 continue;
             }
 
-            tracing::info!(
-                "level {:?} insert_table_infos {:?}",
-                level.level_idx,
-                insert_table_infos
-            );
-
             cur_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
                 .map(|sst| sst.sst_size)
@@ -499,13 +485,6 @@ impl HummockVersion {
                     level.total_file_size -= sst_info.sst_size;
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
                 });
-
-            level.total_file_size = level.table_infos.iter().map(|s| s.sst_size).sum();
-            level.uncompressed_file_size = level
-                .table_infos
-                .iter()
-                .map(|s| s.uncompressed_file_size)
-                .sum();
         }
     }
 
@@ -1686,132 +1665,28 @@ mod tests {
 
     #[test]
     fn test_split_sst() {
+        let epoch = test_epoch(1);
+        let table_key_l = gen_key_from_str(VirtualNode::from_index(0), "1");
+        let table_key_r = gen_key_from_str(VirtualNode::from_index(255), "1");
+        let full_key_l = FullKey::for_test(TableId::new(1), table_key_l, epoch);
+        let full_key_r = FullKey::for_test(TableId::new(5), table_key_r, epoch);
+
+        let sst = SstableInfo {
+            object_id: 1,
+            sst_id: 1,
+            key_range: KeyRange {
+                left: full_key_l.encode().into(),
+                right: full_key_r.encode().into(),
+                right_exclusive: false,
+            },
+            table_ids: vec![1, 2, 3, 5],
+            uncompressed_file_size: 2,
+            file_size: 100,
+            sst_size: 100,
+            ..Default::default()
+        };
+
         {
-            let epoch = test_epoch(1);
-            let table_key_l = gen_key_from_str(VirtualNode::from_index(0), "1");
-            let table_key_r = gen_key_from_str(VirtualNode::from_index(255), "1");
-            let full_key_l = FullKey::for_test(TableId::new(3), table_key_l, epoch);
-            let full_key_r = FullKey::for_test(TableId::new(5), table_key_r, epoch);
-
-            let sst = SstableInfo {
-                object_id: 1,
-                sst_id: 1,
-                key_range: KeyRange {
-                    left: full_key_l.encode().into(),
-                    right: full_key_r.encode().into(),
-                    right_exclusive: false,
-                },
-                table_ids: vec![1, 2, 3, 4, 5],
-                uncompressed_file_size: 2,
-                file_size: 100,
-                sst_size: 100,
-                ..Default::default()
-            };
-
-            {
-                let split_key = {
-                    FullKey::for_test(
-                        TableId::from(3),
-                        gen_key_from_str(VirtualNode::from_index(0), ""),
-                        0,
-                    )
-                    .encode()
-                };
-                let mut origin_sst = sst.clone();
-                let sst_size = origin_sst.sst_size;
-                let split_type = group_split::need_to_split(&origin_sst, split_key.clone().into());
-                assert_eq!(SstSplitType::Right, split_type);
-
-                let mut new_sst_id = 10;
-                let branched_sst = group_split::split_sst(
-                    &mut origin_sst,
-                    &mut new_sst_id,
-                    split_key.into(),
-                    sst_size / 2,
-                    sst_size / 2,
-                );
-
-                assert!(origin_sst.key_range.right_exclusive);
-                assert!(origin_sst
-                    .key_range
-                    .right
-                    .cmp(&branched_sst.key_range.left)
-                    .is_le());
-                assert!(origin_sst.table_ids.is_sorted());
-                assert!(branched_sst.table_ids.is_sorted());
-                assert!(
-                    origin_sst.table_ids.last().unwrap() < branched_sst.table_ids.first().unwrap()
-                );
-                assert!(branched_sst.sst_size < origin_sst.file_size);
-                assert_eq!(10, branched_sst.sst_id);
-                assert_eq!(11, origin_sst.sst_id);
-                assert_eq!(&3, branched_sst.table_ids.first().unwrap()); // split table_id to right
-            }
-
-            {
-                let split_key = {
-                    FullKey::for_test(
-                        TableId::from(3),
-                        gen_key_from_str(VirtualNode::from_index(255), ""),
-                        0,
-                    )
-                    .encode()
-                };
-                let mut origin_sst = sst.clone();
-                let sst_size = origin_sst.sst_size;
-                let split_type = group_split::need_to_split(&origin_sst, split_key.clone().into());
-                assert_eq!(SstSplitType::Both, split_type);
-
-                let mut new_sst_id = 10;
-                let branched_sst = group_split::split_sst(
-                    &mut origin_sst,
-                    &mut new_sst_id,
-                    split_key.into(),
-                    sst_size / 2,
-                    sst_size / 2,
-                );
-
-                assert!(origin_sst.key_range.right_exclusive);
-                assert!(origin_sst
-                    .key_range
-                    .right
-                    .cmp(&branched_sst.key_range.left)
-                    .is_le());
-                assert!(origin_sst.table_ids.is_sorted());
-                assert!(branched_sst.table_ids.is_sorted());
-                assert!(
-                    origin_sst.table_ids.last().unwrap() == branched_sst.table_ids.first().unwrap()
-                );
-                assert!(branched_sst.sst_size < origin_sst.file_size);
-                assert_eq!(10, branched_sst.sst_id);
-                assert_eq!(11, origin_sst.sst_id);
-                assert_eq!(&3, branched_sst.table_ids.first().unwrap()); // split table_id to right
-            }
-
-            let split_key = {
-                FullKey::for_test(
-                    TableId::from(6),
-                    gen_key_from_str(VirtualNode::from_index(0), ""),
-                    0,
-                )
-                .encode()
-            };
-            let origin_sst = sst.clone();
-            let split_type = group_split::need_to_split(&origin_sst, split_key.into());
-            assert_eq!(SstSplitType::Left, split_type);
-
-            let split_key = {
-                FullKey::for_test(
-                    TableId::from(4),
-                    gen_key_from_str(VirtualNode::from_index(0), ""),
-                    0,
-                )
-                .encode()
-            };
-            let origin_sst = sst.clone();
-            let split_type = group_split::need_to_split(&origin_sst, split_key.into());
-            assert_eq!(SstSplitType::Both, split_type);
-
             let split_key = {
                 FullKey::for_test(
                     TableId::from(3),
@@ -1820,34 +1695,109 @@ mod tests {
                 )
                 .encode()
             };
-            let origin_sst = sst.clone();
-            let split_type = group_split::need_to_split(&origin_sst, split_key.into());
-            assert_eq!(SstSplitType::Right, split_type);
+            let mut origin_sst = sst.clone();
+            let sst_size = origin_sst.sst_size;
+            let split_type = group_split::need_to_split(&origin_sst, split_key.clone().into());
+            assert_eq!(SstSplitType::Both, split_type);
 
+            let mut new_sst_id = 10;
+            let branched_sst = group_split::split_sst(
+                &mut origin_sst,
+                &mut new_sst_id,
+                split_key.into(),
+                sst_size / 2,
+                sst_size / 2,
+            );
+
+            assert!(origin_sst.key_range.right_exclusive);
+            assert!(origin_sst
+                .key_range
+                .right
+                .cmp(&branched_sst.key_range.left)
+                .is_le());
+            assert!(origin_sst.table_ids.is_sorted());
+            assert!(branched_sst.table_ids.is_sorted());
+            assert!(origin_sst.table_ids.last().unwrap() < branched_sst.table_ids.first().unwrap());
+            assert!(branched_sst.sst_size < origin_sst.file_size);
+            assert_eq!(10, branched_sst.sst_id);
+            assert_eq!(11, origin_sst.sst_id);
+            assert_eq!(&3, branched_sst.table_ids.first().unwrap()); // split table_id to right
+        }
+
+        {
+            // test un-exist table_id
             let split_key = {
                 FullKey::for_test(
-                    TableId::from(5),
-                    gen_key_from_str(VirtualNode::from_index(255), ""),
+                    TableId::from(4),
+                    gen_key_from_str(VirtualNode::from_index(0), ""),
                     0,
                 )
                 .encode()
             };
-            let origin_sst = sst.clone();
+            let mut origin_sst = sst.clone();
+            let sst_size = origin_sst.sst_size;
             let split_type = group_split::need_to_split(&origin_sst, split_key.clone().into());
             assert_eq!(SstSplitType::Both, split_type);
 
-            let split_key = {
-                FullKey::for_test(
-                    TableId::from(5),
-                    gen_key_from_str(VirtualNode::from_index(255), ""),
-                    u64::MAX,
-                )
-                .encode()
-            };
-            let origin_sst = sst.clone();
-            let split_type = group_split::need_to_split(&origin_sst, split_key.into());
-            assert_eq!(SstSplitType::Left, split_type);
+            let mut new_sst_id = 10;
+            let branched_sst = group_split::split_sst(
+                &mut origin_sst,
+                &mut new_sst_id,
+                split_key.into(),
+                sst_size / 2,
+                sst_size / 2,
+            );
+
+            assert!(origin_sst.key_range.right_exclusive);
+            assert!(origin_sst
+                .key_range
+                .right
+                .cmp(&branched_sst.key_range.left)
+                .is_le());
+            assert!(origin_sst.table_ids.is_sorted());
+            assert!(branched_sst.table_ids.is_sorted());
+            assert!(origin_sst.table_ids.last().unwrap() < branched_sst.table_ids.first().unwrap());
+            assert!(branched_sst.sst_size < origin_sst.file_size);
+            assert_eq!(10, branched_sst.sst_id);
+            assert_eq!(11, origin_sst.sst_id);
+            assert_eq!(&5, branched_sst.table_ids.first().unwrap()); // split table_id to right
         }
+
+        let split_key = {
+            FullKey::for_test(
+                TableId::from(6),
+                gen_key_from_str(VirtualNode::from_index(0), ""),
+                0,
+            )
+            .encode()
+        };
+        let origin_sst = sst.clone();
+        let split_type = group_split::need_to_split(&origin_sst, split_key.into());
+        assert_eq!(SstSplitType::Left, split_type);
+
+        let split_key = {
+            FullKey::for_test(
+                TableId::from(4),
+                gen_key_from_str(VirtualNode::from_index(0), ""),
+                0,
+            )
+            .encode()
+        };
+        let origin_sst = sst.clone();
+        let split_type = group_split::need_to_split(&origin_sst, split_key.into());
+        assert_eq!(SstSplitType::Both, split_type);
+
+        let split_key = {
+            FullKey::for_test(
+                TableId::from(1),
+                gen_key_from_str(VirtualNode::from_index(0), ""),
+                0,
+            )
+            .encode()
+        };
+        let origin_sst = sst.clone();
+        let split_type = group_split::need_to_split(&origin_sst, split_key.into());
+        assert_eq!(SstSplitType::Right, split_type);
     }
 
     fn gen_sst_info(object_id: u64, table_ids: Vec<u32>, left: Bytes, right: Bytes) -> SstableInfo {

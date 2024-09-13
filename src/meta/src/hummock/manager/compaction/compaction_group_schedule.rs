@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::TableGroupInf
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
-use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
+use risingwave_hummock_sdk::{can_concat, CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
@@ -59,9 +59,13 @@ pub(crate) fn build_split_key(mut table_id: StateTableId, mut vnode: VirtualNode
         vnode = VNODE_SPLIT_TO_RIGHT;
     }
 
-    FullKey::new(TableId::from(table_id), TableKey(vnode.to_be_bytes()), 0)
-        .encode()
-        .into()
+    FullKey::new(
+        TableId::from(table_id),
+        TableKey(vnode.to_be_bytes()),
+        HummockEpoch::MIN,
+    )
+    .encode()
+    .into()
 }
 
 impl HummockManager {
@@ -77,6 +81,7 @@ impl HummockManager {
             .move_state_tables_to_dedicated_compaction_group(parent_group_id, table_ids)
             .await?;
 
+        // partition_vnode_count only works inside a table, to avoid a lot of slicing sst, we only enable it in groups with high throughput and only one table.
         if table_ids.len() == 1 {
             // update compaction config for target_compaction_group_id
             let mut compaction_group_manager = self.compaction_group_manager.write().await;
@@ -143,12 +148,10 @@ impl HummockManager {
 
         // not need to split
         if table_id == *table_ids.first().unwrap() && is_vnode_split_to_right(vnode) {
-            println!("group_id {} table_id {} == *table_ids.first().unwrap() && is_vnode_split_to_right({:?})", parent_group_id, table_id, vnode);
             return Ok(parent_group_id);
         }
 
         if table_id == *table_ids.last().unwrap() && is_vnode_split_to_left(vnode) {
-            println!("group_id {} table_id {} == *table_ids.last().unwrap() && is_vnode_split_to_left({:?})", parent_group_id, table_id, vnode);
             return Ok(parent_group_id);
         }
 
@@ -166,12 +169,6 @@ impl HummockManager {
         let split_sst_count = new_version_delta
             .latest_version()
             .count_new_ssts_in_group_split(parent_group_id, split_key.clone());
-
-        tracing::info!(
-            "LI)K parent_group_id: {}, split_sst_count: {}",
-            parent_group_id,
-            split_sst_count
-        );
 
         let new_sst_start_id = next_sstable_object_id(&self.env, split_sst_count).await?;
         let (new_group, target_compaction_group_id) = {
@@ -297,7 +294,6 @@ impl HummockManager {
 
         let parent_table_ids = {
             let versioning_guard = self.versioning.read().await;
-            // let versioning = versioning_guard.deref_mut();
             versioning_guard
                 .current_version
                 .state_table_info

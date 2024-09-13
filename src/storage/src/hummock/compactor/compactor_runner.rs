@@ -656,19 +656,7 @@ where
         let iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
 
-        let (is_new_user_key, error_msg) = full_key_tracker.observe_debug(iter.key());
-        if let Some(error_msg) = error_msg {
-            tracing::warn!(
-                "LI)K last_table_id {:?} total_key_count {:?} task_key_range {:?} key {:?}",
-                last_table_id,
-                compaction_statistics.iter_total_key_counts,
-                task_config.key_range,
-                iter.key()
-            );
-
-            panic!("Error in observing key: {}", error_msg);
-        }
-
+        let is_new_user_key = full_key_tracker.observe(iter.key());
         let mut drop = false;
 
         // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.

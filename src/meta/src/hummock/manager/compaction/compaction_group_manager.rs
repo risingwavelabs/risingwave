@@ -232,7 +232,6 @@ impl HummockManager {
 
         let mut last_group_id = 0;
         for (table_id, raw_group_id) in pairs {
-            // let group_id = *raw_group_id;
             let mut is_group_init = true;
             let group_id = *raw_group_id;
 
