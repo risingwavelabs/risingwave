@@ -142,6 +142,13 @@ impl HummockVersionStateTableInfo {
             match self.state_table_info.entry(*table_id) {
                 Entry::Occupied(mut entry) => {
                     let prev_info = entry.get_mut();
+                    assert!(
+                        new_info.committed_epoch >= prev_info.committed_epoch,
+                        "state table info regress. table id: {}, prev_info: {:?}, new_info: {:?}",
+                        table_id.table_id,
+                        prev_info,
+                        new_info
+                    );
                     if new_info.committed_epoch > prev_info.committed_epoch {
                         has_bumped_committed_epoch = true;
                     }

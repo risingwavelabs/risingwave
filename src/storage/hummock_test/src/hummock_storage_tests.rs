@@ -2341,7 +2341,14 @@ async fn test_table_watermark() {
 
     let (local1, local2) = test_after_epoch2(local1, local2).await;
 
-    let check_version_table_watermark = |version: PinnedVersion, epoch: HummockEpoch| {
+    let check_version_table_watermark = |version: PinnedVersion| {
+        let epoch = version
+            .version()
+            .state_table_info
+            .info()
+            .get(&TEST_TABLE_ID)
+            .unwrap()
+            .committed_epoch;
         let table_watermarks = TableWatermarksIndex::new_committed(
             version
                 .version()
@@ -2447,7 +2454,7 @@ async fn test_table_watermark() {
 
     test_global_read(test_env.storage.clone(), epoch2).await;
 
-    check_version_table_watermark(test_env.storage.get_pinned_version(), epoch1);
+    check_version_table_watermark(test_env.storage.get_pinned_version());
 
     let (local1, local2) = test_after_epoch2(local1, local2).await;
 
@@ -2456,7 +2463,7 @@ async fn test_table_watermark() {
 
     test_global_read(test_env.storage.clone(), epoch2).await;
 
-    check_version_table_watermark(test_env.storage.get_pinned_version(), epoch2);
+    check_version_table_watermark(test_env.storage.get_pinned_version());
 
     let (mut local1, mut local2) = test_after_epoch2(local1, local2).await;
 
@@ -2489,7 +2496,7 @@ async fn test_table_watermark() {
     test_env.commit_epoch(epoch3).await;
     test_env.storage.try_wait_epoch_for_test(epoch3).await;
 
-    check_version_table_watermark(test_env.storage.get_pinned_version(), epoch3);
+    check_version_table_watermark(test_env.storage.get_pinned_version());
 
     let (_local1, _local2) = test_after_epoch2(local1, local2).await;
 

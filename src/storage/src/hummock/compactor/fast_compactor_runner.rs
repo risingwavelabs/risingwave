@@ -621,7 +621,6 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory> {
     state: SkipWatermarkState,
     last_key_is_delete: bool,
     progress_key_num: u32,
-    watermark_can_see_last_key: bool,
 }
 
 impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
@@ -642,7 +641,6 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             task_progress,
             state,
             progress_key_num: 0,
-            watermark_can_see_last_key: false,
         }
     }
 
@@ -659,7 +657,6 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         if !self.last_key.is_empty() {
             self.last_key = FullKey::default();
         }
-        self.watermark_can_see_last_key = false;
         self.last_key_is_delete = false;
     }
 
