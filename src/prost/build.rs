@@ -147,6 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "plan_common.AdditionalColumnPartition",
             "#[derive(Eq, Hash)]",
         )
+        .type_attribute("plan_common.AdditionalColumnPayload", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalColumnTimestamp",
             "#[derive(Eq, Hash)]",
@@ -179,6 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.GroupDestroy", "#[derive(Eq)]")
         .type_attribute("hummock.GroupMetaChange", "#[derive(Eq)]")
         .type_attribute("hummock.GroupTableChange", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupMerge", "#[derive(Eq)]")
         .type_attribute("hummock.GroupDelta", "#[derive(Eq)]")
         .type_attribute("hummock.LevelHandler.RunningCompactTask", "#[derive(Eq)]")
         .type_attribute("hummock.LevelHandler", "#[derive(Eq)]")

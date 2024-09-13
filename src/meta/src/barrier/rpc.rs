@@ -14,14 +14,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::future::Future;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
@@ -58,33 +57,47 @@ struct ControlStreamNode {
     sender: UnboundedSender<StreamingControlStreamRequest>,
 }
 
-fn into_future(
-    worker_id: WorkerId,
-    stream: BoxStream<
-        'static,
-        risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
-    >,
-) -> ResponseStreamFuture {
-    stream.into_future().map(move |(opt, stream)| {
-        (
-            worker_id,
-            stream,
-            opt.ok_or_else(|| anyhow!("end of stream").into())
-                .and_then(|result| result.map_err(|e| e.into())),
-        )
-    })
+mod response_stream_future {
+    use std::future::Future;
+
+    use anyhow::anyhow;
+    use futures::stream::BoxStream;
+    use futures::{FutureExt, StreamExt};
+    use risingwave_pb::stream_service::StreamingControlStreamResponse;
+
+    use crate::manager::WorkerId;
+    use crate::MetaResult;
+
+    pub(super) fn into_future(
+        worker_id: WorkerId,
+        stream: BoxStream<
+            'static,
+            risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
+        >,
+    ) -> ResponseStreamFuture {
+        stream.into_future().map(move |(opt, stream)| {
+            (
+                worker_id,
+                stream,
+                opt.ok_or_else(|| anyhow!("end of stream").into())
+                    .and_then(|result| result.map_err(|e| e.into())),
+            )
+        })
+    }
+
+    pub(super) type ResponseStreamFuture = impl Future<
+            Output = (
+                WorkerId,
+                BoxStream<
+                    'static,
+                    risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
+                >,
+                MetaResult<StreamingControlStreamResponse>,
+            ),
+        > + 'static;
 }
 
-type ResponseStreamFuture = impl Future<
-        Output = (
-            WorkerId,
-            BoxStream<
-                'static,
-                risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
-            >,
-            MetaResult<StreamingControlStreamResponse>,
-        ),
-    > + 'static;
+use response_stream_future::*;
 
 pub(super) struct ControlStreamManager {
     context: GlobalBarrierManagerContext,
@@ -360,7 +373,7 @@ impl ControlStreamManager {
 
         self.nodes
             .iter_mut()
-            .map(|(node_id, node)| {
+            .try_for_each(|(node_id, node)| {
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
                     .actor_ids_to_collect(*node_id)
                     .collect();
@@ -427,7 +440,6 @@ impl ControlStreamManager {
                     Result::<_, MetaError>::Ok(())
                 }
             })
-            .try_collect()
             .inspect_err(|e| {
                 // Record failure in event log.
                 use risingwave_pb::meta::event_log;

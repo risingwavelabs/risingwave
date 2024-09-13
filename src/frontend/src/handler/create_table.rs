@@ -771,6 +771,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     // append additional columns to the end
     handle_addition_columns(
+        None,
         &connect_properties,
         include_column_options,
         &mut columns,

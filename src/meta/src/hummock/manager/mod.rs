@@ -50,7 +50,6 @@ use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager};
 use crate::model::{ClusterId, MetadataModel, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
 
-mod compaction_group_manager;
 mod context;
 mod gc;
 mod tests;
