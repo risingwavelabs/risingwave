@@ -344,6 +344,10 @@ IcebergConfig:
     field_type: bool
     required: false
     default: Default::default
+  - name: nimtable
+    field_type: bool
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server

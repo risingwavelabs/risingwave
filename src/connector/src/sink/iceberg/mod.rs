@@ -1582,6 +1582,7 @@ mod test {
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
             create_table_if_not_exists: false,
+            nimtable: false,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
