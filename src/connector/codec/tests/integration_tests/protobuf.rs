@@ -18,6 +18,7 @@ mod recursive;
 #[rustfmt::skip]
 #[allow(clippy::all)]
 mod all_types;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -516,6 +517,11 @@ fn test_all_types() -> anyhow::Result<()> {
                 name: "Nested".to_string(),
             }),
             repeated_int_field: vec![1, 2, 3, 4, 5],
+            map_field: HashMap::from_iter([
+                ("key1".to_string(), 1),
+                ("key2".to_string(), 2),
+                ("key3".to_string(), 3),
+            ]),
             timestamp_field: Some(::prost_types::Timestamp {
                 seconds: 1630927032,
                 nanos: 500000000,
@@ -531,6 +537,26 @@ fn test_all_types() -> anyhow::Result<()> {
             int32_value_field: Some(42),
             string_value_field: Some("Hello, Wrapper!".to_string()),
             example_oneof: Some(ExampleOneof::OneofInt32(123)),
+            map_struct_field: HashMap::from_iter([
+                (
+                    "key1".to_string(),
+                    NestedMessage {
+                        id: 1,
+                        name: "A".to_string(),
+                    },
+                ),
+                (
+                    "key2".to_string(),
+                    NestedMessage {
+                        id: 2,
+                        name: "B".to_string(),
+                    },
+                ),
+            ]),
+            map_enum_field: HashMap::from_iter([
+                (1, EnumType::Option1 as i32),
+                (2, EnumType::Option2 as i32),
+            ]),
         }
     };
     let mut data_bytes = Vec::new();
@@ -565,17 +591,23 @@ fn test_all_types() -> anyhow::Result<()> {
                 oneof_string(#21): Varchar,
                 oneof_int32(#22): Int32,
                 oneof_enum(#23): Varchar,
-                timestamp_field(#26): Struct {
+                map_field(#26): Map(Varchar,Int32), type_name: all_types.AllTypes.MapFieldEntry, field_descs: [key(#24): Varchar, value(#25): Int32],
+                timestamp_field(#29): Struct {
                     seconds: Int64,
                     nanos: Int32,
-                }, type_name: google.protobuf.Timestamp, field_descs: [seconds(#24): Int64, nanos(#25): Int32],
-                duration_field(#29): Struct {
+                }, type_name: google.protobuf.Timestamp, field_descs: [seconds(#27): Int64, nanos(#28): Int32],
+                duration_field(#32): Struct {
                     seconds: Int64,
                     nanos: Int32,
-                }, type_name: google.protobuf.Duration, field_descs: [seconds(#27): Int64, nanos(#28): Int32],
-                any_field(#32): Jsonb, type_name: google.protobuf.Any, field_descs: [type_url(#30): Varchar, value(#31): Bytea],
-                int32_value_field(#34): Struct { value: Int32 }, type_name: google.protobuf.Int32Value, field_descs: [value(#33): Int32],
-                string_value_field(#36): Struct { value: Varchar }, type_name: google.protobuf.StringValue, field_descs: [value(#35): Varchar],
+                }, type_name: google.protobuf.Duration, field_descs: [seconds(#30): Int64, nanos(#31): Int32],
+                any_field(#35): Jsonb, type_name: google.protobuf.Any, field_descs: [type_url(#33): Varchar, value(#34): Bytea],
+                int32_value_field(#37): Struct { value: Int32 }, type_name: google.protobuf.Int32Value, field_descs: [value(#36): Int32],
+                string_value_field(#39): Struct { value: Varchar }, type_name: google.protobuf.StringValue, field_descs: [value(#38): Varchar],
+                map_struct_field(#44): Map(Varchar,Struct { id: Int32, name: Varchar }), type_name: all_types.AllTypes.MapStructFieldEntry, field_descs: [key(#40): Varchar, value(#43): Struct {
+                    id: Int32,
+                    name: Varchar,
+                }, type_name: all_types.AllTypes.NestedMessage, field_descs: [id(#41): Int32, name(#42): Varchar]],
+                map_enum_field(#47): Map(Int32,Varchar), type_name: all_types.AllTypes.MapEnumFieldEntry, field_descs: [key(#45): Int32, value(#46): Varchar],
             ]"#]],
         expect![[r#"
             Owned(Float64(OrderedFloat(1.2345)))
@@ -608,6 +640,20 @@ fn test_all_types() -> anyhow::Result<()> {
             Owned(Utf8(""))
             Owned(Int32(123))
             Owned(Utf8("DEFAULT"))
+            Owned([
+                StructValue(
+                    Utf8("key1"),
+                    Int32(1),
+                ),
+                StructValue(
+                    Utf8("key2"),
+                    Int32(2),
+                ),
+                StructValue(
+                    Utf8("key3"),
+                    Int32(3),
+                ),
+            ])
             Owned(StructValue(
                 Int64(1630927032),
                 Int32(500000000),
@@ -620,7 +666,33 @@ fn test_all_types() -> anyhow::Result<()> {
             Error at column `any_field`: Fail to convert protobuf Any into jsonb: message 'my_custom_type' not found
             ~~~~
             Owned(StructValue(Int32(42)))
-            Owned(StructValue(Utf8("Hello, Wrapper!")))"#]],
+            Owned(StructValue(Utf8("Hello, Wrapper!")))
+            Owned([
+                StructValue(
+                    Utf8("key1"),
+                    StructValue(
+                        Int32(1),
+                        Utf8("A"),
+                    ),
+                ),
+                StructValue(
+                    Utf8("key2"),
+                    StructValue(
+                        Int32(2),
+                        Utf8("B"),
+                    ),
+                ),
+            ])
+            Owned([
+                StructValue(
+                    Int32(1),
+                    Utf8("OPTION1"),
+                ),
+                StructValue(
+                    Int32(2),
+                    Utf8("OPTION2"),
+                ),
+            ])"#]],
     );
 
     Ok(())
