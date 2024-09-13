@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -77,6 +77,8 @@ pub struct SchemaCatalog {
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, Arc<SystemTableCatalog>>,
     pub owner: u32,
+    
+    change_log_epochs_by_table_id: HashMap<TableId, Vec<Arc<VecDeque<u64>>>>,
 }
 
 impl SchemaCatalog {
@@ -804,6 +806,12 @@ impl SchemaCatalog {
     pub fn name(&self) -> String {
         self.name.clone()
     }
+
+    
+    pub fn list_change_log_epochs(&self, table_id: &TableId) -> Option<&Vec<Arc<VecDeque<u64>>>>
+    {
+        self.change_log_epochs_by_table_id.get(table_id)
+    }
 }
 
 impl OwnedByUserCatalog for SchemaCatalog {
@@ -844,6 +852,7 @@ impl From<&PbSchema> for SchemaCatalog {
             connection_sink_ref: HashMap::new(),
             subscription_by_name: HashMap::new(),
             subscription_by_id: HashMap::new(),
+            change_log_epochs_by_table_id: HashMap::new(),
         }
     }
 }
