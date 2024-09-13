@@ -76,7 +76,7 @@ jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = { workspace = true }
 jsonwebtoken = "9.2.0"
 maplit = "1.0.2"
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12.0", features = ["future"] }
 mongodb = { version = "2.8.2", features = ["tokio-runtime"] }
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",

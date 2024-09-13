@@ -147,6 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "plan_common.AdditionalColumnPartition",
             "#[derive(Eq, Hash)]",
         )
+        .type_attribute("plan_common.AdditionalColumnPayload", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalColumnTimestamp",
             "#[derive(Eq, Hash)]",

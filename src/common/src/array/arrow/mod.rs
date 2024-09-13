@@ -17,7 +17,7 @@ mod arrow_iceberg;
 mod arrow_udf;
 
 pub use arrow_deltalake::DeltaLakeConvert;
-pub use arrow_iceberg::IcebergArrowConvert;
+pub use arrow_iceberg::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 pub use arrow_udf::{FromArrow, ToArrow, UdfArrowConvert};
 
 use crate::types::Interval;
