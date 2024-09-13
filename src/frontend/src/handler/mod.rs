@@ -1037,18 +1037,6 @@ fn check_ban_ddl_for_iceberg_engine_table(
     stmt: &Statement,
 ) -> Result<()> {
     match stmt {
-        Statement::CreateIndex { table_name, .. } => {
-            let (table, schema_name) =
-                get_table_catalog_by_table_name(session.as_ref(), table_name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "CREATE INDEX is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    table_name
-                );
-            }
-        }
-
         Statement::AlterTable {
             name,
             operation:
