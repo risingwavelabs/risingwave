@@ -23,8 +23,9 @@ use std::path::PathBuf;
 use anyhow::Context;
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor};
+use risingwave_connector_codec::common::protobuf::compile_pb;
 use risingwave_connector_codec::decoder::protobuf::parser::*;
-use risingwave_connector_codec::decoder::protobuf::{compile_pb, ProtobufAccess};
+use risingwave_connector_codec::decoder::protobuf::ProtobufAccess;
 use risingwave_connector_codec::decoder::Access;
 use thiserror_ext::AsReport;
 

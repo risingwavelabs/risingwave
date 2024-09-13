@@ -23,7 +23,7 @@
 //! ## Why not directly test the uppermost layer `AvroParserConfig` and `AvroAccessBuilder`?
 //!
 //! Because their interface are not clean enough, and have complex logic like schema registry.
-//! We might need to separate logic to make them clenaer and then we can use it directly for testing.
+//! We might need to separate logic to make them cleaner and then we can use it directly for testing.
 //!
 //! ## If we reimplement a similar logic here, what are we testing?
 //!

@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use prost_reflect::{DescriptorPool, FileDescriptor, MessageDescriptor};
-use risingwave_connector_codec::decoder::protobuf::compile_pb;
+use risingwave_connector_codec::common::protobuf::compile_pb;
 
 use super::loader::{LoadedSchema, SchemaLoader};
 use super::schema_registry::Subject;
