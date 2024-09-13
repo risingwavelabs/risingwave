@@ -73,4 +73,7 @@ message AllTypes {
     // wrapper types
     google.protobuf.Int32Value int32_value_field = 27;
     google.protobuf.StringValue string_value_field = 28;
+
+    map<string, NestedMessage> map_struct_field = 29;
+    map<int32, EnumType> map_enum_field = 30;
   }

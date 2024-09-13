@@ -192,10 +192,10 @@ pub fn from_protobuf_value<'a>(
             let DataType::Map(map_type) = type_expected else {
                 return Err(err());
             };
-            let map_desc = kind.as_message().ok_or_else(err)?;
-            if !map_desc.is_map_entry() {
+            if !field_desc.is_map() {
                 return Err(err());
             }
+            let map_desc = kind.as_message().ok_or_else(err)?;
 
             let mut key_builder = map_type.key().create_array_builder(map.len());
             let mut value_builder = map_type.value().create_array_builder(map.len());
@@ -205,11 +205,15 @@ pub fn from_protobuf_value<'a>(
             // in the future.
             for (key, value) in map.iter().sorted_by_key(|(k, _v)| *k) {
                 key_builder.append(from_protobuf_value(
-                    field_desc,
+                    &map_desc.map_entry_key_field(),
                     &key.clone().into(),
                     map_type.key(),
                 )?);
-                value_builder.append(from_protobuf_value(field_desc, value, map_type.value())?);
+                value_builder.append(from_protobuf_value(
+                    &map_desc.map_entry_value_field(),
+                    value,
+                    map_type.value(),
+                )?);
             }
             let keys = key_builder.finish();
             let values = value_builder.finish();
