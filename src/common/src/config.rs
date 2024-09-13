@@ -192,10 +192,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_interval_sec")]
     pub full_gc_interval_sec: u64,
 
-    /// In certain scenarios, objects path are prefixed by an additional shard id and a slash. i.e. [`data_dir`]/[`shard id`]/[`object name`].
+    /// In certain scenarios, objects path are prefixed by an additional shard id and a slash. i.e. `data_dir`/`shard_id`/`object_name`.
     /// When enabled, full GC will list objects with a prefix of rotational shard ids.
     /// For instance, setting it to 256 leads to a rotation through the range [0..255].
-    /// Set it to 1 leads for scenarios where object sharding is not applied, i.e.[`data_dir`]/[`object name`].
+    /// Set it to 1 leads for scenarios where object sharding is not applied, i.e.`data_dir`/`object_name`.
     /// By default it's disabled, indicating the full GC will list objects without any prefix.
     #[serde(default = "default::meta::full_gc_shard_num")]
     pub full_gc_shard_num: Option<u32>,
