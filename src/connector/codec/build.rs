@@ -13,17 +13,17 @@
 // limitations under the License.
 
 fn main() {
-    let proto_dir = "./src/test_data/proto_recursive";
+    let proto_dir = "./tests/test_data/";
 
     println!("cargo:rerun-if-changed={}", proto_dir);
 
-    let proto_files = ["recursive"];
+    let proto_files = ["recursive", "all-types"];
     let protos: Vec<String> = proto_files
         .iter()
         .map(|f| format!("{}/{}.proto", proto_dir, f))
         .collect();
     prost_build::Config::new()
-        .out_dir("./src/parser/protobuf")
+        .out_dir("./tests/integration_tests/protobuf")
         .compile_protos(&protos, &Vec::<String>::new())
         .unwrap();
 

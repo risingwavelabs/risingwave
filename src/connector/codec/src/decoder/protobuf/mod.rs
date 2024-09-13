@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod parser;
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
+use parser::from_protobuf_value;
 use prost_reflect::{DynamicMessage, ReflectMessage};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, DatumCow, ToOwnedDatum};
 use thiserror_ext::AsReport;
 
-use super::{Access, AccessResult};
-use crate::parser::from_protobuf_value;
-use crate::parser::unified::uncategorized;
+use super::{uncategorized, Access, AccessResult};
 
 pub struct ProtobufAccess {
     message: DynamicMessage,
