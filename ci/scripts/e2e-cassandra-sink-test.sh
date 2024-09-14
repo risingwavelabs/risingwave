@@ -43,6 +43,7 @@ export LATEST_CASSANDRA_VERSION=$(get_latest_cassandra_version)
 export CASSANDRA_DIR="./apache-cassandra-${LATEST_CASSANDRA_VERSION}"
 
 # Cassandra only support python 3.11
+apt-get update
 apt-get install -y python3.11
 apt-get install -y python3.11-venv
 python3.11 -m venv cqlsh_env
