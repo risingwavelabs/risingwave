@@ -31,6 +31,3 @@ select * from diamonds;
 
 statement ok
 DROP TABLE diamonds;
-
-statement ok
-DROP TABLE diamonds_recursive_read;
