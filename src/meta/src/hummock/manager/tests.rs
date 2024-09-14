@@ -62,15 +62,9 @@ fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
         .collect_vec()
 }
 
-fn gen_sstable_info(
-    sst_id: u64,
-    table_ids: Vec<u32>,
-    key_range_left_vnode: usize,
-    key_range_right_vnode: usize,
-    epoch: u64,
-) -> SstableInfo {
-    let table_key_l = gen_key_from_str(VirtualNode::from_index(key_range_left_vnode), "1");
-    let table_key_r = gen_key_from_str(VirtualNode::from_index(key_range_right_vnode), "1");
+fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
+    let table_key_l = gen_key_from_str(VirtualNode::ZERO, "1");
+    let table_key_r = gen_key_from_str(VirtualNode::MAX_FOR_TEST, "1");
     let full_key_l = FullKey::for_test(
         TableId::new(*table_ids.first().unwrap()),
         table_key_l,
@@ -97,21 +91,9 @@ fn gen_sstable_info(
     }
 }
 
-fn gen_local_sstable_info(
-    sst_id: u64,
-    table_ids: Vec<u32>,
-    key_range_left_vnode: usize,
-    key_range_right_vnode: usize,
-    epoch: u64,
-) -> LocalSstableInfo {
+fn gen_local_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> LocalSstableInfo {
     LocalSstableInfo {
-        sst_info: gen_sstable_info(
-            sst_id,
-            table_ids,
-            key_range_left_vnode,
-            key_range_right_vnode,
-            epoch,
-        ),
+        sst_info: gen_sstable_info(sst_id, table_ids, epoch),
         table_stats: Default::default(),
     }
 }
@@ -2197,7 +2179,7 @@ async fn test_move_tables_between_compaction_group() {
         .register_table_ids_for_test(&[(100, 2), (101, 2), (102, 2)])
         .await
         .unwrap();
-    let sst_1 = gen_local_sstable_info(10, vec![100, 101, 102], 1, 128, test_epoch(1));
+    let sst_1 = gen_local_sstable_info(10, vec![100, 101, 102], test_epoch(1));
 
     hummock_meta_client
         .commit_epoch(
@@ -2211,7 +2193,7 @@ async fn test_move_tables_between_compaction_group() {
         .await
         .unwrap();
 
-    let sst_2 = gen_local_sstable_info(14, vec![101, 102], 1, 128, test_epoch(2));
+    let sst_2 = gen_local_sstable_info(14, vec![101, 102], test_epoch(2));
 
     hummock_meta_client
         .commit_epoch(
@@ -2356,7 +2338,7 @@ async fn test_partition_level() {
         .register_table_ids_for_test(&[(100, 2), (101, 2)])
         .await
         .unwrap();
-    let sst_1 = gen_local_sstable_info(10, vec![100, 101], 1, 128, test_epoch(1));
+    let sst_1 = gen_local_sstable_info(10, vec![100, 101], test_epoch(1));
 
     hummock_meta_client
         .commit_epoch(
@@ -2381,7 +2363,7 @@ async fn test_partition_level() {
     const MB: u64 = 1024 * 1024;
     let mut selector = default_compaction_selector();
     for epoch in 31..100 {
-        let mut sst = gen_local_sstable_info(global_sst_id, vec![100], 1, 128, test_epoch(epoch));
+        let mut sst = gen_local_sstable_info(global_sst_id, vec![100], test_epoch(epoch));
         sst.sst_info.file_size = 10 * MB;
         sst.sst_info.sst_size = 10 * MB;
         sst.sst_info.uncompressed_file_size = 10 * MB;
@@ -2404,7 +2386,7 @@ async fn test_partition_level() {
             .await
             .unwrap()
         {
-            let mut sst = gen_sstable_info(global_sst_id, vec![100], 1, 128, test_epoch(epoch));
+            let mut sst = gen_sstable_info(global_sst_id, vec![100], test_epoch(epoch));
             sst.file_size = task
                 .input_ssts
                 .iter()
