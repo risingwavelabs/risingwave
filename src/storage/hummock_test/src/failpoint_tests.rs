@@ -146,7 +146,7 @@ async fn test_failpoints_state_store_read_upload() {
         .seal_and_sync_epoch(1, table_id_set.clone())
         .await
         .unwrap();
-    meta_client.commit_epoch(1, res).await.unwrap();
+    meta_client.commit_epoch(1, res, false).await.unwrap();
     hummock_storage
         .try_wait_epoch(HummockReadEpoch::Committed(1))
         .await
@@ -223,7 +223,7 @@ async fn test_failpoints_state_store_read_upload() {
         .seal_and_sync_epoch(3, table_id_set)
         .await
         .unwrap();
-    meta_client.commit_epoch(3, res).await.unwrap();
+    meta_client.commit_epoch(3, res, false).await.unwrap();
     hummock_storage
         .try_wait_epoch(HummockReadEpoch::Committed(3))
         .await

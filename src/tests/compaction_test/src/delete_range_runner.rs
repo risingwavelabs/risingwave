@@ -388,7 +388,7 @@ async fn run_compare_result(
             .await
             .unwrap();
         meta_client
-            .commit_epoch(epoch, ret)
+            .commit_epoch(epoch, ret, false)
             .await
             .map_err(|e| format!("{:?}", e))?;
         if (epoch / test_epoch(1)) % 200 == 0 {

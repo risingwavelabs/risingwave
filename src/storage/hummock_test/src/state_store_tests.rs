@@ -379,7 +379,11 @@ async fn test_basic_v2() {
         .seal_and_sync_epoch(epoch1, HashSet::from_iter([local.table_id()]))
         .await
         .unwrap();
-    meta_client.commit_epoch(epoch1, res).await.unwrap();
+    let is_log_store = false;
+    meta_client
+        .commit_epoch(epoch1, res, is_log_store)
+        .await
+        .unwrap();
     hummock_storage
         .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
         .await
@@ -1068,7 +1072,11 @@ async fn test_delete_get_v2() {
         .seal_and_sync_epoch(epoch1, table_id_set.clone())
         .await
         .unwrap();
-    meta_client.commit_epoch(epoch1, res).await.unwrap();
+    let is_log_store = false;
+    meta_client
+        .commit_epoch(epoch1, res, is_log_store)
+        .await
+        .unwrap();
 
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -1089,7 +1097,10 @@ async fn test_delete_get_v2() {
         .seal_and_sync_epoch(epoch2, table_id_set)
         .await
         .unwrap();
-    meta_client.commit_epoch(epoch2, res).await.unwrap();
+    meta_client
+        .commit_epoch(epoch2, res, is_log_store)
+        .await
+        .unwrap();
     hummock_storage
         .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
         .await
@@ -1243,12 +1254,12 @@ async fn test_multiple_epoch_sync_v2() {
     test_get().await;
 
     meta_client
-        .commit_epoch(epoch2, sync_result2)
+        .commit_epoch(epoch2, sync_result2, false)
         .await
         .unwrap();
 
     meta_client
-        .commit_epoch(epoch3, sync_result3)
+        .commit_epoch(epoch3, sync_result3, false)
         .await
         .unwrap();
     hummock_storage
@@ -1350,7 +1361,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         min_object_id_epoch1,
     );
     meta_client
-        .commit_epoch(epoch1, sync_result1)
+        .commit_epoch(epoch1, sync_result1, false)
         .await
         .unwrap();
     hummock_storage
@@ -1583,12 +1594,13 @@ async fn test_iter_log() {
     hummock_storage.start_epoch(MAX_EPOCH, HashSet::from_iter([table_id]));
     let in_memory_state_store = MemoryStateStore::new();
 
+    let is_log_store = true;
     let mut in_memory_local = in_memory_state_store
         .new_local(NewLocalOptions {
             table_id,
             op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
                 check_old_value: CHECK_BYTES_EQUAL.clone(),
-                is_log_store: true,
+                is_log_store,
             },
             table_option: Default::default(),
             is_replicated: false,
@@ -1603,7 +1615,7 @@ async fn test_iter_log() {
             table_id,
             op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
                 check_old_value: CHECK_BYTES_EQUAL.clone(),
-                is_log_store: true,
+                is_log_store,
             },
             table_option: Default::default(),
             is_replicated: false,
@@ -1623,7 +1635,7 @@ async fn test_iter_log() {
             assert!(!res.old_value_ssts.is_empty());
         }
         assert!(!res.uncommitted_ssts.is_empty());
-        meta_client.commit_epoch(*epoch, res).await.unwrap();
+        meta_client.commit_epoch(*epoch, res, true).await.unwrap();
     }
 
     hummock_storage

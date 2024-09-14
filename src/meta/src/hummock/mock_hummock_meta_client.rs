@@ -164,7 +164,12 @@ impl HummockMetaClient for MockHummockMetaClient {
             })
     }
 
-    async fn commit_epoch(&self, epoch: HummockEpoch, sync_result: SyncResult) -> Result<()> {
+    async fn commit_epoch(
+        &self,
+        epoch: HummockEpoch,
+        sync_result: SyncResult,
+        is_log_store: bool,
+    ) -> Result<()> {
         let version: HummockVersion = self.hummock_manager.get_current_version().await;
         let table_ids = version
             .state_table_info
@@ -173,16 +178,20 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|table_id| table_id.table_id)
             .collect::<BTreeSet<_>>();
 
+        let old_value_ssts_vec = if is_log_store {
+            sync_result.old_value_ssts.clone()
+        } else {
+            vec![]
+        };
         let commit_table_ids = sync_result
             .uncommitted_ssts
             .iter()
             .flat_map(|sstable| sstable.sst_info.table_ids.clone())
-            .chain(
-                sync_result
-                    .old_value_ssts
+            .chain({
+                old_value_ssts_vec
                     .iter()
-                    .flat_map(|sstable| sstable.sst_info.table_ids.clone()),
-            )
+                    .flat_map(|sstable| sstable.sst_info.table_ids.clone())
+            })
             .collect::<BTreeSet<_>>();
 
         let new_table_fragment_info = if commit_table_ids
@@ -201,13 +210,17 @@ impl HummockMetaClient for MockHummockMetaClient {
             }
         };
 
-        println!("self.context_id: {}", self.context_id);
-        let sst_to_worker = sync_result
+        let sst_to_context = sync_result
             .uncommitted_ssts
             .iter()
             .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, self.context_id))
             .collect();
         let new_table_watermark = sync_result.table_watermarks;
+        let table_change_log_table_ids = if is_log_store {
+            commit_table_ids.clone()
+        } else {
+            BTreeSet::new()
+        };
         let table_change_log = build_table_change_log_delta(
             sync_result
                 .old_value_ssts
@@ -215,9 +228,8 @@ impl HummockMetaClient for MockHummockMetaClient {
                 .map(|sst| sst.sst_info),
             sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
             &vec![epoch],
-            commit_table_ids
-                .iter()
-                .cloned()
+            table_change_log_table_ids
+                .into_iter()
                 .map(|table_id| (table_id, 0)),
         );
 
@@ -225,7 +237,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .commit_epoch(CommitEpochInfo {
                 sstables: sync_result.uncommitted_ssts,
                 new_table_watermarks: new_table_watermark,
-                sst_to_context: sst_to_worker,
+                sst_to_context,
                 new_table_fragment_info,
                 change_log_delta: table_change_log,
                 committed_epoch: epoch,

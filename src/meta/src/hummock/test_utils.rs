@@ -22,7 +22,6 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::test_epoch;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::Levels;
@@ -30,8 +29,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
-    SyncResult,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -55,9 +53,15 @@ pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
         .collect_vec()
 }
 
+// This function has 3 phases:
+// 1. add 3 ssts to
+// 2. trigger a compaction and replace the input from phase 1 with the 1 new sst
+// 3. add 1 new sst
+// Please make sure the function do what you want before using it.
 pub async fn add_test_tables(
     hummock_manager: &HummockManager,
-    context_id: HummockContextId,
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
+    compaction_group_id: CompactionGroupId,
 ) -> Vec<Vec<SstableInfo>> {
     // Increase version by 2.
 
@@ -66,43 +70,31 @@ pub async fn add_test_tables(
     let mut epoch = test_epoch(1);
     let sstable_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
-    register_sstable_infos_to_compaction_group(
-        hummock_manager,
-        &test_tables,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
-    let ssts = to_local_sstable_info(&test_tables);
-    let sst_to_worker = ssts
-        .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, context_id))
-        .collect();
-    hummock_manager
-        .commit_epoch_for_test(epoch, ssts, sst_to_worker)
+    register_sstable_infos_to_compaction_group(hummock_manager, &test_tables, compaction_group_id)
+        .await;
+    let test_local_tables = to_local_sstable_info(&test_tables);
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: test_local_tables,
+                ..Default::default()
+            },
+            false,
+        )
         .await
         .unwrap();
+
     // Simulate a compaction and increase version by 1.
-    let mut temp_compactor = false;
-    if hummock_manager
-        .compactor_manager_ref_for_test()
-        .compactor_num()
-        == 0
-    {
-        hummock_manager
-            .compactor_manager_ref_for_test()
-            .add_compactor(context_id);
-        temp_compactor = true;
-    }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager,
         &test_tables_2,
-        StaticCompactionGroupId::StateDefault.into(),
+        compaction_group_id,
     )
     .await;
-    let mut selector = default_compaction_selector();
     let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
+        .get_compact_task(compaction_group_id, &mut default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
@@ -114,15 +106,8 @@ pub async fn add_test_tables(
             .sum::<usize>(),
         3
     );
-    compact_task.target_level = 6;
-    if temp_compactor {
-        let compactor = hummock_manager
-            .compactor_manager_ref_for_test()
-            .next_compactor()
-            .unwrap();
-        assert_eq!(compactor.context_id(), context_id);
-    }
 
+    compact_task.target_level = 6;
     hummock_manager
         .report_compact_task_for_test(
             compact_task.task_id,
@@ -133,27 +118,25 @@ pub async fn add_test_tables(
         )
         .await
         .unwrap();
-    if temp_compactor {
-        hummock_manager
-            .compactor_manager_ref_for_test()
-            .remove_compactor(context_id);
-    }
     // Increase version by 1.
     epoch.inc_epoch();
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager,
         &test_tables_3,
-        StaticCompactionGroupId::StateDefault.into(),
+        compaction_group_id,
     )
     .await;
-    let ssts = to_local_sstable_info(&test_tables_3);
-    let sst_to_worker = ssts
-        .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, context_id))
-        .collect();
-    hummock_manager
-        .commit_epoch_for_test(epoch, ssts, sst_to_worker)
+    let test_local_tables_3 = to_local_sstable_info(&test_tables_3);
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: test_local_tables_3,
+                ..Default::default()
+            },
+            false,
+        )
         .await
         .unwrap();
     vec![test_tables, test_tables_2, test_tables_3]
@@ -290,11 +273,9 @@ pub fn get_sorted_object_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableObje
 
 pub fn get_sorted_committed_object_ids(
     hummock_version: &HummockVersion,
+    compaction_group_id: CompactionGroupId,
 ) -> Vec<HummockSstableObjectId> {
-    let levels = match hummock_version
-        .levels
-        .get(&StaticCompactionGroupId::StateDefault.into())
-    {
+    let levels = match hummock_version.levels.get(&compaction_group_id) {
         Some(levels) => levels,
         None => return vec![],
     };
@@ -400,6 +381,7 @@ pub async fn add_ssts(
                 uncommitted_ssts: ssts,
                 ..Default::default()
             },
+            false,
         )
         .await
         .unwrap();

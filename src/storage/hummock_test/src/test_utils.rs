@@ -257,7 +257,10 @@ impl HummockTestEnv {
             .seal_and_sync_epoch(epoch, table_ids)
             .await
             .unwrap();
-        self.meta_client.commit_epoch(epoch, res).await.unwrap();
+        self.meta_client
+            .commit_epoch(epoch, res, false)
+            .await
+            .unwrap();
 
         self.storage.try_wait_epoch_for_test(epoch).await;
     }
