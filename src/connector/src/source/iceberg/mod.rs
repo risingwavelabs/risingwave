@@ -29,6 +29,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::deserialize_optional_bool_from_string;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::sink::iceberg::IcebergConfig;
@@ -36,7 +37,6 @@ use crate::source::{
     BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
 };
-
 pub const ICEBERG_CONNECTOR: &str = "iceberg";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
@@ -69,7 +69,11 @@ pub struct IcebergProperties {
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
 
-    #[serde(rename = "nimtable")]
+    #[serde(
+        rename = "nimtable",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
     pub nimtable: Option<bool>,
 
     #[serde(flatten)]

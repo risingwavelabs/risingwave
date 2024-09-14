@@ -415,12 +415,6 @@ impl IcebergConfig {
             };
 
             iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
-            // #TODO
-            // Support load config file
-            iceberg_configs.insert(
-                "iceberg.table.io.disable_config_load".to_string(),
-                "true".to_string(),
-            );
 
             load_iceberg_base_catalog_config(&iceberg_configs)?
         };
