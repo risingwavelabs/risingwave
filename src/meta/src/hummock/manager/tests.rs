@@ -944,6 +944,10 @@ async fn test_hummock_compaction_task_heartbeat() {
     use crate::hummock::HummockManager;
 
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_node.id,
+    ));
     let context_id = worker_node.id;
     let sst_num = 2;
 
@@ -975,13 +979,16 @@ async fn test_hummock_compaction_task_heartbeat() {
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    commit_from_meta_node(
-        hummock_manager.borrow(),
-        epoch,
-        to_local_sstable_info(&original_tables),
-    )
-    .await
-    .unwrap();
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: to_local_sstable_info(&original_tables),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
 
     // Get a compaction task.
     let compact_task = hummock_manager
@@ -1057,6 +1064,10 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 
     use crate::hummock::HummockManager;
     let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_node.id,
+    ));
     let context_id = worker_node.id;
     let sst_num = 2;
 
@@ -1088,13 +1099,16 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    commit_from_meta_node(
-        hummock_manager.borrow(),
-        epoch,
-        to_local_sstable_info(&original_tables),
-    )
-    .await
-    .unwrap();
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: to_local_sstable_info(&original_tables),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
 
     // Get a compaction task.
     let compact_task = hummock_manager
