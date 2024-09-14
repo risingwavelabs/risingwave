@@ -301,9 +301,7 @@ impl SubscriptionCursor {
                         *expected_timestamp,
                         handle_args.clone(),
                         &self.subscription,
-                    )
-                    .await
-                    {
+                    ) {
                         Ok((Some(rw_timestamp), expected_timestamp)) => {
                             let (mut chunk_stream, fields) = Self::initiate_query(
                                 Some(rw_timestamp),
@@ -451,7 +449,7 @@ impl SubscriptionCursor {
         Ok((ans, desc))
     }
 
-    async fn get_next_rw_timestamp(
+    fn get_next_rw_timestamp(
         seek_timestamp: u64,
         table_id: &TableId,
         expected_timestamp: Option<u64>,

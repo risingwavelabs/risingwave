@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::u64;
-
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
@@ -24,12 +22,11 @@ use risingwave_pb::catalog::{Secret, Table};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
-use risingwave_pb::meta::change_log_epochs::Uint64List;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    ChangeLogEpochs, FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot,
-    SubscribeRequest, SubscribeType,
+    FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
+    SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -309,23 +306,7 @@ impl NotificationServiceImpl {
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
 
         let hummock_snapshot = Some(self.hummock_manager.latest_snapshot());
-        let change_log_epochs = Some(ChangeLogEpochs {
-            change_log_epochs: self
-                .hummock_manager
-                .get_all_non_empty_epochs()
-                .await
-                .into_iter()
-                .map(|(table_id, epochs)| {
-                    (
-                        table_id,
-                        Uint64List {
-                            epochs,
-                            truncate_epoch: u64::MIN,
-                        },
-                    )
-                })
-                .collect(),
-        });
+        let change_log_epochs = Some(self.hummock_manager.get_change_log_epochs().await);
 
         let session_params = match self.env.session_params_manager_impl_ref() {
             SessionParamsManagerImpl::Kv(manager) => manager.get_params().await,

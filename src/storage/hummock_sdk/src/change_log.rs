@@ -17,6 +17,8 @@ use std::collections::HashMap;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo, PbTableChangeLog};
+use risingwave_pb::meta::change_log_epochs::Uint64List;
+use risingwave_pb::meta::ChangeLogEpochs;
 use tracing::warn;
 
 use crate::sstable_info::SstableInfo;
@@ -121,6 +123,36 @@ impl TableChangeLog {
             first_log.epochs.retain(|epoch| *epoch > truncate_epoch);
         }
     }
+}
+
+pub fn build_change_log_epochs_from_delta(
+    change_log_delta: &HashMap<TableId, ChangeLogDelta>,
+) -> ChangeLogEpochs {
+    let change_log_epochs: HashMap<u32, Uint64List> = change_log_delta
+        .iter()
+        .filter_map(|(table_id, change_log_delta)| {
+            let truncate_epoch = change_log_delta.truncate_epoch;
+            let epochs = match change_log_delta.new_log.as_ref() {
+                Some(new_log) => {
+                    let new_value_empty = new_log.new_value.is_empty();
+                    let old_value_empty = new_log.old_value.is_empty();
+                    if new_value_empty && old_value_empty {
+                        return None;
+                    }
+                    new_log.epochs.clone()
+                }
+                None => return None,
+            };
+            Some((
+                table_id.table_id,
+                Uint64List {
+                    epochs,
+                    truncate_epoch,
+                },
+            ))
+        })
+        .collect();
+    ChangeLogEpochs { change_log_epochs }
 }
 
 impl<T> TableChangeLogCommon<T>

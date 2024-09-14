@@ -232,7 +232,9 @@ impl Catalog {
                 .change_log_epochs_by_table_id
                 .entry(TableId::new(*table_id))
                 .or_default();
-            if let Some(save_max_epoch) = epochs_entry.back() && let Some(delta_min_epoch) = change_log_epochs.epochs.first() {
+            if let Some(save_max_epoch) = epochs_entry.back()
+                && let Some(delta_min_epoch) = change_log_epochs.epochs.first()
+            {
                 assert!(save_max_epoch < delta_min_epoch);
             }
             epochs_entry.extend(&change_log_epochs.epochs);

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -1086,16 +1086,17 @@ impl SessionImpl {
         max_count: u32,
     ) -> Result<Vec<u64>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
-        let v = VecDeque::new();
         let epochs = catalog_reader
             .list_change_log_epochs(table_id)
-            .unwrap_or(&v);
-        let epochs = epochs
-            .iter()
-            .filter(|&epoch| epoch >= &min_epoch)
-            .take(max_count as usize)
-            .cloned()
-            .collect::<Vec<_>>();
+            .map(|epochs| {
+                epochs
+                    .iter()
+                    .filter(|&epoch| epoch >= &min_epoch)
+                    .take(max_count as usize)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         Ok(epochs)
     }
 

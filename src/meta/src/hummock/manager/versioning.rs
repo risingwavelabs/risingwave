@@ -32,7 +32,9 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
 };
+use risingwave_pb::meta::change_log_epochs::Uint64List;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::ChangeLogEpochs;
 
 use super::check_cg_write_limit;
 use crate::hummock::error::Result;
@@ -281,18 +283,25 @@ impl HummockManager {
     }
 
     // Get all epochs without empty values for each table
-    pub async fn get_all_non_empty_epochs(&self) -> HashMap<u32, Vec<u64>> {
+    pub async fn get_change_log_epochs(&self) -> ChangeLogEpochs {
         let versioning = self.versioning.read().await;
-        versioning
+        let change_log_epochs = versioning
             .current_version
             .table_change_log
             .iter()
             .map(|(table_id, table_change_log)| {
                 let table_change_log = table_change_log.clone();
                 let epochs = table_change_log.get_all_non_empty_epochs();
-                (table_id.table_id, epochs)
+                (
+                    table_id.table_id,
+                    Uint64List {
+                        epochs,
+                        truncate_epoch: u64::MIN,
+                    },
+                )
             })
-            .collect()
+            .collect();
+        ChangeLogEpochs { change_log_epochs }
     }
 }
 
