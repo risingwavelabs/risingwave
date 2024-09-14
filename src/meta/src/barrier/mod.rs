@@ -41,8 +41,9 @@ use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::meta::change_log_epochs::Uint64List;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
+use risingwave_pb::meta::{ChangeLogEpochs, PausedReason, PbRecoveryStatus};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
@@ -1287,6 +1288,7 @@ impl GlobalBarrierManagerContext {
                 // See https://github.com/risingwave-labs/risingwave/issues/1251
                 // hummock_manager commit epoch.
                 let mut new_snapshot = None;
+                let mut change_log_epochs_delta = None;
 
                 match &command_ctx.kind {
                     BarrierKind::Initial => {}
@@ -1298,6 +1300,33 @@ impl GlobalBarrierManagerContext {
                             backfill_pinned_log_epoch,
                             tables_to_commit,
                         );
+
+                        let change_log_epochs: HashMap<u32, Uint64List> = commit_info
+                            .change_log_delta
+                            .iter()
+                            .filter_map(|(table_id, change_log_delta)| {
+                                let truncate_epoch = change_log_delta.truncate_epoch;
+                                let epochs = match change_log_delta.new_log.as_ref() {
+                                    Some(new_log) => {
+                                        let new_value_empty = new_log.new_value.is_empty();
+                                        let old_value_empty = new_log.old_value.is_empty();
+                                        if new_value_empty && old_value_empty {
+                                            return None;
+                                        }
+                                        new_log.epochs.clone()
+                                    }
+                                    None => return None,
+                                };
+                                Some((
+                                    table_id.table_id,
+                                    Uint64List {
+                                        epochs,
+                                        truncate_epoch,
+                                    },
+                                ))
+                            })
+                            .collect();
+                        change_log_epochs_delta = Some(ChangeLogEpochs { change_log_epochs });
                         new_snapshot = self.hummock_manager.commit_epoch(commit_info).await?;
                     }
                     BarrierKind::Barrier => {
@@ -1318,6 +1347,15 @@ impl GlobalBarrierManagerContext {
                             Operation::Update, // Frontends don't care about operation.
                             Info::HummockSnapshot(snapshot),
                         );
+                }
+                if let Some(change_log_epochs_delta) = change_log_epochs_delta {
+                    self.env
+                        .notification_manager()
+                        .notify_frontend(
+                            Operation::Update,
+                            Info::ChangeLogEpochs(change_log_epochs_delta),
+                        )
+                        .await;
                 }
                 Ok(if command_ctx.kind.is_checkpoint() {
                     Some(self.hummock_manager.get_version_stats().await)

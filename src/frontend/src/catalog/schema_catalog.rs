@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -25,7 +25,6 @@ use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource, PbSubscription,
     PbTable, PbView,
 };
-use risingwave_pb::meta::change_log_epochs;
 use risingwave_pb::user::grant_privilege::Object;
 
 use super::subscription_catalog::SubscriptionCatalog;
@@ -78,8 +77,6 @@ pub struct SchemaCatalog {
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, Arc<SystemTableCatalog>>,
     pub owner: u32,
-    
-    change_log_epochs_by_table_id: HashMap<TableId, VecDeque<u64>>,
 }
 
 impl SchemaCatalog {
@@ -344,29 +341,6 @@ impl SchemaCatalog {
         self.subscription_by_id.insert(id, subscription_ref);
     }
 
-    pub fn init_change_log_epochs(&mut self,change_log_epochs: &HashMap<
-        u32,
-        change_log_epochs::Uint64List,
-    >){
-        for (table_id, change_log_epochs) in change_log_epochs{
-            let epochs = VecDeque::from(change_log_epochs.epochs.clone());
-            self.change_log_epochs_by_table_id.insert(TableId::new(*table_id), epochs);
-        }
-    }
-
-    pub fn update_change_log_epochs(&mut self,change_log_epochs: HashMap<
-        u32,
-        change_log_epochs::Uint64List,
-    >){
-        for (table_id, change_log_epochs) in change_log_epochs{
-            let epochs_entry = self.change_log_epochs_by_table_id.entry(TableId::new(table_id)).or_insert(VecDeque::new());
-            epochs_entry.extend(change_log_epochs.epochs);
-            while let Some(epoch) = epochs_entry.front() && epoch <= &change_log_epochs.truncate_epoch{
-                epochs_entry.pop_front();
-            }
-        }
-    }
-    
     pub fn create_view(&mut self, prost: &PbView) {
         let name = prost.name.clone();
         let id = prost.id;
@@ -830,13 +804,6 @@ impl SchemaCatalog {
     pub fn name(&self) -> String {
         self.name.clone()
     }
-
-    
-    pub fn list_change_log_epochs(&self, table_id: &TableId) -> Option<&VecDeque<u64>>
-    {
-        self.change_log_epochs_by_table_id.get(table_id)
-    }
-    
 }
 
 impl OwnedByUserCatalog for SchemaCatalog {
@@ -877,7 +844,6 @@ impl From<&PbSchema> for SchemaCatalog {
             connection_sink_ref: HashMap::new(),
             subscription_by_name: HashMap::new(),
             subscription_by_id: HashMap::new(),
-            change_log_epochs_by_table_id: HashMap::new(),
         }
     }
 }

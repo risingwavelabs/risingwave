@@ -28,7 +28,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{change_log_epochs, FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
@@ -188,7 +188,7 @@ impl ObserverState for FrontendObserverNode {
             catalog_guard.create_secret(secret)
         }
 
-        catalog_guard.init_change_log(&change_log_epochs);
+        catalog_guard.init_change_log_epochs(&change_log_epochs);
 
         for user in users {
             user_guard.create_user(user)
@@ -364,13 +364,7 @@ impl FrontendObserverNode {
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::ChangeLogEpochs(change_log_epochs) => match resp.operation() {
-                Operation::Add => catalog_guard.create_connection(connection),
-                Operation::Delete => catalog_guard.drop_connection(
-                    connection.database_id,
-                    connection.schema_id,
-                    connection.id,
-                ),
-                Operation::Update => catalog_guard.update_connection(connection),
+                Operation::Update => catalog_guard.update_change_log_epochs(change_log_epochs),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Secret(secret) => {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -1079,29 +1079,23 @@ impl SessionImpl {
         Ok(secret.clone())
     }
 
-    pub async fn list_change_log_epochs(
+    pub fn list_change_log_epochs(
         &self,
-        schema_id: u32,
         table_id: &TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
-        let db_name = self.database();
-
         let catalog_reader = self.env().catalog_reader().read_guard();
-        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-        let schema = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
-        let epochs = schema.list_change_log_epochs(table_id).ok_or_else(|| {
-            RwError::from(ErrorCode::ItemNotFound(format!(
-                "table {} not found",
-                table_id
-            )))
-        })?;
+        let v = VecDeque::new();
+        let epochs = catalog_reader
+            .list_change_log_epochs(table_id)
+            .unwrap_or(&v);
         let epochs = epochs
-            .into_iter()
+            .iter()
             .filter(|&epoch| epoch >= &min_epoch)
             .take(max_count as usize)
-            .cloned().collect::<Vec<_>>();
+            .cloned()
+            .collect::<Vec<_>>();
         Ok(epochs)
     }
 

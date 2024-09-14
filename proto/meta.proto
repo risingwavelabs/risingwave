@@ -827,7 +827,5 @@ message ChangeLogEpochs {
     repeated uint64 epochs = 1;
     uint64 truncate_epoch = 2;
   }
-  uint32 database_id = 1;
-  uint32 schema_id = 2;
-  map<uint32, Uint64List> change_log_epochs = 3;
+  map<uint32, Uint64List> change_log_epochs = 1;
 }

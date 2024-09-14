@@ -108,6 +108,7 @@ where
             | Info::User(_)
             | Info::Connection(_)
             | Info::Secret(_)
+            | Info::ChangeLogEpochs(_)
             | Info::Function(_) => {
                 notification.version > info.version.as_ref().unwrap().catalog_version
             }
@@ -132,7 +133,6 @@ where
                         .streaming_worker_slot_mapping_version
             }
             Info::ServingWorkerSlotMappings(_) => true,
-            Info::ChangeLogEpochs(_) => todo!(),
         });
 
         self.observer_states

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -105,6 +105,7 @@ pub struct Catalog {
     /// all table catalogs in the cluster identified by universal unique table id.
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,
     table_stats: HummockVersionStats,
+    change_log_epochs_by_table_id: HashMap<TableId, VecDeque<u64>>,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -116,6 +117,7 @@ impl Default for Catalog {
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
             table_stats: HummockVersionStats::default(),
+            change_log_epochs_by_table_id: HashMap::new(),
         }
     }
 }
@@ -214,13 +216,36 @@ impl Catalog {
     }
 
     pub fn init_change_log_epochs(&mut self, proto: &Option<PbChangeLogEpochs>) {
-        if let Some(proto) = proto {
-            self.get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .init_change_log_epochs(&proto.change_log_epochs);
+        self.change_log_epochs_by_table_id = HashMap::new();
+        if let Some(change_log_epochs) = proto {
+            for (table_id, change_log_epochs) in &change_log_epochs.change_log_epochs {
+                let epochs = VecDeque::from(change_log_epochs.epochs.clone());
+                self.change_log_epochs_by_table_id
+                    .insert(TableId::new(*table_id), epochs);
+            }
         }
+    }
+
+    pub fn update_change_log_epochs(&mut self, proto: &PbChangeLogEpochs) {
+        for (table_id, change_log_epochs) in &proto.change_log_epochs {
+            let epochs_entry = self
+                .change_log_epochs_by_table_id
+                .entry(TableId::new(*table_id))
+                .or_default();
+            if let Some(save_max_epoch) = epochs_entry.back() && let Some(delta_min_epoch) = change_log_epochs.epochs.first() {
+                assert!(save_max_epoch < delta_min_epoch);
+            }
+            epochs_entry.extend(&change_log_epochs.epochs);
+            while let Some(epoch) = epochs_entry.front()
+                && epoch <= &change_log_epochs.truncate_epoch
+            {
+                epochs_entry.pop_front();
+            }
+        }
+    }
+
+    pub fn list_change_log_epochs(&self, table_id: &TableId) -> Option<&VecDeque<u64>> {
+        self.change_log_epochs_by_table_id.get(table_id)
     }
 
     pub fn create_view(&mut self, proto: &PbView) {
@@ -303,6 +328,7 @@ impl Catalog {
         let database = self.database_by_name.remove(&name).unwrap();
         database.iter_all_table_ids().for_each(|table| {
             self.table_by_id.remove(&table);
+            self.change_log_epochs_by_table_id.remove(&table);
         });
     }
 
@@ -312,6 +338,7 @@ impl Catalog {
 
     pub fn drop_table(&mut self, db_id: DatabaseId, schema_id: SchemaId, tb_id: TableId) {
         self.table_by_id.remove(&tb_id);
+        self.change_log_epochs_by_table_id.remove(&tb_id);
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
