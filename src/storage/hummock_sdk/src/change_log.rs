@@ -125,6 +125,7 @@ impl TableChangeLog {
     }
 }
 
+// Get `change_log_epochs` from `change_log_delta` who will be used to update the epoch list of subscriptions saved in the frontend
 pub fn build_change_log_epochs_from_delta(
     change_log_delta: &HashMap<TableId, ChangeLogDelta>,
 ) -> ChangeLogEpochs {

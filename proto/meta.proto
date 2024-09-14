@@ -821,7 +821,6 @@ service ClusterLimitService {
   rpc GetClusterLimits(GetClusterLimitsRequest) returns (GetClusterLimitsResponse);
 }
 
-
 message ChangeLogEpochs {
   message Uint64List {
     repeated uint64 epochs = 1;

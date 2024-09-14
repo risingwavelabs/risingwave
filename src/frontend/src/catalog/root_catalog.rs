@@ -232,6 +232,8 @@ impl Catalog {
                 .change_log_epochs_by_table_id
                 .entry(TableId::new(*table_id))
                 .or_default();
+
+            // Ensure the epochs in the queue are in order
             if let Some(save_max_epoch) = epochs_entry.back()
                 && let Some(delta_min_epoch) = change_log_epochs.epochs.first()
             {
