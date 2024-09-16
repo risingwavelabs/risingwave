@@ -40,7 +40,6 @@ use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{BarrierKind, GlobalBarrierManager, GlobalBarrierManagerContext};
-use crate::controller::catalog::ReleaseContext;
 use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
@@ -100,8 +99,7 @@ impl GlobalBarrierManagerContext {
             }
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller.clean_dirty_subscription().await?;
-                let ReleaseContext { source_ids, .. } =
-                    mgr.catalog_controller.clean_dirty_creating_jobs().await?;
+                let source_ids = mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
                 // unregister cleaned sources.
                 self.source_manager

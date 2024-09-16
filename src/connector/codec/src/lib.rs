@@ -37,6 +37,7 @@
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 
+pub mod common;
 /// Converts JSON/AVRO/Protobuf data to RisingWave datum.
 /// The core API is [`decoder::Access`].
 pub mod decoder;

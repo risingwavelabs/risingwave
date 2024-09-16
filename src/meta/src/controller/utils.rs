@@ -230,7 +230,7 @@ pub fn construct_sink_cycle_check_query(
         .to_owned()
 }
 
-#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[derive(Clone, DerivePartialModel, FromQueryResult, Debug)]
 #[sea_orm(entity = "Object")]
 pub struct PartialObject {
     pub oid: ObjectId,

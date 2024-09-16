@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
@@ -715,6 +716,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
         len: usize,
     }
     let mut current_transaction = None;
+    let mut direct_cdc_event_lag_latency_metrics = HashMap::new();
 
     #[for_await]
     for batch in data_stream {
@@ -764,10 +766,15 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
             if let SourceMeta::DebeziumCdc(msg_meta) = &msg.meta {
                 let lag_ms = process_time_ms - msg_meta.source_ts_ms;
                 // report to promethus
-                GLOBAL_SOURCE_METRICS
-                    .direct_cdc_event_lag_latency
-                    .with_guarded_label_values(&[&msg_meta.full_table_name])
-                    .observe(lag_ms as f64);
+                let full_table_name = msg_meta.full_table_name.clone();
+                let direct_cdc_event_lag_latency = direct_cdc_event_lag_latency_metrics
+                    .entry(full_table_name)
+                    .or_insert_with(|| {
+                        GLOBAL_SOURCE_METRICS
+                            .direct_cdc_event_lag_latency
+                            .with_guarded_label_values(&[&msg_meta.full_table_name])
+                    });
+                direct_cdc_event_lag_latency.observe(lag_ms as f64);
             }
 
             let old_len = builder.len();

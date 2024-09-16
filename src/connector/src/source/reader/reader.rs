@@ -93,47 +93,27 @@ impl SourceReader {
         match config {
             ConnectorProperties::Gcs(prop) => {
                 list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
-                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
                 let lister: OpendalEnumerator<OpendalGcs> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
-                Ok(build_opendal_fs_list_stream(
-                    lister,
-                    list_interval_sec,
-                    recursive_scan,
-                ))
+                Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             ConnectorProperties::OpendalS3(prop) => {
                 list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
-                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
                 let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
-                Ok(build_opendal_fs_list_stream(
-                    lister,
-                    list_interval_sec,
-                    recursive_scan,
-                ))
+                Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             ConnectorProperties::Azblob(prop) => {
                 list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
-                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
                 let lister: OpendalEnumerator<OpendalAzblob> =
                     OpendalEnumerator::new_azblob_source(*prop)?;
-                Ok(build_opendal_fs_list_stream(
-                    lister,
-                    list_interval_sec,
-                    recursive_scan,
-                ))
+                Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             ConnectorProperties::PosixFs(prop) => {
                 list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
-                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
                 let lister: OpendalEnumerator<OpendalPosixFs> =
                     OpendalEnumerator::new_posix_fs_source(*prop)?;
-                Ok(build_opendal_fs_list_stream(
-                    lister,
-                    list_interval_sec,
-                    recursive_scan,
-                ))
+                Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             other => bail!("Unsupported source: {:?}", other),
         }
@@ -284,11 +264,10 @@ impl SourceReader {
 async fn build_opendal_fs_list_stream<Src: OpendalSource>(
     lister: OpendalEnumerator<Src>,
     list_interval_sec: u64,
-    recursive_scan: bool,
 ) {
     loop {
         let matcher = lister.get_matcher();
-        let mut object_metadata_iter = lister.list(recursive_scan).await?;
+        let mut object_metadata_iter = lister.list().await?;
 
         while let Some(list_res) = object_metadata_iter.next().await {
             match list_res {
@@ -300,7 +279,6 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(
                     {
                         yield res
                     } else {
-                        // Currrntly due to the lack of prefix list, we just skip the unmatched files.
                         continue;
                     }
                 }
@@ -315,12 +293,9 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(
 }
 
 #[try_stream(boxed, ok = OpendalFsSplit<Src>,  error = crate::error::ConnectorError)]
-pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(
-    lister: OpendalEnumerator<Src>,
-    recursive_scan: bool,
-) {
+pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
     let matcher = lister.get_matcher();
-    let mut object_metadata_iter = lister.list(recursive_scan).await?;
+    let mut object_metadata_iter = lister.list().await?;
 
     while let Some(list_res) = object_metadata_iter.next().await {
         match list_res {

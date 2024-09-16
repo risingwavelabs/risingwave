@@ -14,7 +14,3 @@
 
 mod parser;
 pub use parser::*;
-
-#[rustfmt::skip]
-#[cfg(test)]
-mod recursive;
