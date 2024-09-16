@@ -35,52 +35,6 @@ type FragmentLayout = {
   height: number
 } & Position
 
-function treeLayoutFlip<Datum>(
-  root: d3.HierarchyNode<Datum>,
-  { dx, dy }: { dx: number; dy: number }
-): d3.HierarchyPointNode<Datum> {
-  const tree = d3.tree<Datum>().nodeSize([dy, dx])
-
-  // Flip x, y
-  const treeRoot = tree(root)
-
-  // Flip back x, y
-  treeRoot.each((d: Position) => ([d.x, d.y] = [d.y, d.x]))
-
-  // LTR -> RTL
-  treeRoot.each((d: Position) => (d.x = -d.x))
-
-  return treeRoot
-}
-
-function boundBox<Datum>(
-  root: d3.HierarchyPointNode<Datum>,
-  {
-    margin: { top, bottom, left, right },
-  }: { margin: { top: number; bottom: number; left: number; right: number } }
-): { width: number; height: number } {
-  let x0 = Infinity
-  let x1 = -x0
-  let y0 = Infinity
-  let y1 = -y0
-
-  root.each((d) => (x1 = d.x > x1 ? d.x : x1))
-  root.each((d) => (x0 = d.x < x0 ? d.x : x0))
-  root.each((d) => (y1 = d.y > y1 ? d.y : y1))
-  root.each((d) => (y0 = d.y < y0 ? d.y : y0))
-
-  x0 -= left
-  x1 += right
-  y0 -= top
-  y1 += bottom
-
-  root.each((d) => (d.x = d.x - x0))
-  root.each((d) => (d.y = d.y - y0))
-
-  // return { width: x1 - x0, height: y1 - y0 }
-  return { width: 100, height: 100 }
-}
-
 const nodeRadius = 12
 const fragmentMarginX = nodeRadius * 2
 const fragmentMarginY = nodeRadius * 2
@@ -98,14 +52,6 @@ export default function DdlGraph({
 
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [currentStreamNode, setCurrentStreamNode] = useState<PlanNodeDatum>()
-
-  const openPlanNodeDetail = useCallback(
-    (node: PlanNodeDatum) => {
-      setCurrentStreamNode(node)
-      onOpen()
-    },
-    [onOpen, setCurrentStreamNode]
-  )
 
   const planNodeDependencyDagCallback = useCallback(() => {
     const fragmentDependencyDag = cloneDeep(fragmentDependency)
@@ -317,7 +263,6 @@ export default function DdlGraph({
     fragmentLayout,
     fragmentEdgeLayout,
     backPressures,
-    openPlanNodeDetail,
   ])
 
   return (
