@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::{bail, bail_not_implemented};
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 use risingwave_sqlparser::ast::{self, FunctionArgExpr};
 
@@ -158,8 +158,9 @@ impl Binder {
                     2 => {
                         let relative_error = &mut direct_args[1];
                         decimal_to_float64(relative_error, kind)?;
-                        if let Some(relative_error) = relative_error.as_literal() &&
-                            let Some(relative_error) = relative_error.get_data() {
+                        if let Some(relative_error) = relative_error.as_literal()
+                            && let Some(relative_error) = relative_error.get_data()
+                        {
                             let relative_error = relative_error.as_float64().0;
                             if relative_error <= 0.0 || relative_error >= 1.0 {
                                 bail!(
