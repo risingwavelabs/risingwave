@@ -536,10 +536,12 @@ impl TableWatermarks {
         debug!("clear stale table watermark below epoch {}", safe_epoch);
         let mut result_epoch_watermark = Vec::with_capacity(self.watermarks.len());
         let mut set_vnode: HashSet<VirtualNode> = HashSet::new();
+        let mut vnode_count: Option<usize> = None; // lazy initialized on first occurrence of vnode watermark
         while let Some((epoch, _)) = self.watermarks.last() {
             if *epoch >= safe_epoch {
                 let (epoch, watermarks) = self.watermarks.pop().expect("have check Some");
                 for watermark in watermarks.as_ref() {
+                    vnode_count.get_or_insert_with(|| watermark.vnode_count());
                     for vnode in watermark.vnode_bitmap.iter_vnodes() {
                         set_vnode.insert(vnode);
                     }
@@ -555,6 +557,7 @@ impl TableWatermarks {
             let mut new_vnode_watermarks = Vec::new();
             for vnode_watermark in watermarks.as_ref() {
                 let mut new_set_vnode = Vec::new();
+                vnode_count.get_or_insert_with(|| vnode_watermark.vnode_count());
                 for vnode in vnode_watermark.vnode_bitmap.iter_vnodes() {
                     if set_vnode.insert(vnode) {
                         new_set_vnode.push(vnode);
