@@ -18,6 +18,7 @@ use std::ops::Range;
 
 use bytes::{Buf, Bytes};
 use risingwave_common::array::*;
+use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_common_estimate_size::EstimateSize;
@@ -38,6 +39,12 @@ fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
         .literal()
         .map(|x| (*x.as_float64()).into())
         .unwrap();
+    if relative_error < 0.0 || relative_error >= 1.0 {
+        bail!(
+            "relative_error must be in the range [0, 1), got {}",
+            relative_error
+        );
+    }
     let base = (1.0 + relative_error) / (1.0 - relative_error);
     Ok(Box::new(ApproxPercentile { quantile, base }))
 }
@@ -83,7 +90,11 @@ impl ApproxPercentile {
             } else {
                 (true, prim_value)
             };
-            let bucket_id = abs_value.log(self.base).ceil() as BucketId;
+            let bucket_id = if self.base == 1.0 {
+                abs_value as BucketId
+            } else {
+                abs_value.log(self.base).ceil() as BucketId
+            };
             match op {
                 Op::Delete | Op::UpdateDelete => {
                     if abs_value == 0.0 {
@@ -162,7 +173,11 @@ impl AggregateFunction for ApproxPercentile {
             acc_count += count;
             if acc_count > quantile_count {
                 // approx value = -2 * y^i / (y + 1)
-                let approx_percentile = -2.0 * self.base.powi(*bucket_id) / (self.base + 1.0);
+                let approx_percentile = if self.base == 1.0 {
+                    -*bucket_id as f64
+                } else {
+                    -2.0 * self.base.powi(*bucket_id) / (self.base + 1.0)
+                };
                 let approx_percentile = ScalarImpl::Float64(approx_percentile.into());
                 return Ok(Datum::from(approx_percentile));
             }
@@ -175,7 +190,11 @@ impl AggregateFunction for ApproxPercentile {
             acc_count += count;
             if acc_count > quantile_count {
                 // approx value = 2 * y^i / (y + 1)
-                let approx_percentile = 2.0 * self.base.powi(*bucket_id) / (self.base + 1.0);
+                let approx_percentile = if self.base == 1.0 {
+                    *bucket_id as f64
+                } else {
+                    2.0 * self.base.powi(*bucket_id) / (self.base + 1.0)
+                };
                 let approx_percentile = ScalarImpl::Float64(approx_percentile.into());
                 return Ok(Datum::from(approx_percentile));
             }
