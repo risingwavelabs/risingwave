@@ -522,14 +522,8 @@ impl CommandContext {
                 }
 
                 Command::SourceSplitAssignment(change) => {
-                    let mut checked_assignment = change.clone();
-                    checked_assignment
-                        .iter_mut()
-                        .for_each(|(_, assignment)| validate_assignment(assignment));
-
                     let mut diff = HashMap::new();
-
-                    for actor_splits in checked_assignment.values() {
+                    for actor_splits in change.values() {
                         diff.extend(actor_splits.clone());
                     }
 
@@ -581,7 +575,11 @@ impl CommandContext {
                     let mut checked_split_assignment = split_assignment.clone();
                     checked_split_assignment
                         .iter_mut()
-                        .for_each(|(_, assignment)| validate_assignment(assignment));
+                        .for_each(|(_, assignment)| {
+                            // No related actor running before, we don't need to check the mutation
+                            // should be wrapped with pause.
+                            validate_assignment(assignment);
+                        });
                     let actor_splits = checked_split_assignment
                         .values()
                         .flat_map(build_actor_connector_splits)
@@ -789,7 +787,8 @@ impl CommandContext {
 
                     for reschedule in reschedules.values() {
                         let mut checked_assignment = reschedule.actor_splits.clone();
-                        validate_assignment(&mut checked_assignment);
+                        // Update mutation always wrapped by Pause and Resume mutation. no further action needed.
+                        _ = validate_assignment(&mut checked_assignment);
 
                         for (actor_id, splits) in &checked_assignment {
                             actor_splits.insert(
