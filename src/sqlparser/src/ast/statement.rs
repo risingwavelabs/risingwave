@@ -219,6 +219,7 @@ impl Encode {
     }
 }
 
+/// `FORMAT ... ENCODE ... [(a=b, ...)] [KEY ENCODE ...]`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ConnectorSchema {

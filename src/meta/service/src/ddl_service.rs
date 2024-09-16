@@ -240,7 +240,7 @@ impl DdlService for DdlServiceImpl {
             None => {
                 let version = self
                     .ddl_controller
-                    .run_command(DdlCommand::CreateSource(source))
+                    .run_command(DdlCommand::CreateSourceWithoutStreamingJob(source))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
@@ -695,6 +695,7 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    /// Only support add column for now.
     async fn alter_source(
         &self,
         request: Request<AlterSourceRequest>,

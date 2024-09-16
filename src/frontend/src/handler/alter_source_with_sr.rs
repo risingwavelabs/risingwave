@@ -278,7 +278,7 @@ pub async fn handle_alter_source_with_sr(
     pb_source.version += 1;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.alter_source_with_sr(pb_source).await?;
+    catalog_writer.alter_source(pb_source).await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }
