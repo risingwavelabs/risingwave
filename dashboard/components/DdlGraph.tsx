@@ -22,7 +22,8 @@ import {
   FragmentBoxPosition,
   Position,
   generateFragmentEdges,
-  layoutItem,
+  generateDdlEdges,
+  layoutItem, DdlBox, DdlBoxPosition
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
 import { StreamNode } from "../proto/gen/stream_plan"
@@ -42,10 +43,10 @@ const fragmentDistanceX = nodeRadius * 2
 const fragmentDistanceY = nodeRadius * 2
 
 export default function DdlGraph({
-  fragmentDependency,
+  ddlDependency,
   backPressures,
 }: {
-  fragmentDependency: FragmentBox[] // This is just the layout info.
+  ddlDependency: DdlBox[] // This is just the layout info.
   backPressures?: Map<string, number> // relation_id -> relation_id: back pressure rate
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -53,37 +54,37 @@ export default function DdlGraph({
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [currentStreamNode, setCurrentStreamNode] = useState<PlanNodeDatum>()
 
-  const planNodeDependencyDagCallback = useCallback(() => {
-    const fragmentDependencyDag = cloneDeep(fragmentDependency)
+  const ddlDependencyDagCallback = useCallback(() => {
+    const ddlDependencyDag = cloneDeep(ddlDependency)
 
-    const layoutFragmentResult = new Map<string, any>()
-    const includedFragmentIds = new Set<string>()
-    for (const fragmentBox of fragmentDependencyDag) {
-      let fragmentId = fragmentBox.id;
+    const layoutDdlResult = new Map<string, any>()
+    const includedDdlIds = new Set<string>()
+    for (const ddlBox of ddlDependencyDag) {
+      let ddlId = ddlBox.id;
       let width = 100;
       let height = 100;
-      layoutFragmentResult.set(fragmentId, {
+      layoutDdlResult.set(ddlId, {
         width,
         height,
       })
-      includedFragmentIds.add(fragmentId)
+      includedDdlIds.add(ddlId)
     }
 
-    const fragmentLayout = layoutItem(
-      fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
+    const ddlLayout = layoutItem(
+      ddlDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
         return { width: 100, height: 100, id, ...data }
       }),
       fragmentDistanceX,
       fragmentDistanceY
     )
-    const fragmentLayoutPosition = new Map<string, Position>()
-    fragmentLayout.forEach(({ id, x, y }: FragmentBoxPosition) => {
-      fragmentLayoutPosition.set(id, { x, y })
+    const ddlLayoutPosition = new Map<string, Position>()
+    ddlLayout.forEach(({ id, x, y }: DdlBoxPosition) => {
+      ddlLayoutPosition.set(id, { x, y })
     })
 
-    const layoutResult: FragmentLayout[] = []
-    for (const [fragmentId, result] of layoutFragmentResult) {
-      const { x, y } = fragmentLayoutPosition.get(fragmentId)!
+    const layoutResult: DdlLayout[] = []
+    for (const [fragmentId, result] of layoutDdlResult) {
+      const { x, y } = ddlLayoutPosition.get(fragmentId)!
       layoutResult.push({ id: fragmentId, x, y, ...result })
     }
 
@@ -93,7 +94,7 @@ export default function DdlGraph({
       svgHeight = Math.max(svgHeight, y + height + 50)
       svgWidth = Math.max(svgWidth, x + width)
     })
-    const edges = generateFragmentEdges(fragmentLayout)
+    const edges = generateDdlEdges(ddlLayout)
 
     return {
       layoutResult,
@@ -101,14 +102,14 @@ export default function DdlGraph({
       svgHeight,
       edges,
     }
-  }, [fragmentDependency])
+  }, [ddlDependency])
 
   const {
     svgWidth,
     svgHeight,
     edges: fragmentEdgeLayout,
     layoutResult: fragmentLayout,
-  } = planNodeDependencyDagCallback()
+  } = ddlDependencyDagCallback()
 
   useEffect(() => {
     if (fragmentLayout) {

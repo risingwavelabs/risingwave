@@ -110,10 +110,10 @@ const SampleDdlDependencyGraph: DdlBox[] = [
 ]
 
 const SampleDdlBackpressures: Map<string, number> = new Map([
-  ["1-2", 0.1],
-  ["1-3", 0.2],
-  ["2-4", 0.3],
-  ["3-4", 0.4],
+  ["1_2", 0.1],
+  ["1_3", 0.2],
+  ["2_4", 0.3],
+  ["3_4", 0.4],
 ])
 
 function buildPlanNodeDependency(
@@ -553,10 +553,8 @@ export default function Streaming() {
           <Text fontWeight="semibold">Fragment Graph</Text>
           {planNodeDependencies && fragmentDependency && (
             <DdlGraph
-              selectedFragmentId={selectedFragmentId?.toString()}
-              fragmentDependency={fragmentDependency}
-              planNodeDependencies={planNodeDependencies}
-              backPressures={backPressures}
+              ddlDependency={SampleDdlDependencyGraph}
+              backPressures={SampleDdlBackpressures}
             />
           )}
         </Box>
