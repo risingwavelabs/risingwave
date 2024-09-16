@@ -93,7 +93,7 @@ pub async fn handle_alter_parallelism(
         }
     };
 
-    let mut target_parallelism = extract_table_parallelism(parallelism)?;
+    let target_parallelism = extract_table_parallelism(parallelism)?;
 
     let available_parallelism = session
         .env()
@@ -103,26 +103,24 @@ pub async fn handle_alter_parallelism(
         .filter(|w| w.is_streaming_schedulable())
         .map(|w| w.parallelism)
         .sum::<u32>();
-    // TODO(var-vnode): get max parallelism from catalogs.
-    // Although the meta service will clamp the value for us, we should still check it here for better UI.
-    let max_parallelism = VirtualNode::COUNT_FOR_COMPAT;
 
     let mut builder = RwPgResponse::builder(stmt_type);
+
+    // TODO(var-vnode): get correct max parallelism from catalogs.
+    // Although the meta service will clamp the value for us and print warnings there,
+    // we may still check it here for better UI.
+    let max_parallelism = VirtualNode::COUNT_FOR_COMPAT;
 
     match &target_parallelism.parallelism {
         Some(Parallelism::Adaptive(_)) | Some(Parallelism::Auto(_)) => {
             if available_parallelism > max_parallelism as u32 {
-                builder = builder.notice(format!("Available parallelism exceeds the maximum parallelism limit, the actual parallelism will be limited to {max_parallelism}"));
+                builder = builder.notice("Available parallelism may exceed the maximum parallelism limit, the actual parallelism will be limited");
             }
         }
         Some(Parallelism::Fixed(FixedParallelism { parallelism })) => {
             if *parallelism > max_parallelism as u32 {
-                builder = builder.notice(format!("Provided parallelism exceeds the maximum parallelism limit, resetting to FIXED({max_parallelism})"));
-                target_parallelism = PbTableParallelism {
-                    parallelism: Some(PbParallelism::Fixed(FixedParallelism {
-                        parallelism: max_parallelism as u32,
-                    })),
-                };
+                builder = builder.notice("Provided parallelism may exceed the maximum parallelism limit, will be reset to FIXED(max_parallelism)");
+                // Rewriting will be done in meta service.
             }
         }
         _ => {}
