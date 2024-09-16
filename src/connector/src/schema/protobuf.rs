@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use anyhow::Context as _;
 use prost_reflect::{DescriptorPool, FileDescriptor, MessageDescriptor};
