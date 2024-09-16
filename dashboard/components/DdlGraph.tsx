@@ -59,7 +59,7 @@ export default function DdlGraph({
     const layoutFragmentResult = new Map<string, any>()
     const includedFragmentIds = new Set<string>()
     for (const fragmentBox of fragmentDependencyDag) {
-      let fragmentId = fragmentBox.fragment.fragmentId.toString();
+      let fragmentId = fragmentBox.id;
       let width = 100;
       let height = 100;
       layoutFragmentResult.set(fragmentId, {

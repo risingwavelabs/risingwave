@@ -293,6 +293,11 @@ export type FragmentBox = LayoutItemBase & {
   fragment: TableFragments_Fragment
 }
 
+export type DdlBox = LayoutItemBase & {
+  ddl_name: string
+  schema_name: string
+}
+
 export type RelationPoint = LayoutItemBase & {
   name: string
   relation: Relation

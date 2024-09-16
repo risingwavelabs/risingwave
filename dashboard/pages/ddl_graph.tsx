@@ -49,7 +49,7 @@ import {
   getRelationIdInfos,
   getStreamingJobs,
 } from "../lib/api/streaming"
-import { FragmentBox } from "../lib/layout"
+import {DdlBox, FragmentBox} from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { BackPressureInfo } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
@@ -69,6 +69,52 @@ export interface PlanNodeDatum {
   node: StreamNode | DispatcherNode
   actorIds?: string[]
 }
+
+const SampleDdlDependencyGraph: DdlBox[] = [
+  {
+    id: "1",
+    order: 1, // preference order, item with larger order will be placed at right or down
+    width: 100,
+    height: 100,
+    parentIds: [],
+    ddl_name: "table",
+    schema_name: "s1",
+  },
+  {
+    id: "2",
+    order: 2,
+    width: 100,
+    height: 100,
+    parentIds: ["1"],
+    ddl_name: "mv1",
+    schema_name: "s1",
+  },
+  {
+    id: "3",
+    order: 3,
+    width: 100,
+    height: 100,
+    parentIds: ["1"],
+    ddl_name: "mv2",
+    schema_name: "s1",
+  },
+  {
+    id: "4",
+    order: 4,
+    width: 100,
+    height: 100,
+    parentIds: ["2", "3"],
+    ddl_name: "mv3",
+    schema_name: "s1",
+  }
+]
+
+const SampleDdlBackpressures: Map<string, number> = new Map([
+  ["1-2", 0.1],
+  ["1-3", 0.2],
+  ["2-4", 0.3],
+  ["3-4", 0.4],
+])
 
 function buildPlanNodeDependency(
   fragment: TableFragments_Fragment
