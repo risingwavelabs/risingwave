@@ -71,8 +71,7 @@ export default function DdlGraph({
 
     const fragmentLayout = layoutItem(
       fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
-        const { width, height } = layoutFragmentResult.get(id)!
-        return { width, height, id, ...data }
+        return { width: 100, height: 100, id, ...data }
       }),
       fragmentDistanceX,
       fragmentDistanceY

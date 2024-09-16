@@ -310,6 +310,7 @@ export interface Position {
 
 export type FragmentBoxPosition = FragmentBox & Position
 export type RelationPointPosition = RelationPoint & Position
+export type DdlBoxPosition = DdlBox & Position
 
 export interface Edge {
   points: Array<Position>
@@ -495,7 +496,7 @@ export function generateFragmentEdges(
     // Simply draw a horizontal line here.
     // Typically, external parent is only applicable to `StreamScan` fragment,
     // and there'll be only one external parent due to `UpstreamShard` distribution
-    // and plan node sharing. So there's no overlapping issue.
+    // and plan node sharing. So we won't see multiple horizontal lines overlap each other.
     for (const externalParentId of fragment.externalParentIds) {
       links.push({
         points: [
@@ -515,3 +516,56 @@ export function generateFragmentEdges(
   }
   return links
 }
+
+export function generateDdlEdges(
+    layoutMap: DdlBoxPosition[]
+): Edge[] {
+  const links = []
+  const ddlMap = new Map<string, DdlBoxPosition>()
+  for (const x of layoutMap) {
+    ddlMap.set(x.id, x)
+  }
+  for (const ddl of layoutMap) {
+    for (const parentId of ddl.parentIds) {
+      const parentDdl = ddlMap.get(parentId)!
+      links.push({
+        points: [
+          {
+            x: ddl.x + ddl.width / 2,
+            y: ddl.y + ddl.height / 2,
+          },
+          {
+            x: parentDdl.x + parentDdl.width / 2,
+            y: parentDdl.y + parentDdl.height / 2,
+          },
+        ],
+        source: ddl.id,
+        target: parentId,
+      })
+    }
+
+    // TODO(kwannoel)
+    // Simply draw a horizontal line here.
+    // Typically, external parent is only applicable to `StreamScan` fragment,
+    // and there'll be only one external parent due to `UpstreamShard` distribution
+    // and plan node sharing. So we won't see multiple horizontal lines overlap each other.
+    // for (const externalParentId of ddl.externalParentIds) {
+    //   links.push({
+    //     points: [
+    //       {
+    //         x: fragment.x,
+    //         y: fragment.y + fragment.height / 2,
+    //       },
+    //       {
+    //         x: fragment.x + 100,
+    //         y: fragment.y + fragment.height / 2,
+    //       },
+    //     ],
+    //     source: fragment.id,
+    //     target: externalParentId,
+    //   })
+    // }
+  }
+  return links
+}
+
