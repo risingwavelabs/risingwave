@@ -15,6 +15,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use anyhow::Context as _;
+use itertools::Itertools as _;
 use prost_reflect::{DescriptorPool, FileDescriptor, MessageDescriptor};
 use risingwave_connector_codec::common::protobuf::compile_pb;
 
@@ -99,18 +101,105 @@ pub async fn fetch_from_registry(
 impl LoadedSchema for FileDescriptor {
     fn compile(primary: Subject, references: Vec<Subject>) -> Result<Self, SchemaFetchError> {
         let primary_name = primary.name.clone();
-        let compiled_pb = compile_pb_subject(primary, references)?;
-        let pool = DescriptorPool::decode(compiled_pb.as_slice())
-            .map_err(|e| SchemaFetchError::SchemaCompile(e.into()))?;
-        pool.get_file_by_name(&primary_name).ok_or_else(|| {
-            SchemaFetchError::SchemaCompile(
-                anyhow::anyhow!("{primary_name} lost after compilation").into(),
-            )
-        })
+        match protox_impl::compile_pb(primary, references) {
+            Err(e) => Err(SchemaFetchError::SchemaCompile(e.into())),
+            Ok(b) => DescriptorPool::from_file_descriptor_set(b)
+                .context("failed to convert fd set to descriptor pool")
+                .and_then(|pool| {
+                    pool.get_file_by_name(&primary_name)
+                        .context("file lost after compilation")
+                })
+                .map_err(|e| SchemaFetchError::SchemaCompile(e.into())),
+        }
     }
 }
 
-fn compile_pb_subject(
+macro_rules! embed_wkts {
+    [$( $path:literal ),+ $(,)?] => {
+        &[$(
+            (
+                concat!("google/protobuf/", $path),
+                include_bytes!(concat!(env!("PROTO_INCLUDE"), "/google/protobuf/", $path)).as_slice(),
+            )
+        ),+]
+    };
+}
+const WELL_KNOWN_TYPES: &[(&str, &[u8])] = embed_wkts![
+    "any.proto",
+    "api.proto",
+    "compiler/plugin.proto",
+    "descriptor.proto",
+    "duration.proto",
+    "empty.proto",
+    "field_mask.proto",
+    "source_context.proto",
+    "struct.proto",
+    "timestamp.proto",
+    "type.proto",
+    "wrappers.proto",
+];
+
+#[derive(Debug, thiserror::Error)]
+pub enum PbCompileError {
+    #[error("build_file_descriptor_set failed\n{}", errs.iter().map(|e| format!("\t{e}")).join("\n"))]
+    Build {
+        errs: Vec<protobuf_native::compiler::FileLoadError>,
+    },
+    #[error("serialize descriptor set failed")]
+    Serialize,
+}
+
+mod protox_impl {
+    use std::collections::HashMap;
+
+    use prost_types::FileDescriptorSet;
+    use protox::file::{ChainFileResolver, File, FileResolver, GoogleFileResolver};
+    use protox::Error;
+
+    use crate::schema::schema_registry::Subject;
+
+    pub fn compile_pb(
+        primary_subject: Subject,
+        dependency_subjects: Vec<Subject>,
+    ) -> Result<FileDescriptorSet, Error> {
+        struct MyResolver {
+            map: HashMap<String, String>,
+        }
+
+        impl MyResolver {
+            fn new(primary_subject: Subject, dependency_subjects: Vec<Subject>) -> Self {
+                let map = std::iter::once(primary_subject)
+                    .chain(dependency_subjects)
+                    .map(|s| (s.name, s.schema.content))
+                    .collect();
+
+                Self { map }
+            }
+        }
+
+        impl FileResolver for MyResolver {
+            fn open_file(&self, name: &str) -> Result<File, Error> {
+                if let Some(content) = self.map.get(name) {
+                    Ok(File::from_source(name, content)?)
+                } else {
+                    Err(Error::file_not_found(name))
+                }
+            }
+        }
+
+        let mut resolver = ChainFileResolver::new();
+        resolver.add(GoogleFileResolver::new());
+        resolver.add(MyResolver::new(primary_subject, dependency_subjects));
+
+        let fd = protox::Compiler::with_file_resolver(resolver)
+            .include_imports(true)
+            .file_descriptor_set();
+
+        Ok(fd)
+    }
+}
+
+pub fn compile_pb(
     primary_subject: Subject,
     dependency_subjects: Vec<Subject>,
 ) -> Result<Vec<u8>, SchemaFetchError> {
