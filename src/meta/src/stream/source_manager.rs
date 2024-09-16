@@ -594,12 +594,12 @@ pub fn validate_assignment(assignment: &mut HashMap<ActorId, Vec<SplitImpl>>) ->
     // check if one split is assign to multiple actors
     let mut split_to_actor = HashMap::new();
     for (actor_id, splits) in &mut *assignment {
-        let _ = splits.iter().map(|split| {
+        for split in splits {
             split_to_actor
                 .entry(split.id())
                 .or_insert_with(Vec::new)
-                .push(*actor_id)
-        });
+                .push(*actor_id);
+        }
     }
 
     for (split_id, actor_ids) in &mut split_to_actor {
