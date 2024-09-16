@@ -16,7 +16,6 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use anyhow::Context as _;
-use itertools::Itertools as _;
 use prost_reflect::{DescriptorPool, FileDescriptor, MessageDescriptor};
 use risingwave_connector_codec::common::protobuf::compile_pb;
 
@@ -101,7 +100,10 @@ pub async fn fetch_from_registry(
 impl LoadedSchema for FileDescriptor {
     fn compile(primary: Subject, references: Vec<Subject>) -> Result<Self, SchemaFetchError> {
         let primary_name = primary.name.clone();
-        match protox_impl::compile_pb(primary, references) {
+
+        match protox_impl::compile_pb(primary, references)
+            .context("failed to compile protobuf schema into fd set")
+        {
             Err(e) => Err(SchemaFetchError::SchemaCompile(e.into())),
             Ok(b) => DescriptorPool::from_file_descriptor_set(b)
                 .context("failed to convert fd set to descriptor pool")
@@ -112,41 +114,6 @@ impl LoadedSchema for FileDescriptor {
                 .map_err(|e| SchemaFetchError::SchemaCompile(e.into())),
         }
     }
-}
-
-macro_rules! embed_wkts {
-    [$( $path:literal ),+ $(,)?] => {
-        &[$(
-            (
-                concat!("google/protobuf/", $path),
-                include_bytes!(concat!(env!("PROTO_INCLUDE"), "/google/protobuf/", $path)).as_slice(),
-            )
-        ),+]
-    };
-}
-const WELL_KNOWN_TYPES: &[(&str, &[u8])] = embed_wkts![
-    "any.proto",
-    "api.proto",
-    "compiler/plugin.proto",
-    "descriptor.proto",
-    "duration.proto",
-    "empty.proto",
-    "field_mask.proto",
-    "source_context.proto",
-    "struct.proto",
-    "timestamp.proto",
-    "type.proto",
-    "wrappers.proto",
-];
-
-#[derive(Debug, thiserror::Error)]
-pub enum PbCompileError {
-    #[error("build_file_descriptor_set failed\n{}", errs.iter().map(|e| format!("\t{e}")).join("\n"))]
-    Build {
-        errs: Vec<protobuf_native::compiler::FileLoadError>,
-    },
-    #[error("serialize descriptor set failed")]
-    Serialize,
 }
 
 mod protox_impl {
