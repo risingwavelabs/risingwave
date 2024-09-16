@@ -357,6 +357,7 @@ export default function Streaming() {
     }
   }, [backPressureDataSource, toast])
 
+  // Map from (fragment_id, downstream_fragment_id) -> back pressure rate
   const backPressures = useMemo(() => {
     if (promethusMetrics || embeddedBackPressureInfo) {
       let map = new Map()

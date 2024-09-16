@@ -473,6 +473,11 @@ pub(super) mod handlers {
         Ok(srv.diagnose_command.report().await)
     }
 
+    /// NOTE(kwannoel): Although we fetch the BP for the entire graph via this API,
+    /// the workload should be reasonable.
+    /// In most cases, we can safely assume each node has most 2 outgoing edges (e.g. join).
+    /// In such a scenario, the number of edges is linear to the number of nodes.
+    /// So the workload is proportional to the relation id graph we fetch in `get_relation_id_infos`.
     pub async fn get_embedded_back_pressures(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<GetBackPressureResponse>> {

@@ -290,7 +290,7 @@ export type FragmentBox = LayoutItemBase & {
   name: string
   // Upstream Fragment Ids.
   externalParentIds: string[]
-  fragment?: TableFragments_Fragment
+  fragment: TableFragments_Fragment
 }
 
 export type RelationPoint = LayoutItemBase & {

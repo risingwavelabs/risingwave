@@ -31,10 +31,8 @@ const ReactJson = loadable(() => import("react-json-view"))
 
 type FragmentLayout = {
   id: string
-  layoutRoot: d3.HierarchyPointNode<PlanNodeDatum>
   width: number
   height: number
-  actorIds: string[]
 } & Position
 
 function treeLayoutFlip<Datum>(
@@ -79,7 +77,8 @@ function boundBox<Datum>(
   root.each((d) => (d.x = d.x - x0))
   root.each((d) => (d.y = d.y - y0))
 
-  return { width: x1 - x0, height: y1 - y0 }
+  // return { width: x1 - x0, height: y1 - y0 }
+  return { width: 100, height: 100 }
 }
 
 const nodeRadius = 12
@@ -91,12 +90,10 @@ const fragmentDistanceX = nodeRadius * 2
 const fragmentDistanceY = nodeRadius * 2
 
 export default function DdlGraph({
-  planNodeDependencies,
   fragmentDependency,
   selectedFragmentId,
   backPressures,
 }: {
-  planNodeDependencies: Map<string, d3.HierarchyNode<PlanNodeDatum>>
   fragmentDependency: FragmentBox[] // This is just the layout info.
   selectedFragmentId?: string // change to selected ddl id.
   backPressures?: Map<string, number> // relation_id -> relation_id: back pressure rate
@@ -115,29 +112,17 @@ export default function DdlGraph({
   )
 
   const planNodeDependencyDagCallback = useCallback(() => {
-    const deps = cloneDeep(planNodeDependencies)
     const fragmentDependencyDag = cloneDeep(fragmentDependency)
 
     const layoutFragmentResult = new Map<string, any>()
     const includedFragmentIds = new Set<string>()
-    for (const [fragmentId, fragmentRoot] of deps) {
-      const layoutRoot = treeLayoutFlip(fragmentRoot, {
-        dx: nodeMarginX,
-        dy: nodeMarginY,
-      })
-      let { width, height } = boundBox(layoutRoot, {
-        margin: {
-          left: nodeRadius * 4 + fragmentMarginX,
-          right: nodeRadius * 4 + fragmentMarginX,
-          top: nodeRadius * 3 + fragmentMarginY,
-          bottom: nodeRadius * 4 + fragmentMarginY,
-        },
-      })
+    for (const fragmentBox of fragmentDependencyDag) {
+      let fragmentId = fragmentBox.fragment.fragmentId.toString();
+      let width = 100;
+      let height = 100;
       layoutFragmentResult.set(fragmentId, {
-        layoutRoot,
         width,
         height,
-        actorIds: fragmentRoot.data.actorIds ?? [],
       })
       includedFragmentIds.add(fragmentId)
     }
@@ -175,7 +160,7 @@ export default function DdlGraph({
       svgHeight,
       edges,
     }
-  }, [planNodeDependencies, fragmentDependency])
+  }, [fragmentDependency])
 
   const {
     svgWidth,
@@ -219,7 +204,6 @@ export default function DdlGraph({
 
         text2
           .attr("fill", "black")
-          .text(({ actorIds }) => `Actor ${actorIds.join(", ")}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
           .attr("dy", ({ height }) => height - fragmentMarginY + 24)
