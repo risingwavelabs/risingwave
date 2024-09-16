@@ -82,8 +82,6 @@ function boundBox<Datum>(
 }
 
 const nodeRadius = 12
-const nodeMarginX = nodeRadius * 6
-const nodeMarginY = nodeRadius * 4
 const fragmentMarginX = nodeRadius * 2
 const fragmentMarginY = nodeRadius * 2
 const fragmentDistanceX = nodeRadius * 2
@@ -91,11 +89,9 @@ const fragmentDistanceY = nodeRadius * 2
 
 export default function DdlGraph({
   fragmentDependency,
-  selectedFragmentId,
   backPressures,
 }: {
   fragmentDependency: FragmentBox[] // This is just the layout info.
-  selectedFragmentId?: string // change to selected ddl id.
   backPressures?: Map<string, number> // relation_id -> relation_id: back pressure rate
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -174,8 +170,6 @@ export default function DdlGraph({
       const svgNode = svgRef.current
       const svgSelection = d3.select(svgNode)
 
-      const isSelected = (id: string) => id === selectedFragmentId
-
       // Fragments
       const applyFragment = (gSel: FragmentSelection) => {
         gSel.attr("transform", ({ x, y }) => `translate(${x}, ${y})`)
@@ -223,11 +217,9 @@ export default function DdlGraph({
           .attr("x", fragmentMarginX)
           .attr("y", fragmentMarginY)
           .attr("fill", "white")
-          .attr("stroke-width", ({ id }) => (isSelected(id) ? 3 : 1))
+          .attr("stroke-width", 1)
           .attr("rx", 5)
-          .attr("stroke", ({ id }) =>
-            isSelected(id) ? theme.colors.blue[500] : theme.colors.gray[500]
-          )
+          .attr("stroke", theme.colors.gray[500])
       }
 
       const createFragment = (sel: Enter<FragmentSelection>) =>
@@ -265,9 +257,6 @@ export default function DdlGraph({
           path = gSel.append("path")
         }
 
-        const isEdgeSelected = (d: Edge) =>
-          isSelected(d.source) || isSelected(d.target)
-
         const color = (d: Edge) => {
           if (backPressures) {
             let value = backPressures.get(`${d.target}_${d.source}`)
@@ -276,9 +265,7 @@ export default function DdlGraph({
             }
           }
 
-          return isEdgeSelected(d)
-            ? theme.colors.blue["500"]
-            : theme.colors.gray["300"]
+          return theme.colors.gray["300"]
         }
 
         const width = (d: Edge) => {
@@ -289,7 +276,7 @@ export default function DdlGraph({
             }
           }
 
-          return isEdgeSelected(d) ? 4 : 2
+          return 2
         }
 
         path
@@ -330,7 +317,6 @@ export default function DdlGraph({
     fragmentLayout,
     fragmentEdgeLayout,
     backPressures,
-    selectedFragmentId,
     openPlanNodeDetail,
   ])
 
