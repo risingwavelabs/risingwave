@@ -1149,7 +1149,7 @@ impl SourceManager {
         let dup_assignment_flag = split_assignment
             .iter_mut()
             .map(|(_, assignment)| validate_assignment(assignment))
-            .reduce(|a, b| a && b)
+            .reduce(|a, b| a || b)
             .unwrap_or(false);
 
         if !split_assignment.is_empty() {
@@ -1374,9 +1374,9 @@ mod tests {
         let dup_assignment_flag = fragment_assignment
             .iter_mut()
             .map(|(_, assignment)| validate_assignment(assignment))
-            .reduce(|a, b| a && b)
+            .reduce(|a, b| a || b)
             .unwrap_or(false);
-        assert_eq!(dup_assignment_flag, true);
+        assert!(dup_assignment_flag);
         {
             let mut split_to_actor = HashMap::new();
             for actor_to_splits in fragment_assignment.values() {
