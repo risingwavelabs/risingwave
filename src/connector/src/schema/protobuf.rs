@@ -101,7 +101,7 @@ impl LoadedSchema for FileDescriptor {
     fn compile(primary: Subject, references: Vec<Subject>) -> Result<Self, SchemaFetchError> {
         let primary_name = primary.name.clone();
 
-        match protox_impl::compile_pb(primary, references)
+        match compile_pb_subject(primary, references)
             .context("failed to compile protobuf schema into fd set")
         {
             Err(e) => Err(SchemaFetchError::SchemaCompile(e.into())),
@@ -116,68 +116,18 @@ impl LoadedSchema for FileDescriptor {
     }
 }
 
-mod protox_impl {
-    use std::collections::HashMap;
-
-    use prost_types::FileDescriptorSet;
-    use protox::file::{ChainFileResolver, File, FileResolver, GoogleFileResolver};
-    use protox::Error;
-
-    use crate::schema::schema_registry::Subject;
-
-    pub fn compile_pb(
-        primary_subject: Subject,
-        dependency_subjects: Vec<Subject>,
-    ) -> Result<FileDescriptorSet, Error> {
-        struct MyResolver {
-            map: HashMap<String, String>,
-        }
-
-        impl MyResolver {
-            fn new(primary_subject: Subject, dependency_subjects: Vec<Subject>) -> Self {
-                let map = std::iter::once(primary_subject)
-                    .chain(dependency_subjects)
-                    .map(|s| (s.name, s.schema.content))
-                    .collect();
-
-                Self { map }
-            }
-        }
-
-        impl FileResolver for MyResolver {
-            fn open_file(&self, name: &str) -> Result<File, Error> {
-                if let Some(content) = self.map.get(name) {
-                    Ok(File::from_source(name, content)?)
-                } else {
-                    Err(Error::file_not_found(name))
-                }
-            }
-        }
-
-        let mut resolver = ChainFileResolver::new();
-        resolver.add(GoogleFileResolver::new());
-        resolver.add(MyResolver::new(primary_subject, dependency_subjects));
-
-        let fd = protox::Compiler::with_file_resolver(resolver)
-            .include_imports(true)
-            .file_descriptor_set();
-
-        Ok(fd)
-    }
-}
-
-pub fn compile_pb(
+fn compile_pb_subject(
     primary_subject: Subject,
     dependency_subjects: Vec<Subject>,
 ) -> Result<Vec<u8>, SchemaFetchError> {
     compile_pb(
         (
-            PathBuf::from(&primary_subject.name),
-            primary_subject.schema.content.as_bytes().to_vec(),
+            primary_subject.name.clone(),
+            primary_subject.schema.content.clone(),
         ),
         dependency_subjects
             .into_iter()
-            .map(|s| (PathBuf::from(&s.name), s.schema.content.as_bytes().to_vec())),
+            .map(|s| (s.name.clone(), s.schema.content.clone())),
     )
     .map_err(|e| SchemaFetchError::SchemaCompile(e.into()))
 }
