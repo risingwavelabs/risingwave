@@ -47,7 +47,7 @@ import {
 import {
   getFragmentsByJobId, getRelationDependencies,
   getRelationIdInfos,
-  getStreamingJobs,
+  getStreamingJobs, Relation,
 } from "../lib/api/streaming"
 import {DdlBox, FragmentBox} from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
@@ -225,6 +225,26 @@ function buildFragmentDependencyAsEdges(
   return nodes
 }
 
+function buildDdlDependencyAsEdges(
+    relations: Relation[],
+    dependencies: Map<number, number[]>,
+): DdlBox[] {
+  const nodes: DdlBox[] = []
+  for (const relation of relations) {
+    let parentIds = dependencies.get(relation.id) || []
+    nodes.push({
+      id: relation.id.toString(),
+      order: relation.id,
+      width: 0,
+      height: 0,
+      parentIds: parentIds.map((x) => x.toString()),
+      ddl_name: relation.name,
+      schema_name: relation.schemaName
+    })
+  }
+  return nodes
+}
+
 const SIDEBAR_WIDTH = 200
 
 type BackPressureDataSource = "Embedded" | "Prometheus"
@@ -246,7 +266,7 @@ export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: relationIdInfos } = useFetch(getRelationIdInfos)
   // 1. Get the relation dependendencies.
-  // const { response: relationDeps } = useFetch(getRelationDependencies)
+  const { response: relationDeps } = useFetch(getRelationDependencies)
   // 2. Get the relation -> input fragment_id mapping.
   // 3. Get the relation -> output fragment_id mapping.
   // 4. Construct the BP graph for relation ids using 1-3.

@@ -126,7 +126,7 @@ export async function getRelations() {
   return relations
 }
 
-export async function getRelationDependencies() {
+export async function getRelationDependencies(): Map<number, number[]> {
   return await getObjectDependencies()
 }
 
@@ -200,7 +200,8 @@ export async function getSchemas() {
   return schemas
 }
 
-export async function getObjectDependencies() {
+// Returns a map of object id to a list of object ids that it depends on
+export async function getObjectDependencies(): Map<number, number[]> {
   let objDependencies: ObjectDependencies[] = (
     await api.get("/object_dependencies")
   ).map(ObjectDependencies.fromJSON)
