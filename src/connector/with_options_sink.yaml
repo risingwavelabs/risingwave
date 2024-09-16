@@ -115,7 +115,7 @@ ClickHouseConfig:
     field_type: u64
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
   - name: r#type
     field_type: String
     required: true
@@ -143,7 +143,7 @@ DeltaLakeConfig:
     field_type: u64
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
   - name: r#type
     field_type: String
     required: true
@@ -339,7 +339,7 @@ IcebergConfig:
     field_type: u64
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
   - name: create_table_if_not_exists
     field_type: bool
     required: false
@@ -1021,7 +1021,7 @@ StarrocksConfig:
       also, in this time, the `sink_decouple` option should be enabled as well.
       Defaults to 10 if commit_checkpoint_interval <= 0
     required: false
-    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
   - name: starrocks.partial_update
     field_type: String
     comments: Enable partial update

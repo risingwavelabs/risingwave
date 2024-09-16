@@ -991,7 +991,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "136d4d23bcc79e27423727b36823d86233aad06dfea531837b038394d11e9928"
 dependencies = [
  "concurrent-queue",
- "event-listener 5.2.0",
+ "event-listener 5.3.1",
  "event-listener-strategy",
  "futures-core",
  "pin-project-lite",
@@ -2345,9 +2345,9 @@ dependencies = [
 
 [[package]]
 name = "bytecount"
-version = "0.6.3"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c676a478f63e9fa2dd5368a42f28bba0d6c560b775f38583c8bbaa7fcd67c9c"
+checksum = "5ce89b21cab1437276d2650d57e971f9d548a2d9037cc231abdc0562b97498ce"
 
 [[package]]
 name = "bytemuck"
@@ -2418,9 +2418,9 @@ checksum = "981520c98f422fcc584dc1a95c334e6953900b9106bc47a9839b81790009eb21"
 
 [[package]]
 name = "camino"
-version = "1.1.6"
+version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c59e92b5a388f549b863a7bea62612c09f24c8393560709a54558a9abdfb3b9c"
+checksum = "8b96ec4966b5813e2c0507c1f86115c8c5abaadc3980879c3424042a02fd1ad3"
 dependencies = [
  "serde",
 ]
@@ -2498,9 +2498,9 @@ checksum = "1582e1c9e755dd6ad6b224dcffb135d199399a4568d454bd89fe515ca8425695"
 
 [[package]]
 name = "cargo-platform"
-version = "0.1.3"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cfa25e60aea747ec7e1124f238816749faa93759c6ff5b31f1ccdda137f4479"
+checksum = "24b1f0365a6c6bb4020cd05806fd0d33c44d38046b8bd7f0e40814b9763cabfc"
 dependencies = [
  "serde",
 ]
@@ -2852,9 +2852,9 @@ dependencies = [
 
 [[package]]
 name = "concurrent-queue"
-version = "2.2.0"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62ec6771ecfa0762d24683ee5a32ad78487a3d3afdc0fb8cae19d2c5deb50b7c"
+checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -4568,9 +4568,9 @@ checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 
 [[package]]
 name = "event-listener"
-version = "5.2.0"
+version = "5.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b5fb89194fa3cad959b833185b3063ba881dbfc7030680b314250779fb4cc91"
+checksum = "6032be9bd27023a771701cc49f9f053c751055f71efb2e0ae5c15809093675ba"
 dependencies = [
  "concurrent-queue",
  "parking",
@@ -4583,7 +4583,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "332f51cb23d20b0de8458b86580878211da09bcd4503cb579c225b3d124cabb3"
 dependencies = [
- "event-listener 5.2.0",
+ "event-listener 5.3.1",
  "pin-project-lite",
 ]
 
@@ -6004,8 +6004,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "651dfca7c429918e164607a549287cfdd1e7814d2e4cb577d0d6dc57fe19b785"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=84bf51c9d0d5886e4ee306ca4f383f029e1767a4#84bf51c9d0d5886e4ee306ca4f383f029e1767a4"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6025,11 +6024,13 @@ dependencies = [
  "fnv",
  "futures",
  "itertools 0.13.0",
+ "moka",
  "murmur3",
  "once_cell",
  "opendal 0.49.0",
  "ordered-float 4.1.1",
  "parquet 52.0.0",
+ "paste",
  "reqwest 0.12.4",
  "rust_decimal",
  "serde",
@@ -6039,7 +6040,7 @@ dependencies = [
  "serde_repr",
  "serde_with 3.8.0",
  "tokio",
- "typed-builder 0.19.1",
+ "typed-builder 0.20.0",
  "url",
  "uuid",
 ]
@@ -6047,8 +6048,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64ef7c992442a80c46975e08f3862140ca3e1c1c772aa68baaf65bb08f97ff07"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=84bf51c9d0d5886e4ee306ca4f383f029e1767a4#84bf51c9d0d5886e4ee306ca4f383f029e1767a4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6058,15 +6058,14 @@ dependencies = [
  "log",
  "serde_json",
  "tokio",
- "typed-builder 0.19.1",
+ "typed-builder 0.20.0",
  "uuid",
 ]
 
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f351c7b964fa6f3b4f976f8de3f16f1bf84eea8478606aaebdfd6a871d6b082c"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=84bf51c9d0d5886e4ee306ca4f383f029e1767a4#84bf51c9d0d5886e4ee306ca4f383f029e1767a4"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6079,14 +6078,14 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tokio",
- "typed-builder 0.19.1",
+ "typed-builder 0.20.0",
  "uuid",
 ]
 
 [[package]]
 name = "icelake"
 version = "0.3.141592654"
-source = "git+https://github.com/risingwavelabs/icelake.git?rev=1860eb315183a5f3f72b4097c1e40d49407f8373#1860eb315183a5f3f72b4097c1e40d49407f8373"
+source = "git+https://github.com/risingwavelabs/icelake.git?rev=3f4724158acee37a4785f56670a1427993a58739#3f4724158acee37a4785f56670a1427993a58739"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (git+https://github.com/apache/avro.git)",
@@ -9127,7 +9126,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -9182,7 +9181,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.66",
@@ -9311,11 +9310,11 @@ dependencies = [
 
 [[package]]
 name = "pulldown-cmark"
-version = "0.9.3"
+version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77a1a2f1f0a7ecff9c31abbe177637be0e97a0aef46cf8738ece09327985d998"
+checksum = "57206b407293d2bcd3af849ce869d52068623f19e1b5ff8e8778e3309439682b"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.6.0",
  "memchr",
  "unicase",
 ]
@@ -9368,7 +9367,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -10614,6 +10613,7 @@ dependencies = [
  "easy-ext",
  "enum-as-inner 0.6.0",
  "expect-test",
+ "fs-err",
  "futures",
  "futures-async-stream",
  "gcp-bigquery-client",
@@ -10652,11 +10652,8 @@ dependencies = [
  "pretty_assertions",
  "prometheus",
  "prost 0.13.1",
- "prost-build 0.12.1",
  "prost-reflect",
  "prost-types 0.13.1",
- "protobuf-native",
- "protobuf-src",
  "pulsar",
  "quote",
  "rand",
@@ -10718,11 +10715,19 @@ dependencies = [
  "chrono",
  "easy-ext",
  "expect-test",
+ "fs-err",
  "hex",
  "itertools 0.12.1",
  "jsonbb",
  "jsonschema-transpiler",
+ "madsim-tokio",
  "num-bigint",
+ "prost 0.13.1",
+ "prost-build 0.12.1",
+ "prost-reflect",
+ "prost-types 0.13.1",
+ "protobuf-native",
+ "protobuf-src",
  "risingwave_common",
  "risingwave_pb",
  "rust_decimal",
@@ -14834,6 +14839,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "typed-builder"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e14ed59dc8b7b26cacb2a92bad2e8b1f098806063898ab42a3bd121d7d45e75"
+dependencies = [
+ "typed-builder-macro 0.20.0",
+]
+
+[[package]]
 name = "typed-builder-macro"
 version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14860,6 +14874,17 @@ name = "typed-builder-macro"
 version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9534daa9fd3ed0bd911d462a37f172228077e7abf18c18a5f67199d959205f8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.66",
+]
+
+[[package]]
+name = "typed-builder-macro"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "560b82d656506509d43abe30e0ba64c56b1953ab3d4fe7ba5902747a7a3cedd5"
 dependencies = [
  "proc-macro2",
  "quote",

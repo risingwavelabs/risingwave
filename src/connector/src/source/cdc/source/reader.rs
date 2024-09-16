@@ -213,15 +213,15 @@ impl<T: CdcSourceTypeTrait> CdcSplitReader<T> {
         let mut rx = self.rx;
         let source_id = self.source_id.to_string();
         let metrics = self.source_ctx.metrics.clone();
+        let connector_source_rows_received_metrics = metrics
+            .connector_source_rows_received
+            .with_guarded_label_values(&[source_type.as_str_name(), &source_id]);
 
         while let Some(result) = rx.recv().await {
             match result {
                 Ok(GetEventStreamResponse { events, .. }) => {
                     tracing::trace!("receive {} cdc events ", events.len());
-                    metrics
-                        .connector_source_rows_received
-                        .with_guarded_label_values(&[source_type.as_str_name(), &source_id])
-                        .inc_by(events.len() as u64);
+                    connector_source_rows_received_metrics.inc_by(events.len() as u64);
                     let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
                     yield msgs;
                 }

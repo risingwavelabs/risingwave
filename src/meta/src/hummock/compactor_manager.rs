@@ -476,16 +476,18 @@ impl CompactorManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::time::Duration;
 
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
+    use risingwave_rpc_client::HummockMetaClient;
 
     use crate::hummock::compaction::selector::default_compaction_selector;
     use crate::hummock::test_utils::{
         add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
     };
-    use crate::hummock::CompactorManager;
+    use crate::hummock::{CompactorManager, MockHummockMetaClient};
 
     #[tokio::test]
     async fn test_compactor_manager() {
@@ -493,6 +495,9 @@ mod tests {
         let (env, context_id) = {
             let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
             let context_id = worker_node.id;
+            let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(
+                MockHummockMetaClient::new(hummock_manager.clone(), worker_node.id),
+            );
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
             register_table_ids_to_compaction_group(
                 hummock_manager.as_ref(),
@@ -500,7 +505,8 @@ mod tests {
                 StaticCompactionGroupId::StateDefault.into(),
             )
             .await;
-            let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
+            let _sst_infos =
+                add_ssts(1, hummock_manager.as_ref(), hummock_meta_client.clone()).await;
             let _receiver = compactor_manager.add_compactor(context_id);
             hummock_manager
                 .get_compact_task(

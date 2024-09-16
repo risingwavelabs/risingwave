@@ -22,13 +22,14 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
+    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupMerge, GroupMetaChange,
     GroupTableChange, PbLevelType,
 };
 use tracing::warn;
 
-use super::StateTableId;
-use crate::change_log::TableChangeLog;
+use super::group_split::get_sub_level_insert_hint;
+use super::{group_split, StateTableId};
+use crate::change_log::TableChangeLogCommon;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, Levels, OverlappingLevel};
@@ -47,13 +48,17 @@ pub struct GroupDeltasSummary {
     pub insert_sub_level_id: u64,
     pub insert_table_infos: Vec<SstableInfo>,
     pub group_construct: Option<GroupConstruct>,
-    pub group_destroy: Option<GroupDestroy>,
+    pub group_destroy: Option<CompactionGroupId>,
     pub group_meta_changes: Vec<GroupMetaChange>,
     pub group_table_change: Option<GroupTableChange>,
     pub new_vnode_partition_count: u32,
+    pub group_merge: Option<GroupMerge>,
 }
 
-pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary {
+pub fn summarize_group_deltas(
+    group_deltas: &GroupDeltas,
+    compaction_group_id: CompactionGroupId,
+) -> GroupDeltasSummary {
     let mut delete_sst_levels = Vec::with_capacity(group_deltas.group_deltas.len());
     let mut delete_sst_ids_set = HashSet::new();
     let mut insert_sst_level_id = u32::MAX;
@@ -64,6 +69,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     let mut group_meta_changes = vec![];
     let mut group_table_change = None;
     let mut new_vnode_partition_count = 0;
+    let mut group_merge = None;
 
     for group_delta in &group_deltas.group_deltas {
         match group_delta {
@@ -83,15 +89,20 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
                 assert!(group_construct.is_none());
                 group_construct = Some(construct_delta.clone());
             }
-            GroupDelta::GroupDestroy(destroy_delta) => {
+            GroupDelta::GroupDestroy(_) => {
                 assert!(group_destroy.is_none());
-                group_destroy = Some(*destroy_delta);
+                group_destroy = Some(compaction_group_id);
             }
             GroupDelta::GroupMetaChange(meta_delta) => {
                 group_meta_changes.push(meta_delta.clone());
             }
             GroupDelta::GroupTableChange(meta_delta) => {
                 group_table_change = Some(meta_delta.clone());
+            }
+            GroupDelta::GroupMerge(merge_delta) => {
+                assert!(group_merge.is_none());
+                group_merge = Some(*merge_delta);
+                group_destroy = Some(merge_delta.right_group_id);
             }
         }
     }
@@ -110,6 +121,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
         group_meta_changes,
         group_table_change,
         new_vnode_partition_count,
+        group_merge,
     }
 }
 
@@ -171,6 +183,25 @@ impl HummockVersion {
                         .chain(epoch_change_log.new_value.iter())
                 })
             }))
+    }
+
+    // only scan the sst infos from levels in the specified compaction group (without table change log)
+    pub fn get_sst_ids_by_group_id(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> impl Iterator<Item = u64> + '_ {
+        self.levels
+            .iter()
+            .filter_map(move |(cg_id, level)| {
+                if *cg_id == compaction_group_id {
+                    Some(level)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
+            .flat_map(|level| level.table_infos.iter())
+            .map(|s| s.sst_id)
     }
 
     /// `get_sst_infos_from_groups` doesn't guarantee that all returned sst info belongs to `select_group`.
@@ -386,23 +417,6 @@ impl HummockVersion {
         {
             for sub_level in &mut l0.sub_levels {
                 let target_l0 = &mut cur_levels.l0;
-                // When `insert_hint` is `Ok(idx)`, it means that the sub level `idx` in `target_l0`
-                // will extend these SSTs. When `insert_hint` is `Err(idx)`, it
-                // means that we will add a new sub level `idx` into `target_l0`.
-                let mut insert_hint = Err(target_l0.sub_levels.len());
-                for (idx, other) in target_l0.sub_levels.iter_mut().enumerate() {
-                    match other.sub_level_id.cmp(&sub_level.sub_level_id) {
-                        Ordering::Less => {}
-                        Ordering::Equal => {
-                            insert_hint = Ok(idx);
-                            break;
-                        }
-                        Ordering::Greater => {
-                            insert_hint = Err(idx);
-                            break;
-                        }
-                    }
-                }
                 // Remove SST from sub level may result in empty sub level. It will be purged
                 // whenever another compaction task is finished.
                 let insert_table_infos =
@@ -419,7 +433,7 @@ impl HummockVersion {
                 if insert_table_infos.is_empty() {
                     continue;
                 }
-                match insert_hint {
+                match get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
                     Ok(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
                     }
@@ -570,7 +584,7 @@ impl HummockVersion {
 
         // apply to `levels`, which is different compaction groups
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
-            let summary = summarize_group_deltas(group_deltas);
+            let summary = summarize_group_deltas(group_deltas, *compaction_group_id);
             if let Some(group_construct) = &summary.group_construct {
                 let mut new_levels = build_initial_compaction_group_levels(
                     *compaction_group_id,
@@ -635,14 +649,19 @@ impl HummockVersion {
                     .expect("compaction group should exist")
                     .member_table_ids
                     .append(&mut moving_tables);
+            } else if let Some(group_merge) = &summary.group_merge {
+                tracing::info!(
+                    "group_merge left {:?} right {:?}",
+                    group_merge.left_group_id,
+                    group_merge.right_group_id
+                );
+                self.merge_compaction_group(group_merge.left_group_id, group_merge.right_group_id)
             }
-            let has_destroy = summary.group_destroy.is_some();
             let visible_table_committed_epoch = self.visible_table_committed_epoch();
-            let levels = self
-                .levels
-                .get_mut(compaction_group_id)
-                .expect("compaction group should exist");
-
+            let group_destroy = summary.group_destroy;
+            let levels = self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
+                panic!("compaction group {} does not exist", compaction_group_id)
+            });
             #[expect(deprecated)] // for backward-compatibility of previous hummock version delta
             for group_meta_delta in &summary.group_meta_changes {
                 levels
@@ -669,7 +688,8 @@ impl HummockVersion {
                 } = summary;
 
                 assert!(
-                    delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
+                    delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty()
+                        || group_destroy.is_some(),
                     "no sst should be deleted when committing an epoch"
                 );
                 for group_delta in &group_deltas.group_deltas {
@@ -703,8 +723,8 @@ impl HummockVersion {
                         .compaction_group_member_table_ids(*compaction_group_id),
                 );
             }
-            if has_destroy {
-                self.levels.remove(compaction_group_id);
+            if let Some(destroy_group_id) = &group_destroy {
+                self.levels.remove(destroy_group_id);
             }
         }
         self.id = version_delta.id;
@@ -775,7 +795,7 @@ impl HummockVersion {
                     change_log.0.push(new_change_log.clone());
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(TableChangeLog(vec![new_change_log.clone()]));
+                    entry.insert(TableChangeLogCommon(vec![new_change_log.clone()]));
                 }
             };
         }
@@ -834,6 +854,45 @@ impl HummockVersion {
             }
         }
         ret
+    }
+
+    pub fn merge_compaction_group(
+        &mut self,
+        left_group_id: CompactionGroupId,
+        right_group_id: CompactionGroupId,
+    ) {
+        // Double check
+        let left_group_id_table_ids = self
+            .state_table_info
+            .compaction_group_member_table_ids(left_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id);
+        let right_group_id_table_ids = self
+            .state_table_info
+            .compaction_group_member_table_ids(right_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id);
+
+        assert!(left_group_id_table_ids
+            .chain(right_group_id_table_ids)
+            .is_sorted());
+
+        let total_cg = self.levels.keys().cloned().collect::<Vec<_>>();
+        let right_levels = self.levels.remove(&right_group_id).unwrap_or_else(|| {
+            panic!(
+                "compaction group should exist right {} all {:?}",
+                right_group_id, total_cg
+            )
+        });
+
+        let left_levels = self.levels.get_mut(&left_group_id).unwrap_or_else(|| {
+            panic!(
+                "compaction group should exist left {} all {:?}",
+                left_group_id, total_cg
+            )
+        });
+
+        group_split::merge_levels(left_levels, right_levels);
     }
 }
 
@@ -1228,6 +1287,14 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
                 .chain(cg.levels.iter())
                 .flat_map(|level| level.table_infos.iter().map(|t| (t.object_id, t.file_size)))
         })
+        .chain(version.table_change_log.values().flat_map(|c| {
+            c.0.iter().flat_map(|l| {
+                l.old_value
+                    .iter()
+                    .chain(l.new_value.iter())
+                    .map(|t| (t.object_id, t.file_size))
+            })
+        }))
         .collect()
 }
 
@@ -1373,9 +1440,15 @@ pub fn split_sst(
 mod tests {
     use std::collections::HashMap;
 
+    use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_pb::hummock::{CompactionConfig, GroupConstruct, GroupDestroy, LevelType};
 
+    use crate::compaction_group::group_split;
     use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
+    use crate::key::{gen_key_from_str, FullKey};
+    use crate::key_range::KeyRange;
     use crate::level::{Level, Levels, OverlappingLevel};
     use crate::sstable_info::SstableInfo;
     use crate::version::{
@@ -1385,20 +1458,22 @@ mod tests {
 
     #[test]
     fn test_get_sst_object_ids() {
-        let mut version = HummockVersion::default();
-        version.id = HummockVersionId::new(0);
-        version.levels = HashMap::from_iter([(
-            0,
-            Levels {
-                levels: vec![],
-                l0: OverlappingLevel {
-                    sub_levels: vec![],
-                    total_file_size: 0,
-                    uncompressed_file_size: 0,
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from_iter([(
+                0,
+                Levels {
+                    levels: vec![],
+                    l0: OverlappingLevel {
+                        sub_levels: vec![],
+                        total_file_size: 0,
+                        uncompressed_file_size: 0,
+                    },
+                    ..Default::default()
                 },
-                ..Default::default()
-            },
-        )]);
+            )]),
+            ..Default::default()
+        };
         assert_eq!(version.get_object_ids().len(), 0);
 
         // Add to sub level
@@ -1432,68 +1507,72 @@ mod tests {
 
     #[test]
     fn test_apply_version_delta() {
-        let mut version = HummockVersion::default();
-        version.id = HummockVersionId::new(0);
-        version.levels = HashMap::from_iter([
-            (
-                0,
-                build_initial_compaction_group_levels(
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from_iter([
+                (
                     0,
-                    &CompactionConfig {
-                        max_level: 6,
-                        ..Default::default()
-                    },
-                ),
-            ),
-            (
-                1,
-                build_initial_compaction_group_levels(
-                    1,
-                    &CompactionConfig {
-                        max_level: 6,
-                        ..Default::default()
-                    },
-                ),
-            ),
-        ]);
-        let mut version_delta = HummockVersionDelta::default();
-        version_delta.id = HummockVersionId::new(1);
-        version_delta.group_deltas = HashMap::from_iter([
-            (
-                2,
-                GroupDeltas {
-                    group_deltas: vec![GroupDelta::GroupConstruct(GroupConstruct {
-                        group_config: Some(CompactionConfig {
+                    build_initial_compaction_group_levels(
+                        0,
+                        &CompactionConfig {
                             max_level: 6,
                             ..Default::default()
-                        }),
-                        ..Default::default()
-                    })],
-                },
-            ),
-            (
-                0,
-                GroupDeltas {
-                    group_deltas: vec![GroupDelta::GroupDestroy(GroupDestroy {})],
-                },
-            ),
-            (
-                1,
-                GroupDeltas {
-                    group_deltas: vec![GroupDelta::IntraLevel(IntraLevelDelta::new(
+                        },
+                    ),
+                ),
+                (
+                    1,
+                    build_initial_compaction_group_levels(
                         1,
-                        0,
-                        vec![],
-                        vec![SstableInfo {
-                            object_id: 1,
-                            sst_id: 1,
+                        &CompactionConfig {
+                            max_level: 6,
                             ..Default::default()
-                        }],
-                        0,
-                    ))],
-                },
-            ),
-        ]);
+                        },
+                    ),
+                ),
+            ]),
+            ..Default::default()
+        };
+        let version_delta = HummockVersionDelta {
+            id: HummockVersionId::new(1),
+            group_deltas: HashMap::from_iter([
+                (
+                    2,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta::GroupConstruct(GroupConstruct {
+                            group_config: Some(CompactionConfig {
+                                max_level: 6,
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        })],
+                    },
+                ),
+                (
+                    0,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta::GroupDestroy(GroupDestroy {})],
+                    },
+                ),
+                (
+                    1,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta::IntraLevel(IntraLevelDelta::new(
+                            1,
+                            0,
+                            vec![],
+                            vec![SstableInfo {
+                                object_id: 1,
+                                sst_id: 1,
+                                ..Default::default()
+                            }],
+                            0,
+                        ))],
+                    },
+                ),
+            ]),
+            ..Default::default()
+        };
         let version_delta = version_delta;
 
         version.apply_version_delta(&version_delta);
@@ -1514,23 +1593,425 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(version, {
-            let mut version = HummockVersion::default();
-            version.id = HummockVersionId::new(1);
-            version.levels = HashMap::from_iter([
-                (
-                    2,
-                    build_initial_compaction_group_levels(
+        assert_eq!(
+            version,
+            HummockVersion {
+                id: HummockVersionId::new(1),
+                levels: HashMap::from_iter([
+                    (
                         2,
-                        &CompactionConfig {
-                            max_level: 6,
-                            ..Default::default()
-                        },
+                        build_initial_compaction_group_levels(
+                            2,
+                            &CompactionConfig {
+                                max_level: 6,
+                                ..Default::default()
+                            },
+                        ),
                     ),
+                    (1, cg1),
+                ]),
+                ..Default::default()
+            }
+        );
+    }
+
+    fn gen_sst_info(object_id: u64, table_ids: Vec<u32>, left: Bytes, right: Bytes) -> SstableInfo {
+        SstableInfo {
+            object_id,
+            sst_id: object_id,
+            key_range: KeyRange {
+                left,
+                right,
+                right_exclusive: false,
+            },
+            table_ids,
+            file_size: 100,
+            sst_size: 100,
+            uncompressed_file_size: 100,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_merge_levels() {
+        let mut left_levels = build_initial_compaction_group_levels(
+            1,
+            &CompactionConfig {
+                max_level: 6,
+                ..Default::default()
+            },
+        );
+
+        let mut right_levels = build_initial_compaction_group_levels(
+            2,
+            &CompactionConfig {
+                max_level: 6,
+                ..Default::default()
+            },
+        );
+
+        left_levels.levels[0] = Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping,
+            table_infos: vec![
+                gen_sst_info(
+                    1,
+                    vec![3],
+                    FullKey::for_test(
+                        TableId::new(3),
+                        gen_key_from_str(VirtualNode::from_index(1), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(3),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
                 ),
-                (1, cg1),
-            ]);
-            version
+                gen_sst_info(
+                    10,
+                    vec![3, 4],
+                    FullKey::for_test(
+                        TableId::new(3),
+                        gen_key_from_str(VirtualNode::from_index(201), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(4),
+                        gen_key_from_str(VirtualNode::from_index(10), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    11,
+                    vec![4],
+                    FullKey::for_test(
+                        TableId::new(4),
+                        gen_key_from_str(VirtualNode::from_index(11), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(4),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+            ],
+            total_file_size: 300,
+            ..Default::default()
+        };
+
+        left_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                3,
+                vec![3],
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 101,
+            level_type: LevelType::Overlapping,
+            total_file_size: 100,
+            ..Default::default()
         });
+
+        left_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                3,
+                vec![3],
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 103,
+            level_type: LevelType::Overlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        left_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                3,
+                vec![3],
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 105,
+            level_type: LevelType::Nonoverlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        right_levels.levels[0] = Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping,
+            table_infos: vec![
+                gen_sst_info(
+                    1,
+                    vec![5],
+                    FullKey::for_test(
+                        TableId::new(5),
+                        gen_key_from_str(VirtualNode::from_index(1), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(5),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    10,
+                    vec![5, 6],
+                    FullKey::for_test(
+                        TableId::new(5),
+                        gen_key_from_str(VirtualNode::from_index(201), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(6),
+                        gen_key_from_str(VirtualNode::from_index(10), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    11,
+                    vec![6],
+                    FullKey::for_test(
+                        TableId::new(6),
+                        gen_key_from_str(VirtualNode::from_index(11), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(6),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+            ],
+            total_file_size: 300,
+            ..Default::default()
+        };
+
+        right_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                3,
+                vec![5],
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 101,
+            level_type: LevelType::Overlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        right_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                5,
+                vec![5],
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 102,
+            level_type: LevelType::Overlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        right_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                3,
+                vec![5],
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 103,
+            level_type: LevelType::Nonoverlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        {
+            // test empty
+            let mut left_levels = Levels::default();
+            let right_levels = Levels::default();
+
+            group_split::merge_levels(&mut left_levels, right_levels);
+        }
+
+        {
+            // test empty left
+            let mut left_levels = build_initial_compaction_group_levels(
+                1,
+                &CompactionConfig {
+                    max_level: 6,
+                    ..Default::default()
+                },
+            );
+            let right_levels = right_levels.clone();
+
+            group_split::merge_levels(&mut left_levels, right_levels);
+
+            assert!(left_levels.l0.sub_levels.len() == 3);
+            assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
+            assert_eq!(100, left_levels.l0.sub_levels[0].total_file_size);
+            assert!(left_levels.l0.sub_levels[1].sub_level_id == 102);
+            assert_eq!(100, left_levels.l0.sub_levels[1].total_file_size);
+            assert!(left_levels.l0.sub_levels[2].sub_level_id == 103);
+            assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
+
+            assert!(left_levels.levels[0].level_idx == 1);
+            assert_eq!(300, left_levels.levels[0].total_file_size);
+        }
+
+        {
+            // test empty right
+            let mut left_levels = left_levels.clone();
+            let right_levels = build_initial_compaction_group_levels(
+                2,
+                &CompactionConfig {
+                    max_level: 6,
+                    ..Default::default()
+                },
+            );
+
+            group_split::merge_levels(&mut left_levels, right_levels);
+
+            assert!(left_levels.l0.sub_levels.len() == 3);
+            assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
+            assert_eq!(100, left_levels.l0.sub_levels[0].total_file_size);
+            assert!(left_levels.l0.sub_levels[1].sub_level_id == 103);
+            assert_eq!(100, left_levels.l0.sub_levels[1].total_file_size);
+            assert!(left_levels.l0.sub_levels[2].sub_level_id == 105);
+            assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
+
+            assert!(left_levels.levels[0].level_idx == 1);
+            assert_eq!(300, left_levels.levels[0].total_file_size);
+        }
+
+        {
+            let mut left_levels = left_levels.clone();
+            let right_levels = right_levels.clone();
+
+            group_split::merge_levels(&mut left_levels, right_levels);
+
+            assert!(left_levels.l0.sub_levels.len() == 6);
+            assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
+            assert_eq!(100, left_levels.l0.sub_levels[0].total_file_size);
+            assert!(left_levels.l0.sub_levels[1].sub_level_id == 103);
+            assert_eq!(100, left_levels.l0.sub_levels[1].total_file_size);
+            assert!(left_levels.l0.sub_levels[2].sub_level_id == 105);
+            assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
+            assert!(left_levels.l0.sub_levels[3].sub_level_id == 106);
+            assert_eq!(100, left_levels.l0.sub_levels[3].total_file_size);
+            assert!(left_levels.l0.sub_levels[4].sub_level_id == 107);
+            assert_eq!(100, left_levels.l0.sub_levels[4].total_file_size);
+            assert!(left_levels.l0.sub_levels[5].sub_level_id == 108);
+            assert_eq!(100, left_levels.l0.sub_levels[5].total_file_size);
+
+            assert!(left_levels.levels[0].level_idx == 1);
+            assert_eq!(600, left_levels.levels[0].total_file_size);
+        }
     }
 }

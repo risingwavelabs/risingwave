@@ -23,7 +23,6 @@ use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use futures::future::select;
 use futures::TryStreamExt;
-use itertools::Itertools;
 use jni::JavaVM;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
@@ -60,7 +59,6 @@ use tracing::warn;
 
 use super::elasticsearch::{is_es_sink, StreamChunkConverter, ES_OPTION_DELIMITER};
 use crate::error::ConnectorResult;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
@@ -116,7 +114,7 @@ def_remote_sink!();
 
 pub trait RemoteSinkTrait: Send + Sync + 'static {
     const SINK_NAME: &'static str;
-    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
+    fn default_sink_decouple() -> bool {
         true
     }
 }
@@ -144,9 +142,9 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Default => Ok(R::default_sink_decouple(desc)),
+            SinkDecouple::Default => Ok(R::default_sink_decouple()),
             SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
         }
@@ -175,7 +173,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
         bail!("Es sink only supports single pk or pk with delimiter option");
     }
     // FIXME: support struct and array in stream sink
-    param.columns.iter().map(|col| {
+    param.columns.iter().try_for_each(|col| {
         match &col.data_type {
             DataType::Int16
                     | DataType::Int32
@@ -218,7 +216,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                             "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, Bytea, List and Varchar, (Es sink support Struct) got {:?}: {:?}",
                             col.name,
                             col.data_type,
-                        )))}}).try_collect()?;
+                        )))}})?;
 
     let jvm = JVM.get_or_init()?;
     let sink_param = param.to_proto();
