@@ -116,13 +116,11 @@ impl MqttCommon {
 
         options.set_clean_start(self.clean_start);
 
-        if let Some(max_packet_size) = self.max_packet_size {
-            options.set_connect_properties({
-                let mut props = ConnectProperties::new();
-                props.max_packet_size = Some(max_packet_size);
-                props
-            });
-        }
+        let mut connect_properties = ConnectProperties::new();
+        connect_properties.max_packet_size = self.max_packet_size;
+        options.set_connect_properties({
+            connect_properties
+        });
 
         if ssl {
             let tls_config = self.get_tls_config()?;
