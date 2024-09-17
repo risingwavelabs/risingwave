@@ -138,14 +138,10 @@ get_old_version() {
 
   # We handle the edge case where the current branch is the one being released.
   # If so, we need to prune it from the list.
-  echo "--- DEBUG: "
-  echo "branch output"
-  git branch --show-current
-  echo "buildkite branch output"
-  echo "$BUILDKITE_BRANCH"
-  echo "branch with tr output"
-  git branch --show-current | tr -d 'v'
-  local current_branch=$(git branch --show-current | tr -d 'v')
+  # We cannot simply use 'git branch --show-current', because buildkite checks out with the commit,
+  # rather than branch. So the current state is detached.
+  # Instead we rely on BUILDKITE_BRANCH, provided by buildkite.
+  local current_branch=$(echo "$BUILDKITE_BRANCH" | tr -d 'v')
   echo "--- CURRENT BRANCH: $current_branch"
 
   echo "--- PRUNED VERSIONS"
