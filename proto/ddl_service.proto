@@ -74,6 +74,8 @@ message DropSourceResponse {
 
 message AlterSourceRequest {
   catalog.Source source = 1;
+  // for shared source, we need to replace the streaming job
+  optional ReplaceStreamingJobPlan plan = 2;
 }
 
 message AlterSourceResponse {
@@ -333,6 +335,18 @@ message ReplaceTablePlan {
   // If the new version does not match the subsequent version in the meta service's
   // catalog, this request will be rejected.
   catalog.Table table = 1;
+  // The new materialization plan, where all schema are updated.
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+  // The mapping from the old columns to the new columns of the table.
+  // If no column modifications occur (such as for sinking into table), this will be None.
+  catalog.ColIndexMapping table_col_index_mapping = 3;
+  // Source catalog of table's associated source
+  catalog.Source source = 4;
+  TableJobType job_type = 5;
+}
+
+// Replace a streaming job, but not a table. e.g., alter a shared source.
+message ReplaceStreamingJobPlan {
   // The new materialization plan, where all schema are updated.
   stream_plan.StreamFragmentGraph fragment_graph = 2;
   // The mapping from the old columns to the new columns of the table.
