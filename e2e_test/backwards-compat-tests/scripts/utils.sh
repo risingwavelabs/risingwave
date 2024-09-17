@@ -133,8 +133,17 @@ get_old_version() {
 
   # Then we sort them in descending order.
   echo "--- VERSIONS"
-  local sorted_versions=$(echo -e "$tags" | sort -t '.' -n)
+  local sorted_versions=$(echo -e "$tags" | sort -V)
   echo "$sorted_versions"
+
+  # We handle the edge case where the current branch is the one being released.
+  # If so, we need to prune it from the list.
+  local current_branch=$(git branch --show-current | tr -d 'v')
+  echo "--- CURRENT BRANCH: $current_branch"
+
+  echo "--- PRUNED VERSIONS"
+  local pruned_versions=$(echo -e "$sorted_versions" | grep -v "$current_branch")
+  echo "$pruned_versions"
 
   # Then we take the Nth latest version.
   # We set $OLD_VERSION to this.
