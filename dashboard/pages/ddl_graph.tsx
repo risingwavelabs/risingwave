@@ -45,7 +45,7 @@ import {
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
 import {
-  getFragmentsByJobId, getRelationDependencies,
+  getFragmentsByJobId, getFragmentVertexToRelationMap, getRelationDependencies,
   getRelationIdInfos,
   getStreamingJobs, Relation, StreamingJob,
 } from "../lib/api/streaming"
@@ -218,6 +218,7 @@ interface EmbeddedBackPressureInfo {
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: relationDeps } = useFetch(getRelationDependencies)
+  const { response: fragmentVertexToRelationMap } = useFetch(getFragmentVertexToRelationMap)
 
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
 
@@ -303,6 +304,10 @@ export default function Streaming() {
 
   // Map from (fragment_id, downstream_fragment_id) -> back pressure rate
   const backPressures = useMemo(() => {
+    if (!fragmentVertexToRelationMap) {
+      return
+    }
+    console.log("fragmentVertexToRelationMap", fragmentVertexToRelationMap);
     if (promethusMetrics || embeddedBackPressureInfo) {
       let map = new Map()
 
@@ -334,9 +339,11 @@ export default function Streaming() {
           }
         }
       }
+      let relation_map = new Map()
+      // Rekey the map to use relation id instead of fragment id.
       return map
     }
-  }, [backPressureDataSource, promethusMetrics, embeddedBackPressureInfo])
+  }, [backPressureDataSource, promethusMetrics, embeddedBackPressureInfo, fragmentVertexToRelationMap])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
