@@ -182,9 +182,11 @@ function buildDdlDependencyAsEdges(
   for (const relation of relations) {
       relation_ids.add(relation.id)
   }
+  console.log("relation_ids: ", relation_ids)
   const nodes: DdlBox[] = []
   for (const relation of relations) {
     let parentIds = relation.dependentRelations
+    console.log("parentIds: ", parentIds)
     nodes.push({
       id: relation.id.toString(),
       order: relation.id,
@@ -307,6 +309,8 @@ export default function Streaming() {
     if (!fragmentVertexToRelationMap) {
       return
     }
+    let inMap = fragmentVertexToRelationMap.inMap
+    let outMap = fragmentVertexToRelationMap.outMap
     console.log("fragmentVertexToRelationMap", fragmentVertexToRelationMap);
     if (promethusMetrics || embeddedBackPressureInfo) {
       let map = new Map()
@@ -317,10 +321,17 @@ export default function Streaming() {
           embeddedBackPressureInfo.totalDurationNs
         )
         for (const m of metrics.outputBufferBlockingDuration) {
-          map.set(
-            `${m.metric.fragmentId}_${m.metric.downstreamFragmentId}`,
-            m.sample[0].value
-          )
+          let output = m.metric.fragmentId
+          let input = m.metric.downstreamFragmentId
+          if (outMap[output] && inMap[input]) {
+            output = outMap[output]
+            input = inMap[input]
+            let key = `${output}_${input}`
+            map.set(
+                key,
+                m.sample[0].value
+            )
+          }
         }
       } else if (backPressureDataSource === "Prometheus" && promethusMetrics) {
         for (const m of promethusMetrics.outputBufferBlockingDuration) {
@@ -339,8 +350,7 @@ export default function Streaming() {
           }
         }
       }
-      let relation_map = new Map()
-      // Rekey the map to use relation id instead of fragment id.
+      console.log("backpressure map: ", map)
       return map
     }
   }, [backPressureDataSource, promethusMetrics, embeddedBackPressureInfo, fragmentVertexToRelationMap])
@@ -423,7 +433,7 @@ export default function Streaming() {
           {ddlDependency && (
             <DdlGraph
               ddlDependency={ddlDependency}
-              backPressures={SampleDdlBackpressures}
+              backPressures={backPressures}
             />
           )}
         </Box>
