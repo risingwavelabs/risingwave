@@ -305,7 +305,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         order_types.clone(),
         pk_indices.clone(),
         read_prefix_len_hint,
-        value_indices.iter().map(|v| *v as i32).collect_vec(),
+        value_indices.clone(),
     );
 
     test_env.register_table(table.clone()).await;
@@ -415,7 +415,7 @@ async fn test_batch_scan_with_value_indices() {
         order_types.clone(),
         pk_indices.clone(),
         read_prefix_len_hint,
-        value_indices.iter().map(|v| *v as i32).collect_vec(),
+        value_indices.clone(),
     );
 
     test_env.register_table(table.clone()).await;
@@ -515,7 +515,7 @@ async fn test_batch_scan_chunk_with_value_indices() {
         order_types.clone(),
         pk_indices.clone(),
         read_prefix_len_hint,
-        value_indices.iter().map(|v| *v as i32).collect_vec(),
+        value_indices.clone(),
     );
 
     test_env.register_table(table.clone()).await;
