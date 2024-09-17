@@ -138,6 +138,13 @@ get_old_version() {
 
   # We handle the edge case where the current branch is the one being released.
   # If so, we need to prune it from the list.
+  echo "--- DEBUG: "
+  echo "branch output"
+  git branch --show-current
+  echo "buildkite branch output"
+  echo "$BUILDKITE_BRANCH"
+  echo "branch with tr output"
+  git branch --show-current | tr -d 'v'
   local current_branch=$(git branch --show-current | tr -d 'v')
   echo "--- CURRENT BRANCH: $current_branch"
 
@@ -147,7 +154,7 @@ get_old_version() {
 
   # Then we take the Nth latest version.
   # We set $OLD_VERSION to this.
-  OLD_VERSION=$(echo -e "$sorted_versions" | tail -n $VERSION_OFFSET | head -1)
+  OLD_VERSION=$(echo -e "$pruned_versions" | tail -n $VERSION_OFFSET | head -1)
 }
 
 get_new_version() {
