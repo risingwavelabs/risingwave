@@ -47,7 +47,6 @@ tokio = { version = "0.2", package = "madsim-tokio" }
 
 [build-dependencies]
 prost-build = "0.12"
-protobuf-src = "1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
