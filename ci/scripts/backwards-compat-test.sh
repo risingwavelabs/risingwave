@@ -102,7 +102,7 @@ setup_old_cluster() {
     set -e
     echo "Failed to download ${OLD_VERSION} from github releases, build from source later during \`risedev d\`"
     configure_rw "$OLD_VERSION" true
-  elif [[ $OLD_VERSION -eq '1.10.1' || $OLD_VERSION -eq '1.10.0' ]]; then
+  elif [[ $OLD_VERSION = '1.10.1' || $OLD_VERSION = '1.10.0' ]]; then
     set -e
     echo "1.10.x has older openssl version, build from source later during \`risedev d\`"
     configure_rw "$OLD_VERSION" true
