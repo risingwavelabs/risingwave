@@ -45,7 +45,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, create_connection_request, DdlProgress,
-    PbTableJobType, ReplaceTablePlan, TableJobType,
+    PbReplaceStreamingJobPlan, PbTableJobType, ReplaceTablePlan, TableJobType,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -586,7 +586,11 @@ impl CatalogWriter for MockCatalogWriter {
         }
     }
 
-    async fn alter_source(&self, source: PbSource) -> Result<()> {
+    async fn alter_source(
+        &self,
+        source: PbSource,
+        _replace_streaming_job_plan: Option<PbReplaceStreamingJobPlan>,
+    ) -> Result<()> {
         self.catalog.write().update_source(&source);
         Ok(())
     }
