@@ -307,7 +307,8 @@ mod tests {
         let expected_vnodes = vnodes().cycle();
         let actual_vnodes = row_ids.iter().map(|&r| vnode_of(r));
 
-        for (expected, actual) in expected_vnodes.zip_eq(actual_vnodes) {
+        #[expect(clippy::disallowed_methods)] // `expected_vnodes` is an endless cycle iterator
+        for (expected, actual) in expected_vnodes.zip(actual_vnodes) {
             assert_eq!(expected, actual);
         }
 
