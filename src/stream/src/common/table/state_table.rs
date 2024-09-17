@@ -543,27 +543,6 @@ where
         .await
     }
 
-    /// Create a state table without distribution, used for unit tests.
-    pub async fn new_without_distribution_inconsistent_op(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_with_distribution_inner(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            TableDistribution::singleton(),
-            None,
-            false,
-        )
-        .await
-    }
-
     /// Create a state table with distribution specified with `distribution`. Should use
     /// `Distribution::fallback()` for tests.
     pub async fn new_with_distribution(

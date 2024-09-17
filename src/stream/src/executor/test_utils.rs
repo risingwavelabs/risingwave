@@ -282,6 +282,7 @@ pub mod agg_executor {
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::agg_common::{
         AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
@@ -422,12 +423,16 @@ pub mod agg_executor {
             add_column_desc(agg_call.return_type.clone());
         });
 
-        StateTable::new_without_distribution_inconsistent_op(
+        StateTable::from_table_catalog_inconsistent_op(
+            &gen_pbtable(
+                table_id,
+                column_descs,
+                order_types,
+                (0..group_key_indices.len()).collect(),
+                0,
+            ),
             store,
-            table_id,
-            column_descs,
-            order_types,
-            (0..group_key_indices.len()).collect(),
+            None,
         )
         .await
     }
