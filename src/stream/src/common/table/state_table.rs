@@ -609,29 +609,6 @@ where
         .await
     }
 
-    /// Create a state table with distribution and without sanity check, used for unit tests.
-    pub async fn new_with_distribution_inconsistent_op(
-        store: S,
-        table_id: TableId,
-        table_columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        distribution: TableDistribution,
-        value_indices: Option<Vec<usize>>,
-    ) -> Self {
-        Self::new_with_distribution_inner(
-            store,
-            table_id,
-            table_columns,
-            order_types,
-            pk_indices,
-            distribution,
-            value_indices,
-            false,
-        )
-        .await
-    }
-
     #[allow(clippy::too_many_arguments)]
     async fn new_with_distribution_inner(
         store: S,
