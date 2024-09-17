@@ -20,7 +20,7 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::ColumnCatalog;
 
-pub fn gen_prost_table(
+pub fn gen_pbtable(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,
@@ -28,7 +28,7 @@ pub fn gen_prost_table(
     read_prefix_len_hint: u32,
 ) -> PbTable {
     let col_len = column_descs.len() as i32;
-    gen_prost_table_with_value_indices(
+    gen_pbtable_with_value_indices(
         table_id,
         column_descs,
         order_types,
@@ -38,7 +38,7 @@ pub fn gen_prost_table(
     )
 }
 
-pub fn gen_prost_table_with_dist_key(
+pub fn gen_pbtable_with_dist_key(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,
@@ -47,7 +47,7 @@ pub fn gen_prost_table_with_dist_key(
     distribution_key: Vec<usize>,
 ) -> PbTable {
     let col_len = column_descs.len() as i32;
-    gen_prost_table_inner(
+    gen_pbtable_inner(
         table_id,
         column_descs,
         order_types,
@@ -58,7 +58,7 @@ pub fn gen_prost_table_with_dist_key(
     )
 }
 
-pub fn gen_prost_table_with_value_indices(
+pub fn gen_pbtable_with_value_indices(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,
@@ -66,7 +66,7 @@ pub fn gen_prost_table_with_value_indices(
     read_prefix_len_hint: u32,
     value_indices: Vec<i32>,
 ) -> PbTable {
-    gen_prost_table_inner(
+    gen_pbtable_inner(
         table_id,
         column_descs,
         order_types,
@@ -77,7 +77,7 @@ pub fn gen_prost_table_with_value_indices(
     )
 }
 
-pub fn gen_prost_table_inner(
+pub fn gen_pbtable_inner(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,

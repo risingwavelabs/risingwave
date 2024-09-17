@@ -28,7 +28,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 
 use crate::common::table::state_table::StateTable;
-use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
+use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indices};
 
 /// There are three struct in relational layer, StateTable, MemTable and StorageTable.
 /// `StateTable` provides read/write interfaces to the upper layer streaming operator.
@@ -56,7 +56,7 @@ async fn test_storage_table_value_indices() {
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let value_indices = vec![1, 3, 4];
     let read_prefix_len_hint = 2;
-    let table = gen_prost_table_with_value_indices(
+    let table = gen_pbtable_with_value_indices(
         TEST_TABLE_ID,
         column_descs.clone(),
         order_types.clone(),
@@ -191,7 +191,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_indices = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 2;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs.clone(),
         order_types.clone(),
@@ -299,7 +299,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let value_indices: Vec<usize> = vec![0, 1, 2];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table_with_value_indices(
+    let table = gen_pbtable_with_value_indices(
         TEST_TABLE_ID,
         column_descs.clone(),
         order_types.clone(),
@@ -409,7 +409,7 @@ async fn test_batch_scan_with_value_indices() {
     let pk_indices = vec![0_usize, 2_usize];
     let value_indices: Vec<usize> = vec![1, 3];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table_with_value_indices(
+    let table = gen_pbtable_with_value_indices(
         TEST_TABLE_ID,
         column_descs.clone(),
         order_types.clone(),
@@ -509,7 +509,7 @@ async fn test_batch_scan_chunk_with_value_indices() {
     let pk_indices = vec![0_usize, 2_usize];
     let value_indices: Vec<usize> = vec![1, 3];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table_with_value_indices(
+    let table = gen_pbtable_with_value_indices(
         TEST_TABLE_ID,
         column_descs.clone(),
         order_types.clone(),
