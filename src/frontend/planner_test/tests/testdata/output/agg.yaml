@@ -2198,3 +2198,30 @@
         └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
           └─StreamProject { exprs: [t.v1::Float64 as $expr1, t._row_id] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test approx percentile with invalid relative_error
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.0) WITHIN GROUP (order by v1) from t;
+  binder_error: |
+    Failed to bind expression: approx_percentile(0.5, 0.0)
+
+    Caused by:
+      relative_error=0 does not satisfy 0.0 < relative_error < 1.0
+- name: test approx percentile with invalid relative_error 0.0
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.0) WITHIN GROUP (order by v1) from t;
+  binder_error: |
+    Failed to bind expression: approx_percentile(0.5, 0.0)
+
+    Caused by:
+      relative_error=0 does not satisfy 0.0 < relative_error < 1.0
+- name: test approx percentile with invalid relative_error 1.0 with group by.
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT approx_percentile(0.0, 1.0) WITHIN GROUP (order by v1) from t group by v2;
+  binder_error: |
+    Failed to bind expression: approx_percentile(0.0, 1.0)
+
+    Caused by:
+      relative_error=1 does not satisfy 0.0 < relative_error < 1.0
