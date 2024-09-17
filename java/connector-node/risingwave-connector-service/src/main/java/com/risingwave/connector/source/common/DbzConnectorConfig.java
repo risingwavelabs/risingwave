@@ -54,6 +54,7 @@ public class DbzConnectorConfig {
     public static final String PG_PUB_NAME = "publication.name";
     public static final String PG_PUB_CREATE = "publication.create.enable";
     public static final String PG_SCHEMA_NAME = "schema.name";
+    public static final String PG_SSL_ROOT_CERT = "ssl.root.cert";
 
     /* Sql Server configs */
     public static final String SQL_SERVER_SCHEMA_NAME = "schema.name";
@@ -210,6 +211,10 @@ public class DbzConnectorConfig {
                 // allow user to ingest tables in different schemas
                 LOG.info("Disable table filtering for the shared Postgres source");
                 dbzProps.remove("table.include.list");
+            }
+
+            if (userProps.containsKey(PG_SSL_ROOT_CERT)) {
+                dbzProps.setProperty("database.sslrootcert", userProps.get(PG_SSL_ROOT_CERT));
             }
         } else if (source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);

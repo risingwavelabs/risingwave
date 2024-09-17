@@ -143,9 +143,10 @@ arrow-array-iceberg = { package = "arrow-array", version = "52" }
 arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
 arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
 arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
-iceberg = "0.3.0"
-iceberg-catalog-rest = "0.3.0"
-iceberg-catalog-glue = "0.3.0"
+# branch dev
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
 opendal = "0.47"
 arrow-array = "50"
 arrow-arith = "50"

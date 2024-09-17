@@ -108,7 +108,7 @@ pub struct TracedReadOptions {
     pub retention_seconds: Option<u32>,
     pub table_id: TracedTableId,
     pub read_version_from_backup: bool,
-    pub read_version_from_time_travel: bool,
+    pub read_committed: bool,
 }
 
 impl TracedReadOptions {
@@ -123,7 +123,7 @@ impl TracedReadOptions {
             retention_seconds: None,
             table_id: TracedTableId { table_id },
             read_version_from_backup: false,
-            read_version_from_time_travel: false,
+            read_committed: false,
         }
     }
 }

@@ -153,10 +153,7 @@ fn map_contains(map: MapRef<'_>, key: ScalarRefImpl<'_>) -> Result<bool, ExprErr
 /// ```
 #[function("map_length(anymap) -> int4")]
 fn map_length<T: TryFrom<usize>>(map: MapRef<'_>) -> Result<T, ExprError> {
-    map.inner()
-        .len()
-        .try_into()
-        .map_err(|_| ExprError::NumericOverflow)
+    map.len().try_into().map_err(|_| ExprError::NumericOverflow)
 }
 
 /// If both `m1` and `m2` have a value with the same key, then the output map contains the value from `m2`.

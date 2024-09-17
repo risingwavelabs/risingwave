@@ -346,6 +346,7 @@ fn datum_to_json_object(
                 }
             }
         }
+        // TODO(map): support map
         (data_type, scalar_ref) => {
             return Err(ArrayError::internal(
                 format!("datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}", field.name, data_type, scalar_ref),
