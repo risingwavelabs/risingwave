@@ -18,6 +18,7 @@ use prost_types::FileDescriptorSet;
 use protox::file::{ChainFileResolver, File, FileResolver, GoogleFileResolver};
 use protox::Error;
 
+// name -> content
 pub fn compile_pb(
     main_file: (String, String),
     dependencies: impl IntoIterator<Item = (String, String)>,
@@ -47,12 +48,15 @@ pub fn compile_pb(
         }
     }
 
+    let main_file_name = main_file.0.clone();
+
     let mut resolver = ChainFileResolver::new();
     resolver.add(GoogleFileResolver::new());
     resolver.add(MyResolver::new(main_file, dependencies));
 
     let fd = protox::Compiler::with_file_resolver(resolver)
         .include_imports(true)
+        .open_file(&main_file_name)?
         .file_descriptor_set();
 
     Ok(fd)
