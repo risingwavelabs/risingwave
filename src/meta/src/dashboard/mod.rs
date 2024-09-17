@@ -63,12 +63,14 @@ pub(super) mod handlers {
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::{
-        ActorIds, FragmentIdToActorIdMap, PbTableFragments, RelationIdInfos,
+        ActorIds, FragmentIdToActorIdMap, FragmentVertices, PbTableFragments, RelationIdInfos,
+        RelationIdToFragmentVertexMap,
     };
     use risingwave_pb::monitor_service::{
         GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
         StackTraceResponse,
     };
+    use risingwave_pb::stream_plan::FragmentTypeFlag;
     use risingwave_pb::user::PbUserInfo;
     use serde_json::json;
     use thiserror_ext::AsReport;
@@ -216,6 +218,112 @@ pub(super) mod handlers {
 
         Ok(Json(table_fragments))
     }
+
+    /// In the ddl backpressure graph, we want to compute the backpressure between relations.
+    /// So we need to know which are the fragments which are connected to external relations.
+    /// These fragments form the vertices of the graph.
+    /// We can get collection of backpressure values, keyed by vertex_id-vertex_id.
+    /// This function will return a map of fragment vertex id to relation id.
+    /// We can convert `vertex_id-vertex_id` to `relation_id-relation_id` using that.
+    /// Finally, we have a map of `relation_id-relation_id` to backpressure values.
+    pub async fn get_relation_id_to_fragment_vertex_map(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<RelationIdToFragmentVertexMap>> {
+        let map = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let core = mgr.fragment_manager.get_fragment_read_guard().await;
+                let table_fragments = core.table_fragments();
+                let mut in_map = HashMap::new();
+                let mut out_map = HashMap::new();
+                for (relation_id, tf) in table_fragments {
+                    let mut in_fragment_ids = vec![];
+                    let mut out_fragment_ids = vec![];
+                    for (fragment_id, fragment) in &tf.fragments {
+                        if ((fragment.fragment_type_mask & FragmentTypeFlag::SourceScan as u32)
+                            != 0)
+                            || ((fragment.fragment_type_mask & FragmentTypeFlag::StreamScan as u32)
+                                != 0)
+                            || ((fragment.fragment_type_mask
+                                & FragmentTypeFlag::SnapshotBackfillStreamScan as u32)
+                                != 0)
+                            || ((fragment.fragment_type_mask & FragmentTypeFlag::Values as u32)
+                                != 0)
+                            || ((fragment.fragment_type_mask & FragmentTypeFlag::Now as u32) != 0)
+                        {
+                            in_fragment_ids.push(*fragment_id);
+                        }
+                        if ((fragment.fragment_type_mask & FragmentTypeFlag::Sink as u32) != 0)
+                            || ((fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0)
+                        {
+                            out_fragment_ids.push(*fragment_id);
+                        }
+                    }
+                    in_map.insert(
+                        relation_id.table_id,
+                        FragmentVertices {
+                            vertices: in_fragment_ids,
+                        },
+                    );
+                    out_map.insert(
+                        relation_id.table_id,
+                        FragmentVertices {
+                            vertices: out_fragment_ids,
+                        },
+                    );
+                }
+                RelationIdToFragmentVertexMap { in_map, out_map }
+            }
+            MetadataManager::V2(mgr) => {
+                let table_fragments = mgr
+                    .catalog_controller
+                    .table_fragments()
+                    .await
+                    .map_err(err)?;
+                let mut in_map = HashMap::new();
+                let mut out_map = HashMap::new();
+                for (relation_id, tf) in table_fragments {
+                    let mut in_fragment_ids = vec![];
+                    let mut out_fragment_ids = vec![];
+                    for (fragment_id, fragment) in &tf.fragments {
+                        if ((fragment.fragment_type_mask & FragmentTypeFlag::SourceScan as u32)
+                            != 0)
+                            || ((fragment.fragment_type_mask & FragmentTypeFlag::StreamScan as u32)
+                                != 0)
+                            || ((fragment.fragment_type_mask
+                                & FragmentTypeFlag::SnapshotBackfillStreamScan as u32)
+                                != 0)
+                            || ((fragment.fragment_type_mask & FragmentTypeFlag::Values as u32)
+                                != 0)
+                            || ((fragment.fragment_type_mask & FragmentTypeFlag::Now as u32) != 0)
+                        {
+                            in_fragment_ids.push(*fragment_id);
+                        }
+                        if ((fragment.fragment_type_mask & FragmentTypeFlag::Sink as u32) != 0)
+                            || ((fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0)
+                        {
+                            out_fragment_ids.push(*fragment_id);
+                        }
+                    }
+                    in_map.insert(
+                        relation_id as u32,
+                        FragmentVertices {
+                            vertices: in_fragment_ids,
+                        },
+                    );
+                    out_map.insert(
+                        relation_id as u32,
+                        FragmentVertices {
+                            vertices: out_fragment_ids,
+                        },
+                    );
+                }
+                RelationIdToFragmentVertexMap { in_map, out_map }
+            }
+        };
+        Ok(Json(map))
+    }
+
+    /// Provides a hierarchy of relation ids to fragments to actors.
 
     pub async fn get_relation_id_infos(
         Extension(srv): Extension<Service>,
