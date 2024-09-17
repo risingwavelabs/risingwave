@@ -87,8 +87,8 @@ where
     }
 }
 
-impl TableChangeLog {
-    pub fn filter_epoch(&self, (min_epoch, max_epoch): (u64, u64)) -> &[EpochNewChangeLog] {
+impl<T> TableChangeLogCommon<T> {
+    pub fn filter_epoch(&self, (min_epoch, max_epoch): (u64, u64)) -> &[EpochNewChangeLogCommon<T>] {
         let start = self.0.partition_point(|epoch_change_log| {
             epoch_change_log.epochs.last().expect("non-empty") < &min_epoch
         });

@@ -14,16 +14,22 @@
 
 use std::assert_matches::assert_matches;
 use std::collections::btree_map::Entry;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_common::must_match;
+use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
+use risingwave_hummock_sdk::{
+    FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
+};
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use risingwave_pb::hummock::PbHummockSnapshot;
+use risingwave_pb::hummock::{HummockVersionDeltas, PbHummockSnapshot};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::watch;
+use tracing::warn;
 
 use crate::expr::InlineNowProcTime;
 use crate::meta_client::FrontendMetaClient;
@@ -85,7 +91,7 @@ impl ReadSnapshot {
 // DO NOT implement `Clone` for `PinnedSnapshot` because it's a "resource" that should always be a
 // singleton for each snapshot. Use `PinnedSnapshotRef` instead.
 pub struct PinnedSnapshot {
-    value: PbHummockSnapshot,
+    value: FrontendHummockVersion,
     unpin_sender: UnboundedSender<Operation>,
 }
 
@@ -103,26 +109,29 @@ impl PinnedSnapshot {
         let epoch = if is_barrier_read {
             batch_query_epoch::Epoch::Current(u64::MAX)
         } else {
-            batch_query_epoch::Epoch::Committed(self.value.committed_epoch)
+            batch_query_epoch::Epoch::Committed(self.value.max_committed_epoch)
         };
         BatchQueryEpoch { epoch: Some(epoch) }
     }
 
     pub fn committed_epoch(&self) -> u64 {
-        self.value.committed_epoch
+        self.value.max_committed_epoch
     }
 }
 
 impl Drop for PinnedSnapshot {
     fn drop(&mut self) {
-        let _ = self.unpin_sender.send(Operation::Unpin(self.value));
+        let _ = self.unpin_sender.send(Operation::Unpin(self.value.id));
     }
 }
 
 /// Returns an invalid snapshot, used for initial values.
-fn invalid_snapshot() -> PbHummockSnapshot {
-    PbHummockSnapshot {
-        committed_epoch: INVALID_EPOCH,
+fn invalid_snapshot() -> FrontendHummockVersion {
+    FrontendHummockVersion {
+        id: INVALID_VERSION_ID,
+        max_committed_epoch: 0,
+        state_table_info: HummockVersionStateTableInfo::from_protobuf(&HashMap::new()),
+        table_change_log: Default::default(),
     }
 }
 
@@ -170,43 +179,54 @@ impl HummockSnapshotManager {
         self.latest_snapshot.borrow().clone()
     }
 
+    pub fn init(&self, version: FrontendHummockVersion) {
+        self.worker_sender
+            .send(Operation::Pin(version.id, version.max_committed_epoch))
+            .unwrap();
+        // Then set the latest snapshot.
+        let snapshot = Arc::new(PinnedSnapshot {
+            value: version,
+            unpin_sender: self.worker_sender.clone(),
+        });
+        if self.latest_snapshot.send(snapshot).is_err() {
+            warn!("fail to set init version");
+        }
+    }
+
     /// Update the latest snapshot.
     ///
     /// Should only be called by the observer manager.
-    pub fn update(&self, snapshot: PbHummockSnapshot) {
+    pub fn update(&self, deltas: HummockVersionDeltas) {
         self.latest_snapshot.send_if_modified(move |old_snapshot| {
-            // Note(bugen): theoretically, the snapshots from the observer should always be
-            // monotonically increasing, so there's no need to `max` them or check whether they are
-            // the same. But we still do it here to be safe.
-            // TODO: turn this into an assertion.
-            let snapshot = PbHummockSnapshot {
-                committed_epoch: std::cmp::max(
-                    old_snapshot.value.committed_epoch,
-                    snapshot.committed_epoch,
-                ),
+            if deltas.version_deltas.is_empty() {
+                return false;
+            }
+            let snapshot = {
+                let mut snapshot = old_snapshot.value.clone();
+                for delta in deltas.version_deltas {
+                    snapshot.apply_delta(FrontendHummockVersionDelta::from_protobuf(delta));
+                }
+                snapshot
             };
 
-            if old_snapshot.value == snapshot {
-                // Ignore the same snapshot
-                false
-            } else {
-                // First tell the worker that a new snapshot is going to be pinned.
-                self.worker_sender.send(Operation::Pin(snapshot)).unwrap();
-                // Then set the latest snapshot.
-                *old_snapshot = Arc::new(PinnedSnapshot {
-                    value: snapshot,
-                    unpin_sender: self.worker_sender.clone(),
-                });
+            // First tell the worker that a new snapshot is going to be pinned.
+            self.worker_sender
+                .send(Operation::Pin(snapshot.id, snapshot.max_committed_epoch))
+                .unwrap();
+            // Then set the latest snapshot.
+            *old_snapshot = Arc::new(PinnedSnapshot {
+                value: snapshot,
+                unpin_sender: self.worker_sender.clone(),
+            });
 
-                true
-            }
+            true
         });
     }
 
     /// Wait until the latest snapshot is newer than the given one.
     pub async fn wait(&self, snapshot: PbHummockSnapshot) {
         let mut rx = self.latest_snapshot.subscribe();
-        while rx.borrow_and_update().value.committed_epoch < snapshot.committed_epoch {
+        while rx.borrow_and_update().value.max_committed_epoch < snapshot.committed_epoch {
             rx.changed().await.unwrap();
         }
     }
@@ -216,7 +236,7 @@ impl HummockSnapshotManager {
 #[derive(Debug)]
 enum PinState {
     /// The snapshot is currently pinned by some sessions in this frontend.
-    Pinned,
+    Pinned(u64),
 
     /// The snapshot is no longer pinned by any session in this frontend, but it's still considered
     /// to be pinned by the meta service. It will be unpinned by the [`UnpinWorker`] in the next
@@ -228,20 +248,18 @@ enum PinState {
 #[derive(Debug)]
 enum Operation {
     /// Mark the snapshot as pinned, sent when a new snapshot is pinned with `update`.
-    Pin(PbHummockSnapshot),
+    Pin(HummockVersionId, u64),
 
     /// Mark the snapshot as unpinned, sent when all references to a [`PinnedSnapshot`] is dropped.
-    Unpin(PbHummockSnapshot),
+    Unpin(HummockVersionId),
 }
 
 impl Operation {
     /// Returns whether the operation is for an invalid snapshot, which should be ignored.
     fn is_invalid(&self) -> bool {
-        match self {
-            Operation::Pin(s) | Operation::Unpin(s) => s,
-        }
-        .committed_epoch
-            == INVALID_EPOCH
+        *match self {
+            Operation::Pin(id, _) | Operation::Unpin(id) => id,
+        } == INVALID_VERSION_ID
     }
 }
 
@@ -249,13 +267,13 @@ impl Operation {
 ///
 /// The snapshot will be first sorted by `committed_epoch`, then by `current_epoch`.
 #[derive(Debug, PartialEq, Clone)]
-struct SnapshotKey(PbHummockSnapshot);
+struct SnapshotKey(HummockVersionId);
 
 impl Eq for SnapshotKey {}
 
 impl Ord for SnapshotKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.committed_epoch.cmp(&other.0.committed_epoch)
+        self.0.to_u64().cmp(&other.0.to_u64())
     }
 }
 
@@ -319,15 +337,15 @@ impl UnpinWorker {
         }
 
         match operation {
-            Operation::Pin(snapshot) => {
+            Operation::Pin(version_id, committed_epoch) => {
                 self.states
-                    .try_insert(SnapshotKey(snapshot), PinState::Pinned)
+                    .try_insert(SnapshotKey(version_id), PinState::Pinned(committed_epoch))
                     .unwrap();
             }
             Operation::Unpin(snapshot) => match self.states.entry(SnapshotKey(snapshot)) {
                 Entry::Vacant(_v) => unreachable!("unpin a snapshot that is not pinned"),
                 Entry::Occupied(o) => {
-                    assert_matches!(o.get(), PinState::Pinned);
+                    assert_matches!(o.get(), PinState::Pinned(_));
                     *o.into_mut() = PinState::Unpinned;
                 }
             },
@@ -338,18 +356,23 @@ impl UnpinWorker {
     /// and clean up their entries.
     async fn unpin_batch(&mut self) {
         // Find the minimum snapshot that is pinned. Unpin all snapshots before it.
-        if let Some(min_snapshot) = self
+        if let Some((min_snapshot, min_committed_epoch)) = self
             .states
             .iter()
-            .find(|(_, s)| matches!(s, PinState::Pinned))
-            .map(|(k, _)| k.clone())
+            .find(|(_, s)| matches!(s, PinState::Pinned(_)))
+            .map(|(k, s)| {
+                (
+                    k.clone(),
+                    must_match!(s, PinState::Pinned(committed_epoch) => *committed_epoch),
+                )
+            })
         {
             if &min_snapshot == self.states.first_key_value().unwrap().0 {
                 // Nothing to unpin.
                 return;
             }
 
-            let min_epoch = min_snapshot.0.committed_epoch;
+            let min_epoch = min_committed_epoch;
 
             match self.meta_client.unpin_snapshot_before(min_epoch).await {
                 Ok(()) => {
