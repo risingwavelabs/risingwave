@@ -69,7 +69,7 @@ check_version() {
   local VERSION=$1
   local raw_version=$(run_sql "SELECT version();")
   echo "--- Version"
-  echo "$raw_version"
+  echo "raw_version: $raw_version"
   local version=$(echo $raw_version | grep -i risingwave | sed 's/^.*risingwave-\([0-9]*\.[0-9]*\.[0-9]\).*$/\1/i')
   if [[ "$version" != "$VERSION" ]]; then
     echo "Version mismatch, expected $VERSION, got $version"
@@ -191,7 +191,7 @@ seed_old_cluster() {
   cp -r e2e_test/tpch/* $TEST_DIR/tpch
 
   ./risedev clean-data
-  ./risedev d full-without-monitoring && rm .risingwave/log/*
+  ENABLE_PYTHON_UDF=1 ./risedev d full-without-monitoring && rm .risingwave/log/*
 
   check_version "$OLD_VERSION"
 
@@ -249,7 +249,7 @@ seed_old_cluster() {
 
 validate_new_cluster() {
   echo "--- Start cluster on latest"
-  ./risedev d full-without-monitoring
+  ENABLE_PYTHON_UDF=1 ./risedev d full-without-monitoring
 
   echo "--- Wait ${RECOVERY_DURATION}s for Recovery on Old Cluster Data"
   sleep $RECOVERY_DURATION
