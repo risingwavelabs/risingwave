@@ -58,7 +58,12 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
     StateTable::from_table_catalog(
         &table.to_internal_table_prost(),
         hummock,
-        TableDistribution::all(table.distribution_key().to_vec(), VirtualNode::COUNT), // scan all vnodes
+        Some(
+            // scan all vnodes
+            TableDistribution::all(table.distribution_key().to_vec(), VirtualNode::COUNT)
+                .vnodes()
+                .clone(),
+        ),
     )
     .await
 }
