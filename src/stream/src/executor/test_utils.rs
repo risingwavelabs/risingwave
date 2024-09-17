@@ -365,12 +365,16 @@ pub mod agg_executor {
                     add_column(*idx, input_fields[*idx].data_type(), Some(OrderType::ascending()));
                 }
 
-                let state_table = StateTable::new_without_distribution(
+                let state_table = StateTable::from_table_catalog(
+                    &gen_pbtable(
+                        table_id,
+                        column_descs,
+                        order_types.clone(),
+                        (0..order_types.len()).collect(),
+                        0,
+                    ),
                     store,
-                    table_id,
-                    column_descs,
-                    order_types.clone(),
-                    (0..order_types.len()).collect(),
+                    None,
                 ).await;
 
                 AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None), order_columns }
@@ -583,6 +587,7 @@ pub mod top_n_executor {
     use risingwave_storage::memory::MemoryStateStore;
 
     use crate::common::table::state_table::StateTable;
+    use crate::common::table::test_utils::gen_pbtable;
 
     pub async fn create_in_memory_state_table(
         data_types: &[DataType],
@@ -609,12 +614,16 @@ pub mod top_n_executor {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        StateTable::new_without_distribution(
+        StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::new(0),
+                column_descs,
+                order_types.to_vec(),
+                pk_indices.to_vec(),
+                0,
+            ),
             state_store,
-            TableId::new(0),
-            column_descs,
-            order_types.to_vec(),
-            pk_indices.to_vec(),
+            None,
         )
         .await
     }
