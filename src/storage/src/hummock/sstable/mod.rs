@@ -446,6 +446,7 @@ impl SstableMeta {
             .iter()
             .map(|block_meta| block_meta.encoded_size())
             .sum::<usize>()
+            + 4 // monotonic tombstone events len
             + 4 // bloom filter len
             + self.bloom_filter.len()
             + 4 // estimated size
