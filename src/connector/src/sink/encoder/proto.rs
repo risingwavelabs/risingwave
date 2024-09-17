@@ -873,7 +873,7 @@ mod tests {
                 res.push_str("Map({\n");
                 for (k, v) in m.iter().sorted_by_key(|(k, _v)| *k) {
                     res.push_str(&format!(
-                        "    {}: {}, \n",
+                        "    {}: {},\n",
                         print_proto(&k.clone().into()),
                         print_proto(v)
                     ));
