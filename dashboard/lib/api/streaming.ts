@@ -126,7 +126,7 @@ export async function getRelations() {
   return relations
 }
 
-export async function getRelationDependencies(): Map<number, number[]> {
+export async function getRelationDependencies() {
   return await getObjectDependencies()
 }
 
