@@ -344,10 +344,7 @@ impl StructValue {
     /// ```
     /// # use risingwave_common::types::{StructValue, StructType, DataType, ScalarImpl};
     ///
-    /// let ty = DataType::Struct(StructType::unnamed(vec![
-    ///     DataType::Int32,
-    ///     DataType::Float64,
-    /// ]));
+    /// let ty = StructType::unnamed(vec![DataType::Int32, DataType::Float64]);
     /// let s = StructValue::from_str("(1, 2.0)", &ty).unwrap();
     /// assert_eq!(s.fields()[0], Some(ScalarImpl::Int32(1)));
     /// assert_eq!(s.fields()[1], Some(ScalarImpl::Float64(2.0.into())));
