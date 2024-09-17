@@ -1465,6 +1465,7 @@ impl CatalogController {
                 .exec(&txn)
                 .await?;
 
+            // add new actors
             for (
                 PbStreamActor {
                     actor_id,
@@ -1569,6 +1570,23 @@ impl CatalogController {
 
                 let mut actor = actor.into_active_model();
                 actor.vnode_bitmap = Set(Some((&bitmap.to_protobuf()).into()));
+                actor.update(&txn).await?;
+            }
+
+            // Update actor_splits for existing actors
+            for (actor_id, splits) in actor_splits {
+                if new_created_actors.contains(&(actor_id as ActorId)) {
+                    continue;
+                }
+
+                let actor = Actor::find_by_id(actor_id as ActorId)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
+
+                let mut actor = actor.into_active_model();
+                let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
+                actor.splits = Set(Some((&PbConnectorSplits { splits }).into()));
                 actor.update(&txn).await?;
             }
 
