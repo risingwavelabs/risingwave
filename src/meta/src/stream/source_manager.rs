@@ -588,24 +588,21 @@ where
     )
 }
 
-pub fn validate_assignment(assignment: &mut HashMap<ActorId, Vec<SplitImpl>>) -> bool {
-    let mut dup_assignment_found_flag = false;
-
+pub fn validate_assignment(assignment: &mut HashMap<ActorId, Vec<SplitImpl>>) {
     // check if one split is assign to multiple actors
     let mut split_to_actor = HashMap::new();
     for (actor_id, splits) in &mut *assignment {
-        for split in splits {
+        let _ = splits.iter().map(|split| {
             split_to_actor
                 .entry(split.id())
                 .or_insert_with(Vec::new)
-                .push(*actor_id);
-        }
+                .push(*actor_id)
+        });
     }
 
     for (split_id, actor_ids) in &mut split_to_actor {
         if actor_ids.len() > 1 {
             tracing::warn!(split_id = ?split_id, actor_ids = ?actor_ids, "split is assigned to multiple actors");
-            dup_assignment_found_flag = true;
         }
         // keep the first actor and remove the rest from the assignment
         for actor_id in actor_ids.iter().skip(1) {
@@ -615,8 +612,6 @@ pub fn validate_assignment(assignment: &mut HashMap<ActorId, Vec<SplitImpl>>) ->
                 .retain(|split| split.id() != *split_id);
         }
     }
-
-    dup_assignment_found_flag
 }
 
 fn align_backfill_splits(
@@ -1141,28 +1136,15 @@ impl SourceManager {
     /// The command will first updates `SourceExecutor`'s splits, and finally calls `Self::apply_source_change`
     /// to update states in `SourceManager`.
     async fn tick(&self) -> MetaResult<()> {
-        let mut split_assignment = {
+        let split_assignment = {
             let core_guard = self.core.lock().await;
             core_guard.reassign_splits().await?
         };
 
-        let dup_assignment_flag = split_assignment
-            .iter_mut()
-            .map(|(_, assignment)| validate_assignment(assignment))
-            .reduce(|a, b| a || b)
-            .unwrap_or(false);
-
         if !split_assignment.is_empty() {
             let command = Command::SourceSplitAssignment(split_assignment);
             tracing::info!(command = ?command, "pushing down split assignment command");
-            if dup_assignment_flag {
-                tracing::warn!("duplicate split assignment found, wrap with pause and resume");
-                self.barrier_scheduler
-                    .run_config_change_command_with_pause(command)
-                    .await?;
-            } else {
-                self.barrier_scheduler.run_command(command).await?;
-            }
+            self.barrier_scheduler.run_command(command).await?;
         }
 
         Ok(())
@@ -1371,12 +1353,10 @@ mod tests {
             1 => test_assignment,
         };
 
-        let dup_assignment_flag = fragment_assignment
-            .iter_mut()
-            .map(|(_, assignment)| validate_assignment(assignment))
-            .reduce(|a, b| a || b)
-            .unwrap_or(false);
-        assert!(dup_assignment_flag);
+        fragment_assignment.iter_mut().for_each(|(_, assignment)| {
+            validate_assignment(assignment);
+        });
+
         {
             let mut split_to_actor = HashMap::new();
             for actor_to_splits in fragment_assignment.values() {
