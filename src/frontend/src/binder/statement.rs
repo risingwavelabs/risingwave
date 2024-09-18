@@ -63,7 +63,7 @@ impl BoundStatement {
     pub fn scan_tables(&self) -> HashSet<TableId> {
         if let BoundStatement::Query(query) = self {
             let mut tables = HashSet::new();
-            query.body.visit_all_scan_table_id(|table_id| {
+            query.body.visit_all_scan_table_id(&mut |table_id| {
                 tables.insert(table_id);
             });
             tables

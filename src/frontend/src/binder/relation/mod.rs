@@ -138,7 +138,7 @@ impl Relation {
         }
     }
 
-    pub fn visit_all_scan_table(&self, mut visiter: impl FnMut(TableId)) {
+    pub fn visit_all_scan_table(&self, visiter: &mut impl FnMut(TableId)) {
         match self {
             Relation::Source(_) => {}
             Relation::BaseTable(table) => {
@@ -146,11 +146,11 @@ impl Relation {
             }
             Relation::SystemTable(_) => {}
             Relation::Subquery(subquery) => {
-                subquery.query.body.visit_all_scan_table_id(&mut visiter);
+                subquery.query.body.visit_all_scan_table_id(visiter);
             }
             Relation::Join(join) | Relation::Apply(join) => {
-                join.left.visit_all_scan_table(&mut visiter);
-                join.right.visit_all_scan_table(&mut visiter);
+                join.left.visit_all_scan_table(visiter);
+                join.right.visit_all_scan_table(visiter);
             }
             Relation::WindowTableFunction(_) => {}
             Relation::TableFunction { .. } => {}
