@@ -26,8 +26,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::AddMutation;
-use risingwave_pb::stream_service::BuildActorInfo;
+use risingwave_pb::stream_plan::{AddMutation, StreamActor};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -40,7 +39,6 @@ use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{BarrierKind, GlobalBarrierManager, GlobalBarrierManagerContext};
-use crate::controller::catalog::ReleaseContext;
 use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
@@ -100,8 +98,7 @@ impl GlobalBarrierManagerContext {
             }
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller.clean_dirty_subscription().await?;
-                let ReleaseContext { source_ids, .. } =
-                    mgr.catalog_controller.clean_dirty_creating_jobs().await?;
+                let source_ids = mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
                 // unregister cleaned sources.
                 self.source_manager
@@ -347,17 +344,6 @@ impl GlobalBarrierManager {
                     let mut control_stream_manager =
                         ControlStreamManager::new(self.context.clone());
 
-                    let reset_start_time = Instant::now();
-                    control_stream_manager
-                        .reset(version_id, active_streaming_nodes.current())
-                        .await
-                        .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "reset compute nodes failed");
-                        })?;
-                    info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
-
-                    self.context.sink_manager.reset().await;
-
                     let subscription_info = InflightSubscriptionInfo {
                         mv_depended_subscriptions: self
                             .context
@@ -366,10 +352,25 @@ impl GlobalBarrierManager {
                             .await?,
                     };
 
+                    let reset_start_time = Instant::now();
+                    control_stream_manager
+                        .reset(
+                            version_id,
+                            &subscription_info,
+                            active_streaming_nodes.current(),
+                        )
+                        .await
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "reset compute nodes failed");
+                        })?;
+                    info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
+
+                    self.context.sink_manager.reset().await;
+
                     // update and build all actors.
                     let node_actors = self
                         .context
-                        .load_all_actors(&info, &subscription_info, &active_streaming_nodes)
+                        .load_all_actors(&info, &active_streaming_nodes)
                         .await
                         .inspect_err(|err| {
                             warn!(error = %err.as_report(), "update actors failed");
@@ -398,6 +399,8 @@ impl GlobalBarrierManager {
                         &info,
                         Some(&info),
                         Some(node_actors),
+                        vec![],
+                        vec![],
                     )?;
                     debug!(?node_to_collect, "inject initial barrier");
                     while !node_to_collect.is_empty() {
@@ -1095,18 +1098,14 @@ impl GlobalBarrierManagerContext {
     async fn load_all_actors(
         &self,
         info: &InflightGraphInfo,
-        subscription_info: &InflightSubscriptionInfo,
         active_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<HashMap<WorkerId, Vec<BuildActorInfo>>> {
+    ) -> MetaResult<HashMap<WorkerId, Vec<StreamActor>>> {
         if info.actor_map.is_empty() {
             tracing::debug!("no actor to update, skipping.");
             return Ok(HashMap::new());
         }
 
-        let all_node_actors = self
-            .metadata_manager
-            .all_node_actors(false, &subscription_info.mv_depended_subscriptions)
-            .await?;
+        let all_node_actors = self.metadata_manager.all_node_actors(false).await?;
 
         // Check if any actors were dropped after info resolved.
         if all_node_actors.iter().any(|(node_id, node_actors)| {

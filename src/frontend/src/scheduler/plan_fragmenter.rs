@@ -310,11 +310,9 @@ impl SourceScanInfo {
                 Ok(SourceScanInfo::Complete(split_info))
             }
             ConnectorProperties::OpendalS3(prop) => {
-                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
-
                 let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
-                let stream = build_opendal_fs_list_for_batch(lister, recursive_scan);
+                let stream = build_opendal_fs_list_for_batch(lister);
 
                 let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res
@@ -325,22 +323,18 @@ impl SourceScanInfo {
                 Ok(SourceScanInfo::Complete(res))
             }
             ConnectorProperties::Gcs(prop) => {
-                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
-
                 let lister: OpendalEnumerator<OpendalGcs> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
-                let stream = build_opendal_fs_list_for_batch(lister, recursive_scan);
+                let stream = build_opendal_fs_list_for_batch(lister);
                 let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res.into_iter().map(SplitImpl::Gcs).collect_vec();
 
                 Ok(SourceScanInfo::Complete(res))
             }
             ConnectorProperties::Azblob(prop) => {
-                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
-
                 let lister: OpendalEnumerator<OpendalAzblob> =
                     OpendalEnumerator::new_azblob_source(*prop)?;
-                let stream = build_opendal_fs_list_for_batch(lister, recursive_scan);
+                let stream = build_opendal_fs_list_for_batch(lister);
                 let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res.into_iter().map(SplitImpl::Azblob).collect_vec();
 

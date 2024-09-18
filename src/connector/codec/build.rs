@@ -12,16 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(coverage_attribute))]
-
-#[cfg_attr(coverage, coverage(off))]
 fn main() {
-    // Since we decide to record watermark in every state-table to replace delete-range, this test is not need again. We keep it because we may need delete-range in some day for other features.
-    use clap::Parser;
+    let proto_dir = "./tests/test_data/";
 
-    let opts = risingwave_compaction_test::CompactionTestOpts::parse();
+    println!("cargo:rerun-if-changed={}", proto_dir);
 
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::default());
+    let proto_files = ["recursive", "all-types"];
+    let protos: Vec<String> = proto_files
+        .iter()
+        .map(|f| format!("{}/{}.proto", proto_dir, f))
+        .collect();
+    prost_build::Config::new()
+        .out_dir("./tests/integration_tests/protobuf")
+        .compile_protos(&protos, &Vec::<String>::new())
+        .unwrap();
 
-    risingwave_rt::main_okk(|_| risingwave_compaction_test::start_delete_range(opts))
+    let proto_include_path = protobuf_src::include();
+    println!(
+        "cargo:rustc-env=PROTO_INCLUDE={}",
+        proto_include_path.to_str().unwrap()
+    );
 }

@@ -16,6 +16,7 @@
 
 mod agg_common;
 mod append_only_dedup;
+mod asof_join;
 mod barrier_recv;
 mod batch_query;
 mod cdc_filter;

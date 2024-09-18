@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::time::Duration;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -33,10 +33,10 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamNode, StreamScanNode, StreamScanType};
+use risingwave_pb::stream_plan::{StreamActor, StreamNode, StreamScanNode, StreamScanType};
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
-    BuildActorInfo, StreamingControlStreamRequest, StreamingControlStreamResponse,
+    StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -574,15 +574,11 @@ impl StreamActorManager {
 
     async fn create_actor(
         self: Arc<Self>,
-        actor: BuildActorInfo,
+        actor: StreamActor,
         shared_context: Arc<SharedContext>,
+        related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
         {
-            let BuildActorInfo {
-                actor,
-                related_subscriptions,
-            } = actor;
-            let actor = actor.unwrap();
             let actor_id = actor.actor_id;
             let streaming_config = self.env.config().clone();
             let actor_context = ActorContext::create(
@@ -590,15 +586,7 @@ impl StreamActorManager {
                 self.env.total_mem_usage(),
                 self.streaming_metrics.clone(),
                 actor.dispatcher.len(),
-                related_subscriptions
-                    .into_iter()
-                    .map(|(table_id, subscription_ids)| {
-                        (
-                            TableId::new(table_id),
-                            HashSet::from_iter(subscription_ids.subscription_ids),
-                        )
-                    })
-                    .collect(),
+                related_subscriptions,
                 self.env.meta_client().clone(),
                 streaming_config,
             );
@@ -642,19 +630,20 @@ impl StreamActorManager {
 impl StreamActorManager {
     pub(super) fn spawn_actor(
         self: &Arc<Self>,
-        actor: BuildActorInfo,
+        actor: StreamActor,
+        related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         current_shared_context: Arc<SharedContext>,
     ) -> (JoinHandle<()>, Option<JoinHandle<()>>) {
         {
             let monitor = tokio_metrics::TaskMonitor::new();
-            let stream_actor_ref = actor.actor.as_ref().unwrap();
+            let stream_actor_ref = &actor;
             let actor_id = stream_actor_ref.actor_id;
             let handle = {
                 let trace_span =
                     format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
                 let barrier_manager = current_shared_context.local_barrier_manager.clone();
                 // wrap the future of `create_actor` with `boxed` to avoid stack overflow
-                let actor = self.clone().create_actor(actor, current_shared_context).boxed().and_then(|actor| actor.run()).map(move |result| {
+                let actor = self.clone().create_actor(actor, current_shared_context, related_subscriptions).boxed().and_then(|actor| actor.run()).map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
@@ -732,7 +721,10 @@ impl StreamActorManager {
 impl LocalBarrierWorker {
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn update_actor_info(&self, new_actor_infos: Vec<ActorInfo>) -> StreamResult<()> {
+    pub fn update_actor_info(
+        &self,
+        new_actor_infos: impl Iterator<Item = ActorInfo>,
+    ) -> StreamResult<()> {
         let mut actor_infos = self.current_shared_context.actor_infos.write();
         for actor in new_actor_infos {
             if let Some(prev_actor) = actor_infos.get(&actor.get_actor_id())

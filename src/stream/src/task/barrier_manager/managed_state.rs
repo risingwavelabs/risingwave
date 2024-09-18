@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
+use std::cell::LazyCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{pending, poll_fn, Future};
@@ -31,7 +32,6 @@ use risingwave_common::must_match;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_service::BuildActorInfo;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -141,6 +141,8 @@ mod await_epoch_completed_future {
 }
 
 use await_epoch_completed_future::*;
+use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
+use risingwave_pb::stream_service::InjectBarrierRequest;
 
 fn sync_epoch<S: StateStore>(
     state_store: &S,
@@ -423,6 +425,8 @@ pub(crate) struct ManagedBarrierState {
 
     pub(super) graph_states: HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
 
+    mv_depended_subscriptions: HashMap<TableId, HashSet<u32>>,
+
     actor_manager: Arc<StreamActorManager>,
 
     current_shared_context: Arc<SharedContext>,
@@ -437,6 +441,7 @@ impl ManagedBarrierState {
         Self {
             actor_states: Default::default(),
             graph_states: Default::default(),
+            mv_depended_subscriptions: Default::default(),
             actor_manager,
             current_shared_context,
         }
@@ -502,14 +507,65 @@ impl ManagedBarrierState {
             .register_barrier_sender(tx)
     }
 
+    pub(super) fn add_subscriptions(&mut self, subscriptions: Vec<SubscriptionUpstreamInfo>) {
+        for subscription_to_add in subscriptions {
+            if !self
+                .mv_depended_subscriptions
+                .entry(TableId::new(subscription_to_add.upstream_mv_table_id))
+                .or_default()
+                .insert(subscription_to_add.subscriber_id)
+            {
+                if cfg!(debug_assertions) {
+                    panic!("add an existing subscription: {:?}", subscription_to_add);
+                }
+                warn!(?subscription_to_add, "add an existing subscription");
+            }
+        }
+    }
+
+    pub(super) fn remove_subscriptions(&mut self, subscriptions: Vec<SubscriptionUpstreamInfo>) {
+        for subscription_to_remove in subscriptions {
+            let upstream_table_id = TableId::new(subscription_to_remove.upstream_mv_table_id);
+            let Some(subscribers) = self.mv_depended_subscriptions.get_mut(&upstream_table_id)
+            else {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "unable to find upstream mv table to remove: {:?}",
+                        subscription_to_remove
+                    );
+                }
+                warn!(
+                    ?subscription_to_remove,
+                    "unable to find upstream mv table to remove"
+                );
+                continue;
+            };
+            if !subscribers.remove(&subscription_to_remove.subscriber_id) {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "unable to find subscriber to remove: {:?}",
+                        subscription_to_remove
+                    );
+                }
+                warn!(
+                    ?subscription_to_remove,
+                    "unable to find subscriber to remove"
+                );
+            }
+            if subscribers.is_empty() {
+                self.mv_depended_subscriptions.remove(&upstream_table_id);
+            }
+        }
+    }
+
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,
-        actors_to_build: Vec<BuildActorInfo>,
-        actor_ids_to_collect: HashSet<ActorId>,
-        table_ids: HashSet<TableId>,
-        partial_graph_id: PartialGraphId,
+        request: InjectBarrierRequest,
     ) -> StreamResult<()> {
+        self.add_subscriptions(request.subscriptions_to_add);
+        self.remove_subscriptions(request.subscriptions_to_remove);
+        let partial_graph_id = PartialGraphId::new(request.partial_graph_id);
         let actor_to_stop = barrier.all_stop_actors();
         let is_stop_actor = |actor_id| {
             actor_to_stop
@@ -527,17 +583,24 @@ impl ManagedBarrierState {
                 )
             });
 
-        graph_state.transform_to_issued(barrier, actor_ids_to_collect.clone(), table_ids);
+        graph_state.transform_to_issued(
+            barrier,
+            request.actor_ids_to_collect.iter().cloned(),
+            HashSet::from_iter(request.table_ids_to_sync.iter().cloned().map(TableId::new)),
+        );
 
         let mut new_actors = HashSet::new();
-        for actor in actors_to_build {
-            let actor_id = actor.actor.as_ref().unwrap().actor_id;
+        let subscriptions = LazyCell::new(|| Arc::new(self.mv_depended_subscriptions.clone()));
+        for actor in request.actors_to_build {
+            let actor_id = actor.actor_id;
             assert!(!is_stop_actor(actor_id));
             assert!(new_actors.insert(actor_id));
-            assert!(actor_ids_to_collect.contains(&actor_id));
-            let (join_handle, monitor_join_handle) = self
-                .actor_manager
-                .spawn_actor(actor, self.current_shared_context.clone());
+            assert!(request.actor_ids_to_collect.contains(&actor_id));
+            let (join_handle, monitor_join_handle) = self.actor_manager.spawn_actor(
+                actor,
+                (*subscriptions).clone(),
+                self.current_shared_context.clone(),
+            );
             assert!(self
                 .actor_states
                 .try_insert(
@@ -555,7 +618,7 @@ impl ManagedBarrierState {
 
         // Spawn a trivial join handle to be compatible with the unit test
         if cfg!(test) {
-            for actor_id in &actor_ids_to_collect {
+            for actor_id in &request.actor_ids_to_collect {
                 if !self.actor_states.contains_key(actor_id) {
                     let join_handle = self.actor_manager.runtime.spawn(async { pending().await });
                     assert!(self
@@ -578,14 +641,17 @@ impl ManagedBarrierState {
 
         // Note: it's important to issue barrier to actor after issuing to graph to ensure that
         // we call `start_epoch` on the graph before the actors receive the barrier
-        for actor_id in &actor_ids_to_collect {
+        for actor_id in &request.actor_ids_to_collect {
             if new_actors.contains(actor_id) {
                 continue;
             }
             self.actor_states
                 .get_mut(actor_id)
                 .unwrap_or_else(|| {
-                    panic!("should exist: {} {:?}", actor_id, actor_ids_to_collect);
+                    panic!(
+                        "should exist: {} {:?}",
+                        actor_id, request.actor_ids_to_collect
+                    );
                 })
                 .issue_barrier(partial_graph_id, barrier, is_stop_actor(*actor_id))?;
         }
@@ -770,7 +836,7 @@ impl PartialGraphManagedBarrierState {
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,
-        actor_ids_to_collect: HashSet<ActorId>,
+        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
         table_ids: HashSet<TableId>,
     ) {
         let timer = self

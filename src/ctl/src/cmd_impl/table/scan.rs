@@ -55,19 +55,15 @@ pub fn print_table_catalog(table: &TableCatalog) {
 }
 
 pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
-    StateTable::new_with_distribution(
+    StateTable::from_table_catalog(
+        &table.to_internal_table_prost(),
         hummock,
-        table.id,
-        table
-            .columns()
-            .iter()
-            .map(|x| x.column_desc.clone())
-            .collect(),
-        table.pk().iter().map(|x| x.order_type).collect(),
-        table.pk().iter().map(|x| x.column_index).collect(),
-        // TODO(var-vnode): use vnode count from table desc
-        TableDistribution::all(table.distribution_key().to_vec(), VirtualNode::COUNT), // scan all vnodes
-        Some(table.value_indices.clone()),
+        Some(
+            // scan all vnodes
+            TableDistribution::all(table.distribution_key().to_vec(), VirtualNode::COUNT)
+                .vnodes()
+                .clone(),
+        ),
     )
     .await
 }

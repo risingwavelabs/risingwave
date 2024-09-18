@@ -57,6 +57,7 @@ pub mod monitor;
 
 pub mod agg_common;
 pub mod aggregation;
+pub mod asof_join;
 mod backfill;
 mod barrier_recv;
 mod batch_query;
@@ -133,7 +134,7 @@ pub use filter::FilterExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
-pub use join::JoinType;
+pub use join::{AsOfDesc, AsOfJoinType, JoinType};
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;

@@ -461,6 +461,7 @@ async fn test_storage_basic() {
 #[tokio::test]
 async fn test_state_store_sync() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
     let mut hummock_storage = test_env
@@ -557,10 +558,14 @@ async fn test_state_store_sync() {
         .start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
 
-    let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
+    let res = test_env
+        .storage
+        .seal_and_sync_epoch(epoch1, table_id_set.clone())
+        .await
+        .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, res)
+        .commit_epoch(epoch1, res, false)
         .await
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(epoch1).await;
@@ -599,10 +604,14 @@ async fn test_state_store_sync() {
         }
     }
 
-    let res = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
+    let res = test_env
+        .storage
+        .seal_and_sync_epoch(epoch2, table_id_set.clone())
+        .await
+        .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, res)
+        .commit_epoch(epoch2, res, false)
         .await
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(epoch2).await;
@@ -819,6 +828,7 @@ async fn test_state_store_sync() {
 #[tokio::test]
 async fn test_delete_get() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
     let mut hummock_storage = test_env
@@ -864,10 +874,14 @@ async fn test_delete_get() {
         .storage
         .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
-    let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
+    let res = test_env
+        .storage
+        .seal_and_sync_epoch(epoch1, table_id_set.clone())
+        .await
+        .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, res)
+        .commit_epoch(epoch1, res, false)
         .await
         .unwrap();
 
@@ -886,10 +900,14 @@ async fn test_delete_get() {
         .await
         .unwrap();
     hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
-    let res = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
+    let res = test_env
+        .storage
+        .seal_and_sync_epoch(epoch2, table_id_set)
+        .await
+        .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, res)
+        .commit_epoch(epoch2, res, false)
         .await
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(epoch2).await;
@@ -912,6 +930,7 @@ async fn test_delete_get() {
 #[tokio::test]
 async fn test_multiple_epoch_sync() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
     let mut hummock_storage = test_env
@@ -1054,19 +1073,27 @@ async fn test_multiple_epoch_sync() {
         .storage
         .start_epoch(epoch4, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch4, SealCurrentEpochOptions::for_test());
-    let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
-    let sync_result3 = test_env.storage.seal_and_sync_epoch(epoch3).await.unwrap();
+    let sync_result2 = test_env
+        .storage
+        .seal_and_sync_epoch(epoch2, table_id_set.clone())
+        .await
+        .unwrap();
+    let sync_result3 = test_env
+        .storage
+        .seal_and_sync_epoch(epoch3, table_id_set)
+        .await
+        .unwrap();
     test_get().await;
 
     test_env
         .meta_client
-        .commit_epoch(epoch2, sync_result2)
+        .commit_epoch(epoch2, sync_result2, false)
         .await
         .unwrap();
 
     test_env
         .meta_client
-        .commit_epoch(epoch3, sync_result3)
+        .commit_epoch(epoch3, sync_result3, false)
         .await
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(epoch3).await;
@@ -1076,6 +1103,7 @@ async fn test_multiple_epoch_sync() {
 #[tokio::test]
 async fn test_iter_with_min_epoch() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
     let mut hummock_storage = test_env
@@ -1222,16 +1250,24 @@ async fn test_iter_with_min_epoch() {
     {
         // test after sync
 
-        let sync_result1 = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
-        let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
-        test_env
-            .meta_client
-            .commit_epoch(epoch1, sync_result1)
+        let sync_result1 = test_env
+            .storage
+            .seal_and_sync_epoch(epoch1, table_id_set.clone())
+            .await
+            .unwrap();
+        let sync_result2 = test_env
+            .storage
+            .seal_and_sync_epoch(epoch2, table_id_set)
             .await
             .unwrap();
         test_env
             .meta_client
-            .commit_epoch(epoch2, sync_result2)
+            .commit_epoch(epoch1, sync_result1, false)
+            .await
+            .unwrap();
+        test_env
+            .meta_client
+            .commit_epoch(epoch2, sync_result2, false)
             .await
             .unwrap();
         test_env.storage.try_wait_epoch_for_test(epoch2).await;
@@ -1320,6 +1356,7 @@ async fn test_iter_with_min_epoch() {
 #[tokio::test]
 async fn test_hummock_version_reader() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
     let mut hummock_storage = test_env
@@ -1514,26 +1551,38 @@ async fn test_hummock_version_reader() {
         }
 
         {
-            let sync_result1 = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
+            let sync_result1 = test_env
+                .storage
+                .seal_and_sync_epoch(epoch1, table_id_set.clone())
+                .await
+                .unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch1, sync_result1)
+                .commit_epoch(epoch1, sync_result1, false)
                 .await
                 .unwrap();
             test_env.storage.try_wait_epoch_for_test(epoch1).await;
 
-            let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
+            let sync_result2 = test_env
+                .storage
+                .seal_and_sync_epoch(epoch2, table_id_set.clone())
+                .await
+                .unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch2, sync_result2)
+                .commit_epoch(epoch2, sync_result2, false)
                 .await
                 .unwrap();
             test_env.storage.try_wait_epoch_for_test(epoch2).await;
 
-            let sync_result3 = test_env.storage.seal_and_sync_epoch(epoch3).await.unwrap();
+            let sync_result3 = test_env
+                .storage
+                .seal_and_sync_epoch(epoch3, table_id_set)
+                .await
+                .unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch3, sync_result3)
+                .commit_epoch(epoch3, sync_result3, false)
                 .await
                 .unwrap();
             test_env.storage.try_wait_epoch_for_test(epoch3).await;
@@ -1764,6 +1813,7 @@ async fn test_hummock_version_reader() {
 #[tokio::test]
 async fn test_get_with_min_epoch() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
     let mut hummock_storage = test_env
@@ -1908,16 +1958,24 @@ async fn test_get_with_min_epoch() {
 
     // test after sync
 
-    let sync_result1 = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
-    let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
-    test_env
-        .meta_client
-        .commit_epoch(epoch1, sync_result1)
+    let sync_result1 = test_env
+        .storage
+        .seal_and_sync_epoch(epoch1, table_id_set.clone())
+        .await
+        .unwrap();
+    let sync_result2 = test_env
+        .storage
+        .seal_and_sync_epoch(epoch2, table_id_set)
         .await
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, sync_result2)
+        .commit_epoch(epoch1, sync_result1, false)
+        .await
+        .unwrap();
+    test_env
+        .meta_client
+        .commit_epoch(epoch2, sync_result2, false)
         .await
         .unwrap();
 

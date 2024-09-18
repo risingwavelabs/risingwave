@@ -27,13 +27,11 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
-use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
+use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};
 use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
-    BuildActorInfo, InjectBarrierRequest, StreamingControlStreamRequest,
-    StreamingControlStreamResponse,
+    InjectBarrierRequest, StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -44,7 +42,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::command::CommandContext;
-use super::{BarrierKind, GlobalBarrierManagerContext, TracedEpoch};
+use super::{BarrierKind, GlobalBarrierManagerContext, InflightSubscriptionInfo, TracedEpoch};
 use crate::barrier::info::InflightGraphInfo;
 use crate::manager::WorkerId;
 use crate::{MetaError, MetaResult};
@@ -113,7 +111,11 @@ impl ControlStreamManager {
         }
     }
 
-    pub(super) async fn add_worker(&mut self, node: WorkerNode) {
+    pub(super) async fn add_worker(
+        &mut self,
+        node: WorkerNode,
+        subscription: &InflightSubscriptionInfo,
+    ) {
         if self.nodes.contains_key(&node.id) {
             warn!(id = node.id, host = ?node.host, "node already exists");
             return;
@@ -132,7 +134,11 @@ impl ControlStreamManager {
         for i in 1..=MAX_RETRY {
             match self
                 .context
-                .new_control_stream_node(node.clone(), version_id)
+                .new_control_stream_node(
+                    node.clone(),
+                    version_id,
+                    &subscription.mv_depended_subscriptions,
+                )
                 .await
             {
                 Ok((stream_node, response_stream)) => {
@@ -157,12 +163,17 @@ impl ControlStreamManager {
     pub(super) async fn reset(
         &mut self,
         version_id: HummockVersionId,
+        subscriptions: &InflightSubscriptionInfo,
         nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async {
             let node = self
                 .context
-                .new_control_stream_node(node.clone(), version_id)
+                .new_control_stream_node(
+                    node.clone(),
+                    version_id,
+                    &subscriptions.mv_depended_subscriptions,
+                )
                 .await?;
             Result::<_, MetaError>::Ok((*worker_id, node))
         }))
@@ -264,49 +275,27 @@ impl ControlStreamManager {
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
     ) -> MetaResult<HashSet<WorkerId>> {
+        let mutation = command_ctx.to_mutation();
+        let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
+            add.subscriptions_to_add.clone()
+        } else {
+            vec![]
+        };
+        let subscriptions_to_remove = if let Some(Mutation::DropSubscriptions(drop)) = &mutation {
+            drop.info.clone()
+        } else {
+            vec![]
+        };
         self.inject_barrier(
             None,
-            command_ctx.to_mutation(),
+            mutation,
             (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
             &command_ctx.kind,
             pre_applied_graph_info,
             applied_graph_info,
-            command_ctx
-                .command
-                .actors_to_create()
-                .map(|actors_to_create| {
-                    actors_to_create
-                        .into_iter()
-                        .map(|(worker_id, actors)| {
-                            (
-                                worker_id,
-                                actors
-                                    .into_iter()
-                                    .map(|actor| BuildActorInfo {
-                                        actor: Some(actor),
-                                        // TODO: consider subscriber of backfilling mv
-                                        related_subscriptions: command_ctx
-                                            .subscription_info
-                                            .mv_depended_subscriptions
-                                            .iter()
-                                            .map(|(table_id, subscriptions)| {
-                                                (
-                                                    table_id.table_id,
-                                                    SubscriptionIds {
-                                                        subscription_ids: subscriptions
-                                                            .keys()
-                                                            .cloned()
-                                                            .collect(),
-                                                    },
-                                                )
-                                            })
-                                            .collect(),
-                                    })
-                                    .collect_vec(),
-                            )
-                        })
-                        .collect()
-                }),
+            command_ctx.command.actors_to_create(),
+            subscriptions_to_add,
+            subscriptions_to_remove,
         )
     }
 
@@ -318,7 +307,9 @@ impl ControlStreamManager {
         kind: &BarrierKind,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
-        mut new_actors: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
+        mut new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
+        subscriptions_to_add: Vec<SubscriptionUpstreamInfo>,
+        subscriptions_to_remove: Vec<SubscriptionUpstreamInfo>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
@@ -352,7 +343,7 @@ impl ControlStreamManager {
             .flatten()
             .flat_map(|(worker_id, actor_infos)| {
                 actor_infos.iter().map(|actor_info| ActorInfo {
-                    actor_id: actor_info.actor.as_ref().unwrap().actor_id,
+                    actor_id: actor_info.actor_id,
                     host: self
                         .nodes
                         .get(worker_id)
@@ -410,6 +401,8 @@ impl ControlStreamManager {
                                             .flatten()
                                             .flatten()
                                             .collect(),
+                                        subscriptions_to_add: subscriptions_to_add.clone(),
+                                        subscriptions_to_remove: subscriptions_to_remove.clone(),
                                     },
                                 ),
                             ),
@@ -469,6 +462,7 @@ impl GlobalBarrierManagerContext {
         &self,
         node: WorkerNode,
         initial_version_id: HummockVersionId,
+        mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
     ) -> MetaResult<(
         ControlStreamNode,
         BoxStream<'static, risingwave_rpc_client::error::Result<StreamingControlStreamResponse>>,
@@ -478,7 +472,7 @@ impl GlobalBarrierManagerContext {
             .stream_client_pool()
             .get(&node)
             .await?
-            .start_streaming_control(initial_version_id)
+            .start_streaming_control(initial_version_id, mv_depended_subscriptions)
             .await?;
         Ok((
             ControlStreamNode {

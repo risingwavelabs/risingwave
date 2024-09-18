@@ -24,7 +24,6 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common_estimate_size::EstimateSize;
-use serde::{Deserialize, Serialize};
 
 use crate::{EpochWithGap, HummockEpoch};
 
@@ -441,14 +440,8 @@ impl CopyFromSlice for Bytes {
 ///
 /// Its name come from the assumption that Hummock is always accessed by a table-like structure
 /// identified by a [`TableId`].
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
-pub struct TableKey<T: AsRef<[u8]>>(
-    #[serde(bound(
-        serialize = "T: serde::Serialize + serde_bytes::Serialize",
-        deserialize = "T: serde::Deserialize<'de> + serde_bytes::Deserialize<'de>"
-    ))]
-    pub T,
-);
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct TableKey<T: AsRef<[u8]>>(pub T);
 
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -542,15 +535,11 @@ pub fn gen_key_from_str(vnode: VirtualNode, payload: &str) -> TableKey<Bytes> {
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct UserKey<T: AsRef<[u8]>> {
     // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
     // declaration matters.
     pub table_id: TableId,
-    #[serde(bound(
-        serialize = "T: serde::Serialize + serde_bytes::Serialize",
-        deserialize = "T: serde::Deserialize<'de> + serde_bytes::Deserialize<'de>"
-    ))]
     pub table_key: TableKey<T>,
 }
 
@@ -587,15 +576,6 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     }
 
     pub fn encode_table_key_into(&self, buf: &mut impl BufMut) {
-        buf.put_slice(self.table_key.as_ref());
-    }
-
-    /// Encode in to a buffer.
-    ///
-    /// length prefixed requires 4B more than its `encoded_len()`
-    pub fn encode_length_prefixed(&self, mut buf: impl BufMut) {
-        buf.put_u32(self.table_id.table_id());
-        buf.put_u32(self.table_key.as_ref().len() as u32);
         buf.put_slice(self.table_key.as_ref());
     }
 
@@ -655,16 +635,6 @@ impl<'a, T: AsRef<[u8]> + Clone> UserKey<&'a T> {
 impl<T: AsRef<[u8]>> UserKey<T> {
     pub fn as_ref(&self) -> UserKey<&[u8]> {
         UserKey::new(self.table_id, TableKey(self.table_key.as_ref()))
-    }
-}
-
-impl UserKey<Vec<u8>> {
-    pub fn decode_length_prefixed(buf: &mut &[u8]) -> Self {
-        let table_id = buf.get_u32();
-        let len = buf.get_u32() as usize;
-        let data = buf[..len].to_vec();
-        buf.advance(len);
-        UserKey::new(TableId::new(table_id), TableKey(data))
     }
 }
 
@@ -882,48 +852,50 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct PointRange<T: AsRef<[u8]>> {
-    // When comparing `PointRange`, we first compare `left_user_key`, then
-    // `is_exclude_left_key`. Therefore the order of declaration matters.
-    #[serde(bound(
-        serialize = "T: serde::Serialize + serde_bytes::Serialize",
-        deserialize = "T: serde::Deserialize<'de> + serde_bytes::Deserialize<'de>"
-    ))]
-    pub left_user_key: UserKey<T>,
-    /// `PointRange` represents the left user key itself if `is_exclude_left_key==false`
-    /// while represents the right δ Neighborhood of the left user key if
-    /// `is_exclude_left_key==true`.
-    pub is_exclude_left_key: bool,
-}
+pub mod range_delete_backward_compatibility_serde_struct {
+    use bytes::{Buf, BufMut};
+    use risingwave_common::catalog::TableId;
+    use serde::{Deserialize, Serialize};
 
-impl<T: AsRef<[u8]>> PointRange<T> {
-    pub fn from_user_key(left_user_key: UserKey<T>, is_exclude_left_key: bool) -> Self {
-        Self {
-            left_user_key,
-            is_exclude_left_key,
+    #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+    pub struct TableKey(Vec<u8>);
+
+    #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+    pub struct UserKey {
+        // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
+        // declaration matters.
+        pub table_id: TableId,
+        pub table_key: TableKey,
+    }
+
+    impl UserKey {
+        pub fn decode_length_prefixed(buf: &mut &[u8]) -> Self {
+            let table_id = buf.get_u32();
+            let len = buf.get_u32() as usize;
+            let data = buf[..len].to_vec();
+            buf.advance(len);
+            UserKey {
+                table_id: TableId::new(table_id),
+                table_key: TableKey(data),
+            }
+        }
+
+        pub fn encode_length_prefixed(&self, mut buf: impl BufMut) {
+            buf.put_u32(self.table_id.table_id());
+            buf.put_u32(self.table_key.0.as_slice().len() as u32);
+            buf.put_slice(self.table_key.0.as_slice());
         }
     }
 
-    pub fn as_ref(&self) -> PointRange<&[u8]> {
-        PointRange::from_user_key(self.left_user_key.as_ref(), self.is_exclude_left_key)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.left_user_key.is_empty()
-    }
-}
-
-impl<'a> PointRange<&'a [u8]> {
-    pub fn to_vec(&self) -> PointRange<Vec<u8>> {
-        self.copy_into()
-    }
-
-    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(&self) -> PointRange<T> {
-        PointRange {
-            left_user_key: self.left_user_key.copy_into(),
-            is_exclude_left_key: self.is_exclude_left_key,
-        }
+    #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+    pub struct PointRange {
+        // When comparing `PointRange`, we first compare `left_user_key`, then
+        // `is_exclude_left_key`. Therefore the order of declaration matters.
+        pub left_user_key: UserKey,
+        /// `PointRange` represents the left user key itself if `is_exclude_left_key==false`
+        /// while represents the right δ Neighborhood of the left user key if
+        /// `is_exclude_left_key==true`.
+        pub is_exclude_left_key: bool,
     }
 }
 

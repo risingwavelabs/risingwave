@@ -21,7 +21,6 @@ use std::mem::take;
 use std::sync::Arc;
 use std::time::Duration;
 
-use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::Epoch;
@@ -29,7 +28,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_service::{BarrierCompleteResponse, BuildActorInfo};
+use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, info};
 
 use crate::barrier::command::CommandContext;
@@ -96,24 +95,7 @@ impl CreatingStreamingJobControl {
                 graph_info: InflightGraphInfo::new(fragment_info),
                 backfill_epoch,
                 pending_non_checkpoint_barriers: vec![],
-                initial_barrier_info: Some((
-                    actors_to_create
-                        .into_iter()
-                        .map(|(worker_id, actors)| {
-                            (
-                                worker_id,
-                                actors
-                                    .into_iter()
-                                    .map(|actor| BuildActorInfo {
-                                        actor: Some(actor),
-                                        related_subscriptions: Default::default(),
-                                    })
-                                    .collect_vec(),
-                            )
-                        })
-                        .collect(),
-                    initial_mutation,
-                )),
+                initial_barrier_info: Some((actors_to_create, initial_mutation)),
             },
             upstream_lag: metrics
                 .snapshot_backfill_lag
@@ -267,6 +249,8 @@ impl CreatingStreamingJobControl {
                     graph_info,
                     Some(graph_info),
                     new_actors,
+                    vec![],
+                    vec![],
                 )?;
                 self.barrier_control.enqueue_epoch(
                     prev_epoch.value().0,
@@ -331,6 +315,8 @@ impl CreatingStreamingJobControl {
                     graph_info,
                     Some(graph_info),
                     None,
+                    vec![],
+                    vec![],
                 )?;
                 self.barrier_control.enqueue_epoch(
                     command_ctx.prev_epoch.value().0,
@@ -377,6 +363,8 @@ impl CreatingStreamingJobControl {
                         Some(graph_info)
                     },
                     None,
+                    vec![],
+                    vec![],
                 )?;
                 let prev_epoch = command_ctx.prev_epoch.value().0;
                 self.barrier_control.enqueue_epoch(
