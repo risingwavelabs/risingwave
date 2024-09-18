@@ -35,10 +35,10 @@ type DdlLayout = {
 } & Position
 
 const nodeRadius = 12
-const fragmentMarginX = nodeRadius * 2
-const fragmentMarginY = nodeRadius * 2
-const fragmentDistanceX = nodeRadius * 2
-const fragmentDistanceY = nodeRadius * 2
+const ddlMarginX = nodeRadius * 2
+const ddlMarginY = nodeRadius * 2
+const ddlDistanceX = nodeRadius * 2
+const ddlDistanceY = nodeRadius * 2
 
 export default function DdlGraph({
   ddlDependency,
@@ -72,8 +72,8 @@ export default function DdlGraph({
       ddlDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
         return { width: 100, height: 100, id, ...data }
       }),
-      fragmentDistanceX,
-      fragmentDistanceY
+      ddlDistanceX,
+      ddlDistanceY
     )
     const ddlLayoutPosition = new Map<string, Position>()
     ddlLayout.forEach(({ id, x, y }: DdlBoxPosition) => {
@@ -81,9 +81,9 @@ export default function DdlGraph({
     })
 
     const layoutResult: DdlLayout[] = []
-    for (const [fragmentId, result] of layoutDdlResult) {
-      const { x, y } = ddlLayoutPosition.get(fragmentId)!
-      layoutResult.push({ id: fragmentId, x, y, ...result })
+    for (const [ddlId, result] of layoutDdlResult) {
+      const { x, y } = ddlLayoutPosition.get(ddlId)!
+      layoutResult.push({ id: ddlId, x, y, ...result })
     }
 
     let svgWidth = 0
@@ -105,20 +105,20 @@ export default function DdlGraph({
   const {
     svgWidth,
     svgHeight,
-    edges: fragmentEdgeLayout,
-    layoutResult: fragmentLayout,
+    edges: ddlEdgeLayout,
+    layoutResult: ddlLayout,
   } = ddlDependencyDagCallback()
 
   useEffect(() => {
-    if (fragmentLayout) {
+    if (ddlLayout) {
       const svgNode = svgRef.current
       const svgSelection = d3.select(svgNode)
 
-      // Fragments
-      const applyFragment = (gSel: FragmentSelection) => {
+      // Ddls
+      const applyDdl = (gSel: DdlSelection) => {
         gSel.attr("transform", ({ x, y }) => `translate(${x}, ${y})`)
 
-        // Fragment text line 1 (fragment id)
+        // Ddl text line 1 (ddl id)
         let text = gSel.select<SVGTextElement>(".text-frag-id")
         if (text.empty()) {
           text = gSel.append("text").attr("class", "text-frag-id")
@@ -126,15 +126,15 @@ export default function DdlGraph({
 
         text
           .attr("fill", "black")
-          .text(({ id }) => `Fragment ${id}`)
+          .text(({ id }) => `Ddl ${id}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
-          .attr("dy", ({ height }) => height - fragmentMarginY + 12)
-          .attr("dx", ({ width }) => width - fragmentMarginX)
+          .attr("dy", ({ height }) => height - ddlMarginY + 12)
+          .attr("dx", ({ width }) => width - ddlMarginX)
           .attr("fill", "black")
           .attr("font-size", 12)
 
-        // Fragment text line 2 (actor ids)
+        // Ddl text line 2 (actor ids)
         let text2 = gSel.select<SVGTextElement>(".text-actor-id")
         if (text2.empty()) {
           text2 = gSel.append("text").attr("class", "text-actor-id")
@@ -144,46 +144,46 @@ export default function DdlGraph({
           .attr("fill", "black")
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
-          .attr("dy", ({ height }) => height - fragmentMarginY + 24)
-          .attr("dx", ({ width }) => width - fragmentMarginX)
+          .attr("dy", ({ height }) => height - ddlMarginY + 24)
+          .attr("dx", ({ width }) => width - ddlMarginX)
           .attr("fill", "black")
           .attr("font-size", 12)
 
-        // Fragment bounding box
+        // Ddl bounding box
         let boundingBox = gSel.select<SVGRectElement>(".bounding-box")
         if (boundingBox.empty()) {
           boundingBox = gSel.append("rect").attr("class", "bounding-box")
         }
 
         boundingBox
-          .attr("width", ({ width }) => width - fragmentMarginX * 2)
-          .attr("height", ({ height }) => height - fragmentMarginY * 2)
-          .attr("x", fragmentMarginX)
-          .attr("y", fragmentMarginY)
+          .attr("width", ({ width }) => width - ddlMarginX * 2)
+          .attr("height", ({ height }) => height - ddlMarginY * 2)
+          .attr("x", ddlMarginX)
+          .attr("y", ddlMarginY)
           .attr("fill", "white")
           .attr("stroke-width", 1)
           .attr("rx", 5)
           .attr("stroke", theme.colors.gray[500])
       }
 
-      const createFragment = (sel: Enter<FragmentSelection>) =>
-        sel.append("g").attr("class", "fragment").call(applyFragment)
+      const createDdl = (sel: Enter<DdlSelection>) =>
+        sel.append("g").attr("class", "ddl").call(applyDdl)
 
-      const fragmentSelection = svgSelection
-        .select<SVGGElement>(".fragments")
-        .selectAll<SVGGElement, null>(".fragment")
-        .data(fragmentLayout)
-      type FragmentSelection = typeof fragmentSelection
+      const ddlSelection = svgSelection
+        .select<SVGGElement>(".ddls")
+        .selectAll<SVGGElement, null>(".ddl")
+        .data(ddlLayout)
+      type DdlSelection = typeof ddlSelection
 
-      fragmentSelection.enter().call(createFragment)
-      fragmentSelection.call(applyFragment)
-      fragmentSelection.exit().remove()
+      ddlSelection.enter().call(createDdl)
+      ddlSelection.call(applyDdl)
+      ddlSelection.exit().remove()
 
-      // Fragment Edges
+      // Ddl Edges
       const edgeSelection = svgSelection
-        .select<SVGGElement>(".fragment-edges")
-        .selectAll<SVGGElement, null>(".fragment-edge")
-        .data(fragmentEdgeLayout)
+        .select<SVGGElement>(".ddl-edges")
+        .selectAll<SVGGElement, null>(".ddl-edge")
+        .data(ddlEdgeLayout)
       type EdgeSelection = typeof edgeSelection
 
       const curveStyle = d3.curveMonotoneX
@@ -251,13 +251,13 @@ export default function DdlGraph({
         return gSel
       }
       const createEdge = (sel: Enter<EdgeSelection>) =>
-        sel.append("g").attr("class", "fragment-edge").call(applyEdge)
+        sel.append("g").attr("class", "ddl-edge").call(applyEdge)
 
       edgeSelection.enter().call(createEdge)
       edgeSelection.call(applyEdge)
       edgeSelection.exit().remove()
     }
-  }, [fragmentLayout, fragmentEdgeLayout, backPressures])
+  }, [ddlLayout, ddlEdgeLayout, backPressures])
 
   return (
     <Fragment>
@@ -290,8 +290,8 @@ export default function DdlGraph({
         </ModalContent>
       </Modal>
       <svg ref={svgRef} width={`${svgWidth}px`} height={`${svgHeight}px`}>
-        <g className="fragment-edges" />
-        <g className="fragments" />
+        <g className="ddl-edges" />
+        <g className="ddls" />
       </svg>
     </Fragment>
   )

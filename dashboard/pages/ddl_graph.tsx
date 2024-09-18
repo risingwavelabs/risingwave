@@ -357,7 +357,7 @@ export default function Streaming() {
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
-      <Title>Fragment Graph</Title>
+      <Title>Ddl Graph</Title>
       <Flex flexDirection="row" height="full" width="full">
         <VStack
           mr={3}
