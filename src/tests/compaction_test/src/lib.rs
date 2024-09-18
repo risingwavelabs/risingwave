@@ -27,10 +27,8 @@
 #![allow(rw::format_error)] // test code
 
 mod compaction_test_runner;
-mod delete_range_runner;
 
 use clap::Parser;
-pub use delete_range_runner::start_delete_range;
 
 use crate::compaction_test_runner::compaction_test_main;
 

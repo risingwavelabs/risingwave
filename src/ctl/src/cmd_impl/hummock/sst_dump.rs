@@ -228,14 +228,6 @@ pub async fn sst_dump_via_sstable_store(
     println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
     println!("Key Count: {}", sstable_meta.key_count);
     println!("Version: {}", sstable_meta.version);
-    println!(
-        "Monotonoic Deletes Count: {}",
-        sstable_meta.monotonic_tombstone_events.len()
-    );
-    for monotonic_delete in &sstable_meta.monotonic_tombstone_events {
-        println!("\tevent key: {:?}", monotonic_delete.event_key);
-        println!("\tnew epoch: {:?}", monotonic_delete.new_epoch);
-    }
 
     println!("Block Count: {}", sstable.block_count());
     for i in 0..sstable.block_count() {
