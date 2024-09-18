@@ -493,7 +493,6 @@ pub struct ReadOptions {
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Bytes>,
-    pub ignore_range_tombstone: bool,
     pub prefetch_options: PrefetchOptions,
     pub cache_policy: CachePolicy,
 
@@ -509,7 +508,6 @@ impl From<TracedReadOptions> for ReadOptions {
     fn from(value: TracedReadOptions) -> Self {
         Self {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
-            ignore_range_tombstone: value.ignore_range_tombstone,
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
             retention_seconds: value.retention_seconds,
@@ -524,7 +522,6 @@ impl From<ReadOptions> for TracedReadOptions {
     fn from(value: ReadOptions) -> Self {
         Self {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
-            ignore_range_tombstone: value.ignore_range_tombstone,
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
             retention_seconds: value.retention_seconds,

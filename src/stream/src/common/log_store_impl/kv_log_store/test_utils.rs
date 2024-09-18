@@ -24,7 +24,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::catalog::PbTable;
 
 use crate::common::log_store_impl::kv_log_store::KvLogStorePkInfo;
-use crate::common::table::test_utils::gen_prost_table_with_dist_key;
+use crate::common::table::test_utils::gen_pbtable_with_dist_key;
 
 pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 pub(crate) const TEST_DATA_SIZE: usize = 10;
@@ -164,7 +164,7 @@ pub(crate) fn gen_test_log_store_table(pk_info: &'static KvLogStorePkInfo) -> Pb
     let order_types = pk_info.pk_orderings.to_vec();
     let pk_index = (0..pk_info.pk_len()).collect();
     let read_prefix_len_hint = 0;
-    gen_prost_table_with_dist_key(
+    gen_pbtable_with_dist_key(
         TEST_TABLE_ID,
         schema,
         order_types,
