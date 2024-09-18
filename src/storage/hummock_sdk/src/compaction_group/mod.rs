@@ -179,7 +179,10 @@ pub mod group_split {
         branch_table_info
     }
 
-    pub fn split_sst_for_commit_epoch(
+    /// The old split sst logic with `table_ids`
+    /// This function is used to split the sst into two parts based on the `table_ids`.
+    /// In contrast to `split_sst`, this function does not modify the `key_range` and does not guarantee that the split ssts can be merged, which needs to be guaranteed by the caller.
+    pub fn split_sst_with_table_ids(
         sst_info: &mut SstableInfo,
         new_sst_id: &mut u64,
         old_sst_size: u64,

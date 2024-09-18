@@ -26,6 +26,7 @@ use risingwave_pb::hummock::{
 };
 use tracing::warn;
 
+use super::group_split::split_sst_with_table_ids;
 use super::{group_split, StateTableId};
 use crate::change_log::TableChangeLogCommon;
 use crate::compaction_group::StaticCompactionGroupId;
@@ -1175,7 +1176,7 @@ fn split_sst_info_for_level(
             .cloned()
             .collect_vec();
         if !removed_table_ids.is_empty() {
-            let branch_sst = split_sst(
+            let branch_sst = split_sst_with_table_ids(
                 sst_info,
                 new_sst_id,
                 sst_info.sst_size / 2,
@@ -1501,42 +1502,6 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
         }
     }
     res
-}
-
-pub fn split_sst(
-    sst_info: &mut SstableInfo,
-    new_sst_id: &mut u64,
-    old_sst_size: u64,
-    new_sst_size: u64,
-    new_table_ids: Vec<u32>,
-) -> SstableInfo {
-    let mut branch_table_info = sst_info.clone();
-    branch_table_info.sst_id = *new_sst_id;
-    branch_table_info.sst_size = new_sst_size;
-    *new_sst_id += 1;
-
-    sst_info.sst_id = *new_sst_id;
-    sst_info.sst_size = old_sst_size;
-    *new_sst_id += 1;
-
-    {
-        // related github.com/risingwavelabs/risingwave/pull/17898/
-        // This is a temporary implementation that will update `table_ids`` based on the new split rule after PR 17898
-        // sst_info.table_ids = vec[1, 2, 3];
-        // new_table_ids = vec[2, 3, 4];
-        // branch_table_info.table_ids = vec[1, 2, 3] ∩ vec[2, 3, 4] = vec[2, 3]
-        let set1: BTreeSet<_> = sst_info.table_ids.iter().cloned().collect();
-        let set2: BTreeSet<_> = new_table_ids.into_iter().collect();
-        let intersection: Vec<_> = set1.intersection(&set2).cloned().collect();
-
-        // Update table_ids
-        branch_table_info.table_ids = intersection;
-        sst_info
-            .table_ids
-            .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
-    }
-
-    branch_table_info
 }
 
 #[cfg(test)]
