@@ -21,6 +21,7 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
 use crate::common::table::state_table::StateTable;
+use crate::common::table::test_utils::gen_pbtable;
 
 pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore> {
     let state_store = MemoryStateStore::new();
@@ -33,12 +34,16 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
     let pk_indices = vec![0_usize, 1_usize];
-    let mut state = StateTable::new_without_distribution(
+    let mut state = StateTable::from_table_catalog(
+        &gen_pbtable(
+            TableId::from(0x42),
+            column_descs.clone(),
+            order_types,
+            pk_indices,
+            0,
+        ),
         state_store.clone(),
-        TableId::from(0x42),
-        column_descs.clone(),
-        order_types,
-        pk_indices,
+        None,
     )
     .await;
     let table = StorageTable::for_test(
