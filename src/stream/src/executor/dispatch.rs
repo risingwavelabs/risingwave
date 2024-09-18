@@ -1180,10 +1180,6 @@ mod tests {
         let actor_id = 233;
         let fragment_id = 666;
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let input = Executor::new(
-            Default::default(),
-            ReceiverExecutor::for_test(233, rx, barrier_test_env.shared_context.clone()).boxed(),
-        );
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
@@ -1252,6 +1248,11 @@ mod tests {
             .flush_all_events()
             .await;
 
+        let input = Executor::new(
+            Default::default(),
+            ReceiverExecutor::for_test(actor_id, rx, barrier_test_env.shared_context.clone())
+                .boxed(),
+        );
         let executor = Box::new(DispatchExecutor::new(
             input,
             vec![broadcast_dispatcher, simple_dispatcher],
