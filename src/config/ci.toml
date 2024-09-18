@@ -16,6 +16,9 @@ stream_exchange_concurrent_barriers = 10
 [storage]
 imm_merge_threshold = 2
 
+[storage.object_store]
+opendal_upload_concurrency = 16
+
 [storage.object_store.retry]
 streaming_upload_attempt_timeout_ms = 10000
 upload_retry_attempts = 5
