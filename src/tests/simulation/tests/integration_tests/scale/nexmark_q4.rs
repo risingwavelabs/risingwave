@@ -97,6 +97,8 @@ async fn nexmark_q4_common(
     if recovery {
         // Trigger recovery
         cluster.kill_node(&KillOpts::ALL).await;
+
+        sleep(Duration::from_secs(5)).await;
     }
 
     // 5~15s
