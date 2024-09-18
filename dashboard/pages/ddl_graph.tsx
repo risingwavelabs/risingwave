@@ -286,10 +286,14 @@ export default function Streaming() {
             // possible that an old version of meta service returns a range-query result.
             // So we take the one with the latest timestamp here.
             const value = _(m.sample).maxBy((s) => s.timestamp)!.value * 100
-            map.set(
-              `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
-              value
-            )
+            let output = m.metric.fragment_id
+            let input = m.metric.downstream_fragment_id
+            if (outMap[output] && inMap[input]) {
+              output = outMap[output]
+              input = inMap[input]
+              let key = `${output}_${input}`
+              map.set(key, m.sample[0].value)
+            }
           }
         }
       }
