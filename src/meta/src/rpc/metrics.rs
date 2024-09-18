@@ -199,6 +199,9 @@ pub struct MetaMetrics {
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
 
+    /// The number of compaction groups that have been triggered to move
+    pub merge_compaction_group_count: IntCounterVec,
+
     // ********************************** Auto Schema Change ************************************
     pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec<2>,
     pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec<2>,
@@ -729,6 +732,14 @@ impl MetaMetrics {
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let merge_compaction_group_count = register_int_counter_vec_with_registry!(
+            "storage_merge_compaction_group_count",
+            "Count of trigger merge compaction group",
+            &["group_left, group_right"],
+            registry
+        )
+        .unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -802,6 +813,7 @@ impl MetaMetrics {
             auto_schema_change_failure_cnt,
             auto_schema_change_success_cnt,
             auto_schema_change_latency,
+            merge_compaction_group_count,
         }
     }
 
