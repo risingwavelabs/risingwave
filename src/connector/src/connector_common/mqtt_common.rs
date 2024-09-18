@@ -21,7 +21,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
 use with_options::WithOptions;
 
-use crate::connector_common::common::{load_certs, load_private_key};
+use super::common::{load_certs, load_private_key};
 use crate::deserialize_bool_from_string;
 use crate::error::ConnectorResult;
 

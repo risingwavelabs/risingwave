@@ -90,7 +90,12 @@ impl IcebergScanExecutor {
     async fn do_execute(mut self: Box<Self>) {
         let table = self
             .iceberg_config
-            .load_table_v2_with_metadata(self.table_meta)
+            .common
+            .load_table_v2_with_metadata(
+                self.table_meta,
+                &self.iceberg_config.path_style_access,
+                &self.iceberg_config.java_catalog_props,
+            )
             .await?;
         let data_types = self.schema.data_types();
         let executor_schema_names = self.schema.names();

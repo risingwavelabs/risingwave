@@ -61,7 +61,13 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
         let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
         if let ConnectorProperties::Iceberg(iceberg_properties) = config {
             let iceberg_config: IcebergConfig = iceberg_properties.to_iceberg_config();
-            let table: Table = iceberg_config.load_table_v2().await?;
+            let table: Table = iceberg_config
+                .common
+                .load_table_v2(
+                    &iceberg_config.path_style_access,
+                    &iceberg_config.java_catalog_props,
+                )
+                .await?;
 
             let snapshots: ConnectorResult<Vec<RwIcebergSnapshots>> = table
                 .metadata()

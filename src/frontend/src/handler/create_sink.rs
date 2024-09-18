@@ -345,7 +345,13 @@ async fn get_partition_compute_info_for_iceberg(
     if iceberg_config.create_table_if_not_exists {
         return Ok(None);
     }
-    let table = iceberg_config.load_table().await?;
+    let table = iceberg_config
+        .common
+        .load_table(
+            &iceberg_config.path_style_access,
+            &iceberg_config.java_catalog_props,
+        )
+        .await?;
     let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok() else {
         return Ok(None);
     };

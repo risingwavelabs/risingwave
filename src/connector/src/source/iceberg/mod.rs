@@ -29,6 +29,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::connector_common::IcebergCommon;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::sink::iceberg::IcebergConfig;
@@ -39,30 +40,11 @@ use crate::source::{
 
 pub const ICEBERG_CONNECTOR: &str = "iceberg";
 
-#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
+#[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
 pub struct IcebergProperties {
-    #[serde(rename = "catalog.type")]
-    pub catalog_type: Option<String>,
-    #[serde(rename = "s3.region")]
-    pub region: Option<String>,
-    #[serde(rename = "s3.endpoint")]
-    pub endpoint: Option<String>,
-    #[serde(rename = "s3.access.key")]
-    pub s3_access: String,
-    #[serde(rename = "s3.secret.key")]
-    pub s3_secret: String,
-    #[serde(rename = "warehouse.path")]
-    pub warehouse_path: String,
-    // Catalog name, can be omitted for storage catalog, but
-    // must be set for other catalogs.
-    #[serde(rename = "catalog.name")]
-    pub catalog_name: Option<String>,
-    #[serde(rename = "catalog.uri")]
-    pub catalog_uri: Option<String>, // URI of iceberg catalog, only applicable in rest catalog.
-    #[serde(rename = "database.name")]
-    pub database_name: Option<String>,
-    #[serde(rename = "table.name")]
-    pub table_name: String,
+    #[serde(flatten)]
+    pub common: IcebergCommon,
+
     // For jdbc catalog
     #[serde(rename = "catalog.jdbc.user")]
     pub jdbc_user: Option<String>,
@@ -83,18 +65,15 @@ impl IcebergProperties {
             java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
         }
         IcebergConfig {
-            catalog_name: self.catalog_name.clone(),
-            database_name: self.database_name.clone(),
-            table_name: self.table_name.clone(),
-            catalog_type: self.catalog_type.clone(),
-            uri: self.catalog_uri.clone(),
-            path: self.warehouse_path.clone(),
-            endpoint: self.endpoint.clone(),
-            access_key: self.s3_access.clone(),
-            secret_key: self.s3_secret.clone(),
-            region: self.region.clone(),
+            common: self.common.clone(),
             java_catalog_props,
-            ..Default::default()
+            // default values
+            r#type: "".to_string(),
+            force_append_only: false,
+            path_style_access: None,
+            primary_key: None,
+            commit_checkpoint_interval: 0,
+            create_table_if_not_exists: false,
         }
     }
 }
@@ -207,7 +186,14 @@ impl IcebergSplitEnumerator {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
-        let table = self.config.load_table_v2().await?;
+        let table = self
+            .config
+            .common
+            .load_table_v2(
+                &self.config.path_style_access,
+                &self.config.java_catalog_props,
+            )
+            .await?;
 
         let current_snapshot = table.metadata().current_snapshot();
         if current_snapshot.is_none() {

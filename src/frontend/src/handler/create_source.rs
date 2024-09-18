@@ -1352,7 +1352,13 @@ pub async fn extract_iceberg_columns(
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
         let iceberg_config: IcebergConfig = properties.to_iceberg_config();
-        let table = iceberg_config.load_table_v2().await?;
+        let table = iceberg_config
+            .common
+            .load_table_v2(
+                &iceberg_config.path_style_access,
+                &iceberg_config.java_catalog_props,
+            )
+            .await?;
         let iceberg_schema: arrow_schema_iceberg::Schema =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
@@ -1404,7 +1410,13 @@ pub async fn check_iceberg_source(
             .collect(),
     };
 
-    let table = iceberg_config.load_table_v2().await?;
+    let table = iceberg_config
+        .common
+        .load_table_v2(
+            &iceberg_config.path_style_access,
+            &iceberg_config.java_catalog_props,
+        )
+        .await?;
 
     let iceberg_schema = iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
