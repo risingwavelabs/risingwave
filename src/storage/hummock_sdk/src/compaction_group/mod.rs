@@ -216,7 +216,7 @@ pub mod group_split {
 
     pub fn get_split_pos(sstables: &Vec<SstableInfo>, split_key: Bytes) -> usize {
         sstables
-            .partition_point(|sst| sst.key_range.left.cmp(&split_key).is_lt())
+            .partition_point(|sst| sst.key_range.left.lt(&split_key))
             .saturating_sub(1)
     }
 
