@@ -515,9 +515,19 @@ pub async fn local_execute(
     // TODO: if there's no table scan, we don't need to acquire snapshot.
     let snapshot = session.pinned_snapshot();
 
+    let epoch = snapshot.batch_query_epoch();
+    let temp = 0;
+
     // TODO: Passing sql here
-    let execution =
-        LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session, timeout);
+    let execution = LocalQueryExecution::new(
+        query,
+        front_env.clone(),
+        "",
+        snapshot,
+        session,
+        timeout,
+        epoch,
+    );
 
     Ok(execution.stream_rows())
 }

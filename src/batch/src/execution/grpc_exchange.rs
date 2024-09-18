@@ -54,7 +54,7 @@ impl GrpcExchangeSource {
                     tracing_context: plan.tracing_context,
                     expr_context: Some(capture_expr_context()?),
                 };
-                client.execute(execute_request).await?
+                client.execute1(execute_request).await?
             }
             None => client.get_data(task_output_id.clone()).await?,
         };

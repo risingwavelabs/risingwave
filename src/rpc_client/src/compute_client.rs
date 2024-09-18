@@ -170,6 +170,7 @@ impl ComputeClient {
         epoch: BatchQueryEpoch,
         expr_context: ExprContext,
     ) -> Result<Streaming<TaskInfoResponse>> {
+        let temp = 0;
         Ok(self
             .task_client
             .to_owned()
@@ -185,7 +186,7 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn execute(&self, req: ExecuteRequest) -> Result<Streaming<GetDataResponse>> {
+    pub async fn execute1(&self, req: ExecuteRequest) -> Result<Streaming<GetDataResponse>> {
         Ok(self
             .task_client
             .to_owned()
