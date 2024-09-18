@@ -21,36 +21,8 @@ mod stream_manager;
 mod test_fragmenter;
 mod test_scale;
 
-use std::collections::HashMap;
-
-use risingwave_common::catalog::TableId;
-use risingwave_pb::stream_plan::StreamActor;
-use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
-use risingwave_pb::stream_service::BuildActorInfo;
 pub use scale::*;
 pub use sink::*;
 pub use source_manager::*;
 pub use stream_graph::*;
 pub use stream_manager::*;
-
-pub(crate) fn to_build_actor_info(
-    actor: StreamActor,
-    subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
-    subscription_depend_table_id: TableId,
-) -> BuildActorInfo {
-    BuildActorInfo {
-        actor: Some(actor),
-        related_subscriptions: subscriptions
-            .get(&subscription_depend_table_id)
-            .into_iter()
-            .map(|subscriptions| {
-                (
-                    subscription_depend_table_id.table_id,
-                    SubscriptionIds {
-                        subscription_ids: subscriptions.keys().cloned().collect(),
-                    },
-                )
-            })
-            .collect(),
-    }
-}

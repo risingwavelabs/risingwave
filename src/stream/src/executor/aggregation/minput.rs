@@ -312,6 +312,7 @@ mod tests {
 
     use super::MaterializedInputState;
     use crate::common::table::state_table::StateTable;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::GroupKey;
     use crate::executor::{PkIndices, StreamExecutorResult};
@@ -341,12 +342,10 @@ mod tests {
             .collect_vec();
         let mapping = StateTableColumnMapping::new(upstream_columns, None);
         let pk_len = order_types.len();
-        let table = StateTable::new_without_distribution(
+        let table = StateTable::from_table_catalog(
+            &gen_pbtable(table_id, columns, order_types, (0..pk_len).collect(), 0),
             MemoryStateStore::new(),
-            table_id,
-            columns,
-            order_types,
-            (0..pk_len).collect(),
+            None,
         )
         .await;
         (table, mapping)

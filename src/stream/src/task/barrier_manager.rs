@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Display;
 use std::future::pending;
 use std::sync::Arc;
@@ -46,7 +46,6 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgressReporter;
-use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -57,7 +56,7 @@ use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ShutdownResponse,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo,
+    streaming_control_stream_response, BarrierCompleteResponse, InjectBarrierRequest,
     StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 
@@ -343,6 +342,7 @@ impl LocalBarrierWorker {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
                                 self.reset(HummockVersionId::new(init_request.version_id)).await;
+                                self.state.add_subscriptions(init_request.subscriptions);
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
@@ -383,20 +383,8 @@ impl LocalBarrierWorker {
         match request.request.expect("should not be empty") {
             Request::InjectBarrier(req) => {
                 let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
-                self.update_actor_info(req.broadcast_info)?;
-                self.send_barrier(
-                    &barrier,
-                    req.actors_to_build,
-                    req.actor_ids_to_collect.into_iter().collect(),
-                    req.table_ids_to_sync
-                        .into_iter()
-                        .map(TableId::new)
-                        .collect(),
-                    PartialGraphId::new(req.partial_graph_id),
-                    req.actor_ids_to_pre_sync_barrier_mutation
-                        .into_iter()
-                        .collect(),
-                )?;
+                self.update_actor_info(req.broadcast_info.iter().cloned())?;
+                self.send_barrier(&barrier, req)?;
                 Ok(())
             }
             Request::RemovePartialGraph(req) => {
@@ -554,11 +542,7 @@ impl LocalBarrierWorker {
     fn send_barrier(
         &mut self,
         barrier: &Barrier,
-        to_build: Vec<BuildActorInfo>,
-        to_collect: HashSet<ActorId>,
-        table_ids: HashSet<TableId>,
-        partial_graph_id: PartialGraphId,
-        actor_ids_to_pre_sync_barrier: HashSet<ActorId>,
+        request: InjectBarrierRequest,
     ) -> StreamResult<()> {
         if barrier.kind == BarrierKind::Initial {
             self.actor_manager
@@ -569,10 +553,10 @@ impl LocalBarrierWorker {
             target: "events::stream::barrier::manager::send",
             "send barrier {:?}, actor_ids_to_collect = {:?}",
             barrier,
-            to_collect
+            request.actor_ids_to_collect
         );
 
-        for actor_id in &to_collect {
+        for actor_id in &request.actor_ids_to_collect {
             if self.failure_actors.contains_key(actor_id) {
                 // The failure actors could exit before the barrier is issued, while their
                 // up-downstream actors could be stuck somehow. Return error directly to trigger the
@@ -585,14 +569,7 @@ impl LocalBarrierWorker {
             }
         }
 
-        self.state.transform_to_issued(
-            barrier,
-            to_build,
-            to_collect,
-            table_ids,
-            partial_graph_id,
-            actor_ids_to_pre_sync_barrier,
-        )?;
+        self.state.transform_to_issued(barrier, request)?;
         Ok(())
     }
 
@@ -966,7 +943,10 @@ pub(crate) mod barrier_test_utils {
                     response_tx,
                     UnboundedReceiverStream::new(request_rx).boxed(),
                 ),
-                init_request: InitRequest { version_id: 0 },
+                init_request: InitRequest {
+                    version_id: 0,
+                    subscriptions: vec![],
+                },
             });
 
             assert_matches!(
@@ -1004,6 +984,8 @@ pub(crate) mod barrier_test_utils {
                             actor_ids_to_pre_sync_barrier_mutation: vec![],
                             broadcast_info: vec![],
                             actors_to_build: vec![],
+                            subscriptions_to_add: vec![],
+                            subscriptions_to_remove: vec![],
                         },
                     )),
                 }))
