@@ -61,23 +61,17 @@ pub mod group_split {
     use crate::sstable_info::SstableInfo;
     use crate::{can_concat, HummockEpoch};
 
-    pub const VNODE_SPLIT_TO_RIGHT: VirtualNode = VirtualNode::ZERO;
-    pub const VNODE_SPLIT_TO_LEFT: VirtualNode = VirtualNode::MAX;
-
-    pub fn is_vnode_split_to_right(vnode: VirtualNode) -> bool {
-        vnode == VNODE_SPLIT_TO_RIGHT
-    }
-
-    pub fn is_vnode_split_to_left(vnode: VirtualNode) -> bool {
-        vnode == VNODE_SPLIT_TO_LEFT
-    }
+    /// The split will follow the following rules:
+    /// 1. Ssts with `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.right`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`].
+    /// 2. Currently only `vnode` 0 and `vnode` max is supported.
+    /// 3. Due to the above rule, `vnode` max will be rewritten as `table_id` + 1, vnode 0
 
     // By default, the split key is constructed with vnode = 0 and epoch = 0, so that we can split table_id to the right group
     pub fn build_split_key(mut table_id: StateTableId, mut vnode: VirtualNode) -> Bytes {
-        if is_vnode_split_to_left(vnode) {
+        if VirtualNode::MAX == vnode {
             // Modify `table_id` to `next_table_id` to satisfy the `split_to_right`` rule, so that the `table_id`` originally passed in will be split to left.
-            table_id += 1;
-            vnode = VNODE_SPLIT_TO_RIGHT;
+            table_id = table_id.strict_add(1);
+            vnode = VirtualNode::ZERO;
         }
 
         FullKey::new(
@@ -96,6 +90,7 @@ pub mod group_split {
         Both,
     }
 
+    /// Determine whether the SST needs to be split, and if so, which side to split.
     pub fn need_to_split(sst: &SstableInfo, split_key: Bytes) -> SstSplitType {
         let key_range = &sst.key_range;
         // 1. compare left
@@ -115,6 +110,25 @@ pub mod group_split {
         SstSplitType::Both
     }
 
+    /// Split the SST into two parts based on the split key.
+    /// The left part is the original SST, and the right part is the new SST.
+    /// The split key is exclusive for the left part and inclusive for the right part.
+    /// The `table_ids` of the new SST are calculated based on the split key.
+    /// e.g.
+    ///  `sst.table_ids` = [1, 2, 3, 4, 5, 6, 7, 8, 9], `split_key` = (`table_id` = 5, vnode = 0)
+    ///  then the result:
+    /// sst1 {
+    ///     `sst_id`: `new_sst_id + 1`,
+    ///     `table_ids`: [1, 2, 3, 4],
+    ///     `key_range`: [left, `split_key`),
+    ///     `sst_size`: `left_size`,
+    /// }
+    /// sst2 {
+    ///    `sst_id`: `new_sst_id`,
+    ///    `table_ids`: [5, 6, 7, 8, 9],
+    ///    `key_range`: [`split_key`, right],
+    ///    `sst_size`: `right_size`,
+    /// }
     pub fn split_sst(
         origin_sst_info: &mut SstableInfo,
         new_sst_id: &mut u64,
@@ -231,6 +245,7 @@ pub mod group_split {
             .saturating_sub(1)
     }
 
+    /// Merge the right levels into the left levels.
     pub fn merge_levels(left_levels: &mut Levels, right_levels: Levels) {
         let right_l0 = right_levels.l0;
 
@@ -335,6 +350,7 @@ pub mod group_split {
         Err(target_levels.len())
     }
 
+    /// Split the SSTs in the level according to the split key.
     pub fn split_sst_info_for_level_v2(
         level: &mut Level,
         new_sst_id: &mut u64,
@@ -411,6 +427,8 @@ pub mod group_split {
 #[cfg(test)]
 mod tests {
     use risingwave_common::hash::VirtualNode;
+
+    #[test]
     fn test_split_table_ids() {
         let table_ids = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
         let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
@@ -429,7 +447,7 @@ mod tests {
             VirtualNode::ZERO.to_index(),
         );
         assert_eq!(left, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
-        assert_eq!(right, vec![]);
+        assert!(right.is_empty());
 
         let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
             &table_ids,
@@ -437,10 +455,11 @@ mod tests {
             VirtualNode::ZERO.to_index(),
         );
 
-        assert_eq!(left, vec![]);
+        assert!(left.is_empty());
         assert_eq!(right, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
+    #[test]
     fn test_split_table_ids_with_split_key() {
         let table_ids = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
         let split_key = super::group_split::build_split_key(5, VirtualNode::ZERO);

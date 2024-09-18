@@ -75,7 +75,7 @@ enum CompatibilityVersion {
   VERSION_UNSPECIFIED = 0;
   NO_TRIVIAL_SPLIT = 1;
   NO_MEMBER_TABLE_IDS = 2;
-  SPLIT_GROUP_BY_TABLE = 3;
+  SPLIT_GROUP_BY_TABLE_ID = 3;
 }
 
 message GroupConstruct {

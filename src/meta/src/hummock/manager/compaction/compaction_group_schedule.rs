@@ -362,8 +362,8 @@ impl HummockManager {
 }
 
 impl HummockManager {
-    /// Splits a compaction group into two. The new one will contain `table_ids`.
-    /// Returns the newly created compaction group id.
+    /// Split `table_ids` to a dedicated compaction group.
+    /// Returns the compaction group id containing the `table_ids`.
     pub async fn split_compaction_group(
         &self,
         parent_group_id: CompactionGroupId,
@@ -381,6 +381,12 @@ impl HummockManager {
         Ok(target_compaction_group_id)
     }
 
+    /// Split `table_ids` to a dedicated compaction group.(will be split by the `table_id` and `vnode`.)
+    /// Returns the compaction group id containing the `table_ids` and the mapping of compaction group id to table ids.
+    /// The split will follow the following rules
+    /// 1. ssts with `key_range.left` greater than `split_key` will be split to the right group
+    /// 2. the sst containing `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.left`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`]
+    /// 3. currently only `vnode` 0 and `vnode` max is supported. (Due to the above rule, vnode max will be rewritten as `table_id` + 1, `vnode` 0)
     async fn split_compaction_group_impl(
         &self,
         parent_group_id: CompactionGroupId,
@@ -415,12 +421,11 @@ impl HummockManager {
             )));
         }
 
+        let split_key = group_split::build_split_key(table_id, vnode);
         let table_ids = member_table_ids
             .iter()
             .map(|table_id| table_id.table_id)
             .collect_vec();
-
-        let split_key = group_split::build_split_key(table_id, vnode);
         // avoid decode split_key when caller is aware of the table_id and vnode
         let (table_ids_left, table_ids_right) =
             group_split::split_table_ids_with_table_id_and_vnode(
@@ -429,7 +434,7 @@ impl HummockManager {
                 vnode.to_index(),
             );
         if table_ids_left.is_empty() || table_ids_right.is_empty() {
-            // not need to split
+            // not need to split group if all tables are in the same side
             if !table_ids_left.is_empty() {
                 result.push((parent_group_id, table_ids_left));
             }
@@ -478,7 +483,7 @@ impl HummockManager {
                         parent_group_id,
                         new_sst_start_id,
                         table_ids: vec![],
-                        version: CompatibilityVersion::NoMemberTableIds as i32,
+                        version: CompatibilityVersion::SplitGroupByTableId as i32, // for compatibility
                         split_key: Some(split_key.into()),
                     })],
                 },
@@ -554,6 +559,8 @@ impl HummockManager {
         Ok(result)
     }
 
+    /// Split `table_ids` to a dedicated compaction group.
+    /// Returns the compaction group id containing the `table_ids` and the mapping of compaction group id to table ids.
     pub async fn move_state_tables_to_dedicated_compaction_group(
         &self,
         parent_group_id: CompactionGroupId,
@@ -609,7 +616,7 @@ impl HummockManager {
             .split_compaction_group_impl(
                 parent_group_id,
                 *table_ids.first().unwrap(),
-                group_split::VNODE_SPLIT_TO_RIGHT,
+                VirtualNode::ZERO,
             )
             .await?;
         assert_eq!(2, result_vec.len());
@@ -626,11 +633,12 @@ impl HummockManager {
         }
 
         // split 2
+        // Use table_id + 1 as the split key to split the table_ids. See the example in L603 and the split rule in `split_compaction_group_impl`.
         let result_vec = self
             .split_compaction_group_impl(
                 target_compaction_group_id,
-                *table_ids.last().unwrap(),
-                group_split::VNODE_SPLIT_TO_LEFT,
+                *table_ids.last().unwrap() + 1,
+                VirtualNode::ZERO,
             )
             .await?;
         assert_eq!(2, result_vec.len());
@@ -645,7 +653,7 @@ impl HummockManager {
             cg_id_to_table_ids.insert(cg_id, table_ids);
         }
 
-        // partition_vnode_count only works inside a table, to avoid a lot of slicing sst, we only enable it in groups with high throughput and only one table.
+        // `partition_vnode_count` only works inside a table, to avoid a lot of slicing sst, we only enable it in groups with high throughput and only one table.
         // The target `table_ids` might be split to an existing group, so we need to try to update its config
         if table_ids.len() == 1 {
             // update compaction config for target_compaction_group_id

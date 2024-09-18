@@ -639,8 +639,7 @@ impl HummockVersion {
                         BTreeSet::from_iter(group_construct.table_ids.clone())
                     };
 
-                if group_construct.version >= CompatibilityVersion::SplitGroupByTable as _ {
-                    // split
+                if group_construct.version >= CompatibilityVersion::SplitGroupByTableId as _ {
                     let split_key = if group_construct.split_key.is_some() {
                         Some(Bytes::from(group_construct.split_key.clone().unwrap()))
                     } else {
@@ -653,6 +652,7 @@ impl HummockVersion {
                         split_key.clone(),
                     );
                 } else {
+                    // for backward-compatibility of previous hummock version delta
                     self.init_with_parent_group(
                         parent_group_id,
                         *compaction_group_id,
