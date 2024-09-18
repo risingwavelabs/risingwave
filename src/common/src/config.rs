@@ -2200,7 +2200,7 @@ pub mod default {
                 }
 
                 pub fn use_opendal() -> bool {
-                    false
+                    true
                 }
             }
         }
