@@ -27,9 +27,8 @@ const ROOT_TABLE_CREATE: &str = "create table t (v1 int);";
 const ROOT_MV: &str = "create materialized view m1 as select count(*) as c1 from t;";
 const CASCADE_MV: &str = "create materialized view m2 as select * from m1;";
 
-#[tokio::test]
-async fn test_singleton_migration() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+async fn test_singleton_migration_helper(configuration: Configuration) -> Result<()> {
+    let mut cluster = Cluster::start(configuration).await?;
     let mut session = cluster.start_session();
 
     session.run(ROOT_TABLE_CREATE).await?;
@@ -103,4 +102,14 @@ async fn test_singleton_migration() -> Result<()> {
         .assert_result_eq("20");
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_singleton_migration() -> Result<()> {
+    test_singleton_migration_helper(Configuration::for_scale()).await
+}
+
+#[tokio::test]
+async fn test_singleton_migration_for_no_shuffle() -> Result<()> {
+    test_singleton_migration_helper(Configuration::for_scale_no_shuffle()).await
 }
