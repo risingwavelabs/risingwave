@@ -90,16 +90,6 @@ pub async fn get_from_sstable_info(
             local_stats,
         )
     {
-        if !read_options.ignore_range_tombstone {
-            let delete_epoch = get_min_delete_range_epoch_from_sstable(&sstable, full_key.user_key);
-            if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
-                return Ok(Some((
-                    HummockValue::Delete,
-                    EpochWithGap::new_from_epoch(delete_epoch),
-                )));
-            }
-        }
-
         return Ok(None);
     }
 
@@ -113,17 +103,6 @@ pub async fn get_from_sstable_info(
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
-        if !read_options.ignore_range_tombstone {
-            let delete_epoch =
-                get_min_delete_range_epoch_from_sstable(iter.sst(), full_key.user_key);
-            if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
-                return Ok(Some((
-                    HummockValue::Delete,
-                    EpochWithGap::new_from_epoch(delete_epoch),
-                )));
-            }
-        }
-
         return Ok(None);
     }
 
@@ -131,16 +110,6 @@ pub async fn get_from_sstable_info(
     // or key next to it.
     let value = if iter.key().user_key == full_key.user_key {
         Some((iter.value().to_bytes(), iter.key().epoch_with_gap))
-    } else if !read_options.ignore_range_tombstone {
-        let delete_epoch = get_min_delete_range_epoch_from_sstable(iter.sst(), full_key.user_key);
-        if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
-            Some((
-                HummockValue::Delete,
-                EpochWithGap::new_from_epoch(delete_epoch),
-            ))
-        } else {
-            None
-        }
     } else {
         None
     };

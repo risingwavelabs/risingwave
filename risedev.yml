@@ -30,9 +30,16 @@ profile:
       # - use: aws-s3
       #   bucket: test-bucket
 
-      # if you want to enable etcd backend, uncomment the following lines.
+      # By default, the meta-backend is sqlite.
+      # To enable etcd backend, uncomment the following lines and set the meta-backend to etcd in 'meta-node'
       # - use: etcd
       #   unsafe-no-fsync: true
+
+      # To enable postgres backend, uncomment the following lines and set the meta-backend to postgres in 'meta-node'
+      # - use: postgres
+      #   port: 8432
+      #   user: postgres
+      #   database: metadata
 
       # If you want to enable metrics or tracing, uncomment the following lines.
       # - use: prometheus  # metrics
@@ -40,6 +47,8 @@ profile:
       # - use: grafana     # visualization
 
       - use: meta-node
+      #   - meta-backend: postgres
+      #   - meta-backend: etcd
       - use: compute-node
       - use: frontend
 
@@ -107,9 +116,12 @@ profile:
   full:
     steps:
       - use: minio
-      - use: etcd
+      - use: postgres
+        port: 8432
+        user: postgres
+        database: metadata
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: postgres
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -121,10 +133,13 @@ profile:
   standalone-full-peripherals:
     steps:
       - use: minio
-      - use: etcd
+      - use: postgres
+        port: 8432
+        user: postgres
+        database: metadata
       - use: meta-node
         user-managed: true
-        meta-backend: etcd
+        meta-backend: postgres
       - use: compute-node
         user-managed: true
       - use: frontend

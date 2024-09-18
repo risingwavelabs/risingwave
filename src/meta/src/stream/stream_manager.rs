@@ -846,7 +846,6 @@ mod tests {
                                 let mut guard = inner.actor_streams.lock().unwrap();
                                 let mut actor_ids = inner.actor_ids.lock().unwrap();
                                 for actor in req.actors_to_build {
-                                    let actor = actor.actor.as_ref().unwrap();
                                     assert!(actor_ids.insert(actor.actor_id));
                                     guard.insert(actor.get_actor_id(), actor.clone());
                                 }
