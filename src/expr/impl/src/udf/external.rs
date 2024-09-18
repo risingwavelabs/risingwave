@@ -164,6 +164,9 @@ impl UdfImpl for ExternalFunction {
     }
 }
 
+// TODO(rc): allow changing this in configuration
+const MAX_DECODING_MESSAGE_SIZE: usize = 20 << 20; // 20MB
+
 /// Get or create a client for the given UDF service.
 ///
 /// There is a global cache for clients, so that we can reuse the same client for the same service.
@@ -186,7 +189,10 @@ fn get_or_create_flight_client(link: &str) -> Result<Arc<Client>> {
         let client = Arc::new(tokio::task::block_in_place(|| {
             RUNTIME.block_on(async {
                 let channel = connect_tonic(link).await?;
-                Ok(Client::new(channel).await?) as Result<_>
+                Ok(Client::new(channel)
+                    .await?
+                    .max_decoding_message_size(MAX_DECODING_MESSAGE_SIZE))
+                    as Result<_>
             })
         })?);
         clients.insert(link.to_owned(), Arc::downgrade(&client));
