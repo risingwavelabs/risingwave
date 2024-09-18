@@ -947,16 +947,14 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table = StateTable::new_without_distribution(
+        StateTable::new_without_distribution(
             mem_state.clone(),
             TableId::new(table_id),
             column_descs,
             order_types.to_vec(),
             pk_indices.to_vec(),
         )
-        .await;
-
-        state_table
+        .await
     }
 
     async fn create_executor<const T: AsOfJoinTypePrimitive>(
