@@ -421,7 +421,7 @@ fn encode_field<D: MaybeData>(
             return no_match_err();
         }
         DataType::Map(_) => {
-            // TODO:
+            // TODO(map): support map
             return no_match_err();
         }
     };

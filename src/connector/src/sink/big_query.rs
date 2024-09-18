@@ -261,7 +261,9 @@ impl BigQuerySink {
             DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "Bigquery cannot support Int256"
             ))),
-            DataType::Map(_) => todo!(),
+            DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Bigquery cannot support Map"
+            ))),
         }
     }
 
@@ -311,7 +313,11 @@ impl BigQuerySink {
                     "Bigquery cannot support Int256"
                 )))
             }
-            DataType::Map(_) => todo!(),
+            DataType::Map(_) => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Bigquery cannot support Map"
+                )))
+            }
         };
         Ok(tfs)
     }
