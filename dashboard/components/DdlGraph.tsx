@@ -64,6 +64,8 @@ export default function DdlGraph({
       layoutDdlResult.set(ddlId, {
         width,
         height,
+        ddl_name: ddlBox.ddl_name,
+        schema_name: ddlBox.schema_name,
       })
       includedDdlIds.add(ddlId)
     }
@@ -126,7 +128,7 @@ export default function DdlGraph({
 
         text
           .attr("fill", "black")
-          .text(({ id }) => `Ddl ${id}`)
+          .text(({ ddl_name, schema_name  }) => `${schema_name}.${ddl_name}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
           .attr("dy", ({ height }) => height - ddlMarginY + 12)

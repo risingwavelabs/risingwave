@@ -43,7 +43,7 @@ import {
   StreamingJob,
   getFragmentVertexToRelationMap,
   getRelationDependencies,
-  getStreamingJobs,
+  getStreamingJobs, getSchemas,
 } from "../lib/api/streaming"
 import { DdlBox, FragmentBox } from "../lib/layout"
 import { TableFragments } from "../proto/gen/meta"
@@ -216,9 +216,8 @@ interface EmbeddedBackPressureInfo {
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: relationDeps } = useFetch(getRelationDependencies)
-  const { response: fragmentVertexToRelationMap } = useFetch(
-    getFragmentVertexToRelationMap
-  )
+  const { response: fragmentVertexToRelationMap } = useFetch(getFragmentVertexToRelationMap)
+  const { response: schemas } = useFetch(getSchemas)
 
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
 
@@ -226,15 +225,20 @@ export default function Streaming() {
 
   const ddlDependencyCallback = useCallback(() => {
     if (relationList) {
-      if (relationDeps) {
-        console.log(relationDeps)
-        const ddlDep = buildDdlDependencyAsEdges(relationList)
+      if (schemas) {
+        let relationListWithSchemaName = relationList.map((relation) => {
+            let schemaName = schemas.find(
+                (schema) => schema.id === relation.schemaId
+            )?.name
+            return { ...relation, schemaName }
+        })
+        const ddlDep = buildDdlDependencyAsEdges(relationListWithSchemaName)
         return {
           ddlDep,
         }
       }
     }
-  }, [relationList, relationDeps])
+  }, [relationList, schemas])
 
   useEffect(() => {
     if (relationList) {
