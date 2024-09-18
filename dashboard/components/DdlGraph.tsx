@@ -25,6 +25,7 @@ import {
   layoutItem,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
+import {relationIsStreamingJob} from "../lib/api/streaming";
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -32,6 +33,8 @@ type DdlLayout = {
   id: string
   width: number
   height: number
+  ddl_name: string,
+  schema_name: string,
 } & Position
 
 const nodeRadius = 12
@@ -79,7 +82,7 @@ export default function DdlGraph({
     )
     const ddlLayoutPosition = new Map<string, Position>()
     ddlLayout.forEach(({ id, x, y }: DdlBoxPosition) => {
-      ddlLayoutPosition.set(id, { x, y })
+      ddlLayoutPosition.set(id, { x: x + 50, y: y + 50 })
     })
 
     const layoutResult: DdlLayout[] = []
@@ -130,38 +133,24 @@ export default function DdlGraph({
           .attr("fill", "black")
           .text(({ ddl_name, schema_name  }) => `${schema_name}.${ddl_name}`)
           .attr("font-family", "inherit")
-          .attr("text-anchor", "end")
-          .attr("dy", ({ height }) => height - ddlMarginY + 12)
-          .attr("dx", ({ width }) => width - ddlMarginX)
-          .attr("fill", "black")
-          .attr("font-size", 12)
-
-        // Ddl text line 2 (actor ids)
-        let text2 = gSel.select<SVGTextElement>(".text-actor-id")
-        if (text2.empty()) {
-          text2 = gSel.append("text").attr("class", "text-actor-id")
-        }
-
-        text2
-          .attr("fill", "black")
-          .attr("font-family", "inherit")
-          .attr("text-anchor", "end")
-          .attr("dy", ({ height }) => height - ddlMarginY + 24)
-          .attr("dx", ({ width }) => width - ddlMarginX)
+          .attr("text-anchor", "middle")
+          .attr("dy", ({ height }) => ddlMarginY + 10)
           .attr("fill", "black")
           .attr("font-size", 12)
 
         // Ddl bounding box
-        let boundingBox = gSel.select<SVGRectElement>(".bounding-box")
-        if (boundingBox.empty()) {
-          boundingBox = gSel.append("rect").attr("class", "bounding-box")
+        let circle = gSel.select<SVGCircleElement>("circle")
+        if (circle.empty()) {
+          circle = gSel.append("circle")
         }
 
-        boundingBox
-          .attr("width", ({ width }) => width - ddlMarginX * 2)
-          .attr("height", ({ height }) => height - ddlMarginY * 2)
-          .attr("x", ddlMarginX)
-          .attr("y", ddlMarginY)
+        circle.attr("r", 20).attr("fill", (_) => {
+          const weight = "500"
+          return theme.colors.gray[weight]
+        })
+
+        circle
+          .attr("dy", 24)
           .attr("fill", "white")
           .attr("stroke-width", 1)
           .attr("rx", 5)
@@ -309,5 +298,5 @@ function backPressureWidth(value: number) {
   value = Math.max(value, 0)
   value = Math.min(value, 100)
 
-  return 30 * (value / 100) + 2
+  return 15 * (value / 100) + 2
 }

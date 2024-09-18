@@ -163,8 +163,6 @@ export default function Streaming() {
   const { response: fragmentVertexToRelationMap } = useFetch(getFragmentVertexToRelationMap)
   const { response: schemas } = useFetch(getSchemas)
 
-  const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
-
   const toast = useErrorToast()
 
   const ddlDependencyCallback = useCallback(() => {
@@ -184,18 +182,7 @@ export default function Streaming() {
     }
   }, [relationList, schemas])
 
-  useEffect(() => {
-    if (relationList) {
-      if (!relationId) {
-        if (relationList.length > 0) {
-          setRelationId(relationList[0].id)
-        }
-      }
-    }
-  }, [relationId, relationList, setRelationId])
-
   const ddlDependency = ddlDependencyCallback()?.ddlDep
-  console.log("ddlDependency: ", ddlDependency)
 
   const [backPressureDataSource, setBackPressureDataSource] =
     useState<BackPressureDataSource>("Embedded")
@@ -257,7 +244,6 @@ export default function Streaming() {
     }
     let inMap = fragmentVertexToRelationMap.inMap
     let outMap = fragmentVertexToRelationMap.outMap
-    console.log("fragmentVertexToRelationMap", fragmentVertexToRelationMap)
     if (promethusMetrics || embeddedBackPressureInfo) {
       let map = new Map()
 
@@ -297,7 +283,6 @@ export default function Streaming() {
           }
         }
       }
-      console.log("backpressure map: ", map)
       return map
     }
   }, [

@@ -49,7 +49,7 @@ For example:
 ./risedev psql -c 'CREATE TABLE s1.t1 (v1 int);'  
 ./risedev psql -c 'CREATE MATERIALIZED VIEW s1.mv1 AS SELECT s1.t1.* FROM s1.t1 join mv on s1.t1.v1 = mv.id;'
 
-./risedev psql -c 'INSERT INTO dimension select 0 from generate_series(1, 10);'
+./risedev psql -c 'INSERT INTO dimension select 0 from generate_series(1, 20);'
 ```
 
 Install dependencies and start the development server.
