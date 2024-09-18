@@ -67,7 +67,15 @@ pub mod group_split {
     /// 3. Due to the above rule, `vnode` max will be rewritten as `table_id` + 1, vnode 0
 
     // By default, the split key is constructed with vnode = 0 and epoch = 0, so that we can split table_id to the right group
-    pub fn build_split_key(mut table_id: StateTableId, mut vnode: VirtualNode) -> Bytes {
+    pub fn build_split_key(table_id: StateTableId, vnode: VirtualNode) -> Bytes {
+        build_split_full_key(table_id, vnode).encode().into()
+    }
+
+    /// generate a full key for convenience to get the `table_id` and `vnode`
+    pub fn build_split_full_key(
+        mut table_id: StateTableId,
+        mut vnode: VirtualNode,
+    ) -> FullKey<Vec<u8>> {
         if VirtualNode::MAX == vnode {
             // Modify `table_id` to `next_table_id` to satisfy the `split_to_right`` rule, so that the `table_id`` originally passed in will be split to left.
             table_id = table_id.strict_add(1);
@@ -76,11 +84,9 @@ pub mod group_split {
 
         FullKey::new(
             TableId::from(table_id),
-            TableKey(vnode.to_be_bytes()),
+            TableKey(vnode.to_be_bytes().to_vec()),
             HummockEpoch::MIN,
         )
-        .encode()
-        .into()
     }
 
     #[derive(Debug, PartialEq, Clone)]

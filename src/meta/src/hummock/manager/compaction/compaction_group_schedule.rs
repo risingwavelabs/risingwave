@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -421,7 +422,9 @@ impl HummockManager {
             )));
         }
 
-        let split_key = group_split::build_split_key(table_id, vnode);
+        let split_full_key = group_split::build_split_full_key(table_id, vnode);
+
+        // change to vec for partition
         let table_ids = member_table_ids
             .iter()
             .map(|table_id| table_id.table_id)
@@ -430,8 +433,8 @@ impl HummockManager {
         let (table_ids_left, table_ids_right) =
             group_split::split_table_ids_with_table_id_and_vnode(
                 &table_ids,
-                table_id,
-                vnode.to_index(),
+                split_full_key.user_key.table_id.table_id(),
+                split_full_key.user_key.get_vnode_id(),
             );
         if table_ids_left.is_empty() || table_ids_right.is_empty() {
             // not need to split group if all tables are in the same side
@@ -446,6 +449,8 @@ impl HummockManager {
         }
 
         result.push((parent_group_id, table_ids_left));
+
+        let split_key: Bytes = split_full_key.encode().into();
 
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
@@ -605,7 +610,6 @@ impl HummockManager {
         // split key
         // 1. table_id = 3, vnode = 0, epoch = 0
         // 2. table_id = 7, vnode = 0, epoch = 0
-        let table_ids = table_ids.iter().cloned().unique().collect_vec();
 
         // The new compaction group id is always generate on the right side
         // Hence, we return the first compaction group id as the result
@@ -633,12 +637,12 @@ impl HummockManager {
         }
 
         // split 2
-        // Use table_id + 1 as the split key to split the table_ids. See the example in L603 and the split rule in `split_compaction_group_impl`.
+        // See the example in L603 and the split rule in `split_compaction_group_impl`.
         let result_vec = self
             .split_compaction_group_impl(
                 target_compaction_group_id,
-                *table_ids.last().unwrap() + 1,
-                VirtualNode::ZERO,
+                *table_ids.last().unwrap(),
+                VirtualNode::MAX,
             )
             .await?;
         assert!(result_vec.len() <= 2);
