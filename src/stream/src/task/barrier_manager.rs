@@ -62,7 +62,7 @@ use risingwave_pb::stream_service::{
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Barrier, BarrierInner, DispatcherBarrier, Mutation, StreamExecutorError};
+use crate::executor::{Barrier, BarrierInner, StreamExecutorError};
 use crate::task::barrier_manager::managed_state::ManagedBarrierStateDebugInfo;
 use crate::task::barrier_manager::progress::BackfillState;
 
@@ -177,8 +177,6 @@ impl ControlStreamHandle {
     }
 }
 
-pub(crate) type SubscribeMutationItem = (u64, Option<Arc<Mutation>>);
-
 pub(super) enum LocalBarrierEvent {
     ReportActorCollected {
         actor_id: ActorId,
@@ -188,11 +186,6 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         actor: ActorId,
         state: BackfillState,
-    },
-    SubscribeBarrierMutation {
-        actor_id: ActorId,
-        epoch: EpochPair,
-        mutation_sender: mpsc::UnboundedSender<SubscribeMutationItem>,
     },
     RegisterBarrierSender {
         actor_id: ActorId,
@@ -413,14 +406,6 @@ impl LocalBarrierWorker {
                 state,
             } => {
                 self.update_create_mview_progress(epoch, actor, state);
-            }
-            LocalBarrierEvent::SubscribeBarrierMutation {
-                actor_id,
-                epoch,
-                mutation_sender,
-            } => {
-                self.state
-                    .subscribe_actor_mutation(actor_id, epoch.prev, mutation_sender);
             }
             LocalBarrierEvent::RegisterBarrierSender {
                 actor_id,
@@ -765,21 +750,6 @@ impl LocalBarrierManager {
             .send((actor_id, err.into_unexpected_exit(actor_id)));
     }
 
-    /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
-    pub fn subscribe_barrier_mutation(
-        &self,
-        actor_id: ActorId,
-        first_barrier: &DispatcherBarrier,
-    ) -> mpsc::UnboundedReceiver<SubscribeMutationItem> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        self.send_event(LocalBarrierEvent::SubscribeBarrierMutation {
-            actor_id,
-            epoch: first_barrier.epoch,
-            mutation_sender: tx,
-        });
-        rx
-    }
-
     pub fn subscribe_barrier(&self, actor_id: ActorId) -> UnboundedReceiver<Barrier> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.send_event(LocalBarrierEvent::RegisterBarrierSender {
@@ -981,7 +951,6 @@ pub(crate) mod barrier_test_utils {
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: u32::MAX,
-                            actor_ids_to_pre_sync_barrier_mutation: vec![],
                             broadcast_info: vec![],
                             actors_to_build: vec![],
                             subscriptions_to_add: vec![],
