@@ -298,8 +298,8 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    #[serde(default = "default::meta::periodic_split_compact_group_interval_sec")]
-    pub periodic_split_compact_group_interval_sec: u64,
+    #[serde(default = "default::meta::periodic_scheduling_compaction_group_interval_sec")]
+    pub periodic_scheduling_compaction_group_interval_sec: u64,
 
     #[serde(default = "default::meta::move_table_size_limit")]
     pub move_table_size_limit: u64,
@@ -308,6 +308,7 @@ pub struct MetaConfig {
     pub split_group_size_limit: u64,
 
     #[serde(default = "default::meta::cut_table_size_limit")]
+    #[deprecated]
     pub cut_table_size_limit: u64,
 
     #[serde(default, flatten)]
@@ -1399,7 +1400,7 @@ pub mod default {
             1800 // 30mi
         }
 
-        pub fn periodic_split_compact_group_interval_sec() -> u64 {
+        pub fn periodic_scheduling_compaction_group_interval_sec() -> u64 {
             10 // 10s
         }
 
