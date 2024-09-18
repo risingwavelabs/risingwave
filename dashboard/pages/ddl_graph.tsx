@@ -50,21 +50,8 @@ import { TableFragments } from "../proto/gen/meta"
 import { BackPressureInfo } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
-interface DispatcherNode {
-  [actorId: number]: Dispatcher[]
-}
-
 // Refresh interval (ms) for back pressure stats
 const INTERVAL_MS = 5000
-
-/** Associated data of each plan node in the fragment graph, including the dispatchers. */
-export interface PlanNodeDatum {
-  name: string
-  children?: PlanNodeDatum[]
-  operatorId: string | number
-  node: StreamNode | DispatcherNode
-  actorIds?: string[]
-}
 
 const SampleDdlDependencyGraph: DdlBox[] = [
   {
@@ -128,48 +115,6 @@ function findMergeNodes(root: StreamNode): MergeNode[] {
   return Array.from(mergeNodes)
 }
 
-function buildFragmentDependencyAsEdges(
-  fragments: TableFragments
-): FragmentBox[] {
-  const nodes: FragmentBox[] = []
-  const actorToFragmentMapping = new Map<number, number>()
-  for (const fragmentId in fragments.fragments) {
-    const fragment = fragments.fragments[fragmentId]
-    for (const actor of fragment.actors) {
-      actorToFragmentMapping.set(actor.actorId, actor.fragmentId)
-    }
-  }
-  for (const id in fragments.fragments) {
-    const fragment = fragments.fragments[id]
-    const parentIds = new Set<number>()
-    const externalParentIds = new Set<number>()
-
-    for (const actor of fragment.actors) {
-      for (const upstreamActorId of actor.upstreamActorId) {
-        const upstreamFragmentId = actorToFragmentMapping.get(upstreamActorId)
-        if (upstreamFragmentId) {
-          parentIds.add(upstreamFragmentId)
-        } else {
-          for (const m of findMergeNodes(actor.nodes!)) {
-            externalParentIds.add(m.upstreamFragmentId)
-          }
-        }
-      }
-    }
-    nodes.push({
-      id: fragment.fragmentId.toString(),
-      name: `Fragment ${fragment.fragmentId}`,
-      parentIds: Array.from(parentIds).map((x) => x.toString()),
-      externalParentIds: Array.from(externalParentIds).map((x) => x.toString()),
-      width: 0,
-      height: 0,
-      order: fragment.fragmentId,
-      fragment,
-    })
-  }
-  return nodes
-}
-
 function buildDdlDependencyAsEdges(relations: StreamingJob[]): DdlBox[] {
   // Filter out non-streaming relations, e.g. source, views.
   let relation_ids = new Set<number>()
@@ -215,7 +160,6 @@ interface EmbeddedBackPressureInfo {
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
-  const { response: relationDeps } = useFetch(getRelationDependencies)
   const { response: fragmentVertexToRelationMap } = useFetch(getFragmentVertexToRelationMap)
   const { response: schemas } = useFetch(getSchemas)
 
@@ -371,42 +315,6 @@ export default function Streaming() {
           height="full"
         >
           <FormControl>
-            <FormLabel>Relations</FormLabel>
-            <Input
-              list="relationList"
-              spellCheck={false}
-              onChange={(event) => {
-                const id = relationList?.find(
-                  (x) => x.name == event.target.value
-                )?.id
-                if (id) {
-                  setRelationId(id)
-                }
-              }}
-              placeholder="Search..."
-              mb={2}
-            ></Input>
-            <datalist id="relationList">
-              {relationList &&
-                relationList.map((r) => (
-                  <option value={r.name} key={r.id}>
-                    ({r.id}) {r.name}
-                  </option>
-                ))}
-            </datalist>
-            <Select
-              value={relationId ?? undefined}
-              onChange={(event) => setRelationId(parseInt(event.target.value))}
-            >
-              {relationList &&
-                relationList.map((r) => (
-                  <option value={r.id} key={r.name}>
-                    ({r.id}) {r.name}
-                  </option>
-                ))}
-            </Select>
-          </FormControl>
-          <FormControl>
             <FormLabel>Back Pressure Data Source</FormLabel>
             <Select
               value={backPressureDataSource}
@@ -433,7 +341,7 @@ export default function Streaming() {
           overflowX="scroll"
           overflowY="scroll"
         >
-          <Text fontWeight="semibold">Fragment Graph</Text>
+          <Text fontWeight="semibold">Ddl Graph</Text>
           {ddlDependency && (
             <DdlGraph
               ddlDependency={ddlDependency}

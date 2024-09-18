@@ -263,34 +263,6 @@ export default function DdlGraph({
 
   return (
     <Fragment>
-      <Modal isOpen={isOpen} onClose={onClose} size="5xl">
-        <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>
-            {currentStreamNode?.operatorId} - {currentStreamNode?.name}
-          </ModalHeader>
-          <ModalCloseButton />
-          <ModalBody>
-            {isOpen && currentStreamNode?.node && (
-              <ReactJson
-                shouldCollapse={({ name }) =>
-                  name === "input" || name === "fields" || name === "streamKey"
-                } // collapse top-level fields for better readability
-                src={currentStreamNode.node}
-                collapsed={3}
-                name={null}
-                displayDataTypes={false}
-              />
-            )}
-          </ModalBody>
-
-          <ModalFooter>
-            <Button colorScheme="blue" mr={3} onClick={onClose}>
-              Close
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
       <svg ref={svgRef} width={`${svgWidth}px`} height={`${svgHeight}px`}>
         <g className="ddl-edges" />
         <g className="ddls" />
