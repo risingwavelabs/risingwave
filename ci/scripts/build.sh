@@ -44,6 +44,8 @@ if [[ "$profile" == "ci-dev" ]]; then
     RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
 else
     RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
+    export OPENSSL_LIB_DIR=/usr/local/lib/
+    export OPENSSL_INCLUDE_DIR=/usr/local/include
     export OPENSSL_STATIC=1
 fi
 
@@ -61,6 +63,9 @@ cargo build \
 
 
 artifacts=(risingwave sqlsmith compaction-test risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test)
+
+echo "--- Show openssl libs via pkg-config"
+pkg-config --libs openssl
 
 echo "--- Show link info"
 ldd target/"$profile"/risingwave
