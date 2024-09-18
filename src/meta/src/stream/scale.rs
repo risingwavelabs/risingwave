@@ -1587,7 +1587,9 @@ impl ScaleController {
 
             for (worker_id, n) in decreased_actor_count {
                 if let Some(actor_ids) = worker_to_actors.get(worker_id) {
-                    assert!(actor_ids.len() >= n);
+                    if actor_ids.len() < n {
+                        bail!("plan illegal, for fragment {}, worker {} only has {} actors, but needs to reduce {}",fragment_id, worker_id, actor_ids.len(), n);
+                    }
 
                     let removed_actors: Vec<_> = actor_ids
                         .iter()
