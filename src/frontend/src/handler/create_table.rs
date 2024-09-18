@@ -1357,12 +1357,12 @@ pub async fn handle_create_table(
                 bail!("To create an iceberg engine table, RW_SQL_DATABASE needed to be set");
             };
 
-            let Ok(meta_store_user) = std::env::var("RW_POSTGRES_USERNAME") else {
-                bail!("To create an iceberg engine table, RW_POSTGRES_USERNAME needed to be set");
+            let Ok(meta_store_user) = std::env::var("RW_SQL_USERNAME") else {
+                bail!("To create an iceberg engine table, RW_SQL_USERNAME needed to be set");
             };
 
-            let Ok(meta_store_password) = std::env::var("RW_POSTGRES_PASSWORD") else {
-                bail!("To create an iceberg engine table, RW_POSTGRES_PASSWORD needed to be set");
+            let Ok(meta_store_password) = std::env::var("RW_SQL_PASSWORD") else {
+                bail!("To create an iceberg engine table, RW_SQL_PASSWORD needed to be set");
             };
 
             let rw_db_name = session
