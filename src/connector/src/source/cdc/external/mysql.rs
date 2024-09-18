@@ -25,15 +25,16 @@ use mysql_common::value::Value;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, OFFSET_COLUMN_NAME};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use sea_schema::mysql::def::{ColumnKey, ColumnType};
+use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
 use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
 use serde_derive::{Deserialize, Serialize};
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::MySqlPool;
+use thiserror_ext::AsReport;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::cdc::external::{
@@ -112,11 +113,38 @@ impl MySqlExternalTable {
             let data_type = mysql_type_to_rw_type(&col.col_type)?;
             // column name in mysql is case-insensitive, convert to lowercase
             let col_name = col.name.to_lowercase();
-            column_descs.push(ColumnDesc::named(
-                col_name.clone(),
-                ColumnId::placeholder(),
-                data_type,
-            ));
+            let column_desc = if let Some(default) = col.default {
+                let snapshot_value = match default {
+                    ColumnDefault::Null => None,
+                    ColumnDefault::Int(val) => Some(ScalarImpl::Int64(val)),
+                    ColumnDefault::Real(val) => Some(ScalarImpl::Float64(val.into())),
+                    ColumnDefault::String(val) => Some(ScalarImpl::Utf8(val.into())),
+                    ColumnDefault::CustomExpr(expr_str) => {
+                        match ScalarImpl::from_text(expr_str.as_str(), &data_type) {
+                            Ok(scalar) => Some(scalar),
+                            Err(err) => {
+                                tracing::warn!(error=%err.as_report(), "failed to parse mysql default value expression, only constant is supported");
+                                None
+                            }
+                        }
+                    }
+                    ColumnDefault::CurrentTimestamp => {
+                        tracing::warn!("MySQL CURRENT_TIMESTAMP default value not supported");
+                        None
+                    }
+                };
+
+                ColumnDesc::named_with_default_value(
+                    col_name.clone(),
+                    ColumnId::placeholder(),
+                    data_type.clone(),
+                    snapshot_value,
+                )
+            } else {
+                ColumnDesc::named(col_name.clone(), ColumnId::placeholder(), data_type)
+            };
+
+            column_descs.push(column_desc);
             if matches!(col.key, ColumnKey::Primary) {
                 pk_names.push(col_name);
             }
