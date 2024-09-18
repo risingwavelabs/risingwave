@@ -27,6 +27,7 @@ use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, LocalSstableInfo};
 
@@ -110,7 +111,7 @@ impl BlockStreamIterator {
         let block_stream = self
             .sstable_store
             .get_stream_for_blocks(
-                self.sstable_info.object_id,
+                self.sstable_info.object_id(),
                 &self.sstable.meta.block_metas[self.next_block_index..],
             )
             .verbose_instrument_await("stream_iter_get_stream")
@@ -163,10 +164,10 @@ impl BlockStreamIterator {
                         self.io_retry_times,
                         format!(
                             "object_id={}, sst_id={}, meta_offset={}, table_ids={:?}",
-                            self.sstable_info.object_id,
-                            self.sstable_info.sst_id,
-                            self.sstable_info.meta_offset,
-                            self.sstable_info.table_ids
+                            self.sstable_info.object_id(),
+                            self.sstable_info.sst_id(),
+                            self.sstable_info.meta_offset(),
+                            self.sstable_info.table_ids()
                         )
                     );
                 }
@@ -578,10 +579,10 @@ impl CompactorRunner {
         }
         let mut total_read_bytes = 0;
         for sst in &self.left.sstables {
-            total_read_bytes += sst.sst_size;
+            total_read_bytes += sst.sst_size();
         }
         for sst in &self.right.sstables {
-            total_read_bytes += sst.sst_size;
+            total_read_bytes += sst.sst_size();
         }
         self.metrics
             .compact_fast_runner_bytes

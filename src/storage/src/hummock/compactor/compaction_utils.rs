@@ -26,6 +26,7 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, KeyComparator};
 use risingwave_pb::hummock::compact_task::PbTaskType;
@@ -188,7 +189,7 @@ fn generate_splits_fast(
     );
     let mut indexes = vec![];
     for sst in sstable_infos {
-        let key_range = &sst.key_range;
+        let key_range = sst.key_range();
         indexes.push(
             FullKey {
                 user_key: FullKey::decode(&key_range.left).user_key,
@@ -312,7 +313,7 @@ pub fn estimate_task_output_capacity(context: CompactorContext, task: &CompactTa
         .input_ssts
         .iter()
         .flat_map(|level| level.table_infos.iter())
-        .map(|table| table.uncompressed_file_size)
+        .map(|table| table.uncompressed_file_size())
         .sum::<u64>();
 
     let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
@@ -333,7 +334,7 @@ pub async fn check_compaction_result(
         .input_ssts
         .iter()
         .flat_map(|level| level.table_infos.iter())
-        .flat_map(|sst| sst.table_ids.clone())
+        .flat_map(|sst| sst.table_ids())
         .collect_vec();
     compact_table_ids.sort();
     compact_table_ids.dedup();
@@ -489,7 +490,7 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
         .iter()
         .flat_map(|level| level.table_infos.iter())
         .filter(|table_info| {
-            let table_ids = &table_info.table_ids;
+            let table_ids = table_info.table_ids();
             table_ids
                 .iter()
                 .any(|table_id| compact_task.existing_table_ids.contains(table_id))
@@ -498,27 +499,27 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
         .collect_vec();
     let compaction_size = sstable_infos
         .iter()
-        .map(|table_info| table_info.sst_size)
+        .map(|table_info| table_info.sst_size())
         .sum::<u64>();
 
     let all_ssts_are_blocked_filter = sstable_infos
         .iter()
-        .all(|table_info| table_info.bloom_filter_kind == BloomFilterType::Blocked);
+        .all(|table_info| table_info.bloom_filter_kind() == BloomFilterType::Blocked);
 
     let delete_key_count = sstable_infos
         .iter()
-        .map(|table_info| table_info.stale_key_count + table_info.range_tombstone_count)
+        .map(|table_info| table_info.stale_key_count() + table_info.range_tombstone_count())
         .sum::<u64>();
     let total_key_count = sstable_infos
         .iter()
-        .map(|table_info| table_info.total_key_count)
+        .map(|table_info| table_info.total_key_count())
         .sum::<u64>();
 
     let has_tombstone = compact_task
         .input_ssts
         .iter()
         .flat_map(|level| level.table_infos.iter())
-        .any(|sst| sst.range_tombstone_count > 0);
+        .any(|sst| sst.range_tombstone_count() > 0);
     let has_ttl = compact_task
         .table_options
         .iter()
@@ -528,14 +529,14 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
         .input_ssts
         .iter()
         .flat_map(|level| level.table_infos.iter())
-        .any(|sst| sst.sst_id != sst.object_id);
+        .any(|sst| sst.sst_id() != sst.object_id());
 
     let compact_table_ids: HashSet<u32> = HashSet::from_iter(
         compact_task
             .input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .flat_map(|sst| sst.table_ids.clone()),
+            .flat_map(|sst| sst.table_ids().iter().copied()),
     );
     let single_table = compact_table_ids.len() == 1;
 
@@ -563,7 +564,7 @@ pub async fn generate_splits_for_task(
         .iter()
         .flat_map(|level| level.table_infos.iter())
         .filter(|table_info| {
-            let table_ids = &table_info.table_ids;
+            let table_ids = table_info.table_ids();
             table_ids
                 .iter()
                 .any(|table_id| compact_task.existing_table_ids.contains(table_id))
@@ -572,7 +573,7 @@ pub async fn generate_splits_for_task(
         .collect_vec();
     let compaction_size = sstable_infos
         .iter()
-        .map(|table_info| table_info.sst_size)
+        .map(|table_info| table_info.sst_size())
         .sum::<u64>();
 
     if !optimize_by_copy_block {
@@ -609,7 +610,7 @@ pub fn metrics_report_for_task(compact_task: &CompactTask, context: &CompactorCo
         .collect_vec();
     let select_size = select_table_infos
         .iter()
-        .map(|table| table.sst_size)
+        .map(|table| table.sst_size())
         .sum::<u64>();
     context
         .compactor_metrics
@@ -622,7 +623,7 @@ pub fn metrics_report_for_task(compact_task: &CompactTask, context: &CompactorCo
         .with_label_values(&[&group_label, &cur_level_label])
         .inc_by(select_table_infos.len() as u64);
 
-    let target_level_read_bytes = target_table_infos.iter().map(|t| t.sst_size).sum::<u64>();
+    let target_level_read_bytes = target_table_infos.iter().map(|t| t.sst_size()).sum::<u64>();
     let next_level_label = compact_task.target_level.to_string();
     context
         .compactor_metrics
@@ -648,7 +649,7 @@ pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &Compacto
         .iter()
         .flat_map(|level| level.table_infos.iter())
         .filter(|table_info| {
-            let table_ids = &table_info.table_ids;
+            let table_ids = table_info.table_ids();
             table_ids
                 .iter()
                 .any(|table_id| compact_task.existing_table_ids.contains(table_id))
@@ -657,7 +658,7 @@ pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &Compacto
         .collect_vec();
     let compaction_size = sstable_infos
         .iter()
-        .map(|table_info| table_info.sst_size)
+        .map(|table_info| table_info.sst_size())
         .sum::<u64>();
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     calculate_task_parallelism_impl(

@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::sstable_info_ref::HummockVersionType;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{PbHummockVersion, StateTableInfoDelta};
 use spin::Mutex;
@@ -88,8 +88,8 @@ impl HummockUploader {
     }
 }
 
-pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
-    let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
+pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersionType {
+    let mut version = HummockVersionType::from_persisted_protobuf(&PbHummockVersion {
         id: epoch,
         max_committed_epoch: epoch,
         ..Default::default()

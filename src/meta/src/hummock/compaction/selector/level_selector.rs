@@ -475,6 +475,7 @@ pub mod tests {
     use itertools::Itertools;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_hummock_sdk::level::Levels;
+    use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
 
@@ -528,7 +529,7 @@ pub mod tests {
         levels.levels[3].total_file_size = levels.levels[3]
             .table_infos
             .iter()
-            .map(|sst| sst.sst_size)
+            .map(|sst| sst.sst_size())
             .sum::<u64>();
 
         let ctx = selector.calculate_level_base_size(&levels);
@@ -555,7 +556,7 @@ pub mod tests {
         levels.levels[0].total_file_size = levels.levels[0]
             .table_infos
             .iter()
-            .map(|sst| sst.sst_size)
+            .map(|sst| sst.sst_size())
             .sum::<u64>();
 
         let ctx = selector.calculate_level_base_size(&levels);
@@ -673,7 +674,7 @@ pub mod tests {
             compaction.input.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|sst| sst.sst_id)
+                .map(|sst| sst.sst_id())
                 .collect_vec(),
             vec![5]
         );
@@ -681,7 +682,7 @@ pub mod tests {
             compaction.input.input_levels[1]
                 .table_infos
                 .iter()
-                .map(|sst| sst.sst_id)
+                .map(|sst| sst.sst_id())
                 .collect_vec(),
             vec![10]
         );

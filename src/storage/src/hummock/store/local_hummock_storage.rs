@@ -24,7 +24,7 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoType;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tracing::{warn, Instrument};
 
@@ -888,7 +888,7 @@ impl IteratorFactory for ForwardIteratorFactory {
 
     fn add_concat_sst_iter(
         &mut self,
-        tables: Vec<SstableInfo>,
+        tables: Vec<SstableInfoType>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
     ) {
@@ -957,7 +957,7 @@ impl IteratorFactory for BackwardIteratorFactory {
 
     fn add_concat_sst_iter(
         &mut self,
-        mut tables: Vec<SstableInfo>,
+        mut tables: Vec<SstableInfoType>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
     ) {

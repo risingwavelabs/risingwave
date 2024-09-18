@@ -22,6 +22,7 @@ use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_hummock_sdk::level::Level;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::event_log::Event;
@@ -475,16 +476,16 @@ impl DiagnoseCommand {
                     let mut visit_level = |level: &Level| {
                         sst_num += level.table_infos.len();
                         sst_total_file_size +=
-                            level.table_infos.iter().map(|t| t.sst_size).sum::<u64>();
+                            level.table_infos.iter().map(|t| t.sst_size()).sum::<u64>();
                         for sst in &level.table_infos {
-                            if sst.total_key_count == 0 {
+                            if sst.total_key_count() == 0 {
                                 continue;
                             }
                             let tombstone_delete_ratio =
-                                sst.stale_key_count * 10000 / sst.total_key_count;
+                                sst.stale_key_count() * 10000 / sst.total_key_count();
                             let e = SstableSort {
                                 compaction_group_id: compaction_group.group_id,
-                                sst_id: sst.sst_id,
+                                sst_id: sst.sst_id(),
                                 delete_ratio: tombstone_delete_ratio,
                             };
                             top_k_sstables(top_k, &mut top_tombstone_delete_sst, e);

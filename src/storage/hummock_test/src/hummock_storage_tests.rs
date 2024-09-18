@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
@@ -2567,10 +2568,10 @@ async fn test_commit_multi_epoch() {
             manager
                 .commit_epoch(CommitEpochInfo {
                     new_table_watermarks: Default::default(),
-                    sst_to_context: context_id_map(&[sst.object_id]),
+                    sst_to_context: context_id_map(&[sst.object_id()]),
                     sstables: vec![LocalSstableInfo {
                         table_stats: sst
-                            .table_ids
+                            .table_ids()
                             .iter()
                             .map(|&table_id| {
                                 (
@@ -2628,7 +2629,10 @@ async fn test_commit_multi_epoch() {
         let sub_level = &sub_levels[0];
         assert_eq!(sub_level.sub_level_id, epoch1);
         assert_eq!(sub_level.table_infos.len(), 1);
-        assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch1.object_id);
+        assert_eq!(
+            sub_level.table_infos[0].object_id(),
+            sst1_epoch1.object_id()
+        );
 
         assert_eq!(version.visible_table_committed_epoch(), epoch1);
 
@@ -2677,11 +2681,17 @@ async fn test_commit_multi_epoch() {
         let sub_level = &sub_levels[0];
         assert_eq!(sub_level.sub_level_id, epoch1);
         assert_eq!(sub_level.table_infos.len(), 1);
-        assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch1.object_id);
+        assert_eq!(
+            sub_level.table_infos[0].object_id(),
+            sst1_epoch1.object_id()
+        );
         let sub_level = &sub_levels[1];
         assert_eq!(sub_level.sub_level_id, epoch2);
         assert_eq!(sub_level.table_infos.len(), 1);
-        assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch2.object_id);
+        assert_eq!(
+            sub_level.table_infos[0].object_id(),
+            sst1_epoch2.object_id()
+        );
 
         assert_eq!(version.visible_table_committed_epoch(), epoch2);
 
@@ -2732,7 +2742,10 @@ async fn test_commit_multi_epoch() {
         let sub_level1 = &sub_levels[0];
         assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
-        assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
+        assert_eq!(
+            sub_level1.table_infos[0].object_id(),
+            sst2_epoch1.object_id()
+        );
 
         assert_eq!(version.visible_table_committed_epoch(), epoch2);
 
@@ -2770,11 +2783,17 @@ async fn test_commit_multi_epoch() {
         let sub_level1 = &sub_levels[0];
         assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
-        assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
+        assert_eq!(
+            sub_level1.table_infos[0].object_id(),
+            sst2_epoch1.object_id()
+        );
         let sub_level2 = &sub_levels[1];
         assert_eq!(sub_level2.sub_level_id, epoch2);
         assert_eq!(sub_level2.table_infos.len(), 1);
-        assert_eq!(sub_level2.table_infos[0].object_id, sst2_epoch2.object_id);
+        assert_eq!(
+            sub_level2.table_infos[0].object_id(),
+            sst2_epoch2.object_id()
+        );
 
         assert_eq!(version.visible_table_committed_epoch(), epoch2);
 
@@ -2814,15 +2833,24 @@ async fn test_commit_multi_epoch() {
         let sub_level1 = &sub_levels[0];
         assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
-        assert_eq!(sub_level1.table_infos[0].object_id, sst1_epoch1.object_id);
+        assert_eq!(
+            sub_level1.table_infos[0].object_id(),
+            sst1_epoch1.object_id()
+        );
         let sub_level2 = &sub_levels[1];
         assert_eq!(sub_level2.sub_level_id, epoch2);
         assert_eq!(sub_level2.table_infos.len(), 1);
-        assert_eq!(sub_level2.table_infos[0].object_id, sst1_epoch2.object_id);
+        assert_eq!(
+            sub_level2.table_infos[0].object_id(),
+            sst1_epoch2.object_id()
+        );
         let sub_level3 = &sub_levels[2];
         assert_eq!(sub_level3.sub_level_id, epoch3);
         assert_eq!(sub_level3.table_infos.len(), 1);
-        assert_eq!(sub_level3.table_infos[0].object_id, sst_epoch3.object_id);
+        assert_eq!(
+            sub_level3.table_infos[0].object_id(),
+            sst_epoch3.object_id()
+        );
 
         let new_cg = version.levels.get(&new_cg_id).unwrap();
         let sub_levels = &new_cg.l0.sub_levels;
@@ -2830,15 +2858,24 @@ async fn test_commit_multi_epoch() {
         let sub_level1 = &sub_levels[0];
         assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
-        assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
+        assert_eq!(
+            sub_level1.table_infos[0].object_id(),
+            sst2_epoch1.object_id()
+        );
         let sub_level2 = &sub_levels[1];
         assert_eq!(sub_level2.sub_level_id, epoch2);
         assert_eq!(sub_level2.table_infos.len(), 1);
-        assert_eq!(sub_level2.table_infos[0].object_id, sst2_epoch2.object_id);
+        assert_eq!(
+            sub_level2.table_infos[0].object_id(),
+            sst2_epoch2.object_id()
+        );
         let sub_level3 = &sub_levels[1];
         assert_eq!(sub_level3.sub_level_id, epoch2);
         assert_eq!(sub_level3.table_infos.len(), 1);
-        assert_eq!(sub_level3.table_infos[0].object_id, sst2_epoch2.object_id);
+        assert_eq!(
+            sub_level3.table_infos[0].object_id(),
+            sst2_epoch2.object_id()
+        );
 
         assert_eq!(version.visible_table_committed_epoch(), epoch3);
 

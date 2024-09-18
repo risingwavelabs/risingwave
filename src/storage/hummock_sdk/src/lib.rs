@@ -47,6 +47,7 @@ pub mod key_range;
 pub mod level;
 pub mod prost_key_range;
 pub mod sstable_info;
+pub mod sstable_info_ref;
 pub mod table_stats;
 pub mod table_watermark;
 pub mod time_travel;
@@ -55,6 +56,7 @@ pub mod version;
 pub use compact::*;
 use risingwave_common::catalog::TableId;
 
+use crate::sstable_info_ref::SstableInfoReader;
 use crate::table_watermark::TableWatermarks;
 
 pub type HummockSstableObjectId = u64;
@@ -191,8 +193,8 @@ impl LocalSstableInfo {
     }
 
     pub fn file_size(&self) -> u64 {
-        assert_eq!(self.sst_info.file_size, self.sst_info.sst_size);
-        self.sst_info.file_size
+        assert_eq!(self.sst_info.file_size(), self.sst_info.sst_size());
+        self.sst_info.file_size()
     }
 }
 
@@ -276,12 +278,15 @@ impl SstObjectIdRange {
     }
 }
 
-pub fn can_concat(ssts: &[SstableInfo]) -> bool {
+pub fn can_concat<T>(ssts: &[T]) -> bool
+where
+    T: SstableInfoReader,
+{
     let len = ssts.len();
     for i in 1..len {
         if ssts[i - 1]
-            .key_range
-            .compare_right_with(&ssts[i].key_range.left)
+            .key_range()
+            .compare_right_with(&ssts[i].key_range().left)
             != Ordering::Less
         {
             return false;

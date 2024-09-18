@@ -29,7 +29,7 @@ use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
@@ -71,12 +71,13 @@ where
     !too_left && !too_right
 }
 
-pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool
+pub fn filter_single_sst<R, B, T>(info: &T, table_id: TableId, table_key_range: &R) -> bool
 where
     R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]> + EmptySliceRef,
+    T: SstableInfoReader,
 {
-    let table_range = &info.key_range;
+    let table_range = info.key_range();
     let table_start = FullKey::decode(table_range.left.as_ref()).user_key;
     let table_end = FullKey::decode(table_range.right.as_ref()).user_key;
     let (left, right) = bound_table_key_range(table_id, table_key_range);
@@ -90,39 +91,40 @@ where
         } else {
             Bound::Included(&table_end)
         },
-    ) && info.table_ids.binary_search(&table_id.table_id()).is_ok()
+    ) && info.table_ids().binary_search(&table_id.table_id()).is_ok()
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
-pub(crate) fn search_sst_idx(ssts: &[SstableInfo], key: UserKey<&[u8]>) -> usize {
+pub(crate) fn search_sst_idx<T: SstableInfoReader>(ssts: &[T], key: UserKey<&[u8]>) -> usize {
     ssts.partition_point(|table| {
-        let ord = FullKey::decode(&table.key_range.left).user_key.cmp(&key);
+        let ord = FullKey::decode(&table.key_range().left).user_key.cmp(&key);
         ord == Ordering::Less || ord == Ordering::Equal
     })
 }
 
 /// Prune overlapping SSTs that does not overlap with a specific key range or does not overlap with
 /// a specific table id. Returns the sst ids after pruning.
-pub fn prune_overlapping_ssts<'a, R, B>(
-    ssts: &'a [SstableInfo],
+pub fn prune_overlapping_ssts<'a, R, B, T>(
+    ssts: &'a [T],
     table_id: TableId,
     table_key_range: &'a R,
-) -> impl DoubleEndedIterator<Item = &'a SstableInfo>
+) -> impl DoubleEndedIterator<Item = &'a T>
 where
     R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]> + EmptySliceRef,
+    T: SstableInfoReader,
 {
     ssts.iter()
-        .filter(move |info| filter_single_sst(info, table_id, table_key_range))
+        .filter(move |info| filter_single_sst(*info, table_id, table_key_range))
 }
 
 /// Prune non-overlapping SSTs that does not overlap with a specific key range or does not overlap
 /// with a specific table id. Returns the sst ids after pruning.
 #[allow(clippy::type_complexity)]
-pub fn prune_nonoverlapping_ssts<'a>(
-    ssts: &'a [SstableInfo],
+pub fn prune_nonoverlapping_ssts<'a, T: SstableInfoReader>(
+    ssts: &'a [T],
     user_key_range: (Bound<UserKey<&'a [u8]>>, Bound<UserKey<&'a [u8]>>),
-) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
+) -> impl DoubleEndedIterator<Item = &'a T> {
     debug_assert!(can_concat(ssts));
     let start_table_idx = match user_key_range.0 {
         Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),

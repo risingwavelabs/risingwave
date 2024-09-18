@@ -23,6 +23,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoType;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
@@ -162,7 +163,7 @@ pub async fn gen_iterator_test_sstable_info(
     idx_mapping: impl Fn(usize) -> usize,
     sstable_store: SstableStoreRef,
     total: usize,
-) -> SstableInfo {
+) -> SstableInfoType {
     gen_test_sstable_info(
         opts,
         object_id,
@@ -175,6 +176,7 @@ pub async fn gen_iterator_test_sstable_info(
         sstable_store,
     )
     .await
+    .into()
 }
 
 /// Generates a test table used in almost all table-related tests. Developers may verify the

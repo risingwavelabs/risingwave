@@ -28,6 +28,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use picker::{LevelCompactionPicker, TierCompactionPicker};
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
@@ -179,7 +180,7 @@ impl CompactStatus {
         let exist_table_ids = HashSet::<u32>::from_iter(task.existing_table_ids.clone());
         task.input_ssts.iter().all(|level| {
             level.table_infos.iter().all(|sst| {
-                sst.table_ids
+                sst.table_ids()
                     .iter()
                     .all(|table_id| !exist_table_ids.contains(table_id))
             })

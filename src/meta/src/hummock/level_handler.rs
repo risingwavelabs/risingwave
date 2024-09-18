@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockSstableId};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 
@@ -67,7 +68,7 @@ impl LevelHandler {
         level
             .table_infos
             .iter()
-            .any(|table| self.compacting_files.contains_key(&table.sst_id))
+            .any(|table| self.compacting_files.contains_key(&table.sst_id()))
     }
 
     pub fn is_level_all_pending_compact(&self, level: &Level) -> bool {
@@ -78,7 +79,7 @@ impl LevelHandler {
         level
             .table_infos
             .iter()
-            .all(|table| self.compacting_files.contains_key(&table.sst_id))
+            .all(|table| self.compacting_files.contains_key(&table.sst_id()))
     }
 
     pub fn add_pending_task<'a>(
@@ -91,9 +92,9 @@ impl LevelHandler {
         let mut table_ids = vec![];
         let mut total_file_size = 0;
         for sst in ssts {
-            self.compacting_files.insert(sst.sst_id, task_id);
-            total_file_size += sst.sst_size;
-            table_ids.push(sst.sst_id);
+            self.compacting_files.insert(sst.sst_id(), task_id);
+            total_file_size += sst.sst_size();
+            table_ids.push(sst.sst_id());
         }
 
         self.pending_tasks.push(RunningCompactTask {

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::level::{InputLevel, Levels};
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::CompactionInput;
@@ -58,10 +59,11 @@ impl TombstoneReclaimCompactionPicker {
         while state.last_level <= levels.levels.len() {
             let mut select_input_ssts = vec![];
             for sst in &levels.levels[state.last_level - 1].table_infos {
-                let need_reclaim = (sst.range_tombstone_count * 100
-                    >= sst.total_key_count * self.range_delete_ratio)
-                    || (sst.stale_key_count * 100 >= sst.total_key_count * self.delete_ratio);
-                if !need_reclaim || level_handlers[state.last_level].is_pending_compact(&sst.sst_id)
+                let need_reclaim = (sst.range_tombstone_count() * 100
+                    >= sst.total_key_count() * self.range_delete_ratio)
+                    || (sst.stale_key_count() * 100 >= sst.total_key_count() * self.delete_ratio);
+                if !need_reclaim
+                    || level_handlers[state.last_level].is_pending_compact(&sst.sst_id())
                 {
                     continue;
                 }
@@ -87,7 +89,7 @@ impl TombstoneReclaimCompactionPicker {
                     );
                     let mut pending_compact = false;
                     for sst in &target_table_infos {
-                        if level_handlers[state.last_level + 1].is_pending_compact(&sst.sst_id) {
+                        if level_handlers[state.last_level + 1].is_pending_compact(&sst.sst_id()) {
                             pending_compact = true;
                             break;
                         }
@@ -103,11 +105,11 @@ impl TombstoneReclaimCompactionPicker {
                     }
                 };
                 return Some(CompactionInput {
-                    select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
+                    select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size()).sum(),
                     target_input_size: target_level
                         .table_infos
                         .iter()
-                        .map(|sst| sst.sst_size)
+                        .map(|sst| sst.sst_size())
                         .sum(),
                     total_file_count: (select_input_ssts.len() + target_level.table_infos.len())
                         as u64,
@@ -174,7 +176,7 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
         assert_eq!(2, ret.input_levels.len());
-        assert_eq!(3, ret.input_levels[0].table_infos[0].sst_id);
+        assert_eq!(3, ret.input_levels[0].table_infos[0].sst_id());
         let mut sst = generate_table(4, 1, 1, 100, 1);
         sst.stale_key_count = 30;
         sst.range_tombstone_count = 30;
@@ -186,7 +188,7 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
         assert_eq!(2, ret.input_levels.len());
-        assert_eq!(4, ret.input_levels[0].table_infos[0].sst_id);
-        assert_eq!(1, ret.input_levels[1].table_infos[0].sst_id);
+        assert_eq!(4, ret.input_levels[0].table_infos[0].sst_id());
+        assert_eq!(1, ret.input_levels[1].table_infos[0].sst_id());
     }
 }

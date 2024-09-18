@@ -18,6 +18,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::level::{InputLevel, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
 
 use crate::hummock::compaction::picker::CompactionInput;
@@ -40,7 +41,7 @@ impl VnodeWatermarkCompactionPicker {
         let level = levels.levels.last()?;
         let mut select_input_ssts = vec![];
         for sst_info in &level.table_infos {
-            if !level_handlers[level.level_idx as usize].is_pending_compact(&sst_info.sst_id)
+            if !level_handlers[level.level_idx as usize].is_pending_compact(&sst_info.sst_id())
                 && should_delete_sst_by_watermark(sst_info, table_watermarks)
             {
                 select_input_ssts.push(sst_info.clone());
@@ -50,7 +51,7 @@ impl VnodeWatermarkCompactionPicker {
             return None;
         }
         Some(CompactionInput {
-            select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
+            select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size()).sum(),
             total_file_count: select_input_ssts.len() as u64,
             input_levels: vec![
                 InputLevel {
@@ -77,8 +78,8 @@ fn should_delete_sst_by_watermark(
 ) -> bool {
     // Both table id and vnode must be identical for both the left and right keys in a SST.
     // As more data is written to the bottommost level, they will eventually become identical.
-    let left_key = FullKey::decode(&sst_info.key_range.left);
-    let right_key = FullKey::decode(&sst_info.key_range.right);
+    let left_key = FullKey::decode(&sst_info.key_range().left);
+    let right_key = FullKey::decode(&sst_info.key_range().right);
     if left_key.user_key.table_id != right_key.user_key.table_id {
         return false;
     }

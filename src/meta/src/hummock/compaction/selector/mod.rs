@@ -130,19 +130,20 @@ pub mod tests {
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::{Level, OverlappingLevel};
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
     use risingwave_pb::hummock::LevelType;
 
     use super::*;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     pub fn push_table_level0_overlapping(levels: &mut Levels, sst: SstableInfo) {
-        levels.l0.total_file_size += sst.sst_size;
+        levels.l0.total_file_size += sst.sst_size();
         levels.l0.sub_levels.push(Level {
             level_idx: 0,
             level_type: LevelType::Overlapping,
-            total_file_size: sst.sst_size,
-            uncompressed_file_size: sst.uncompressed_file_size,
-            sub_level_id: sst.sst_id,
+            total_file_size: sst.sst_size(),
+            uncompressed_file_size: sst.uncompressed_file_size(),
+            sub_level_id: sst.sst_id(),
             table_infos: vec![sst],
             ..Default::default()
         });
@@ -154,12 +155,15 @@ pub mod tests {
     }
 
     pub fn push_tables_level0_nonoverlapping(levels: &mut Levels, table_infos: Vec<SstableInfo>) {
-        let total_file_size = table_infos.iter().map(|table| table.sst_size).sum::<u64>();
+        let total_file_size = table_infos
+            .iter()
+            .map(|table| table.sst_size())
+            .sum::<u64>();
         let uncompressed_file_size = table_infos
             .iter()
-            .map(|table| table.uncompressed_file_size)
+            .map(|table| table.uncompressed_file_size())
             .sum();
-        let sub_level_id = table_infos[0].sst_id;
+        let sub_level_id = table_infos[0].sst_id();
         levels.l0.total_file_size += total_file_size;
         levels.l0.sub_levels.push(Level {
             level_idx: 0,
@@ -247,10 +251,10 @@ pub mod tests {
     }
 
     pub fn generate_level(level_idx: u32, table_infos: Vec<SstableInfo>) -> Level {
-        let total_file_size = table_infos.iter().map(|sst| sst.sst_size).sum();
+        let total_file_size = table_infos.iter().map(|sst| sst.sst_size()).sum();
         let uncompressed_file_size = table_infos
             .iter()
-            .map(|sst| sst.uncompressed_file_size)
+            .map(|sst| sst.uncompressed_file_size())
             .sum();
         Level {
             level_idx,
@@ -266,10 +270,13 @@ pub mod tests {
     /// Returns a `OverlappingLevel`, with each `table_infos`'s element placed in a nonoverlapping
     /// sub-level.
     pub fn generate_l0_nonoverlapping_sublevels(table_infos: Vec<SstableInfo>) -> OverlappingLevel {
-        let total_file_size = table_infos.iter().map(|table| table.sst_size).sum::<u64>();
+        let total_file_size = table_infos
+            .iter()
+            .map(|table| table.sst_size())
+            .sum::<u64>();
         let uncompressed_file_size = table_infos
             .iter()
-            .map(|table| table.uncompressed_file_size)
+            .map(|table| table.uncompressed_file_size())
             .sum::<u64>();
         OverlappingLevel {
             sub_levels: table_infos
@@ -278,8 +285,8 @@ pub mod tests {
                 .map(|(idx, table)| Level {
                     level_idx: 0,
                     level_type: LevelType::Nonoverlapping,
-                    total_file_size: table.sst_size,
-                    uncompressed_file_size: table.uncompressed_file_size,
+                    total_file_size: table.sst_size(),
+                    uncompressed_file_size: table.uncompressed_file_size(),
                     sub_level_id: idx as u64,
                     table_infos: vec![table],
                     ..Default::default()
@@ -300,10 +307,10 @@ pub mod tests {
                 .map(|(idx, table)| Level {
                     level_idx: 0,
                     level_type: LevelType::Nonoverlapping,
-                    total_file_size: table.iter().map(|table| table.sst_size).sum::<u64>(),
+                    total_file_size: table.iter().map(|table| table.sst_size()).sum::<u64>(),
                     uncompressed_file_size: table
                         .iter()
-                        .map(|sst| sst.uncompressed_file_size)
+                        .map(|sst| sst.uncompressed_file_size())
                         .sum::<u64>(),
                     sub_level_id: idx as u64,
                     table_infos: table,
@@ -335,12 +342,12 @@ pub mod tests {
                 .map(|(idx, table)| Level {
                     level_idx: 0,
                     level_type: LevelType::Overlapping,
-                    total_file_size: table.iter().map(|table| table.sst_size).sum::<u64>(),
+                    total_file_size: table.iter().map(|table| table.sst_size()).sum::<u64>(),
                     sub_level_id: idx as u64,
                     table_infos: table.clone(),
                     uncompressed_file_size: table
                         .iter()
-                        .map(|sst| sst.uncompressed_file_size)
+                        .map(|sst| sst.uncompressed_file_size())
                         .sum::<u64>(),
                     ..Default::default()
                 })
@@ -360,7 +367,7 @@ pub mod tests {
     pub fn assert_compaction_task(compact_task: &CompactionTask, level_handlers: &[LevelHandler]) {
         for i in &compact_task.input.input_levels {
             for t in &i.table_infos {
-                assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.sst_id));
+                assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.sst_id()));
             }
         }
     }

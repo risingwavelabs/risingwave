@@ -25,7 +25,7 @@ use foyer::{
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::{
     HummockSstableObjectId, HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH, OBJECT_SUFFIX,
 };
@@ -578,18 +578,18 @@ impl SstableStore {
     }
 
     /// Returns `table_holder`
-    pub fn sstable(
+    pub fn sstable<T: SstableInfoReader>(
         &self,
-        sst: &SstableInfo,
+        sst: &T,
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
-        let object_id = sst.object_id;
+        let object_id = sst.object_id();
 
         let entry = self.meta_cache.fetch(object_id, || {
             let store = self.store.clone();
             let meta_path = self.get_sst_data_path(object_id);
             let stats_ptr = stats.remote_io_time.clone();
-            let range = sst.meta_offset as usize..;
+            let range = sst.meta_offset() as usize..;
             async move {
                 let now = Instant::now();
                 let buf = store.read(&meta_path, range).await?;

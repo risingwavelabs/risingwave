@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::level::InputLevel;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_pb::hummock::LevelType;
 
 use super::{CompactionInput, LocalPickerStatistic};
@@ -55,11 +56,11 @@ impl TrivialMovePicker {
     ) -> Option<SstableInfo> {
         let mut skip_by_pending = false;
         for sst in select_tables {
-            if sst.sst_size < self.sst_allowed_trivial_move_min_size {
+            if sst.sst_size() < self.sst_allowed_trivial_move_min_size {
                 continue;
             }
 
-            if level_handlers[self.level].is_pending_compact(&sst.sst_id) {
+            if level_handlers[self.level].is_pending_compact(&sst.sst_id()) {
                 skip_by_pending = true;
                 continue;
             }
@@ -90,7 +91,7 @@ impl TrivialMovePicker {
             self.pick_trivial_move_sst(select_tables, target_tables, level_handlers, stats)
         {
             return Some(CompactionInput {
-                select_input_size: trivial_move_sst.sst_size,
+                select_input_size: trivial_move_sst.sst_size(),
                 total_file_count: 1,
                 input_levels: vec![
                     InputLevel {

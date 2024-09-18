@@ -21,6 +21,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{version_archive_dir, HummockSstableObjectId, HummockVersionId};
 use risingwave_object_store::object::ObjectStoreRef;
@@ -102,7 +103,7 @@ async fn print_user_key_in_version(
     for cg in version.levels.values() {
         for level in cg.l0.sub_levels.iter().rev().chain(cg.levels.iter()) {
             for sstable_info in &level.table_infos {
-                let key_range = &sstable_info.key_range;
+                let key_range = &sstable_info.key_range();
                 let left_user_key = FullKey::decode(&key_range.left);
                 let right_user_key = FullKey::decode(&key_range.right);
                 if left_user_key.user_key > *target_key || *target_key > right_user_key.user_key {
@@ -146,7 +147,11 @@ async fn print_user_key_in_sst(
             let date_time = DateTime::<Utc>::from(epoch.as_system_time());
             if is_first {
                 is_first = false;
-                println!("\t\tSST id: {}, object id: {}", sst.sst_id, sst.object_id);
+                println!(
+                    "\t\tSST id: {}, object id: {}",
+                    sst.sst_id(),
+                    sst.object_id()
+                );
             }
             println!("\t\t   key: {:?}, len={}", full_key, full_key.encoded_len());
             println!(

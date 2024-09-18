@@ -19,6 +19,7 @@ use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
 };
@@ -353,7 +354,7 @@ impl HummockManager {
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
         for commit_sst in sstables {
             let mut group_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
-            for table_id in &commit_sst.sst_info.table_ids {
+            for table_id in commit_sst.sst_info.table_ids() {
                 match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
                     Some(cg_id_from_meta) => {
                         group_table_ids
@@ -365,7 +366,7 @@ impl HummockManager {
                         tracing::warn!(
                             "table {} in SST {} doesn't belong to any compaction group",
                             table_id,
-                            commit_sst.sst_info.object_id,
+                            commit_sst.sst_info.object_id(),
                         );
                     }
                 }
@@ -384,7 +385,7 @@ impl HummockManager {
         for (mut sst, group_table_ids) in sst_to_cg_vec {
             let len = group_table_ids.len();
             for (index, (group_id, match_ids)) in group_table_ids.into_iter().enumerate() {
-                if sst.sst_info.table_ids == match_ids {
+                if sst.sst_info.table_ids() == match_ids {
                     // The SST contains all the tables in the group should be last key
                     assert!(index == len - 1);
                     commit_sstables
@@ -394,7 +395,7 @@ impl HummockManager {
                     break;
                 }
 
-                let origin_sst_size = sst.sst_info.sst_size;
+                let origin_sst_size = sst.sst_info.sst_size();
                 let new_sst_size = match_ids
                     .iter()
                     .map(|id| {

@@ -332,6 +332,7 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
     use risingwave_hummock_sdk::HummockSstableObjectId;
     use risingwave_rpc_client::HummockMetaClient;
 
@@ -443,7 +444,7 @@ mod tests {
         let committed_object_ids = sst_infos
             .into_iter()
             .flatten()
-            .map(|s| s.object_id)
+            .map(|s| s.object_id())
             .sorted()
             .collect_vec();
         assert!(!committed_object_ids.is_empty());

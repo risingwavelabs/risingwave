@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
@@ -363,18 +364,18 @@ fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
 fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
     let mut changes: HashMap<u32, TableStats> = HashMap::default();
     let weighted_value =
-        |value: i64| -> i64 { (value as f64 / sst.table_ids.len() as f64).ceil() as i64 };
-    let key_range = &sst.key_range;
+        |value: i64| -> i64 { (value as f64 / sst.table_ids().len() as f64).ceil() as i64 };
+    let key_range = sst.key_range();
     let estimated_key_size: u64 = (key_range.left.len() + key_range.right.len()) as u64 / 2;
-    let mut estimated_total_key_size = estimated_key_size * sst.total_key_count;
-    if estimated_total_key_size > sst.uncompressed_file_size {
-        estimated_total_key_size = sst.uncompressed_file_size / 2;
-        tracing::warn!(sst.sst_id, "Calculated estimated_total_key_size {} > uncompressed_file_size {}. Use uncompressed_file_size/2 as estimated_total_key_size instead.", estimated_total_key_size, sst.uncompressed_file_size);
+    let mut estimated_total_key_size = estimated_key_size * sst.total_key_count();
+    if estimated_total_key_size > sst.uncompressed_file_size() {
+        estimated_total_key_size = sst.uncompressed_file_size() / 2;
+        tracing::warn!(sst_id=sst.sst_id(), "Calculated estimated_total_key_size {} > uncompressed_file_size {}. Use uncompressed_file_size/2 as estimated_total_key_size instead.", estimated_total_key_size, sst.uncompressed_file_size());
     }
-    let estimated_total_value_size = sst.uncompressed_file_size - estimated_total_key_size;
-    for table_id in &sst.table_ids {
+    let estimated_total_value_size = sst.uncompressed_file_size() - estimated_total_key_size;
+    for table_id in sst.table_ids() {
         let e = changes.entry(*table_id).or_default();
-        e.total_key_count += weighted_value(sst.total_key_count as i64);
+        e.total_key_count += weighted_value(sst.total_key_count() as i64);
         e.total_key_size += weighted_value(estimated_total_key_size as i64);
         e.total_value_size += weighted_value(estimated_total_value_size as i64);
     }

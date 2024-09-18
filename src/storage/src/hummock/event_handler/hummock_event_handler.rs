@@ -942,7 +942,7 @@ mod tests {
     use risingwave_common::bitmap::BitmapBuilder;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
-    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::sstable_info_ref::HummockVersionType;
     use risingwave_pb::hummock::PbHummockVersion;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
@@ -967,7 +967,7 @@ mod tests {
         let mut make_new_version = |max_committed_epoch| {
             let id = next_version_id;
             next_version_id += 1;
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+            HummockVersionType::from_rpc_protobuf(&PbHummockVersion {
                 id,
                 max_committed_epoch,
                 ..Default::default()
@@ -1102,7 +1102,7 @@ mod tests {
         let epoch0 = test_epoch(233);
 
         let initial_version = PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+            HummockVersionType::from_rpc_protobuf(&PbHummockVersion {
                 id: 1,
                 max_committed_epoch: epoch0,
                 ..Default::default()

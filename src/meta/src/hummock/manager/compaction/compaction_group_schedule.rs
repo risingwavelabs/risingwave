@@ -20,6 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact_task::ReportTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::TableGroupInfo;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
 use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -146,10 +147,10 @@ impl HummockManager {
 
                 let left_last_sst = left_level.table_infos.last().unwrap().clone();
                 let right_first_sst = right_level.table_infos.first().unwrap().clone();
-                let left_sst_id = left_last_sst.sst_id;
-                let right_sst_id = right_first_sst.sst_id;
-                let left_obj_id = left_last_sst.object_id;
-                let right_obj_id = right_first_sst.object_id;
+                let left_sst_id = left_last_sst.sst_id();
+                let right_sst_id = right_first_sst.sst_id();
+                let left_obj_id = left_last_sst.object_id();
+                let right_obj_id = right_first_sst.object_id();
 
                 // Since the sst key_range within a group is legal, we only need to check the ssts adjacent to the two groups.
                 if !can_concat(&[left_last_sst, right_first_sst]) {

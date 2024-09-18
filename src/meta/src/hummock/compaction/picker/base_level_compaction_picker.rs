@@ -18,6 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::config::default::compaction_config;
 use risingwave_hummock_sdk::level::{InputLevel, Level, Levels, OverlappingLevel};
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
@@ -213,12 +214,13 @@ impl LevelCompactionPicker {
             let mut target_level_size = 0;
             let mut pending_compact = false;
             for sst in &target_level_ssts {
-                if level_handlers[target_level.level_idx as usize].is_pending_compact(&sst.sst_id) {
+                if level_handlers[target_level.level_idx as usize].is_pending_compact(&sst.sst_id())
+                {
                     pending_compact = true;
                     break;
                 }
 
-                target_level_size += sst.sst_size;
+                target_level_size += sst.sst_size();
             }
 
             if pending_compact {
@@ -346,8 +348,8 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 4);
-        assert_eq!(ret.input_levels[1].table_infos[0].sst_id, 1);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id(), 4);
+        assert_eq!(ret.input_levels[1].table_infos[0].sst_id(), 1);
 
         ret.add_pending_task(0, &mut levels_handler);
         {
@@ -358,14 +360,14 @@ pub mod tests {
                 .unwrap();
 
             assert_eq!(ret2.input_levels[0].table_infos.len(), 1);
-            assert_eq!(ret2.input_levels[0].table_infos[0].sst_id, 6);
-            assert_eq!(ret2.input_levels[1].table_infos[0].sst_id, 5);
+            assert_eq!(ret2.input_levels[0].table_infos[0].sst_id(), 6);
+            assert_eq!(ret2.input_levels[1].table_infos[0].sst_id(), 5);
         }
 
         levels.l0.sub_levels[0]
             .table_infos
-            .retain(|table| table.sst_id != 4);
-        levels.l0.total_file_size -= ret.input_levels[0].table_infos[0].file_size;
+            .retain(|table| table.sst_id() != 4);
+        levels.l0.total_file_size -= ret.input_levels[0].table_infos[0].file_size();
 
         levels_handler[0].remove_task(0);
         levels_handler[1].remove_task(0);
@@ -374,11 +376,11 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels.len(), 3);
-        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 6);
-        assert_eq!(ret.input_levels[1].table_infos[0].sst_id, 5);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id(), 6);
+        assert_eq!(ret.input_levels[1].table_infos[0].sst_id(), 5);
         assert_eq!(ret.input_levels[2].table_infos.len(), 2);
-        assert_eq!(ret.input_levels[2].table_infos[0].sst_id, 3);
-        assert_eq!(ret.input_levels[2].table_infos[1].sst_id, 2);
+        assert_eq!(ret.input_levels[2].table_infos[0].sst_id(), 3);
+        assert_eq!(ret.input_levels[2].table_infos[1].sst_id(), 2);
         ret.add_pending_task(1, &mut levels_handler);
 
         let mut local_stats = LocalPickerStatistic::default();
@@ -395,8 +397,8 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels.len(), 3);
-        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 6);
-        assert_eq!(ret.input_levels[1].table_infos[0].sst_id, 5);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id(), 6);
+        assert_eq!(ret.input_levels[1].table_infos[0].sst_id(), 5);
         assert_eq!(ret.input_levels[2].table_infos.len(), 2);
     }
     #[test]
@@ -455,7 +457,7 @@ pub mod tests {
             ret.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|t| t.sst_id)
+                .map(|t| t.sst_id())
                 .collect_vec(),
             vec![1]
         );
@@ -464,7 +466,7 @@ pub mod tests {
             ret.input_levels[1]
                 .table_infos
                 .iter()
-                .map(|t| t.sst_id)
+                .map(|t| t.sst_id())
                 .collect_vec(),
             vec![3,]
         );
@@ -610,7 +612,7 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 7);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id(), 7);
         assert_eq!(
             3,
             ret.input_levels.iter().filter(|l| l.level_idx == 0).count()
@@ -638,7 +640,7 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 6);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id(), 6);
         assert_eq!(
             2,
             ret.input_levels.iter().filter(|l| l.level_idx == 0).count()
@@ -754,13 +756,13 @@ pub mod tests {
         // 1. trivial_move
         assert_eq!(2, ret.input_levels.len());
         assert!(ret.input_levels[1].table_infos.is_empty());
-        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
+        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id());
         ret.add_pending_task(0, &mut levels_handler);
 
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert_eq!(3, ret.input_levels.len());
-        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
+        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id());
     }
 }

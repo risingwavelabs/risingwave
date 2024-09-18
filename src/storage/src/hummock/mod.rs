@@ -17,47 +17,17 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
-use bytes::Bytes;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRangeRef};
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{HummockEpoch, *};
-
-pub mod block_cache;
 pub use block_cache::*;
-
-pub mod sstable;
-pub use sstable::*;
-
-pub mod compactor;
-pub mod conflict_detector;
-mod error;
-pub mod hummock_meta_client;
-pub mod iterator;
-pub mod shared_buffer;
-pub mod sstable_store;
-#[cfg(any(test, feature = "test"))]
-pub mod test_utils;
-pub mod utils;
-pub use utils::MemoryLimiter;
-pub mod backup_reader;
-pub mod event_handler;
-pub mod local_version;
-pub mod observer_manager;
-pub mod store;
-pub use store::*;
-pub mod vacuum;
-mod validator;
-pub mod value;
-pub mod write_limiter;
-
-pub mod recent_filter;
-pub use recent_filter::*;
-
-pub mod block_stream;
-mod time_travel_version_cache;
-
+use bytes::Bytes;
 pub use error::*;
+pub use recent_filter::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRangeRef};
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
+use risingwave_hummock_sdk::{HummockEpoch, *};
+pub use sstable::*;
+pub use store::*;
+pub use utils::MemoryLimiter;
 pub use validator::*;
 use value::*;
 
@@ -67,14 +37,43 @@ use crate::mem_table::ImmutableMemtable;
 use crate::monitor::StoreLocalStatistic;
 use crate::store::ReadOptions;
 
-pub async fn get_from_sstable_info(
+pub mod backup_reader;
+pub mod block_cache;
+pub mod compactor;
+pub mod conflict_detector;
+mod error;
+pub mod event_handler;
+pub mod hummock_meta_client;
+pub mod iterator;
+pub mod local_version;
+pub mod observer_manager;
+pub mod shared_buffer;
+pub mod sstable;
+pub mod sstable_store;
+pub mod store;
+#[cfg(any(test, feature = "test"))]
+pub mod test_utils;
+pub mod utils;
+pub mod vacuum;
+mod validator;
+pub mod value;
+pub mod write_limiter;
+
+pub mod block_stream;
+pub mod recent_filter;
+mod time_travel_version_cache;
+
+pub async fn get_from_sstable_info<T>(
     sstable_store_ref: SstableStoreRef,
-    sstable_info: &SstableInfo,
+    sstable_info: &T,
     full_key: FullKey<&[u8]>,
     read_options: &ReadOptions,
     dist_key_hash: Option<u64>,
     local_stats: &mut StoreLocalStatistic,
-) -> HummockResult<Option<(HummockValue<Bytes>, EpochWithGap)>> {
+) -> HummockResult<Option<(HummockValue<Bytes>, EpochWithGap)>>
+where
+    T: SstableInfoReader,
+{
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not

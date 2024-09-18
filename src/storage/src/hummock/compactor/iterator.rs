@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::KeyComparator;
 
 use crate::hummock::block_stream::BlockDataStream;
@@ -93,18 +94,18 @@ impl SstableStreamIterator {
         sstable_store: SstableStoreRef,
         max_io_retry_times: usize,
     ) -> Self {
-        let sstable_table_ids = HashSet::from_iter(sstable_info.table_ids.iter().cloned());
+        let sstable_table_ids = HashSet::from_iter(sstable_info.table_ids().iter().cloned());
 
         // filter the block meta with key range
         let block_metas = filter_block_metas(
             &block_metas,
             &sstable_table_ids,
-            sstable_info.key_range.clone(),
+            sstable_info.key_range().clone(),
         );
 
-        let key_range_left = FullKey::decode(&sstable_info.key_range.left).to_vec();
-        let key_range_right = FullKey::decode(&sstable_info.key_range.right).to_vec();
-        let key_range_right_exclusive = sstable_info.key_range.right_exclusive;
+        let key_range_left = FullKey::decode(&sstable_info.key_range().left).to_vec();
+        let key_range_right = FullKey::decode(&sstable_info.key_range().right).to_vec();
+        let key_range_right_exclusive = sstable_info.key_range().right_exclusive;
 
         Self {
             block_stream: None,
@@ -128,7 +129,7 @@ impl SstableStreamIterator {
         let block_stream = self
             .sstable_store
             .get_stream_for_blocks(
-                self.sstable_info.object_id,
+                self.sstable_info.object_id(),
                 &self.block_metas[self.block_idx..],
             )
             .verbose_instrument_await("stream_iter_get_stream")
@@ -318,10 +319,10 @@ impl SstableStreamIterator {
     fn sst_debug_info(&self) -> String {
         format!(
             "object_id={}, sst_id={}, meta_offset={}, table_ids={:?}",
-            self.sstable_info.object_id,
-            self.sstable_info.sst_id,
-            self.sstable_info.meta_offset,
-            self.sstable_info.table_ids
+            self.sstable_info.object_id(),
+            self.sstable_info.sst_id(),
+            self.sstable_info.meta_offset(),
+            self.sstable_info.table_ids()
         )
     }
 
@@ -437,7 +438,7 @@ impl ConcatSstableIterator {
         while self.cur_idx < self.sstables.len() {
             let table_info = &self.sstables[self.cur_idx];
             let mut found = table_info
-                .table_ids
+                .table_ids()
                 .iter()
                 .any(|table_id| self.existing_table_ids.contains(table_id));
             if !found {
@@ -545,7 +546,7 @@ impl HummockIterator for ConcatSstableIterator {
 
             // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
             // (including its max. key) produce the same search result.
-            let max_sst_key = &table.key_range.right;
+            let max_sst_key = &table.key_range().right;
             FullKey::decode(max_sst_key).cmp(&seek_key) == Ordering::Less
         });
 
@@ -562,7 +563,7 @@ impl HummockIterator for ConcatSstableIterator {
         // See SstableStreamIterator::next_block.
         assert!(iter.block_idx >= 1);
         ValueMeta {
-            object_id: Some(iter.sstable_info.object_id),
+            object_id: Some(iter.sstable_info.object_id()),
             block_id: Some(iter.block_idx as u64 - 1),
         }
     }
@@ -726,6 +727,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{next_full_key, prev_full_key, FullKey, FullKeyTracker};
     use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 
     use crate::hummock::compactor::ConcatSstableIterator;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -1203,9 +1205,9 @@ mod tests {
         sst_1.key_range.right = split_key.clone().into();
         sst_1.key_range.right_exclusive = true;
 
-        let total_key_count = sst_1.total_key_count;
+        let total_key_count = sst_1.total_key_count();
         let mut sst_2 = table_info.clone();
-        sst_2.sst_id = sst_1.sst_id + 1;
+        sst_2.sst_id = sst_1.sst_id() + 1;
         sst_2.key_range.left = split_key.clone().into();
 
         {

@@ -17,44 +17,40 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
+pub use backward_concat::*;
+pub use backward_user::*;
+pub use concat_inner::ConcatIteratorInner;
+pub use forward_concat::*;
+pub use forward_user::*;
+pub use merge_inner::MergeIterator;
 use more_asserts::{assert_gt, assert_lt};
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoType;
+use risingwave_hummock_sdk::EpochWithGap;
+pub use skip_watermark::*;
 
 use super::{
     HummockResult, HummockValue, SstableIteratorReadOptions, SstableIteratorType, SstableStoreRef,
 };
+use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::monitor::StoreLocalStatistic;
 
-mod forward_concat;
-pub use forward_concat::*;
 mod backward_concat;
-mod concat_inner;
-pub use backward_concat::*;
-pub use concat_inner::ConcatIteratorInner;
 mod backward_merge;
+mod concat_inner;
+mod forward_concat;
 
 mod backward_user;
-pub use backward_user::*;
 mod forward_merge;
 
+pub mod change_log;
 pub mod forward_user;
 mod merge_inner;
-pub use forward_user::*;
-pub use merge_inner::MergeIterator;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
-use risingwave_hummock_sdk::EpochWithGap;
-
-use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
-
-pub mod change_log;
 mod skip_watermark;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
-
-use risingwave_common::catalog::TableId;
-pub use skip_watermark::*;
-
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::monitor::StoreLocalStatistic;
 
 #[derive(Default)]
 pub struct ValueMeta {
@@ -544,7 +540,7 @@ pub trait IteratorFactory {
     fn add_overlapping_sst_iter(&mut self, iter: Self::SstableIteratorType);
     fn add_concat_sst_iter(
         &mut self,
-        tables: Vec<SstableInfo>,
+        tables: Vec<SstableInfoType>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
     );

@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::level::{InputLevel, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 
 use super::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -79,7 +80,7 @@ impl TtlReclaimCompactionPicker {
     }
 
     fn filter(&self, sst: &SstableInfo, current_epoch_physical_time: u64) -> bool {
-        let table_id_in_sst = sst.table_ids.iter().cloned().collect::<HashSet<u32>>();
+        let table_id_in_sst = sst.table_ids().iter().cloned().collect::<HashSet<u32>>();
         let expire_epoch =
             Epoch::from_physical_time(current_epoch_physical_time - MIN_TTL_EXPIRE_INTERVAL_MS);
 
@@ -90,7 +91,7 @@ impl TtlReclaimCompactionPicker {
                     // default to zero.
                     let ttl_mill = *ttl_second_u32 as u64 * 1000;
                     let min_epoch = expire_epoch.subtract_ms(ttl_mill);
-                    if Epoch(sst.min_epoch) < min_epoch {
+                    if Epoch(sst.min_epoch()) < min_epoch {
                         return false;
                     }
                 }
@@ -138,9 +139,9 @@ impl TtlReclaimCompactionPicker {
             let last_sst = reclaimed_level.table_infos.last().unwrap();
 
             let key_range_this_round = KeyRange {
-                left: first_sst.key_range.left.clone(),
-                right: last_sst.key_range.right.clone(),
-                right_exclusive: last_sst.key_range.right_exclusive,
+                left: first_sst.key_range().left.clone(),
+                right: last_sst.key_range().right.clone(),
+                right_exclusive: last_sst.key_range().right_exclusive,
             };
 
             state.init(key_range_this_round);
@@ -149,10 +150,12 @@ impl TtlReclaimCompactionPicker {
         let current_epoch_physical_time = Epoch::now().physical_time();
 
         for sst in &reclaimed_level.table_infos {
-            let unmatched_sst = sst.key_range.sstable_overlap(&state.last_select_end_bound);
+            let unmatched_sst = sst
+                .key_range()
+                .sstable_overlap(&state.last_select_end_bound);
 
             if unmatched_sst
-                || level_handler.is_pending_compact(&sst.sst_id)
+                || level_handler.is_pending_compact(&sst.sst_id())
                 || self.filter(sst, current_epoch_physical_time)
             {
                 continue;
@@ -171,12 +174,12 @@ impl TtlReclaimCompactionPicker {
         let select_last_sst = select_input_ssts.last().unwrap();
         state.last_select_end_bound.full_key_extend(&KeyRange {
             left: Bytes::default(),
-            right: select_last_sst.key_range.right.clone(),
-            right_exclusive: select_last_sst.key_range.right_exclusive,
+            right: select_last_sst.key_range().right.clone(),
+            right_exclusive: select_last_sst.key_range().right_exclusive,
         });
 
         Some(CompactionInput {
-            select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
+            select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size()).sum(),
             total_file_count: select_input_ssts.len() as _,
             input_levels: vec![
                 InputLevel {
@@ -348,7 +351,7 @@ mod test {
 
         {
             let sst_10 = levels[3].table_infos.get_mut(8).unwrap();
-            assert_eq!(10, sst_10.sst_id);
+            assert_eq!(10, sst_10.sst_id());
             sst_10.key_range.right_exclusive = true;
         }
 
@@ -396,7 +399,7 @@ mod test {
 
             let mut start_id = 2;
             for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.sst_id);
+                assert_eq!(start_id, sst.sst_id());
                 start_id += 1;
             }
 
@@ -453,7 +456,7 @@ mod test {
 
             let mut start_id = 3;
             for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.sst_id);
+                assert_eq!(start_id, sst.sst_id());
                 start_id += 1;
             }
 
@@ -494,7 +497,7 @@ mod test {
                 compact_task::TaskType::Ttl
             ));
             for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.sst_id);
+                assert_eq!(start_id, sst.sst_id());
                 start_id += 1;
             }
         }
@@ -550,7 +553,7 @@ mod test {
             // test table_option_filter
             assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
             let select_sst = &task.input.input_levels[0].table_infos.first().unwrap();
-            assert_eq!(select_sst.sst_id, 5);
+            assert_eq!(select_sst.sst_id(), 5);
 
             assert_eq!(task.input.input_levels[1].level_idx, 4);
             assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
@@ -666,7 +669,7 @@ mod test {
                 let select_sst = &task.input.input_levels[0]
                     .table_infos
                     .iter()
-                    .map(|sst| sst.sst_id)
+                    .map(|sst| sst.sst_id())
                     .collect_vec();
                 assert!(select_sst.is_sorted());
                 assert_eq!(expect_task_sst_id_range[index], *select_sst);
@@ -763,7 +766,7 @@ mod test {
                 let select_sst = &task.input.input_levels[0]
                     .table_infos
                     .iter()
-                    .map(|sst| sst.sst_id)
+                    .map(|sst| sst.sst_id())
                     .collect_vec();
                 assert!(select_sst.is_sorted());
                 assert_eq!(expect_task_sst_id_range[index], *select_sst);

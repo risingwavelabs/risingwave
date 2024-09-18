@@ -17,24 +17,7 @@ use std::mem::size_of;
 use risingwave_pb::hummock::{PbBloomFilterType, PbKeyRange, PbSstableInfo};
 
 use crate::key_range::KeyRange;
-
-#[derive(Debug, PartialEq, Clone, Default)]
-pub struct SstableInfo {
-    pub object_id: u64,
-    pub sst_id: u64,
-    pub key_range: KeyRange,
-    pub file_size: u64,
-    pub table_ids: Vec<u32>,
-    pub meta_offset: u64,
-    pub stale_key_count: u64,
-    pub total_key_count: u64,
-    pub min_epoch: u64,
-    pub max_epoch: u64,
-    pub uncompressed_file_size: u64,
-    pub range_tombstone_count: u64,
-    pub bloom_filter_kind: PbBloomFilterType,
-    pub sst_size: u64,
-}
+use crate::sstable_info_ref::{SstableInfoReader, SstableInfoWriter};
 
 impl SstableInfo {
     pub fn estimated_encode_len(&self) -> usize {
@@ -59,6 +42,24 @@ impl SstableInfo {
     pub fn to_protobuf(&self) -> PbSstableInfo {
         self.into()
     }
+}
+
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct SstableInfo {
+    pub object_id: u64,
+    pub sst_id: u64,
+    pub key_range: KeyRange,
+    pub file_size: u64,
+    pub table_ids: Vec<u32>,
+    pub meta_offset: u64,
+    pub stale_key_count: u64,
+    pub total_key_count: u64,
+    pub min_epoch: u64,
+    pub max_epoch: u64,
+    pub uncompressed_file_size: u64,
+    pub range_tombstone_count: u64,
+    pub bloom_filter_kind: PbBloomFilterType,
+    pub sst_size: u64,
 }
 
 impl From<PbSstableInfo> for SstableInfo {
@@ -138,11 +139,11 @@ impl From<&PbSstableInfo> for SstableInfo {
 
 impl From<SstableInfo> for PbSstableInfo {
     fn from(sstable_info: SstableInfo) -> Self {
-        assert!(sstable_info.sst_size > 0 || sstable_info.is_stripped());
+        assert!(sstable_info.sst_size() > 0 || sstable_info.is_stripped());
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
-            object_id: sstable_info.object_id,
-            sst_id: sstable_info.sst_id,
+            object_id: sstable_info.object_id(),
+            sst_id: sstable_info.sst_id(),
             key_range: {
                 let keyrange = sstable_info.key_range;
                 if keyrange.inf_key_range() {
@@ -177,11 +178,11 @@ impl From<SstableInfo> for PbSstableInfo {
 
 impl From<&SstableInfo> for PbSstableInfo {
     fn from(sstable_info: &SstableInfo) -> Self {
-        assert!(sstable_info.sst_size > 0 || sstable_info.is_stripped());
+        assert!(sstable_info.sst_size() > 0 || sstable_info.is_stripped());
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
-            object_id: sstable_info.object_id,
-            sst_id: sstable_info.sst_id,
+            object_id: sstable_info.object_id(),
+            sst_id: sstable_info.sst_id(),
             key_range: {
                 let keyrange = &sstable_info.key_range;
                 if keyrange.inf_key_range() {
@@ -195,8 +196,7 @@ impl From<&SstableInfo> for PbSstableInfo {
                     Some(pb_key_range)
                 }
             },
-
-            file_size: sstable_info.file_size,
+            file_size: sstable_info.file_size(),
             table_ids: sstable_info.table_ids.clone(),
             meta_offset: sstable_info.meta_offset,
             stale_key_count: sstable_info.stale_key_count,
@@ -220,6 +220,78 @@ impl SstableInfo {
 // Time travel
 impl SstableInfo {
     pub fn is_stripped(&self) -> bool {
-        self.object_id == 0
+        self.object_id() == 0
+    }
+}
+
+impl SstableInfoReader for SstableInfo {
+    fn object_id(&self) -> u64 {
+        self.object_id
+    }
+
+    fn sst_id(&self) -> u64 {
+        self.sst_id
+    }
+
+    fn key_range(&self) -> &KeyRange {
+        &self.key_range
+    }
+
+    fn file_size(&self) -> u64 {
+        self.file_size
+    }
+
+    fn table_ids(&self) -> &[u32] {
+        &self.table_ids
+    }
+
+    fn meta_offset(&self) -> u64 {
+        self.meta_offset
+    }
+
+    fn stale_key_count(&self) -> u64 {
+        self.stale_key_count
+    }
+
+    fn total_key_count(&self) -> u64 {
+        self.total_key_count
+    }
+
+    fn min_epoch(&self) -> u64 {
+        self.min_epoch
+    }
+
+    fn max_epoch(&self) -> u64 {
+        self.max_epoch
+    }
+
+    fn uncompressed_file_size(&self) -> u64 {
+        self.uncompressed_file_size
+    }
+
+    fn range_tombstone_count(&self) -> u64 {
+        self.range_tombstone_count
+    }
+
+    fn bloom_filter_kind(&self) -> PbBloomFilterType {
+        self.bloom_filter_kind
+    }
+
+    fn sst_size(&self) -> u64 {
+        self.sst_size
+    }
+}
+
+impl SstableInfoWriter for SstableInfo {
+    fn set_sst_id(&mut self, v: u64) {
+        self.sst_id = v;
+    }
+
+    fn set_sst_size(&mut self, v: u64) {
+        self.sst_size = v;
+    }
+
+    fn set_table_ids(&mut self, v: Vec<u32>) {
+        self.table_ids = v;
     }
 }

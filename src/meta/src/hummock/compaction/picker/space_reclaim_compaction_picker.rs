@@ -16,6 +16,7 @@ use std::collections::HashSet;
 
 use risingwave_hummock_sdk::level::{InputLevel, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 
 use super::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -47,7 +48,7 @@ impl SpaceReclaimCompactionPicker {
 
     fn exist_table_count(&self, sst: &SstableInfo) -> usize {
         // it means all the table exist , so we not need to pick this sst
-        sst.table_ids
+        sst.table_ids()
             .iter()
             .filter(|id| self.all_table_ids.contains(id))
             .count()
@@ -70,8 +71,8 @@ impl SpaceReclaimCompactionPicker {
             for level in &l0.sub_levels {
                 for sst in &level.table_infos {
                     let exist_count = self.exist_table_count(sst);
-                    if exist_count == sst.table_ids.len()
-                        || level_handlers[0].is_pending_compact(&sst.sst_id)
+                    if exist_count == sst.table_ids().len()
+                        || level_handlers[0].is_pending_compact(&sst.sst_id())
                     {
                         if !select_input_ssts.is_empty() {
                             break;
@@ -84,7 +85,7 @@ impl SpaceReclaimCompactionPicker {
                 }
                 if !select_input_ssts.is_empty() {
                     return Some(CompactionInput {
-                        select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
+                        select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size()).sum(),
                         total_file_count: select_input_ssts.len() as u64,
                         input_levels: vec![
                             InputLevel {
@@ -110,9 +111,10 @@ impl SpaceReclaimCompactionPicker {
             let mut is_trivial_task = true;
             for sst in &levels.levels[state.last_level - 1].table_infos {
                 let exist_count = self.exist_table_count(sst);
-                let need_reclaim = exist_count < sst.table_ids.len();
+                let need_reclaim = exist_count < sst.table_ids().len();
                 let is_trivial_sst = exist_count == 0;
-                if !need_reclaim || level_handlers[state.last_level].is_pending_compact(&sst.sst_id)
+                if !need_reclaim
+                    || level_handlers[state.last_level].is_pending_compact(&sst.sst_id())
                 {
                     if !select_input_ssts.is_empty() {
                         // Our goal is to pick as many complete layers of data as possible and keep
@@ -140,7 +142,7 @@ impl SpaceReclaimCompactionPicker {
             // turn to next_round
             if !select_input_ssts.is_empty() {
                 return Some(CompactionInput {
-                    select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
+                    select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size()).sum(),
                     total_file_count: select_input_ssts.len() as u64,
                     input_levels: vec![
                         InputLevel {
@@ -233,7 +235,7 @@ mod test {
 
         {
             let sst_10 = levels[3].table_infos.get_mut(8).unwrap();
-            assert_eq!(10, sst_10.sst_id);
+            assert_eq!(10, sst_10.sst_id());
             sst_10.key_range.right_exclusive = true;
         }
 
@@ -295,7 +297,7 @@ mod test {
 
             let mut start_id = 2;
             for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.sst_id);
+                assert_eq!(start_id, sst.sst_id());
                 start_id += 1;
             }
 
@@ -311,7 +313,7 @@ mod test {
             let select_file_size: u64 = task.input.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|sst| sst.sst_size)
+                .map(|sst| sst.sst_size())
                 .sum();
             assert!(select_file_size > max_space_reclaim_bytes);
         }
@@ -345,7 +347,7 @@ mod test {
             ));
             let mut start_id = 8;
             for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.sst_id);
+                assert_eq!(start_id, sst.sst_id());
                 start_id += 1;
             }
 
@@ -477,7 +479,7 @@ mod test {
                 let select_sst = &task.input.input_levels[0]
                     .table_infos
                     .iter()
-                    .map(|sst| sst.sst_id)
+                    .map(|sst| sst.sst_id())
                     .collect_vec();
                 assert!(select_sst.is_sorted());
                 assert_eq!(expect_task_sst_id_range[index], *select_sst);
@@ -538,7 +540,7 @@ mod test {
                 let select_sst = &task.input.input_levels[0]
                     .table_infos
                     .iter()
-                    .map(|sst| sst.sst_id)
+                    .map(|sst| sst.sst_id())
                     .collect_vec();
                 assert!(select_sst.is_sorted());
                 assert_eq!(expect_task_sst_id_range[index], *select_sst);

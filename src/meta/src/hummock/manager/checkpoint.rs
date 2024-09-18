@@ -20,6 +20,7 @@ use std::sync::atomic::Ordering;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, summarize_group_deltas,
 };
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
@@ -162,7 +163,7 @@ impl HummockManager {
                     summary
                         .insert_table_infos
                         .iter()
-                        .map(|t| (t.object_id, t.file_size))
+                        .map(|t| (t.object_id(), t.file_size()))
                         .chain(
                             version_delta
                                 .change_log_delta
@@ -173,7 +174,7 @@ impl HummockManager {
                                         .new_value
                                         .iter()
                                         .chain(new_log.old_value.iter())
-                                        .map(|t| (t.object_id, t.file_size))
+                                        .map(|t| (t.object_id(), t.file_size()))
                                 }),
                         ),
                 );

@@ -18,6 +18,7 @@ use risingwave_pb::hummock::LevelType;
 
 use crate::compact_task::CompactTask;
 use crate::sstable_info::SstableInfo;
+use crate::sstable_info_ref::SstableInfoReader;
 
 pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
@@ -74,29 +75,29 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .table_infos
             .iter()
             .map(|table| {
-                for tid in &table.table_ids {
+                for tid in table.table_ids() {
                     if !existing_table_ids.contains(tid) {
                         dropped_table_ids.insert(tid);
                     } else {
                         input_sst_table_ids.insert(*tid);
                     }
                 }
-                if table.total_key_count != 0 {
+                if table.total_key_count() != 0 {
                     format!(
                         "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {}]",
-                        table.sst_id,
-                        table.object_id,
-                        table.file_size / 1024,
-                        table.sst_size / 1024,
-                        (table.stale_key_count * 100 / table.total_key_count),
+                        table.sst_id(),
+                        table.object_id(),
+                        table.file_size() / 1024,
+                        table.sst_size() / 1024,
+                        table.stale_key_count() * 100 / table.total_key_count(),
                     )
                 } else {
                     format!(
                         "[id: {}, obj_id: {} object_size {}KB sst_size {}KB]",
-                        table.sst_id,
-                        table.object_id,
-                        table.file_size / 1024,
-                        table.sst_size / 1024,
+                        table.sst_id(),
+                        table.object_id(),
+                        table.file_size() / 1024,
+                        table.sst_size() / 1024,
                     )
                 }
             })
@@ -123,7 +124,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
 pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo) {
     use std::fmt::Write;
 
-    let key_range = &sstable_info.key_range;
+    let key_range = sstable_info.key_range();
     let left_str = if key_range.left.is_empty() {
         "-inf".to_string()
     } else {
@@ -135,21 +136,21 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         hex::encode(&key_range.right)
     };
 
-    let stale_ratio = (sstable_info.stale_key_count * 100)
-        .checked_div(sstable_info.total_key_count)
+    let stale_ratio = (sstable_info.stale_key_count() * 100)
+        .checked_div(sstable_info.total_key_count())
         .unwrap_or(0);
     writeln!(
         s,
         "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, object_size={}KB, sst_size={}KB stale_ratio={}%, bloom_filter_kind {:?}",
-        sstable_info.object_id,
-        sstable_info.sst_id,
+        sstable_info.object_id(),
+        sstable_info.sst_id(),
         left_str,
         right_str,
-        sstable_info.table_ids,
-        sstable_info.file_size / 1024,
-        sstable_info.sst_size / 1024,
+        sstable_info.table_ids(),
+        sstable_info.file_size() / 1024,
+        sstable_info.sst_size() / 1024,
         stale_ratio,
-        sstable_info.bloom_filter_kind,
+        sstable_info.bloom_filter_kind(),
     )
     .unwrap();
 }
@@ -164,9 +165,9 @@ pub fn statistics_compact_task(task: &CompactTask) -> CompactTaskStatistics {
         total_file_count += level.table_infos.len() as u64;
 
         level.table_infos.iter().for_each(|sst| {
-            total_file_size += sst.file_size;
-            total_uncompressed_file_size += sst.uncompressed_file_size;
-            total_key_count += sst.total_key_count;
+            total_file_size += sst.file_size();
+            total_uncompressed_file_size += sst.uncompressed_file_size();
+            total_key_count += sst.total_key_count();
         });
     }
 
@@ -209,7 +210,7 @@ pub fn estimate_memory_for_compact_task(
         if level.level_type == LevelType::Nonoverlapping {
             let mut cur_level_max_sst_meta_size = 0;
             for sst in &level.table_infos {
-                let meta_size = sst.file_size - sst.meta_offset;
+                let meta_size = sst.file_size() - sst.meta_offset();
                 task_max_sst_meta_ratio =
                     std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.file_size);
                 cur_level_max_sst_meta_size = std::cmp::max(meta_size, cur_level_max_sst_meta_size);
@@ -217,7 +218,7 @@ pub fn estimate_memory_for_compact_task(
             result += max_input_stream_estimated_memory + cur_level_max_sst_meta_size;
         } else {
             for sst in &level.table_infos {
-                let meta_size = sst.file_size - sst.meta_offset;
+                let meta_size = sst.file_size() - sst.meta_offset();
                 result += max_input_stream_estimated_memory + meta_size;
                 task_max_sst_meta_ratio =
                     std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.file_size);

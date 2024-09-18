@@ -339,8 +339,16 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
-                ConcatIterator::new(level1.clone(), sstable_store.clone(), read_options.clone()),
-                ConcatIterator::new(level2.clone(), sstable_store.clone(), read_options.clone()),
+                ConcatIterator::new(
+                    level1.clone().into_iter().map(Into::into).collect(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                ),
+                ConcatIterator::new(
+                    level2.clone().into_iter().map(Into::into).collect(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                ),
             ];
             let iter = MergeIterator::for_compactor(sub_iters);
             async move { compact(iter, sstable_store1, None).await }

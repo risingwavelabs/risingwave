@@ -52,6 +52,7 @@ pub use context::{
 use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
 use risingwave_hummock_sdk::{compact_task_to_string, HummockCompactionTaskId, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -189,7 +190,7 @@ impl Compactor {
 
         debug_assert!(split_table_outputs
             .iter()
-            .all(|table_info| table_info.sst_info.table_ids.is_sorted()));
+            .all(|table_info| table_info.sst_info.table_ids().is_sorted()));
 
         if task_id.is_some() {
             // skip shared buffer compaction

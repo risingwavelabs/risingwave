@@ -21,6 +21,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::time_travel::{
     refill_version, IncompleteHummockVersion, IncompleteHummockVersionDelta,
 };
@@ -354,7 +355,7 @@ impl HummockManager {
                 .await?;
             for sst_info in sst_infos {
                 let sst_info: SstableInfo = sst_info.sstable_info.to_protobuf().into();
-                sst_id_to_info.insert(sst_info.sst_id, sst_info);
+                sst_id_to_info.insert(sst_info.sst_id(), sst_info);
             }
         }
         if sst_count != sst_id_to_info.len() {
@@ -394,8 +395,8 @@ impl HummockManager {
             let mut count = 0;
             for sst_info in sst_infos {
                 let m = hummock_sstable_info::ActiveModel {
-                    sst_id: Set(sst_info.sst_id.try_into().unwrap()),
-                    object_id: Set(sst_info.object_id.try_into().unwrap()),
+                    sst_id: Set(sst_info.sst_id().try_into().unwrap()),
+                    object_id: Set(sst_info.object_id().try_into().unwrap()),
                     sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
                 };
                 hummock_sstable_info::Entity::insert(m)
@@ -433,13 +434,13 @@ impl HummockManager {
             version_sst_ids = Some(
                 version
                     .get_sst_infos_from_groups(&select_groups)
-                    .map(|s| s.sst_id)
+                    .map(|s| s.sst_id())
                     .collect(),
             );
             write_sstable_infos(
                 version
                     .get_sst_infos_from_groups(&select_groups)
-                    .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
+                    .filter(|s| !skip_sst_ids.contains(&s.sst_id())),
                 txn,
             )
             .await?;
@@ -465,7 +466,7 @@ impl HummockManager {
         let written = write_sstable_infos(
             delta
                 .newly_added_sst_infos(&select_groups)
-                .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
+                .filter(|s| !skip_sst_ids.contains(&s.sst_id())),
             txn,
         )
         .await?;

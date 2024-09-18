@@ -224,16 +224,16 @@ pub struct LevelsCommon<T> {
 
 pub type Levels = LevelsCommon<SstableInfo>;
 
-impl Levels {
-    pub fn level0(&self) -> &OverlappingLevel {
+impl<T> LevelsCommon<T> {
+    pub fn level0(&self) -> &OverlappingLevelCommon<T> {
         &self.l0
     }
 
-    pub fn get_level(&self, level_idx: usize) -> &Level {
+    pub fn get_level(&self, level_idx: usize) -> &LevelCommon<T> {
         &self.levels[level_idx - 1]
     }
 
-    pub fn get_level_mut(&mut self, level_idx: usize) -> &mut Level {
+    pub fn get_level_mut(&mut self, level_idx: usize) -> &mut LevelCommon<T> {
         &mut self.levels[level_idx - 1]
     }
 

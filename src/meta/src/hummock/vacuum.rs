@@ -229,6 +229,7 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
     use risingwave_hummock_sdk::HummockVersionId;
     use risingwave_pb::hummock::VacuumTask;
     use risingwave_rpc_client::HummockMetaClient;
@@ -290,7 +291,7 @@ mod tests {
                     .first()
                     .unwrap()
                     .iter()
-                    .map(|s| s.object_id)
+                    .map(|s| s.object_id())
                     .collect_vec(),
             })
             .await

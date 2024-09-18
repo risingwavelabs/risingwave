@@ -20,6 +20,7 @@ use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo, PbTableChangeLo
 use tracing::warn;
 
 use crate::sstable_info::SstableInfo;
+use crate::sstable_info_ref::SstableInfoReader;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLogCommon<T>(pub Vec<EpochNewChangeLogCommon<T>>);
@@ -87,8 +88,11 @@ where
     }
 }
 
-impl TableChangeLog {
-    pub fn filter_epoch(&self, (min_epoch, max_epoch): (u64, u64)) -> &[EpochNewChangeLog] {
+impl<T> TableChangeLogCommon<T> {
+    pub fn filter_epoch(
+        &self,
+        (min_epoch, max_epoch): (u64, u64),
+    ) -> &[EpochNewChangeLogCommon<T>] {
         let start = self.0.partition_point(|epoch_change_log| {
             epoch_change_log.epochs.last().expect("non-empty") < &min_epoch
         });
@@ -167,7 +171,7 @@ pub fn build_table_change_log_delta<'a>(
         })
         .collect();
     for sst in old_value_ssts {
-        for table_id in &sst.table_ids {
+        for table_id in sst.table_ids() {
             match table_change_log.get_mut(&TableId::new(*table_id)) {
                 Some(log) => {
                     log.new_log.as_mut().unwrap().old_value.push(sst.clone());
@@ -179,7 +183,7 @@ pub fn build_table_change_log_delta<'a>(
         }
     }
     for sst in new_value_ssts {
-        for table_id in &sst.table_ids {
+        for table_id in sst.table_ids() {
             if let Some(log) = table_change_log.get_mut(&TableId::new(*table_id)) {
                 log.new_log.as_mut().unwrap().new_value.push(sst.clone());
             }

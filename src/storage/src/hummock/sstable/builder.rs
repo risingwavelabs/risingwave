@@ -19,6 +19,7 @@ use bytes::{Bytes, BytesMut};
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::BloomFilterType;
@@ -522,7 +523,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.epoch_set.len()
         );
         let bloom_filter_size = meta.bloom_filter.len();
-        let sstable_file_size = sst_info.file_size as usize;
+        let sstable_file_size = sst_info.file_size() as usize;
 
         if !meta.block_metas.is_empty() {
             // fill total_compressed_size
@@ -727,14 +728,14 @@ pub(super) mod tests {
         let output = b.finish().await.unwrap();
         let info = output.sst_info.sst_info;
 
-        assert_bytes_eq!(test_key_of(0).encode(), info.key_range.left);
+        assert_bytes_eq!(test_key_of(0).encode(), info.key_range().left);
         assert_bytes_eq!(
             test_key_of(TEST_KEYS_COUNT - 1).encode(),
-            info.key_range.right
+            info.key_range().right
         );
         let (data, meta) = output.writer_output;
-        assert_eq!(info.file_size, meta.estimated_size as u64);
-        let offset = info.meta_offset as usize;
+        assert_eq!(info.file_size(), meta.estimated_size as u64);
+        let offset = info.meta_offset() as usize;
         let meta2 = SstableMeta::decode(&data[offset..]).unwrap();
         assert_eq!(meta2, meta);
     }

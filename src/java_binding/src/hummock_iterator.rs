@@ -25,7 +25,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::sstable_info_ref::HummockVersionType;
 use risingwave_jni_core::HummockJavaBindingIterator;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
@@ -141,7 +141,7 @@ pub(crate) async fn new_hummock_java_binding_iter(
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();
         let pin_version = PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&read_plan.version.unwrap()),
+            HummockVersionType::from_rpc_protobuf(&read_plan.version.unwrap()),
             unbounded_channel().0,
         );
         let table_id = read_plan.table_id.into();

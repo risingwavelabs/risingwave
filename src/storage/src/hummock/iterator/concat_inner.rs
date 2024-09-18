@@ -16,7 +16,7 @@ use std::cmp::Ordering::{Equal, Greater, Less};
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::{SstableInfoReader, SstableInfoType};
 
 use crate::hummock::iterator::{
     DirectionEnum, HummockIterator, HummockIteratorDirection, ValueMeta,
@@ -26,12 +26,12 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
-fn smallest_key(sstable_info: &SstableInfo) -> &[u8] {
-    &sstable_info.key_range.left
+fn smallest_key<T: SstableInfoReader>(sstable_info: &T) -> &[u8] {
+    &sstable_info.key_range().left
 }
 
-fn largest_key(sstable_info: &SstableInfo) -> &[u8] {
-    &sstable_info.key_range.right
+fn largest_key<T: SstableInfoReader>(sstable_info: &T) -> &[u8] {
+    &sstable_info.key_range().right
 }
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
@@ -43,7 +43,7 @@ pub struct ConcatIteratorInner<TI: SstableIteratorType> {
     cur_idx: usize,
 
     /// All non-overlapping tables.
-    tables: Vec<SstableInfo>,
+    tables: Vec<SstableInfoType>,
 
     sstable_store: SstableStoreRef,
 
@@ -56,7 +56,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
     pub fn new(
-        tables: Vec<SstableInfo>,
+        tables: Vec<SstableInfoType>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
@@ -160,7 +160,7 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
                 }
                 DirectionEnum::Backward => {
                     let ord = FullKey::decode(largest_key(table)).cmp(&key);
-                    ord == Greater || (ord == Equal && !table.key_range.right_exclusive)
+                    ord == Greater || (ord == Equal && !table.key_range().right_exclusive)
                 }
             })
             .saturating_sub(1); // considering the boundary of 0

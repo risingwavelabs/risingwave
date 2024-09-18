@@ -27,6 +27,7 @@ use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{
     can_concat, compact_task_output_to_string, HummockSstableObjectId, KeyComparator,
@@ -90,7 +91,7 @@ impl CompactorRunner {
             .input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .map(|sst| sst.total_key_count)
+            .map(|sst| sst.total_key_count())
             .sum::<u64>() as usize;
         let use_block_based_filter =
             BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count) || task.target_level > 0;
@@ -173,12 +174,12 @@ impl CompactorRunner {
                 .table_infos
                 .iter()
                 .filter(|table_info| {
-                    let table_ids = &table_info.table_ids;
+                    let table_ids = table_info.table_ids();
                     let exist_table = table_ids
                         .iter()
                         .any(|table_id| self.compact_task.existing_table_ids.contains(table_id));
 
-                    self.key_range.full_key_overlap(&table_info.key_range) && exist_table
+                    self.key_range.full_key_overlap(table_info.key_range()) && exist_table
                 })
                 .cloned()
                 .collect_vec();
@@ -264,8 +265,8 @@ pub fn partition_overlapping_sstable_infos(
     }
     let mut groups: BinaryHeap<SstableGroup> = BinaryHeap::default();
     origin_infos.sort_by(|a, b| {
-        let x = &a.key_range;
-        let y = &b.key_range;
+        let x = &a.key_range();
+        let y = &b.key_range();
         KeyComparator::compare_encoded_full_key(&x.left, &y.left)
     });
     for sst in origin_infos {
@@ -273,15 +274,17 @@ pub fn partition_overlapping_sstable_infos(
         if let Some(mut prev_group) = groups.peek_mut() {
             if KeyComparator::encoded_full_key_less_than(
                 &prev_group.max_right_bound,
-                &sst.key_range.left,
+                &sst.key_range().left,
             ) {
-                prev_group.max_right_bound.clone_from(&sst.key_range.right);
+                prev_group
+                    .max_right_bound
+                    .clone_from(&sst.key_range().right);
                 prev_group.ssts.push(sst);
                 continue;
             }
         }
         groups.push(SstableGroup {
-            max_right_bound: sst.key_range.right.clone(),
+            max_right_bound: sst.key_range().right.clone(),
             ssts: vec![sst],
         });
     }
@@ -323,7 +326,7 @@ pub async fn compact(
             .input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .flat_map(|sst| sst.table_ids.clone())
+            .flat_map(|sst| sst.table_ids().iter().copied())
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
 

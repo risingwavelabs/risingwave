@@ -19,8 +19,9 @@ use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::level::{Level, Levels};
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::level::{LevelCommon, LevelsCommon};
+use risingwave_hummock_sdk::sstable_info_ref::{SstableInfoReader, SstableInfoType};
+use risingwave_hummock_sdk::version::HummockVersionCommon;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
@@ -72,18 +73,20 @@ impl Drop for PinnedVersionGuard {
 }
 
 #[derive(Clone)]
-pub struct PinnedVersion {
-    version: Arc<HummockVersion>,
+pub struct PinnedVersionCommon<T> {
+    version: Arc<HummockVersionCommon<T>>,
     guard: Arc<PinnedVersionGuard>,
 }
 
-impl PinnedVersion {
+pub type PinnedVersion = PinnedVersionCommon<SstableInfoType>;
+
+impl<T: SstableInfoReader> PinnedVersionCommon<T> {
     pub fn new(
-        version: HummockVersion,
+        version: HummockVersionCommon<T>,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
-        PinnedVersion {
+        PinnedVersionCommon {
             version: Arc::new(version),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
@@ -92,7 +95,7 @@ impl PinnedVersion {
         }
     }
 
-    pub fn new_pin_version(&self, version: HummockVersion) -> Option<Self> {
+    pub fn new_pin_version(&self, version: HummockVersionCommon<T>) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
@@ -104,7 +107,7 @@ impl PinnedVersion {
         }
         let version_id = version.id;
 
-        Some(PinnedVersion {
+        Some(PinnedVersionCommon {
             version: Arc::new(version),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
@@ -121,11 +124,14 @@ impl PinnedVersion {
         self.version.id != INVALID_VERSION_ID
     }
 
-    fn levels_by_compaction_groups_id(&self, compaction_group_id: CompactionGroupId) -> &Levels {
+    fn levels_by_compaction_groups_id(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> &LevelsCommon<T> {
         self.version.levels.get(&compaction_group_id).unwrap()
     }
 
-    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &Level> {
+    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &LevelCommon<T>> {
         #[auto_enum(Iterator)]
         match self.version.state_table_info.info().get(&table_id) {
             Some(info) => {
@@ -152,7 +158,7 @@ impl PinnedVersion {
     }
 
     /// ret value can't be used as `HummockVersion`. it must be modified with delta
-    pub fn version(&self) -> &HummockVersion {
+    pub fn version(&self) -> &HummockVersionCommon<T> {
         &self.version
     }
 }

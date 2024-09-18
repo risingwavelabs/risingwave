@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::config::default::compaction_config;
 use risingwave_hummock_sdk::level::{InputLevel, Levels, OverlappingLevel};
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
@@ -191,7 +192,7 @@ impl IntraCompactionPicker {
                 for level_select_table in &input.sstable_infos {
                     let level_select_size = level_select_table
                         .iter()
-                        .map(|sst| sst.sst_size)
+                        .map(|sst| sst.sst_size())
                         .sum::<u64>();
 
                     max_level_size = std::cmp::max(max_level_size, level_select_size);
@@ -291,7 +292,7 @@ impl IntraCompactionPicker {
                 .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
                 .is_empty());
 
-            let select_input_size = select_sst.sst_size;
+            let select_input_size = select_sst.sst_size();
             let input_levels = vec![
                 InputLevel {
                     level_idx: 0,
@@ -418,6 +419,7 @@ impl WholeLevelCompactionPicker {
 #[cfg(test)]
 pub mod tests {
     use risingwave_hummock_sdk::level::Level;
+    use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -611,9 +613,9 @@ pub mod tests {
                 3
             );
 
-            assert_eq!(4, ret.input_levels[0].table_infos[0].sst_id);
-            assert_eq!(3, ret.input_levels[1].table_infos[0].sst_id);
-            assert_eq!(1, ret.input_levels[2].table_infos[0].sst_id);
+            assert_eq!(4, ret.input_levels[0].table_infos[0].sst_id());
+            assert_eq!(3, ret.input_levels[1].table_infos[0].sst_id());
+            assert_eq!(1, ret.input_levels[2].table_infos[0].sst_id());
 
             // will pick sst [2, 6]
             let ret2 = picker
@@ -628,8 +630,8 @@ pub mod tests {
                 2
             );
 
-            assert_eq!(6, ret2.input_levels[0].table_infos[0].sst_id);
-            assert_eq!(2, ret2.input_levels[1].table_infos[0].sst_id);
+            assert_eq!(6, ret2.input_levels[0].table_infos[0].sst_id());
+            assert_eq!(2, ret2.input_levels[1].table_infos[0].sst_id());
         }
 
         {
@@ -682,9 +684,9 @@ pub mod tests {
                 3
             );
 
-            assert_eq!(11, ret.input_levels[0].table_infos[0].sst_id);
-            assert_eq!(9, ret.input_levels[1].table_infos[0].sst_id);
-            assert_eq!(7, ret.input_levels[2].table_infos[0].sst_id);
+            assert_eq!(11, ret.input_levels[0].table_infos[0].sst_id());
+            assert_eq!(9, ret.input_levels[1].table_infos[0].sst_id());
+            assert_eq!(7, ret.input_levels[2].table_infos[0].sst_id());
 
             let ret2 = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -698,9 +700,9 @@ pub mod tests {
                 3
             );
 
-            assert_eq!(5, ret2.input_levels[0].table_infos[0].sst_id);
-            assert_eq!(10, ret2.input_levels[1].table_infos[0].sst_id);
-            assert_eq!(2, ret2.input_levels[2].table_infos[0].sst_id);
+            assert_eq!(5, ret2.input_levels[0].table_infos[0].sst_id());
+            assert_eq!(10, ret2.input_levels[1].table_infos[0].sst_id());
+            assert_eq!(2, ret2.input_levels[2].table_infos[0].sst_id());
         }
     }
 

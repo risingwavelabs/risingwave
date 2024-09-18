@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod hummock_version_ext;
-
 use parse_display::Display;
 
 use crate::CompactionGroupId;
+
+pub mod hummock_version_ext;
 
 pub type StateTableId = u32;
 
@@ -46,12 +46,17 @@ impl From<StaticCompactionGroupId> for CompactionGroupId {
 
 pub mod group_split {
     use std::cmp::Ordering;
+    use std::fmt::Debug;
 
     use super::hummock_version_ext::insert_new_sub_level;
     use crate::can_concat;
-    use crate::level::{Level, Levels};
+    use crate::level::{LevelCommon, LevelsCommon};
+    use crate::sstable_info_ref::SstableInfoReader;
 
-    pub fn merge_levels(left_levels: &mut Levels, right_levels: Levels) {
+    pub fn merge_levels<T>(left_levels: &mut LevelsCommon<T>, right_levels: LevelsCommon<T>)
+    where
+        T: SstableInfoReader + Debug,
+    {
         let right_l0 = right_levels.l0;
 
         let mut max_left_sub_level_id = left_levels
@@ -105,11 +110,11 @@ pub mod group_split {
             let insert_table_infos = level.table_infos;
             left_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
-                .map(|sst| sst.sst_size)
+                .map(|sst| sst.sst_size())
                 .sum::<u64>();
             left_levels.levels[idx].uncompressed_file_size += insert_table_infos
                 .iter()
-                .map(|sst| sst.uncompressed_file_size)
+                .map(|sst| sst.uncompressed_file_size())
                 .sum::<u64>();
 
             left_levels.levels[idx]
@@ -117,7 +122,7 @@ pub mod group_split {
                 .extend(insert_table_infos);
             left_levels.levels[idx]
                 .table_infos
-                .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+                .sort_by(|sst1, sst2| sst1.key_range().cmp(sst2.key_range()));
             assert!(
                 can_concat(&left_levels.levels[idx].table_infos),
                 "{}",
@@ -136,9 +141,9 @@ pub mod group_split {
     // When `insert_hint` is `Ok(idx)`, it means that the sub level `idx` in `target_l0`
     // will extend these SSTs. When `insert_hint` is `Err(idx)`, it
     // means that we will add a new sub level `idx` into `target_l0`.
-    pub fn get_sub_level_insert_hint(
-        target_levels: &Vec<Level>,
-        sub_level: &Level,
+    pub fn get_sub_level_insert_hint<T>(
+        target_levels: &Vec<LevelCommon<T>>,
+        sub_level: &LevelCommon<T>,
     ) -> Result<usize, usize> {
         for (idx, other) in target_levels.iter().enumerate() {
             match other.sub_level_id.cmp(&sub_level.sub_level_id) {

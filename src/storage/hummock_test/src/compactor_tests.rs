@@ -14,7 +14,6 @@
 
 #[cfg(test)]
 pub(crate) mod tests {
-
     use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
     use std::ops::Bound;
     use std::sync::Arc;
@@ -37,7 +36,7 @@ pub(crate) mod tests {
     };
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::InputLevel;
-    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::sstable_info_ref::{SstableInfoReader, SstableInfoType};
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_hummock_sdk::table_watermark::{
         ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection,
@@ -1406,14 +1405,14 @@ pub(crate) mod tests {
             .last()
             .unwrap();
         assert_eq!(1, output_level_info.table_infos.len());
-        assert_eq!(252, output_level_info.table_infos[0].total_key_count);
+        assert_eq!(252, output_level_info.table_infos[0].total_key_count());
     }
 
     type KeyValue = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>);
     async fn check_compaction_result(
         sstable_store: SstableStoreRef,
-        ret: Vec<SstableInfo>,
-        fast_ret: Vec<SstableInfo>,
+        ret: Vec<SstableInfoType>,
+        fast_ret: Vec<SstableInfoType>,
         capacity: u64,
     ) {
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
@@ -1426,7 +1425,7 @@ pub(crate) mod tests {
         for sst_info in &ret {
             normal_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
         }
-        assert!(fast_ret.iter().all(|f| f.file_size < capacity * 6 / 5));
+        assert!(fast_ret.iter().all(|f| f.file_size() < capacity * 6 / 5));
         assert!(can_concat(&ret));
         assert!(can_concat(&fast_ret));
         let read_options = Arc::new(SstableIteratorReadOptions::default());
@@ -1483,7 +1482,7 @@ pub(crate) mod tests {
     async fn run_fast_and_normal_runner(
         compact_ctx: CompactorContext,
         task: CompactTask,
-    ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
+    ) -> (Vec<SstableInfoType>, Vec<SstableInfoType>) {
         let multi_filter_key_extractor =
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
         let compaction_filter = DummyCompactionFilter {};
@@ -1512,9 +1511,15 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-        let ret = ret1.into_iter().map(|sst| sst.sst_info).collect_vec();
+        let ret = ret1
+            .into_iter()
+            .map(|sst| sst.sst_info.into())
+            .collect_vec();
         let (ssts, _) = fast_compact_runner.run().await.unwrap();
-        let fast_ret = ssts.into_iter().map(|sst| sst.sst_info).collect_vec();
+        let fast_ret = ssts
+            .into_iter()
+            .map(|sst| sst.sst_info.into())
+            .collect_vec();
         (ret, fast_ret)
     }
 
@@ -1776,7 +1781,7 @@ pub(crate) mod tests {
             let output = builder.finish().await.unwrap();
             output.writer_output.await.unwrap().unwrap();
             let sst_info = output.sst_info.sst_info;
-            max_sst_file_size = std::cmp::max(max_sst_file_size, sst_info.file_size);
+            max_sst_file_size = std::cmp::max(max_sst_file_size, sst_info.file_size());
             sst_infos.push(sst_info);
         }
 
@@ -1899,7 +1904,7 @@ pub(crate) mod tests {
             let output = builder.finish().await.unwrap();
             output.writer_output.await.unwrap().unwrap();
             let sst_info = output.sst_info.sst_info;
-            max_sst_file_size = std::cmp::max(max_sst_file_size, sst_info.file_size);
+            max_sst_file_size = std::cmp::max(max_sst_file_size, sst_info.file_size());
             sst_infos.push(sst_info);
         }
 

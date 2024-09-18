@@ -25,7 +25,7 @@ use rand::random;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoType;
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, S3ObjectStore,
 };
@@ -105,7 +105,7 @@ fn test_user_key_of(idx: u64) -> UserKey<Vec<u8>> {
 
 async fn build_tables<F: SstableWriterFactory>(
     mut builder: CapacitySplitTableBuilder<LocalTableBuilderFactory<F>>,
-) -> Vec<SstableInfo> {
+) -> Vec<SstableInfoType> {
     for i in RANGE {
         builder
             .add_full_key_for_test(
@@ -122,7 +122,7 @@ async fn build_tables<F: SstableWriterFactory>(
         .await
         .unwrap()
         .into_iter()
-        .map(|info| info.sst_info)
+        .map(|info| info.sst_info.into())
         .collect()
 }
 

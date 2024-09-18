@@ -32,7 +32,8 @@ pub mod refiller;
 pub mod uploader;
 
 pub use hummock_event_handler::HummockEventHandler;
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoType;
+use risingwave_hummock_sdk::version::{HummockVersionCommon, HummockVersionDeltaCommon};
 
 use super::store::version::HummockReadVersion;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
@@ -47,8 +48,8 @@ pub struct BufferWriteRequest {
 
 #[derive(Debug)]
 pub enum HummockVersionUpdate {
-    VersionDeltas(Vec<HummockVersionDelta>),
-    PinnedVersion(Box<HummockVersion>),
+    VersionDeltas(Vec<HummockVersionDeltaCommon<SstableInfoType>>),
+    PinnedVersion(Box<HummockVersionCommon<SstableInfoType>>),
 }
 
 pub enum HummockEvent {

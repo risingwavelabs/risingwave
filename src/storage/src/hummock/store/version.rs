@@ -27,12 +27,12 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::{EpochNewChangeLogType, SstableInfoReader};
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
@@ -198,7 +198,7 @@ impl StagingVersion {
                     .iter()
                     .map(|sstable| &sstable.sst_info)
                     .filter(move |sstable: &&SstableInfo| {
-                        filter_single_sst(sstable, table_id, table_key_range)
+                        filter_single_sst(*sstable, table_id, table_key_range)
                     })
             });
         (overlapped_imms, overlapped_ssts)
@@ -651,7 +651,7 @@ impl HummockVersionReader {
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
                     let ord = level.table_infos[table_info_idx]
-                        .key_range
+                        .key_range()
                         .compare_right_with_user_key(full_key.user_key.as_ref());
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
@@ -869,7 +869,7 @@ impl HummockVersionReader {
                 let sstables = table_infos
                     .filter(|sstable_info| {
                         sstable_info
-                            .table_ids
+                            .table_ids()
                             .binary_search(&read_options.table_id.table_id)
                             .is_ok()
                     })
@@ -929,7 +929,7 @@ impl HummockVersionReader {
                         .sstable_store
                         .sstable(sstable_info, local_stats)
                         .await?;
-                    assert_eq!(sstable_info.object_id, sstable.id);
+                    assert_eq!(sstable_info.object_id(), sstable.id);
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(
                             &sstable,
@@ -972,7 +972,7 @@ impl HummockVersionReader {
             if let Some(change_log) = version.version().table_change_log.get(&options.table_id) {
                 change_log.filter_epoch(epoch_range)
             } else {
-                static EMPTY_VEC: Vec<EpochNewChangeLog> = Vec::new();
+                static EMPTY_VEC: Vec<EpochNewChangeLogType> = Vec::new();
                 &EMPTY_VEC[..]
             };
         if let Some(max_epoch_change_log) = change_log.last() {
@@ -993,8 +993,8 @@ impl HummockVersionReader {
             prefetch_for_large_query: false,
         });
 
-        async fn make_iter(
-            ssts: impl Iterator<Item = &SstableInfo>,
+        async fn make_iter<'a, T: SstableInfoReader + 'a>(
+            ssts: impl Iterator<Item = &'a T>,
             sstable_store: &SstableStoreRef,
             read_options: Arc<SstableIteratorReadOptions>,
             local_stat: &mut StoreLocalStatistic,
@@ -1026,7 +1026,7 @@ impl HummockVersionReader {
             change_log
                 .iter()
                 .flat_map(|log| log.new_value.iter())
-                .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
+                .filter(|sst| filter_single_sst(*sst, options.table_id, &key_range)),
             &self.sstable_store,
             read_options.clone(),
             &mut local_stat,
@@ -1036,7 +1036,7 @@ impl HummockVersionReader {
             change_log
                 .iter()
                 .flat_map(|log| log.old_value.iter())
-                .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
+                .filter(|sst| filter_single_sst(*sst, options.table_id, &key_range)),
             &self.sstable_store,
             read_options.clone(),
             &mut local_stat,

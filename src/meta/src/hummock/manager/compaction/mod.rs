@@ -46,6 +46,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::{InputLevel, Level, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
@@ -159,8 +160,11 @@ impl<'a> HummockVersionTransaction<'a> {
 
         for level in &compact_task.input_ssts {
             let level_idx = level.level_idx;
-            let mut removed_table_ids =
-                level.table_infos.iter().map(|sst| sst.sst_id).collect_vec();
+            let mut removed_table_ids = level
+                .table_infos
+                .iter()
+                .map(|sst| sst.sst_id())
+                .collect_vec();
 
             removed_table_ids_map
                 .entry(level_idx)
@@ -1124,11 +1128,11 @@ impl HummockManager {
                 let mut sst_ids: HashSet<_> = input_level
                     .table_infos
                     .iter()
-                    .map(|sst| sst.sst_id)
+                    .map(|sst| sst.sst_id())
                     .collect();
                 fn filter_ssts(levels: &Level, sst_ids: &mut HashSet<u64>) {
                     for sst in &levels.table_infos {
-                        sst_ids.remove(&sst.sst_id);
+                        sst_ids.remove(&sst.sst_id());
                     }
                 }
                 if input_level.level_idx == 0 {
@@ -1241,7 +1245,7 @@ impl HummockManager {
             let input_sst_ids: HashSet<u64> = compact_task
                 .input_ssts
                 .iter()
-                .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
+                .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id()))
                 .collect();
             let input_level_ids: Vec<u32> = compact_task
                 .input_ssts
@@ -1507,10 +1511,10 @@ impl HummockManager {
             let mut existing_table_ids: HashSet<u32> = HashSet::default();
             for input_ssts in &compact_task.input_ssts {
                 for sst in &input_ssts.table_infos {
-                    existing_table_ids.extend(sst.table_ids.iter());
-                    for table_id in &sst.table_ids {
+                    existing_table_ids.extend(sst.table_ids());
+                    for table_id in sst.table_ids() {
                         *table_size_info.entry(*table_id).or_default() +=
-                            sst.sst_size / (sst.table_ids.len() as u64);
+                            sst.sst_size() / (sst.table_ids().len() as u64);
                     }
                 }
             }

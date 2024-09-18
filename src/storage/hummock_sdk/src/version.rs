@@ -35,6 +35,7 @@ use crate::compaction_group::hummock_version_ext::build_initial_compaction_group
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::level::LevelsCommon;
 use crate::sstable_info::SstableInfo;
+use crate::sstable_info_ref::SstableInfoReader;
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID};
 
@@ -368,6 +369,29 @@ where
     }
 }
 
+impl<T> HummockVersionCommon<T> {
+    pub(crate) fn set_safe_epoch(&mut self, safe_epoch: u64) {
+        self.safe_epoch = safe_epoch;
+    }
+
+    pub(crate) fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
+        self.max_committed_epoch = max_committed_epoch;
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn max_committed_epoch(&self) -> u64 {
+        self.max_committed_epoch
+    }
+
+    pub fn visible_table_safe_epoch(&self) -> u64 {
+        self.safe_epoch
+    }
+
+    pub fn visible_table_committed_epoch(&self) -> u64 {
+        self.max_committed_epoch
+    }
+}
+
 impl HummockVersion {
     pub fn next_version_id(&self) -> HummockVersionId {
         self.id.next()
@@ -409,27 +433,6 @@ impl HummockVersion {
                 );
             }
         }
-    }
-
-    pub(crate) fn set_safe_epoch(&mut self, safe_epoch: u64) {
-        self.safe_epoch = safe_epoch;
-    }
-
-    pub fn visible_table_safe_epoch(&self) -> u64 {
-        self.safe_epoch
-    }
-
-    pub(crate) fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
-        self.max_committed_epoch = max_committed_epoch;
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn max_committed_epoch(&self) -> u64 {
-        self.max_committed_epoch
-    }
-
-    pub fn visible_table_committed_epoch(&self) -> u64 {
-        self.max_committed_epoch
     }
 
     pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
@@ -514,6 +517,24 @@ where
     }
 }
 
+impl<T> HummockVersionDeltaCommon<T> {
+    pub fn visible_table_safe_epoch(&self) -> u64 {
+        self.safe_epoch
+    }
+
+    pub fn set_safe_epoch(&mut self, safe_epoch: u64) {
+        self.safe_epoch = safe_epoch;
+    }
+
+    pub fn visible_table_committed_epoch(&self) -> u64 {
+        self.max_committed_epoch
+    }
+
+    pub fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
+        self.max_committed_epoch = max_committed_epoch;
+    }
+}
+
 impl HummockVersionDelta {
     /// Get the newly added object ids from the version delta.
     ///
@@ -530,7 +551,7 @@ impl HummockVersionDelta {
                     } else {
                         &EMPTY_VEC
                     };
-                    sst_slice.iter().map(|sst| sst.object_id)
+                    sst_slice.iter().map(|sst| sst.object_id())
                 })
             })
             .chain(self.change_log_delta.values().flat_map(|delta| {
@@ -538,8 +559,8 @@ impl HummockVersionDelta {
                 new_log
                     .new_value
                     .iter()
-                    .map(|sst| sst.object_id)
-                    .chain(new_log.old_value.iter().map(|sst| sst.object_id))
+                    .map(|sst| sst.object_id())
+                    .chain(new_log.old_value.iter().map(|sst| sst.object_id()))
             }))
             .collect()
     }
@@ -564,7 +585,7 @@ impl HummockVersionDelta {
 
         ssts_from_group_deltas
             .chain(ssts_from_change_log)
-            .map(|sst| sst.object_id)
+            .map(|sst| sst.object_id())
             .collect()
     }
 
@@ -597,22 +618,6 @@ impl HummockVersionDelta {
                 let new_log = delta.new_log.as_ref().unwrap();
                 new_log.new_value.iter().chain(new_log.old_value.iter())
             }))
-    }
-
-    pub fn visible_table_safe_epoch(&self) -> u64 {
-        self.safe_epoch
-    }
-
-    pub fn set_safe_epoch(&mut self, safe_epoch: u64) {
-        self.safe_epoch = safe_epoch;
-    }
-
-    pub fn visible_table_committed_epoch(&self) -> u64 {
-        self.max_committed_epoch
-    }
-
-    pub fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
-        self.max_committed_epoch = max_committed_epoch;
     }
 }
 

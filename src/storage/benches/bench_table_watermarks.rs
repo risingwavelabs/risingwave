@@ -24,10 +24,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::sstable_info_ref::HummockVersionType;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
+use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{PbHummockVersion, StateTableInfoDelta};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
@@ -109,14 +110,14 @@ fn gen_version(
     new_epoch_idx: usize,
     table_count: usize,
     vnode_part_count: usize,
-) -> HummockVersion {
+) -> HummockVersionType {
     let table_watermarks = Arc::new(gen_committed_table_watermarks(
         old_epoch_idx,
         new_epoch_idx,
         vnode_part_count,
     ));
     let committed_epoch = test_epoch(new_epoch_idx as _);
-    let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
+    let mut version = HummockVersionType::from_persisted_protobuf(&PbHummockVersion {
         id: new_epoch_idx as _,
         max_committed_epoch: committed_epoch,
         ..Default::default()

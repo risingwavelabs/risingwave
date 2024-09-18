@@ -21,6 +21,7 @@ use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo};
 use crate::change_log::{TableChangeLog, TableChangeLogCommon};
 use crate::level::Level;
 use crate::sstable_info::SstableInfo;
+use crate::sstable_info_ref::SstableInfoReader;
 use crate::version::{
     HummockVersion, HummockVersionCommon, HummockVersionDelta, HummockVersionDeltaCommon,
 };
@@ -74,7 +75,7 @@ fn refill_sstable_info(
     sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>,
 ) {
     *sstable_info = sst_id_to_info
-        .get(&sstable_info.sst_id)
+        .get(&sstable_info.sst_id())
         .unwrap_or_else(|| panic!("SstableInfo should exist"))
         .clone();
 }

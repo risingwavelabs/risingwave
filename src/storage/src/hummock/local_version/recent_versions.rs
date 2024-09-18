@@ -191,7 +191,7 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::sstable_info_ref::HummockVersionType;
     use risingwave_pb::hummock::{PbHummockVersion, StateTableInfo};
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -206,7 +206,7 @@ mod tests {
         table_committed_epoch: impl IntoIterator<Item = (TableId, u64)>,
     ) -> PinnedVersion {
         PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+            HummockVersionType::from_rpc_protobuf(&PbHummockVersion {
                 id: version_id,
                 state_table_info: HashMap::from_iter(table_committed_epoch.into_iter().map(
                     |(table_id, committed_epoch)| {

@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -32,21 +33,22 @@ use super::{group_split, StateTableId};
 use crate::change_log::TableChangeLogCommon;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
-use crate::level::{Level, Levels, OverlappingLevel};
+use crate::level::{LevelCommon, LevelsCommon, OverlappingLevelCommon};
 use crate::sstable_info::SstableInfo;
+use crate::sstable_info_ref::{SstableInfoReader, SstableInfoType, SstableInfoWriter};
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
-    GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
-    IntraLevelDelta,
+    GroupDeltaCommon, GroupDeltasCommon, HummockVersionCommon, HummockVersionDeltaCommon,
+    HummockVersionStateTableInfo, IntraLevelDeltaCommon,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
-pub struct GroupDeltasSummary {
+pub struct GroupDeltasSummaryCommon<T> {
     pub delete_sst_levels: Vec<u32>,
     pub delete_sst_ids_set: HashSet<u64>,
     pub insert_sst_level_id: u32,
     pub insert_sub_level_id: u64,
-    pub insert_table_infos: Vec<SstableInfo>,
+    pub insert_table_infos: Vec<T>,
     pub group_construct: Option<GroupConstruct>,
     pub group_destroy: Option<CompactionGroupId>,
     pub group_meta_changes: Vec<GroupMetaChange>,
@@ -55,10 +57,15 @@ pub struct GroupDeltasSummary {
     pub group_merge: Option<GroupMerge>,
 }
 
-pub fn summarize_group_deltas(
-    group_deltas: &GroupDeltas,
+pub type GroupDeltasSummary = GroupDeltasSummaryCommon<SstableInfo>;
+
+pub fn summarize_group_deltas<T>(
+    group_deltas: &GroupDeltasCommon<T>,
     compaction_group_id: CompactionGroupId,
-) -> GroupDeltasSummary {
+) -> GroupDeltasSummaryCommon<T>
+where
+    T: Clone,
+{
     let mut delete_sst_levels = Vec::with_capacity(group_deltas.group_deltas.len());
     let mut delete_sst_ids_set = HashSet::new();
     let mut insert_sst_level_id = u32::MAX;
@@ -73,7 +80,7 @@ pub fn summarize_group_deltas(
 
     for group_delta in &group_deltas.group_deltas {
         match group_delta {
-            GroupDelta::IntraLevel(intra_level) => {
+            GroupDeltaCommon::IntraLevel(intra_level) => {
                 if !intra_level.removed_table_ids.is_empty() {
                     delete_sst_levels.push(intra_level.level_idx);
                     delete_sst_ids_set.extend(intra_level.removed_table_ids.iter().clone());
@@ -85,21 +92,21 @@ pub fn summarize_group_deltas(
                 }
                 new_vnode_partition_count = intra_level.vnode_partition_count;
             }
-            GroupDelta::GroupConstruct(construct_delta) => {
+            GroupDeltaCommon::GroupConstruct(construct_delta) => {
                 assert!(group_construct.is_none());
                 group_construct = Some(construct_delta.clone());
             }
-            GroupDelta::GroupDestroy(_) => {
+            GroupDeltaCommon::GroupDestroy(_) => {
                 assert!(group_destroy.is_none());
                 group_destroy = Some(compaction_group_id);
             }
-            GroupDelta::GroupMetaChange(meta_delta) => {
+            GroupDeltaCommon::GroupMetaChange(meta_delta) => {
                 group_meta_changes.push(meta_delta.clone());
             }
-            GroupDelta::GroupTableChange(meta_delta) => {
+            GroupDeltaCommon::GroupTableChange(meta_delta) => {
                 group_table_change = Some(meta_delta.clone());
             }
-            GroupDelta::GroupMerge(merge_delta) => {
+            GroupDeltaCommon::GroupMerge(merge_delta) => {
                 assert!(group_merge.is_none());
                 group_merge = Some(*merge_delta);
                 group_destroy = Some(merge_delta.right_group_id);
@@ -110,7 +117,7 @@ pub fn summarize_group_deltas(
     delete_sst_levels.sort();
     delete_sst_levels.dedup();
 
-    GroupDeltasSummary {
+    GroupDeltasSummaryCommon {
         delete_sst_levels,
         delete_sst_ids_set,
         insert_sst_level_id,
@@ -134,16 +141,24 @@ pub struct TableGroupInfo {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct SstDeltaInfo {
+pub struct SstDeltaInfoCommon<T> {
     pub insert_sst_level: u32,
-    pub insert_sst_infos: Vec<SstableInfo>,
+    pub insert_sst_infos: Vec<T>,
     pub delete_sst_object_ids: Vec<HummockSstableObjectId>,
 }
 
+pub type SstDeltaInfo = SstDeltaInfoCommon<SstableInfoType>;
+
 pub type BranchedSstInfo = HashMap<CompactionGroupId, Vec<HummockSstableId>>;
 
-impl HummockVersion {
-    pub fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
+impl<T> HummockVersionCommon<T>
+where
+    T: SstableInfoReader,
+{
+    pub fn get_compaction_group_levels(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> &LevelsCommon<T> {
         self.levels
             .get(&compaction_group_id)
             .unwrap_or_else(|| panic!("compaction group {} does not exist", compaction_group_id))
@@ -152,27 +167,27 @@ impl HummockVersion {
     pub fn get_compaction_group_levels_mut(
         &mut self,
         compaction_group_id: CompactionGroupId,
-    ) -> &mut Levels {
+    ) -> &mut LevelsCommon<T> {
         self.levels
             .get_mut(&compaction_group_id)
             .unwrap_or_else(|| panic!("compaction group {} does not exist", compaction_group_id))
     }
 
-    pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ Level> + '_ {
+    pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ LevelCommon<T>> + '_ {
         self.levels
             .values()
             .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
     }
 
     pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos().map(|s| s.object_id).collect()
+        self.get_sst_infos().map(|s| s.object_id()).collect()
     }
 
     pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos().map(|s| s.sst_id).collect()
+        self.get_sst_infos().map(|s| s.sst_id()).collect()
     }
 
-    pub fn get_sst_infos(&self) -> impl Iterator<Item = &SstableInfo> {
+    pub fn get_sst_infos(&self) -> impl Iterator<Item = &T> {
         self.get_combined_levels()
             .flat_map(|level| level.table_infos.iter())
             .chain(self.table_change_log.values().flat_map(|change_log| {
@@ -201,7 +216,7 @@ impl HummockVersion {
             })
             .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
             .flat_map(|level| level.table_infos.iter())
-            .map(|s| s.sst_id)
+            .map(|s| s.sst_id())
     }
 
     /// `get_sst_infos_from_groups` doesn't guarantee that all returned sst info belongs to `select_group`.
@@ -210,7 +225,7 @@ impl HummockVersion {
     pub fn get_sst_infos_from_groups<'a>(
         &'a self,
         select_group: &'a HashSet<CompactionGroupId>,
-    ) -> impl Iterator<Item = &SstableInfo> + 'a {
+    ) -> impl Iterator<Item = &T> + 'a {
         self.levels
             .iter()
             .filter_map(|(cg_id, level)| {
@@ -233,7 +248,7 @@ impl HummockVersion {
             }))
     }
 
-    pub fn level_iter<F: FnMut(&Level) -> bool>(
+    pub fn level_iter<F: FnMut(&LevelCommon<T>) -> bool>(
         &self,
         compaction_group_id: CompactionGroupId,
         mut f: F,
@@ -353,7 +368,10 @@ pub fn safe_epoch_read_table_watermarks_impl(
         .collect()
 }
 
-impl HummockVersion {
+impl<T> HummockVersionCommon<T>
+where
+    T: SstableInfoReader + SstableInfoWriter + Clone + Debug + Default,
+{
     pub fn count_new_ssts_in_group_split(
         &self,
         parent_group_id: CompactionGroupId,
@@ -370,7 +388,7 @@ impl HummockVersion {
                     .flat_map(|level| &level.table_infos)
                     .map(|sst_info| {
                         // `sst_info.table_ids` will never be empty.
-                        for table_id in &sst_info.table_ids {
+                        for table_id in sst_info.table_ids() {
                             if member_table_ids.contains(table_id) {
                                 return 2;
                             }
@@ -423,12 +441,12 @@ impl HummockVersion {
                     split_sst_info_for_level(&member_table_ids, sub_level, &mut new_sst_id);
                 sub_level
                     .table_infos
-                    .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                    .extract_if(|sst_info| sst_info.table_ids().is_empty())
                     .for_each(|sst_info| {
-                        sub_level.total_file_size -= sst_info.sst_size;
-                        sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                        l0.total_file_size -= sst_info.sst_size;
-                        l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                        sub_level.total_file_size -= sst_info.sst_size();
+                        sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size();
+                        l0.total_file_size -= sst_info.sst_size();
+                        l0.uncompressed_file_size -= sst_info.uncompressed_file_size();
                     });
                 if insert_table_infos.is_empty() {
                     continue;
@@ -454,30 +472,33 @@ impl HummockVersion {
                 split_sst_info_for_level(&member_table_ids, level, &mut new_sst_id);
             cur_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
-                .map(|sst| sst.sst_size)
+                .map(|sst| sst.sst_size())
                 .sum::<u64>();
             cur_levels.levels[idx].uncompressed_file_size += insert_table_infos
                 .iter()
-                .map(|sst| sst.uncompressed_file_size)
+                .map(|sst| sst.uncompressed_file_size())
                 .sum::<u64>();
             cur_levels.levels[idx]
                 .table_infos
                 .extend(insert_table_infos);
             cur_levels.levels[idx]
                 .table_infos
-                .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+                .sort_by(|sst1, sst2| sst1.key_range().cmp(sst2.key_range()));
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
                 .table_infos
-                .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                .extract_if(|sst_info| sst_info.table_ids().is_empty())
                 .for_each(|sst_info| {
-                    level.total_file_size -= sst_info.sst_size;
-                    level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                    level.total_file_size -= sst_info.sst_size();
+                    level.uncompressed_file_size -= sst_info.uncompressed_file_size();
                 });
         }
     }
 
-    pub fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
+    pub fn build_sst_delta_infos(
+        &self,
+        version_delta: &HummockVersionDeltaCommon<T>,
+    ) -> Vec<SstDeltaInfoCommon<T>> {
         let mut infos = vec![];
 
         // Skip trivial move delta for refiller
@@ -487,7 +508,7 @@ impl HummockVersion {
         }
 
         for (group_id, group_deltas) in &version_delta.group_deltas {
-            let mut info = SstDeltaInfo::default();
+            let mut info = SstDeltaInfoCommon::<T>::default();
 
             let mut removed_l0_ssts: BTreeSet<u64> = BTreeSet::new();
             let mut removed_ssts: BTreeMap<u32, BTreeSet<u64>> = BTreeMap::new();
@@ -496,7 +517,7 @@ impl HummockVersion {
             if !group_deltas
                 .group_deltas
                 .iter()
-                .all(|delta| matches!(delta, GroupDelta::IntraLevel(_)))
+                .all(|delta| matches!(delta, GroupDeltaCommon::IntraLevel(_)))
             {
                 continue;
             }
@@ -505,7 +526,7 @@ impl HummockVersion {
             // current `hummock::manager::gen_version_delta` implementation. Better refactor the
             // struct to reduce conventions.
             for group_delta in &group_deltas.group_deltas {
-                if let GroupDelta::IntraLevel(intra_level) = group_delta {
+                if let GroupDeltaCommon::IntraLevel(intra_level) = group_delta {
                     if !intra_level.inserted_table_infos.is_empty() {
                         info.insert_sst_level = intra_level.level_idx;
                         info.insert_sst_infos
@@ -529,16 +550,16 @@ impl HummockVersion {
             let group = self.levels.get(group_id).unwrap();
             for l0_sub_level in &group.level0().sub_levels {
                 for sst_info in &l0_sub_level.table_infos {
-                    if removed_l0_ssts.remove(&sst_info.sst_id) {
-                        info.delete_sst_object_ids.push(sst_info.object_id);
+                    if removed_l0_ssts.remove(&sst_info.sst_id()) {
+                        info.delete_sst_object_ids.push(sst_info.object_id());
                     }
                 }
             }
             for level in &group.levels {
                 if let Some(mut removed_level_ssts) = removed_ssts.remove(&level.level_idx) {
                     for sst_info in &level.table_infos {
-                        if removed_level_ssts.remove(&sst_info.sst_id) {
-                            info.delete_sst_object_ids.push(sst_info.object_id);
+                        if removed_level_ssts.remove(&sst_info.sst_id()) {
+                            info.delete_sst_object_ids.push(sst_info.object_id());
                         }
                     }
                     if !removed_level_ssts.is_empty() {
@@ -567,7 +588,7 @@ impl HummockVersion {
         infos
     }
 
-    pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
+    pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDeltaCommon<T>) {
         assert_eq!(self.id, version_delta.prev_id);
 
         let (changed_table_info, mut is_commit_epoch) = self.state_table_info.apply_delta(
@@ -681,7 +702,7 @@ impl HummockVersion {
             );
             if is_commit_epoch {
                 // `max_committed_epoch` increases. It must be a `commit_epoch`
-                let GroupDeltasSummary {
+                let GroupDeltasSummaryCommon {
                     delete_sst_levels,
                     delete_sst_ids_set,
                     ..
@@ -693,7 +714,7 @@ impl HummockVersion {
                     "no sst should be deleted when committing an epoch"
                 );
                 for group_delta in &group_deltas.group_deltas {
-                    if let GroupDelta::IntraLevel(IntraLevelDelta {
+                    if let GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon {
                         level_idx,
                         l0_sub_level_id,
                         inserted_table_infos,
@@ -841,15 +862,15 @@ impl HummockVersion {
             levels.extend(group.levels.iter());
             for level in levels {
                 for table_info in &level.table_infos {
-                    if table_info.sst_id == table_info.object_id {
+                    if table_info.sst_id() == table_info.object_id() {
                         continue;
                     }
-                    let object_id = table_info.object_id;
+                    let object_id = table_info.object_id();
                     let entry: &mut BranchedSstInfo = ret.entry(object_id).or_default();
                     entry
                         .entry(*compaction_group_id)
                         .or_default()
-                        .push(table_info.sst_id)
+                        .push(table_info.sst_id())
                 }
             }
         }
@@ -897,13 +918,16 @@ impl HummockVersion {
 }
 
 #[easy_ext::ext(HummockLevelsExt)]
-impl Levels {
+impl<T> LevelsCommon<T>
+where
+    T: SstableInfoReader + SstableInfoWriter + Clone,
+{
     pub fn apply_compact_ssts(
         &mut self,
-        summary: GroupDeltasSummary,
+        summary: GroupDeltasSummaryCommon<T>,
         member_table_ids: &BTreeSet<TableId>,
     ) {
-        let GroupDeltasSummary {
+        let GroupDeltasSummaryCommon {
             delete_sst_levels,
             delete_sst_ids_set,
             insert_sst_level_id,
@@ -927,7 +951,7 @@ impl Levels {
                 insert_sub_level_id,
                 insert_table_infos
                     .iter()
-                    .map(|sst| (sst.sst_id, sst.object_id))
+                    .map(|sst| (sst.sst_id(), sst.object_id()))
                     .collect_vec()
             );
             return;
@@ -957,8 +981,8 @@ impl Levels {
                 if l0.sub_levels[index].table_infos.is_empty()
                     && member_table_ids.len() == 1
                     && insert_table_infos.iter().all(|sst| {
-                        sst.table_ids.len() == 1
-                            && sst.table_ids[0]
+                        sst.table_ids().len() == 1
+                            && sst.table_ids()[0]
                                 == member_table_ids.iter().next().expect("non-empty").table_id
                     })
                 {
@@ -972,7 +996,7 @@ impl Levels {
                 if self.levels[idx].table_infos.is_empty()
                     && insert_table_infos
                         .iter()
-                        .all(|sst| sst.table_ids.len() == 1)
+                        .all(|sst| sst.table_ids().len() == 1)
                 {
                     self.levels[idx].vnode_partition_count = new_vnode_partition_count;
                 } else if self.levels[idx].vnode_partition_count != 0
@@ -1012,13 +1036,13 @@ impl Levels {
             if *level_idx == 0 {
                 for level in &self.l0.sub_levels {
                     level.table_infos.iter().for_each(|table| {
-                        delete_sst_ids_set.remove(&table.sst_id);
+                        delete_sst_ids_set.remove(&table.sst_id());
                     });
                 }
             } else {
                 let idx = *level_idx as usize - 1;
                 self.levels[idx].table_infos.iter().for_each(|table| {
-                    delete_sst_ids_set.remove(&table.sst_id);
+                    delete_sst_ids_set.remove(&table.sst_id());
                 });
             }
         }
@@ -1026,13 +1050,13 @@ impl Levels {
     }
 }
 
-pub fn build_initial_compaction_group_levels(
+pub fn build_initial_compaction_group_levels<T>(
     group_id: CompactionGroupId,
     compaction_config: &CompactionConfig,
-) -> Levels {
+) -> LevelsCommon<T> {
     let mut levels = vec![];
     for l in 0..compaction_config.get_max_level() {
-        levels.push(Level {
+        levels.push(LevelCommon {
             level_idx: (l + 1) as u32,
             level_type: PbLevelType::Nonoverlapping,
             table_infos: vec![],
@@ -1043,9 +1067,9 @@ pub fn build_initial_compaction_group_levels(
         });
     }
     #[expect(deprecated)] // for backward-compatibility of previous hummock version delta
-    Levels {
+    LevelsCommon {
         levels,
-        l0: OverlappingLevel {
+        l0: OverlappingLevelCommon {
             sub_levels: vec![],
             total_file_size: 0,
             uncompressed_file_size: 0,
@@ -1056,17 +1080,20 @@ pub fn build_initial_compaction_group_levels(
     }
 }
 
-fn split_sst_info_for_level(
+fn split_sst_info_for_level<T>(
     member_table_ids: &BTreeSet<u32>,
-    level: &mut Level,
+    level: &mut LevelCommon<T>,
     new_sst_id: &mut u64,
-) -> Vec<SstableInfo> {
+) -> Vec<T>
+where
+    T: SstableInfoReader + SstableInfoWriter + Clone,
+{
     // Remove SST from sub level may result in empty sub level. It will be purged
     // whenever another compaction task is finished.
     let mut insert_table_infos = vec![];
     for sst_info in &mut level.table_infos {
         let removed_table_ids = sst_info
-            .table_ids
+            .table_ids()
             .iter()
             .filter(|table_id| member_table_ids.contains(table_id))
             .cloned()
@@ -1075,8 +1102,8 @@ fn split_sst_info_for_level(
             let branch_sst = split_sst(
                 sst_info,
                 new_sst_id,
-                sst_info.sst_size / 2,
-                sst_info.sst_size / 2,
+                sst_info.sst_size() / 2,
+                sst_info.sst_size() / 2,
                 member_table_ids.iter().cloned().collect_vec(),
             );
             insert_table_infos.push(branch_sst);
@@ -1086,14 +1113,14 @@ fn split_sst_info_for_level(
 }
 
 /// Gets all compaction group ids.
-pub fn get_compaction_group_ids(
-    version: &HummockVersion,
+pub fn get_compaction_group_ids<T>(
+    version: &HummockVersionCommon<T>,
 ) -> impl Iterator<Item = CompactionGroupId> + '_ {
     version.levels.keys().cloned()
 }
 
-pub fn get_table_compaction_group_id_mapping(
-    version: &HummockVersion,
+pub fn get_table_compaction_group_id_mapping<T>(
+    version: &HummockVersionCommon<T>,
 ) -> HashMap<StateTableId, CompactionGroupId> {
     version
         .state_table_info
@@ -1104,10 +1131,13 @@ pub fn get_table_compaction_group_id_mapping(
 }
 
 /// Gets all SSTs in `group_id`
-pub fn get_compaction_group_ssts(
-    version: &HummockVersion,
+pub fn get_compaction_group_ssts<T>(
+    version: &HummockVersionCommon<T>,
     group_id: CompactionGroupId,
-) -> impl Iterator<Item = (HummockSstableObjectId, HummockSstableId)> + '_ {
+) -> impl Iterator<Item = (HummockSstableObjectId, HummockSstableId)> + '_
+where
+    T: SstableInfoReader,
+{
     let group_levels = version.get_compaction_group_levels(group_id);
     group_levels
         .l0
@@ -1119,15 +1149,18 @@ pub fn get_compaction_group_ssts(
             level
                 .table_infos
                 .iter()
-                .map(|table_info| (table_info.object_id, table_info.sst_id))
+                .map(|table_info| (table_info.object_id(), table_info.sst_id()))
         })
 }
 
-pub fn new_sub_level(
+pub fn new_sub_level<T>(
     sub_level_id: u64,
     level_type: PbLevelType,
-    table_infos: Vec<SstableInfo>,
-) -> Level {
+    table_infos: Vec<T>,
+) -> LevelCommon<T>
+where
+    T: SstableInfoReader + Debug,
+{
     if level_type == PbLevelType::Nonoverlapping {
         debug_assert!(
             can_concat(&table_infos),
@@ -1135,12 +1168,12 @@ pub fn new_sub_level(
             table_infos
         );
     }
-    let total_file_size = table_infos.iter().map(|table| table.sst_size).sum();
+    let total_file_size = table_infos.iter().map(|table| table.sst_size()).sum();
     let uncompressed_file_size = table_infos
         .iter()
-        .map(|table| table.uncompressed_file_size)
+        .map(|table| table.uncompressed_file_size())
         .sum();
-    Level {
+    LevelCommon {
         level_idx: 0,
         level_type,
         table_infos,
@@ -1151,16 +1184,18 @@ pub fn new_sub_level(
     }
 }
 
-pub fn add_ssts_to_sub_level(
-    l0: &mut OverlappingLevel,
+pub fn add_ssts_to_sub_level<T>(
+    l0: &mut OverlappingLevelCommon<T>,
     sub_level_idx: usize,
-    insert_table_infos: Vec<SstableInfo>,
-) {
+    insert_table_infos: Vec<T>,
+) where
+    T: SstableInfoReader,
+{
     insert_table_infos.iter().for_each(|sst| {
-        l0.sub_levels[sub_level_idx].total_file_size += sst.sst_size;
-        l0.sub_levels[sub_level_idx].uncompressed_file_size += sst.uncompressed_file_size;
-        l0.total_file_size += sst.sst_size;
-        l0.uncompressed_file_size += sst.uncompressed_file_size;
+        l0.sub_levels[sub_level_idx].total_file_size += sst.sst_size();
+        l0.sub_levels[sub_level_idx].uncompressed_file_size += sst.uncompressed_file_size();
+        l0.total_file_size += sst.sst_size();
+        l0.uncompressed_file_size += sst.uncompressed_file_size();
     });
     l0.sub_levels[sub_level_idx]
         .table_infos
@@ -1168,27 +1203,29 @@ pub fn add_ssts_to_sub_level(
     if l0.sub_levels[sub_level_idx].level_type == PbLevelType::Nonoverlapping {
         l0.sub_levels[sub_level_idx]
             .table_infos
-            .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+            .sort_by(|sst1, sst2| sst1.key_range().cmp(sst2.key_range()));
         assert!(
             can_concat(&l0.sub_levels[sub_level_idx].table_infos),
             "sstable ids: {:?}",
             l0.sub_levels[sub_level_idx]
                 .table_infos
                 .iter()
-                .map(|sst| sst.sst_id)
+                .map(|sst| sst.sst_id())
                 .collect_vec()
         );
     }
 }
 
 /// `None` value of `sub_level_insert_hint` means append.
-pub fn insert_new_sub_level(
-    l0: &mut OverlappingLevel,
+pub fn insert_new_sub_level<T>(
+    l0: &mut OverlappingLevelCommon<T>,
     insert_sub_level_id: u64,
     level_type: PbLevelType,
-    insert_table_infos: Vec<SstableInfo>,
+    insert_table_infos: Vec<T>,
     sub_level_insert_hint: Option<usize>,
-) {
+) where
+    T: SstableInfoReader + Debug,
+{
     if insert_sub_level_id == u64::MAX {
         return;
     }
@@ -1228,40 +1265,46 @@ pub fn insert_new_sub_level(
 /// Delete sstables if the table id is in the id set.
 ///
 /// Return `true` if some sst is deleted, and `false` is the deletion is trivial
-fn level_delete_ssts(
-    operand: &mut Level,
+fn level_delete_ssts<T>(
+    operand: &mut LevelCommon<T>,
     delete_sst_ids_superset: &HashSet<HummockSstableId>,
-) -> bool {
+) -> bool
+where
+    T: SstableInfoReader,
+{
     let original_len = operand.table_infos.len();
     operand
         .table_infos
-        .retain(|table| !delete_sst_ids_superset.contains(&table.sst_id));
+        .retain(|table| !delete_sst_ids_superset.contains(&table.sst_id()));
     operand.total_file_size = operand
         .table_infos
         .iter()
-        .map(|table| table.sst_size)
+        .map(|table| table.sst_size())
         .sum::<u64>();
     operand.uncompressed_file_size = operand
         .table_infos
         .iter()
-        .map(|table| table.uncompressed_file_size)
+        .map(|table| table.uncompressed_file_size())
         .sum::<u64>();
     original_len != operand.table_infos.len()
 }
 
-fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) {
+fn level_insert_ssts<T>(operand: &mut LevelCommon<T>, insert_table_infos: Vec<T>)
+where
+    T: SstableInfoReader,
+{
     operand.total_file_size += insert_table_infos
         .iter()
-        .map(|sst| sst.sst_size)
+        .map(|sst| sst.sst_size())
         .sum::<u64>();
     operand.uncompressed_file_size += insert_table_infos
         .iter()
-        .map(|sst| sst.uncompressed_file_size)
+        .map(|sst| sst.uncompressed_file_size())
         .sum::<u64>();
     operand.table_infos.extend(insert_table_infos);
     operand
         .table_infos
-        .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+        .sort_by(|sst1, sst2| sst1.key_range().cmp(sst2.key_range()));
     if operand.level_type == PbLevelType::Overlapping {
         operand.level_type = PbLevelType::Nonoverlapping;
     }
@@ -1271,12 +1314,15 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
         operand
             .table_infos
             .iter()
-            .map(|sst| sst.sst_id)
+            .map(|sst| sst.sst_id())
             .collect_vec()
     );
 }
 
-pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {
+pub fn object_size_map<T>(version: &HummockVersionCommon<T>) -> HashMap<HummockSstableObjectId, u64>
+where
+    T: SstableInfoReader,
+{
     version
         .levels
         .values()
@@ -1285,14 +1331,19 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
                 .sub_levels
                 .iter()
                 .chain(cg.levels.iter())
-                .flat_map(|level| level.table_infos.iter().map(|t| (t.object_id, t.file_size)))
+                .flat_map(|level| {
+                    level
+                        .table_infos
+                        .iter()
+                        .map(|t| (t.object_id(), t.file_size()))
+                })
         })
         .chain(version.table_change_log.values().flat_map(|c| {
             c.0.iter().flat_map(|l| {
                 l.old_value
                     .iter()
                     .chain(l.new_value.iter())
-                    .map(|t| (t.object_id, t.file_size))
+                    .map(|t| (t.object_id(), t.file_size()))
             })
         }))
         .collect()
@@ -1300,7 +1351,10 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
 
 /// Verify the validity of a `HummockVersion` and return a list of violations if any.
 /// Currently this method is only used by risectl validate-version.
-pub fn validate_version(version: &HummockVersion) -> Vec<String> {
+pub fn validate_version<T>(version: &HummockVersionCommon<T>) -> Vec<String>
+where
+    T: SstableInfoReader + Debug,
+{
     let mut res = Vec::new();
 
     // Ensure safe_epoch <= max_committed_epoch
@@ -1324,7 +1378,7 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
 
         let validate_level = |group: CompactionGroupId,
                               expected_level_idx: u32,
-                              level: &Level,
+                              level: &LevelCommon<T>,
                               res: &mut Vec<String>| {
             let mut level_identifier = format!("GROUP {} LEVEL {}", group, level.level_idx);
             if level.level_idx == 0 {
@@ -1349,13 +1403,14 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
                 ));
             }
 
-            let mut prev_table_info: Option<&SstableInfo> = None;
+            let mut prev_table_info: Option<&T> = None;
             for table_info in &level.table_infos {
                 // Ensure table_ids are sorted and unique
-                if !table_info.table_ids.is_sorted_by(|a, b| a < b) {
+                if !table_info.table_ids().is_sorted_by(|a, b| a < b) {
                     res.push(format!(
                         "{} SST {}: table_ids not sorted",
-                        level_identifier, table_info.object_id
+                        level_identifier,
+                        table_info.object_id()
                     ));
                 }
 
@@ -1363,13 +1418,16 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
                 if level.level_type == PbLevelType::Nonoverlapping {
                     if let Some(prev) = prev_table_info.take() {
                         if prev
-                            .key_range
-                            .compare_right_with(&table_info.key_range.left)
+                            .key_range()
+                            .compare_right_with(&table_info.key_range().left)
                             != Ordering::Less
                         {
                             res.push(format!(
                                 "{} SST {}: key range should not overlap. prev={:?}, cur={:?}",
-                                level_identifier, table_info.object_id, prev, table_info
+                                level_identifier,
+                                table_info.object_id(),
+                                prev,
+                                table_info
                             ));
                         }
                     }
@@ -1400,20 +1458,23 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     res
 }
 
-pub fn split_sst(
-    sst_info: &mut SstableInfo,
+pub fn split_sst<T>(
+    sst_info: &mut T,
     new_sst_id: &mut u64,
     old_sst_size: u64,
     new_sst_size: u64,
     new_table_ids: Vec<u32>,
-) -> SstableInfo {
+) -> T
+where
+    T: SstableInfoReader + SstableInfoWriter + Clone,
+{
     let mut branch_table_info = sst_info.clone();
-    branch_table_info.sst_id = *new_sst_id;
-    branch_table_info.sst_size = new_sst_size;
+    branch_table_info.set_sst_id(*new_sst_id);
+    branch_table_info.set_sst_size(new_sst_size);
     *new_sst_id += 1;
 
-    sst_info.sst_id = *new_sst_id;
-    sst_info.sst_size = old_sst_size;
+    sst_info.set_sst_id(*new_sst_id);
+    sst_info.set_sst_size(old_sst_size);
     *new_sst_id += 1;
 
     {
@@ -1422,15 +1483,18 @@ pub fn split_sst(
         // sst_info.table_ids = vec[1, 2, 3];
         // new_table_ids = vec[2, 3, 4];
         // branch_table_info.table_ids = vec[1, 2, 3] ∩ vec[2, 3, 4] = vec[2, 3]
-        let set1: BTreeSet<_> = sst_info.table_ids.iter().cloned().collect();
+        let set1: BTreeSet<_> = sst_info.table_ids().iter().cloned().collect();
         let set2: BTreeSet<_> = new_table_ids.into_iter().collect();
         let intersection: Vec<_> = set1.intersection(&set2).cloned().collect();
 
         // Update table_ids
-        branch_table_info.table_ids = intersection;
-        sst_info
-            .table_ids
-            .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
+        branch_table_info.set_table_ids(intersection);
+        let table_ids = sst_info
+            .table_ids()
+            .iter()
+            .filter(|table_id| !branch_table_info.table_ids().contains(table_id))
+            .cloned();
+        sst_info.set_table_ids(table_ids.collect());
     }
 
     branch_table_info

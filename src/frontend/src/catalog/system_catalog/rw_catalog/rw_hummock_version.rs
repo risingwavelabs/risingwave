@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::version::HummockVersion;
 use serde_json::json;
 
@@ -114,10 +115,10 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
     for cg in version.levels.into_values() {
         for level in cg.levels.into_iter().chain(cg.l0.sub_levels) {
             for sst in level.table_infos {
-                let key_range = sst.key_range;
+                let key_range = sst.key_range();
                 sstables.push(RwHummockSstable {
-                    sstable_id: sst.sst_id as _,
-                    object_id: sst.object_id as _,
+                    sstable_id: sst.sst_id() as _,
+                    object_id: sst.object_id() as _,
                     compaction_group_id: cg.group_id as _,
                     level_id: level.level_idx as _,
                     sub_level_id: (level.level_idx == 0).then_some(level.sub_level_id as _),
@@ -125,17 +126,17 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     key_range_left: key_range.left.to_vec(),
                     key_range_right: key_range.right.to_vec(),
                     right_exclusive: key_range.right_exclusive,
-                    file_size: sst.file_size as _,
-                    meta_offset: sst.meta_offset as _,
-                    stale_key_count: sst.stale_key_count as _,
-                    total_key_count: sst.total_key_count as _,
-                    min_epoch: sst.min_epoch as _,
-                    max_epoch: sst.max_epoch as _,
-                    uncompressed_file_size: sst.uncompressed_file_size as _,
-                    range_tombstone_count: sst.range_tombstone_count as _,
-                    bloom_filter_kind: sst.bloom_filter_kind as _,
-                    table_ids: json!(sst.table_ids).into(),
-                    sst_size: sst.sst_size as _,
+                    file_size: sst.file_size() as _,
+                    meta_offset: sst.meta_offset() as _,
+                    stale_key_count: sst.stale_key_count() as _,
+                    total_key_count: sst.total_key_count() as _,
+                    min_epoch: sst.min_epoch() as _,
+                    max_epoch: sst.max_epoch() as _,
+                    uncompressed_file_size: sst.uncompressed_file_size() as _,
+                    range_tombstone_count: sst.range_tombstone_count() as _,
+                    bloom_filter_kind: sst.bloom_filter_kind() as _,
+                    table_ids: json!(sst.table_ids()).into(),
+                    sst_size: sst.sst_size() as _,
                 });
             }
         }

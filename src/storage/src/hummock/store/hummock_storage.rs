@@ -28,6 +28,7 @@ use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::HummockVersionType;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
@@ -316,7 +317,7 @@ impl HummockStorage {
                 .await
                 .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
                 .map_err(|e| HummockError::meta_error(e.to_report_string()))?;
-            let version = HummockVersion::from_rpc_protobuf(&pb_version);
+            let version = HummockVersionType::from_rpc_protobuf(&pb_version);
             let (tx, _rx) = unbounded_channel();
             Ok(PinnedVersion::new(version, tx))
         };
@@ -672,7 +673,9 @@ impl HummockStorage {
         use tokio::task::yield_now;
         let version_id = version.id;
         self._version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(Box::new(version)))
+            .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                version.into(),
+            )))
             .unwrap();
         loop {
             if self.recent_versions.load().latest_version().id() >= version_id {

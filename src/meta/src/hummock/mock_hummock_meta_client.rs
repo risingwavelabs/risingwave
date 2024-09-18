@@ -28,6 +28,7 @@ use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info_ref::SstableInfoReader;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
@@ -213,7 +214,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         let sst_to_context = sync_result
             .uncommitted_ssts
             .iter()
-            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, self.context_id))
+            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id(), self.context_id))
             .collect();
         let new_table_watermark = sync_result.table_watermarks;
         let table_change_log_table_ids = if is_log_store {
