@@ -25,14 +25,14 @@ CREATE SINK sink1 AS select * from mv1 WITH (
 );
 
 statement ok
-INSERT INTO t1 (i1, i2, i3)
+INSERT INTO s1 (i1, i2, i3)
 SELECT s, s::text, s::text FROM generate_series(1, 10000) s;
 
 statement ok
 flush
 
 statement ok
-DELETE FROM t1
+DELETE FROM s1
 WHERE i1 IN (
     SELECT s
     FROM generate_series(1, 10000, 2) s
@@ -55,7 +55,7 @@ WITH (
 );
 
 statement ok
-DELETE FROM t1
+DELETE FROM s1
 WHERE i1 IN (
     SELECT s
     FROM generate_series(1, 10000, 3) s
