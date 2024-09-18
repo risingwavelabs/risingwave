@@ -39,6 +39,8 @@ use crate::error::BatchError;
 use crate::executor::{DataChunk, Executor};
 use crate::task::BatchTaskContext;
 
+static POSITION_DELETE_FILE_FILE_PATH_INDEX: usize = 0;
+static POSITION_DELETE_FILE_POS: usize = 1;
 pub struct IcebergScanExecutor {
     iceberg_config: IcebergConfig,
     #[allow(dead_code)]
@@ -100,7 +102,7 @@ impl IcebergScanExecutor {
         let data_types = self.schema.data_types();
         let executor_schema_names = self.schema.names();
 
-        let mut position_delete_filter = PositionDeleteFilter::new(
+        let position_delete_filter = PositionDeleteFilter::new(
             mem::take(&mut self.position_delete_file_scan_tasks),
             &table,
             self.batch_size,
@@ -224,6 +226,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
 }
 
 struct PositionDeleteFilter {
+    // Delete columns pos for each file path, false means this column needs to be deleted, value is divided by batch size
     position_delete_file_path_pos_map: HashMap<String, Vec<Vec<bool>>>,
 }
 
@@ -255,8 +258,9 @@ impl PositionDeleteFilter {
             let record_batch = record_batch.map_err(BatchError::Iceberg)?;
             let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
             for row in chunk.rows() {
-                if let Some(file_path) = row.datum_at(0)
-                    && let Some(pos) = row.datum_at(1)
+                // The schema is fixed. `0` must be `file_path`, `1` must be `pos`.
+                if let Some(file_path) = row.datum_at(POSITION_DELETE_FILE_FILE_PATH_INDEX)
+                    && let Some(pos) = row.datum_at(POSITION_DELETE_FILE_POS)
                 {
                     if let ScalarRefImpl::Utf8(file_path) = file_path
                         && let ScalarRefImpl::Int64(pos) = pos
@@ -264,6 +268,7 @@ impl PositionDeleteFilter {
                         let entry = position_delete_file_path_pos_map
                             .entry(file_path.to_string())
                             .or_default();
+                        // Split `pos` by `batch_size`, because the data file will also be split by `batch_size`
                         let delete_vec_index = pos as usize / batch_size;
                         let delete_vec_pos = pos as usize % batch_size;
                         if delete_vec_index >= entry.len() {
@@ -281,28 +286,40 @@ impl PositionDeleteFilter {
         })
     }
 
-    fn filter(&mut self, data_file_path: &str, mut chunk: DataChunk, index: usize) -> DataChunk {
-        if !chunk.is_compacted(){
+    fn filter(&self, data_file_path: &str, mut chunk: DataChunk, index: usize) -> DataChunk {
+        if !chunk.is_compacted() {
             chunk = chunk.compact();
         }
-        let mut position_delete_bool_iter = self
+        if let Some(position_delete_bool_iter) = self
             .position_delete_file_path_pos_map
             .get(data_file_path)
-            .map(|delete_vecs| delete_vecs.get(index).cloned())
-            .flatten()
-            .unwrap_or_else(|| vec![true; chunk.capacity()]);
-        position_delete_bool_iter.truncate(chunk.capacity());
-        let new_visibility = Bitmap::from_iter(position_delete_bool_iter);
-        chunk.set_visibility(chunk.visibility().bitand(new_visibility));
-        chunk
+            .and_then(|delete_vecs| delete_vecs.get(index))
+        {
+            // Some chunks are less than `batch_size`, so we need to be truncate to ensure that the bitmap length is consistent
+            let position_delete_bool_iter = if position_delete_bool_iter.len() > chunk.capacity() {
+                &position_delete_bool_iter[..chunk.capacity()]
+            } else {
+                position_delete_bool_iter
+            };
+            let new_visibility = Bitmap::from_bool_slice(position_delete_bool_iter);
+            chunk.set_visibility(chunk.visibility().bitand(new_visibility));
+            chunk
+        } else {
+            chunk
+        }
     }
 }
 
 struct EqualityDeleteFilter {
+    // The `seq_num` corresponding to each row in the equality delete file
     equality_delete_rows_seq_num_map: HashMap<OwnedRow, i64>,
+    // The field ids of the equality delete columns
     equality_delete_ids: Option<Vec<i32>>,
+    // In chunk, the indexes of the equality delete columns
     equality_delete_column_idxes: Option<Vec<usize>>,
+    // The schema of the data file, which is the intersection of the output shema and the equality delete columns
     data_chunk_column_names: Option<Vec<String>>,
+    // Column names for the output schema so that columns can be trimmed after filter
     executor_schema_names: Vec<String>,
 }
 
@@ -395,7 +412,7 @@ impl EqualityDeleteFilter {
         mut chunk: DataChunk,
         data_sequence_number: i64,
     ) -> crate::error::Result<DataChunk> {
-        if !chunk.is_compacted(){
+        if !chunk.is_compacted() {
             chunk = chunk.compact();
         }
         match self.equality_delete_column_idxes.as_ref() {

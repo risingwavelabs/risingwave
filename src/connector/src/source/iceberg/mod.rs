@@ -257,6 +257,8 @@ impl IcebergSplitEnumerator {
                 current_snapshot.unwrap().snapshot_id()
             }
         };
+
+        // The schema of equality delete files and data files is different from that of position delete files, so get them separately.
         let (equality_delete_files, data_files) =
             Self::get_equality_delete_and_data_file_tasks(&table, snapshot_id, &schema).await?;
         let position_delete_files =
@@ -277,6 +279,7 @@ impl IcebergSplitEnumerator {
                 snapshot_id,
                 table_meta: table_meta.clone(),
                 files: data_files[start..end].to_vec(),
+                // Todo: Can be divided by position to prevent the delete file from being read multiple times
                 equality_delete_files: equality_delete_files.clone(),
                 position_delete_files: position_delete_files.clone(),
             };
@@ -293,6 +296,9 @@ impl IcebergSplitEnumerator {
             .collect_vec())
     }
 
+    /// The required field names are the intersection of the output shema and the equality delete columns.
+    /// This method will ensure that the order of the columns in the output schema remains unchanged,
+    /// after which there is no need to re order, just delete the equality delete columns.
     async fn get_require_field_names(
         table: &Table,
         snapshot_id: i64,
@@ -374,7 +380,7 @@ impl IcebergSplitEnumerator {
         Vec<IcebergFileScanTaskJsonStr>,
         Vec<IcebergFileScanTaskJsonStr>,
     )> {
-        let require_names = Self::get_require_field_names(&table, snapshot_id, schema).await?;
+        let require_names = Self::get_require_field_names(table, snapshot_id, schema).await?;
 
         let mut data_files = vec![];
         let mut equality_delete_files = vec![];
