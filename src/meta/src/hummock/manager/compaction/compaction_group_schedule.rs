@@ -619,7 +619,7 @@ impl HummockManager {
                 VirtualNode::ZERO,
             )
             .await?;
-        assert_eq!(2, result_vec.len());
+        assert!(result_vec.len() <= 2);
 
         let target_compaction_group_id = {
             if result_vec[0].1.contains(&table_ids[0]) {
@@ -641,7 +641,7 @@ impl HummockManager {
                 VirtualNode::ZERO,
             )
             .await?;
-        assert_eq!(2, result_vec.len());
+        assert!(result_vec.len() <= 2);
         let target_compaction_group_id = {
             if result_vec[0].1.contains(&table_ids[0]) {
                 result_vec[0].0

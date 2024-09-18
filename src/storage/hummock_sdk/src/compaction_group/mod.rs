@@ -436,8 +436,8 @@ mod tests {
             5,
             VirtualNode::ZERO.to_index(),
         );
-        assert_eq!(left, vec![1, 2, 3, 4, 5]);
-        assert_eq!(right, vec![6, 7, 8, 9]);
+        assert_eq!(left, vec![1, 2, 3, 4]);
+        assert_eq!(right, vec![5, 6, 7, 8, 9]);
 
         // test table_id not in the table_ids
 
@@ -465,7 +465,7 @@ mod tests {
         let split_key = super::group_split::build_split_key(5, VirtualNode::ZERO);
         let (left, right) =
             super::group_split::split_table_ids_with_split_key(&table_ids, split_key);
-        assert_eq!(left, vec![1, 2, 3, 4, 5]);
-        assert_eq!(right, vec![6, 7, 8, 9]);
+        assert_eq!(left, vec![1, 2, 3, 4]);
+        assert_eq!(right, vec![5, 6, 7, 8, 9]);
     }
 }

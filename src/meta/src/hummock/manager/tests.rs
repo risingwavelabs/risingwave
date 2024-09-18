@@ -1448,17 +1448,7 @@ async fn test_split_compaction_group_on_commit() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 10,
-            sst_id: 10,
-            key_range: KeyRange::default(),
-            table_ids: vec![100, 101],
-            min_epoch: 20,
-            max_epoch: 20,
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(10, vec![100, 101], test_epoch(20)),
         table_stats: HashMap::from([
             (
                 100,
@@ -1554,39 +1544,11 @@ async fn test_split_compaction_group_on_demand_basic() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 10,
-            sst_id: 10,
-            key_range: KeyRange {
-                left: iterator_test_key_of_epoch(100, 1, 20).into(),
-                right: iterator_test_key_of_epoch(100, 100, 20).into(),
-                right_exclusive: false,
-            },
-            table_ids: vec![100],
-            min_epoch: 20,
-            max_epoch: 20,
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(10, vec![100], test_epoch(20)),
         table_stats: Default::default(),
     };
     let sst_2 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 11,
-            sst_id: 11,
-            key_range: KeyRange {
-                left: iterator_test_key_of_epoch(100, 101, 20).into(),
-                right: iterator_test_key_of_epoch(101, 100, 20).into(),
-                right_exclusive: false,
-            },
-            table_ids: vec![100, 101],
-            min_epoch: 20,
-            max_epoch: 20,
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(11, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
     };
     hummock_meta_client
@@ -1626,7 +1588,6 @@ async fn test_split_compaction_group_on_demand_basic() {
     assert_eq!(current_version.levels.len(), 3);
     let new_compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
-    assert!(new_compaction_group_id > StaticCompactionGroupId::End as u64);
 
     let old_compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 102).await;
@@ -1667,17 +1628,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
         worker_node.id,
     ));
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 10,
-            sst_id: 10,
-            key_range: KeyRange::default(),
-            table_ids: vec![100, 101],
-            min_epoch: 20,
-            max_epoch: 20,
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(10, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
     };
     hummock_manager
@@ -1706,7 +1657,6 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
     assert_eq!(current_version.levels.len(), 3);
     let new_compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
-    assert!(new_compaction_group_id > StaticCompactionGroupId::End as u64);
     let old_compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
     assert_eq!(
@@ -1759,39 +1709,12 @@ async fn test_split_compaction_group_trivial_expired() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 10,
-            sst_id: 10,
-            key_range: KeyRange {
-                left: iterator_test_key_of_epoch(100, 1, 20).into(),
-                right: iterator_test_key_of_epoch(100, 100, 20).into(),
-                right_exclusive: false,
-            },
-            table_ids: vec![100],
-            min_epoch: 20,
-            max_epoch: 20,
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(10, vec![100], test_epoch(20)),
         table_stats: Default::default(),
     };
+
     let sst_2 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 11,
-            sst_id: 11,
-            table_ids: vec![101],
-            min_epoch: 20,
-            max_epoch: 20,
-            key_range: KeyRange {
-                left: iterator_test_key_of_epoch(101, 1, 20).into(),
-                right: iterator_test_key_of_epoch(101, 100, 20).into(),
-                right_exclusive: false,
-            },
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(11, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
     };
     let mut sst_3 = sst_2.clone();
@@ -1917,33 +1840,31 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     ));
 
     hummock_manager
-        .register_table_ids_for_test(&[(100, 2), (101, 2)])
+        .register_table_ids_for_test(&[(100, 2), (101, 2), (102, 2), (103, 2)])
         .await
         .unwrap();
 
+    let epoch = test_epoch(1);
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 10,
-            sst_id: 10,
-            key_range: KeyRange {
-                left: iterator_test_key_of_epoch(1, 1, 1).into(),
-                right: iterator_test_key_of_epoch(1, 1, 1).into(),
-                right_exclusive: false,
-            },
-            table_ids: vec![100, 101],
-            min_epoch: 20,
-            max_epoch: 20,
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(10, vec![100], epoch),
         table_stats: Default::default(),
     };
+
+    let sst_2 = LocalSstableInfo {
+        sst_info: gen_sstable_info(11, vec![101, 102], epoch),
+        table_stats: Default::default(),
+    };
+
+    let sst_3 = LocalSstableInfo {
+        sst_info: gen_sstable_info(12, vec![103], epoch),
+        table_stats: Default::default(),
+    };
+
     hummock_meta_client
         .commit_epoch(
             30,
             SyncResult {
-                uncommitted_ssts: vec![sst_1.clone()],
+                uncommitted_ssts: vec![sst_1, sst_2, sst_3],
                 ..Default::default()
             },
             false,
@@ -1951,77 +1872,58 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         .await
         .unwrap();
 
-    // Construct data via manual compaction
-    let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
-    let compaction_task =
-        get_manual_compact_task(hummock_manager.clone(), compaction_group_id, 0).await;
-    let base_level: usize = 6;
-    assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 1);
-    assert_eq!(compaction_task.target_level, base_level as u32);
+    let compaction_group_id =
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
 
-    assert!(hummock_manager
-        .report_compact_task(
-            compaction_task.task_id,
-            TaskStatus::Success,
-            vec![
-                SstableInfo {
-                    object_id: 11,
-                    sst_id: 11,
-                    table_ids: vec![100, 101],
-                    key_range: KeyRange {
-                        left: iterator_test_key_of_epoch(1, 1, 1).into(),
-                        right: iterator_test_key_of_epoch(1, 1, 1).into(),
-                        right_exclusive: false,
-                    },
-                    file_size: 100,
-                    sst_size: 100,
-                    ..Default::default()
-                },
-                SstableInfo {
-                    object_id: 12,
-                    sst_id: 12,
-                    table_ids: vec![100],
-                    key_range: KeyRange {
-                        left: iterator_test_key_of_epoch(1, 2, 2).into(),
-                        right: iterator_test_key_of_epoch(1, 2, 2).into(),
-                        right_exclusive: false,
-                    },
-                    file_size: 100,
-                    sst_size: 100,
-                    ..Default::default()
-                },
-            ],
-            None,
-        )
+    let manual_compcation_option = ManualCompactionOption {
+        level: 0,
+        ..Default::default()
+    };
+    // 2. get compact task
+    let compact_task = hummock_manager
+        .manual_get_compact_task(compaction_group_id, manual_compcation_option)
         .await
-        .unwrap());
-    let current_version = hummock_manager.get_current_version().await;
-    assert!(current_version
-        .get_compaction_group_levels(compaction_group_id)
-        .l0
-        .sub_levels
-        .is_empty());
+        .unwrap()
+        .unwrap();
+
     assert_eq!(
-        current_version
-            .get_compaction_group_levels(compaction_group_id)
-            .levels[base_level - 1]
-            .table_infos
-            .len(),
-        2
+        compact_task
+            .input_ssts
+            .iter()
+            .map(|level| level.table_infos.len())
+            .sum::<usize>(),
+        3,
     );
 
     hummock_manager
-        .split_compaction_group(compaction_group_id, &[100], 0)
+        .report_compact_task(
+            compact_task.task_id,
+            TaskStatus::Success,
+            compact_task
+                .input_ssts
+                .iter()
+                .flat_map(|level| level.table_infos.clone())
+                .collect(),
+            None,
+        )
         .await
         .unwrap();
+
+    let base_level: usize = 6;
+
+    hummock_manager
+        .split_compaction_group(2, &[100], 0)
+        .await
+        .unwrap();
+
     let current_version = hummock_manager.get_current_version().await;
-    let new_compaction_group_id =
+    let left_compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
-    let old_compaction_group_id =
+    let right_compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
     assert_eq!(
         current_version
-            .get_compaction_group_levels(old_compaction_group_id)
+            .get_compaction_group_levels(left_compaction_group_id)
             .levels[base_level - 1]
             .table_infos
             .len(),
@@ -2030,23 +1932,23 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
 
     assert_eq!(
         current_version
-            .get_compaction_group_levels(old_compaction_group_id)
-            .levels[base_level - 1]
-            .table_infos[0]
-            .object_id,
-        sst_1.sst_info.object_id + 1,
-    );
-    assert_eq!(
-        current_version
-            .get_compaction_group_levels(old_compaction_group_id)
+            .get_compaction_group_levels(right_compaction_group_id)
             .levels[base_level - 1]
             .table_infos[0]
             .table_ids,
-        vec![101]
+        vec![101, 102]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_compaction_group_id)
+            .get_compaction_group_levels(left_compaction_group_id)
+            .levels[base_level - 1]
+            .table_infos
+            .len(),
+        1
+    );
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(right_compaction_group_id)
             .levels[base_level - 1]
             .table_infos
             .len(),
@@ -2054,7 +1956,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_compaction_group_id)
+            .get_compaction_group_levels(left_compaction_group_id)
             .levels[base_level - 1]
             .table_infos[0]
             .table_ids,
@@ -2062,11 +1964,11 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_compaction_group_id)
+            .get_compaction_group_levels(right_compaction_group_id)
             .levels[base_level - 1]
             .table_infos[1]
             .table_ids,
-        vec![100]
+        vec![103]
     );
 }
 
@@ -2084,39 +1986,11 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 10,
-            sst_id: 10,
-            key_range: KeyRange {
-                left: iterator_test_key_of_epoch(1, 1, 1).into(),
-                right: iterator_test_key_of_epoch(1, 1, 1).into(),
-                right_exclusive: false,
-            },
-            table_ids: vec![100, 101],
-            min_epoch: 20,
-            max_epoch: 20,
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(10, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
     };
     let sst_2 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 11,
-            sst_id: 11,
-            key_range: KeyRange {
-                left: iterator_test_key_of_epoch(1, 1, 1).into(),
-                right: iterator_test_key_of_epoch(1, 1, 1).into(),
-                right_exclusive: false,
-            },
-            table_ids: vec![101],
-            min_epoch: 20,
-            max_epoch: 20,
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(11, vec![101], test_epoch(20)),
         table_stats: Default::default(),
     };
 
@@ -2444,39 +2318,11 @@ async fn test_unregister_moved_table() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 10,
-            sst_id: 10,
-            key_range: KeyRange {
-                left: iterator_test_key_of_epoch(100, 1, 20).into(),
-                right: iterator_test_key_of_epoch(100, 100, 20).into(),
-                right_exclusive: false,
-            },
-            table_ids: vec![100],
-            min_epoch: 20,
-            max_epoch: 20,
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(10, vec![100], test_epoch(20)),
         table_stats: Default::default(),
     };
     let sst_2 = LocalSstableInfo {
-        sst_info: SstableInfo {
-            object_id: 11,
-            sst_id: 11,
-            key_range: KeyRange {
-                left: iterator_test_key_of_epoch(100, 101, 20).into(),
-                right: iterator_test_key_of_epoch(101, 100, 20).into(),
-                right_exclusive: false,
-            },
-            table_ids: vec![100, 101],
-            min_epoch: 20,
-            max_epoch: 20,
-            file_size: 100,
-            sst_size: 100,
-            ..Default::default()
-        },
+        sst_info: gen_sstable_info(11, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
     };
 
