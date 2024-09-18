@@ -550,7 +550,7 @@ impl HummockManager {
         self.report_compact_tasks(canceled_tasks).await?;
 
         self.metrics
-            .move_state_table_count
+            .split_compaction_group_count
             .with_label_values(&[&parent_group_id.to_string()])
             .inc();
 
