@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
@@ -33,6 +33,7 @@ use tokio::sync::OwnedSemaphorePermit;
 use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
+use crate::catalog::TableId;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::{ExecutionContextRef, SchedulerResult};
 
@@ -190,6 +191,7 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
+        scan_tables: HashSet<TableId>,
     ) -> SchedulerResult<DistributedQueryStream> {
         if let Some(query_limit) = self.disrtibuted_query_limit
             && self.query_metrics.running_query_num.get() as u64 == query_limit
@@ -212,7 +214,7 @@ impl QueryManager {
             .add_query(query_id.clone(), query_execution.clone());
 
         // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let pinned_snapshot = context.session().pinned_snapshot();
+        let pinned_snapshot = context.session().pinned_snapshot(scan_tables);
 
         let worker_node_manager_reader = WorkerNodeSelector::new(
             self.worker_node_manager.clone(),

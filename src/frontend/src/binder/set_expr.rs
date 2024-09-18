@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Corresponding, SetExpr, SetOperator};
@@ -140,6 +140,24 @@ impl BoundSetExpr {
                     right.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
                 );
                 correlated_indices
+            }
+        }
+    }
+
+    pub fn visit_all_scan_table_id(&self, mut visiter: impl FnMut(TableId)) {
+        match self {
+            BoundSetExpr::Select(select) => {
+                if let Some(relation) = &select.from {
+                    relation.visit_all_scan_table(&mut visiter);
+                }
+            }
+            BoundSetExpr::Query(query) => {
+                query.body.visit_all_scan_table_id(&mut visiter);
+            }
+            BoundSetExpr::Values(_) => {}
+            BoundSetExpr::SetOperation { left, right, .. } => {
+                left.visit_all_scan_table_id(&mut visiter);
+                right.visit_all_scan_table_id(&mut visiter);
             }
         }
     }

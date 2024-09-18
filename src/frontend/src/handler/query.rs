@@ -206,6 +206,7 @@ pub struct BatchQueryPlanResult {
     // subset of the final one. i.e. the final one may contain more implicit dependencies on
     // indices.
     pub(crate) dependent_relations: Vec<TableId>,
+    pub(crate) scan_tables: HashSet<TableId>,
 }
 
 fn gen_batch_query_plan(
@@ -223,9 +224,11 @@ fn gen_batch_query_plan(
 
     let mut planner = Planner::new(context);
 
+    let scan_tables = bound.scan_tables();
+
     let mut logical = planner.plan(bound)?;
     let schema = logical.schema();
-    let batch_plan = logical.gen_batch_plan()?;
+    let batch_plan = logical.gen_batch_plan(&scan_tables)?;
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.clone());
@@ -260,6 +263,7 @@ fn gen_batch_query_plan(
         schema,
         stmt_type,
         dependent_relations: dependent_relations.into_iter().collect_vec(),
+        scan_tables,
     })
 }
 
@@ -312,6 +316,7 @@ pub struct BatchPlanFragmenterResult {
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
     pub(crate) _dependent_relations: Vec<TableId>,
+    pub(crate) scan_tables: HashSet<TableId>,
 }
 
 pub fn gen_batch_plan_fragmenter(
@@ -324,6 +329,7 @@ pub fn gen_batch_plan_fragmenter(
         schema,
         stmt_type,
         dependent_relations,
+        scan_tables,
     } = plan_result;
 
     tracing::trace!(
@@ -348,6 +354,7 @@ pub fn gen_batch_plan_fragmenter(
         schema,
         stmt_type,
         _dependent_relations: dependent_relations,
+        scan_tables,
     })
 }
 
@@ -361,6 +368,7 @@ pub async fn create_stream(
         query_mode,
         schema,
         stmt_type,
+        scan_tables,
         ..
     } = plan_fragmenter_result;
 
@@ -392,7 +400,7 @@ pub async fn create_stream(
     let row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-            local_execute(session.clone(), query, can_timeout_cancel).await?,
+            local_execute(session.clone(), query, can_timeout_cancel, scan_tables).await?,
             column_types,
             formats,
             session.clone(),
@@ -400,7 +408,7 @@ pub async fn create_stream(
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
             PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
+                distribute_execute(session.clone(), query, can_timeout_cancel, scan_tables).await?,
                 column_types,
                 formats,
                 session.clone(),
@@ -480,6 +488,7 @@ pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
+    scan_tables: HashSet<TableId>,
 ) -> Result<DistributedQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -493,7 +502,7 @@ pub async fn distribute_execute(
     let query_manager = session.env().query_manager().clone();
 
     query_manager
-        .schedule(execution_context, query)
+        .schedule(execution_context, query, scan_tables)
         .await
         .map_err(|err| err.into())
 }
@@ -502,6 +511,7 @@ pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
+    scan_tables: HashSet<TableId>,
 ) -> Result<LocalQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -513,21 +523,11 @@ pub async fn local_execute(
     let front_env = session.env();
 
     // TODO: if there's no table scan, we don't need to acquire snapshot.
-    let snapshot = session.pinned_snapshot();
-
-    let epoch = snapshot.batch_query_epoch();
-    let temp = 0;
+    let snapshot = session.pinned_snapshot(scan_tables);
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(
-        query,
-        front_env.clone(),
-        "",
-        snapshot,
-        session,
-        timeout,
-        epoch,
-    );
+    let execution =
+        LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session, timeout);
 
     Ok(execution.stream_rows())
 }

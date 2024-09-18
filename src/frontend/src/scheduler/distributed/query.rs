@@ -25,7 +25,7 @@ use pgwire::pg_server::SessionId;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as PbTaskId, TaskOutputId as PbTaskOutputId};
-use risingwave_pb::common::HostAddress;
+use risingwave_pb::common::{BatchQueryEpoch, HostAddress};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -40,7 +40,7 @@ use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
-use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerError, SchedulerResult};
+use crate::scheduler::{ExecutionContextRef, QuerySnapshot, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -124,7 +124,7 @@ impl QueryExecution {
         self: Arc<Self>,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
-        pinned_snapshot: ReadSnapshot,
+        pinned_snapshot: QuerySnapshot,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -137,7 +137,7 @@ impl QueryExecution {
         // reference of `pinned_snapshot`. Its ownership will be moved into `QueryRunner` so that it
         // can control when to release the snapshot.
         let stage_executions = self.gen_stage_executions(
-            &pinned_snapshot,
+            pinned_snapshot.batch_query_epoch()?,
             context.clone(),
             worker_node_manager,
             compute_client_pool.clone(),
@@ -225,7 +225,7 @@ impl QueryExecution {
 
     fn gen_stage_executions(
         &self,
-        pinned_snapshot: &ReadSnapshot,
+        epoch: BatchQueryEpoch,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
         compute_client_pool: ComputeClientPoolRef,
@@ -244,7 +244,7 @@ impl QueryExecution {
                 .collect::<Vec<Arc<StageExecution>>>();
 
             let stage_exec = Arc::new(StageExecution::new(
-                pinned_snapshot.batch_query_epoch(),
+                epoch,
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
@@ -296,7 +296,7 @@ impl Debug for QueryRunner {
 }
 
 impl QueryRunner {
-    async fn run(mut self, pinned_snapshot: ReadSnapshot) {
+    async fn run(mut self, pinned_snapshot: QuerySnapshot) {
         self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
@@ -465,7 +465,7 @@ impl QueryRunner {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
@@ -495,11 +495,9 @@ pub(crate) mod tests {
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::{
-        DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, QueryExecutionInfo,
-        ReadSnapshot,
+        DistributedQueryMetrics, ExecutionContext, QueryExecutionInfo, QuerySnapshot, ReadSnapshot,
     };
     use crate::session::SessionImpl;
-    use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
     use crate::TableCatalog;
 
@@ -508,14 +506,10 @@ pub(crate) mod tests {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
-        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
-            MockFrontendMetaClient {},
-        )));
         let catalog_reader =
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id().clone();
-        let pinned_snapshot = hummock_snapshot_manager.acquire();
         let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
@@ -525,10 +519,7 @@ pub(crate) mod tests {
             .start(
                 ExecutionContext::new(SessionImpl::mock().into(), None).into(),
                 worker_node_selector,
-                ReadSnapshot::FrontendPinned {
-                    snapshot: pinned_snapshot,
-                    is_barrier_read: true
-                },
+                QuerySnapshot::new(ReadSnapshot::BarrierRead, HashSet::from_iter([0.into()])),
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,

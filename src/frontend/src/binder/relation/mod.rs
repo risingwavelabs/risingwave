@@ -137,6 +137,28 @@ impl Relation {
             _ => vec![],
         }
     }
+
+    pub fn visit_all_scan_table(&self, mut visiter: impl FnMut(TableId)) {
+        match self {
+            Relation::Source(_) => {}
+            Relation::BaseTable(table) => {
+                visiter(table.table_id);
+            }
+            Relation::SystemTable(_) => {}
+            Relation::Subquery(subquery) => {
+                subquery.query.body.visit_all_scan_table_id(&mut visiter);
+            }
+            Relation::Join(join) | Relation::Apply(join) => {
+                join.left.visit_all_scan_table(&mut visiter);
+                join.right.visit_all_scan_table(&mut visiter);
+            }
+            Relation::WindowTableFunction(_) => {}
+            Relation::TableFunction { .. } => {}
+            Relation::Watermark(_) => {}
+            Relation::Share(_) => {}
+            Relation::BackCteRef(_) => {}
+        }
+    }
 }
 
 #[derive(Debug)]

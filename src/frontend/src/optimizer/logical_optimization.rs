@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use itertools::Itertools;
 use risingwave_common::bail;
 
@@ -107,6 +109,8 @@ impl OptimizationStage {
 }
 
 use std::sync::LazyLock;
+
+use crate::catalog::TableId;
 
 pub struct LogicalOptimizer {}
 
@@ -532,15 +536,22 @@ impl LogicalOptimizer {
         plan
     }
 
-    pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
+    pub fn inline_now_proc_time(
+        plan: PlanRef,
+        ctx: &OptimizerContextRef,
+        scan_tables: &HashSet<TableId>,
+    ) -> Result<PlanRef> {
         // If now() and proctime() are not found, bail out.
         let mut v = NowProcTimeFinder::default();
         plan.visit_exprs_recursive(&mut v);
         if !v.has() {
-            return plan;
+            return Ok(plan);
         }
 
-        let mut v = ctx.session_ctx().pinned_snapshot().inline_now_proc_time();
+        let mut v = ctx
+            .session_ctx()
+            .pinned_snapshot(scan_tables.clone())
+            .inline_now_proc_time()?;
 
         let plan = plan.rewrite_exprs_recursive(&mut v);
 
@@ -548,7 +559,7 @@ impl LogicalOptimizer {
             ctx.trace("Inline Now and ProcTime:");
             ctx.trace(plan.explain_to_string());
         }
-        plan
+        Ok(plan)
     }
 
     pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
@@ -679,7 +690,10 @@ impl LogicalOptimizer {
         Ok(plan)
     }
 
-    pub fn gen_optimized_logical_plan_for_batch(mut plan: PlanRef) -> Result<PlanRef> {
+    pub fn gen_optimized_logical_plan_for_batch(
+        mut plan: PlanRef,
+        scan_tables: &HashSet<TableId>,
+    ) -> Result<PlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -689,7 +703,7 @@ impl LogicalOptimizer {
         }
 
         // Inline `NOW()` and `PROCTIME()`, only for batch queries.
-        plan = Self::inline_now_proc_time(plan, &ctx);
+        plan = Self::inline_now_proc_time(plan, &ctx, scan_tables)?;
 
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
         plan = plan.optimize_by_rules(&DAG_TO_TREE);

@@ -170,7 +170,6 @@ impl ComputeClient {
         epoch: BatchQueryEpoch,
         expr_context: ExprContext,
     ) -> Result<Streaming<TaskInfoResponse>> {
-        let temp = 0;
         Ok(self
             .task_client
             .to_owned()

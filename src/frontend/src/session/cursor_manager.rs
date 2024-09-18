@@ -14,11 +14,12 @@
 
 use core::mem;
 use core::time::Duration;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
 use futures::StreamExt;
@@ -47,7 +48,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
-use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot};
+use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog};
 
 pub enum CursorDataChunkStream {
@@ -247,14 +248,17 @@ impl SubscriptionCursor {
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
             let (chunk_stream, fields) =
                 Self::initiate_query(None, &dependent_table_id, handle_args.clone()).await?;
-            let pinned_epoch = match handle_args.session.get_pinned_snapshot().ok_or_else(|| {
-                ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_string())
-            })? {
-                ReadSnapshot::FrontendPinned { snapshot, .. } => snapshot.committed_epoch(),
-                ReadSnapshot::Other(_) => {
-                    return Err(ErrorCode::InternalError("Fetch Cursor can't start from specified query epoch. May run `set query_epoch = 0;`".to_string()).into());
-                }
-            };
+            let pinned_epoch = handle_args
+                .session
+                .env
+                .hummock_snapshot_manager
+                .acquire()
+                .version()
+                .state_table_info
+                .info()
+                .get(&dependent_table_id)
+                .ok_or_else(|| anyhow!("dependent_table_id {dependent_table_id} not exists"))?
+                .committed_epoch;
             let start_timestamp = pinned_epoch;
 
             (
@@ -620,6 +624,7 @@ impl SubscriptionCursor {
             schema,
             stmt_type: StatementType::SELECT,
             dependent_relations: table_catalog.dependent_relations.clone(),
+            scan_tables: HashSet::from_iter([table_catalog.id]),
         })
     }
 

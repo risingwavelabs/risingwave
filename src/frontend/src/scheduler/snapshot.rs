@@ -14,10 +14,12 @@
 
 use std::assert_matches::assert_matches;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
+use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
@@ -32,6 +34,7 @@ use tokio::sync::watch;
 
 use crate::expr::InlineNowProcTime;
 use crate::meta_client::FrontendMetaClient;
+use crate::scheduler::SchedulerError;
 
 /// The interval between two unpin batches.
 const UNPIN_INTERVAL_SECS: u64 = 10;
@@ -42,9 +45,9 @@ pub enum ReadSnapshot {
     /// A frontend-pinned snapshot.
     FrontendPinned {
         snapshot: PinnedSnapshotRef,
-        // It's embedded here because we always use it together with snapshot.
-        is_barrier_read: bool,
     },
+
+    BarrierRead,
 
     /// Other arbitrary epoch, e.g. user specified.
     /// Availability and consistency of underlying data should be guaranteed accordingly.
@@ -52,37 +55,50 @@ pub enum ReadSnapshot {
     Other(Epoch),
 }
 
-impl ReadSnapshot {
-    /// Get the [`BatchQueryEpoch`] for this snapshot.
-    pub fn batch_query_epoch(&self) -> BatchQueryEpoch {
-        match self {
-            ReadSnapshot::FrontendPinned {
-                snapshot,
-                is_barrier_read,
-            } => snapshot.batch_query_epoch(*is_barrier_read),
-            ReadSnapshot::Other(e) => BatchQueryEpoch {
-                epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
-            },
+pub struct QuerySnapshot {
+    snapshot: ReadSnapshot,
+    scan_tables: HashSet<TableId>,
+}
+
+impl QuerySnapshot {
+    pub fn new(snapshot: ReadSnapshot, scan_tables: HashSet<TableId>) -> Self {
+        Self {
+            snapshot,
+            scan_tables,
         }
     }
 
-    pub fn inline_now_proc_time(&self) -> InlineNowProcTime {
-        let epoch = match self {
-            ReadSnapshot::FrontendPinned { snapshot, .. } => Epoch(snapshot.committed_epoch()),
+    /// Get the [`BatchQueryEpoch`] for this snapshot.
+    pub fn batch_query_epoch(&self) -> Result<BatchQueryEpoch, SchedulerError> {
+        Ok(match &self.snapshot {
+            ReadSnapshot::FrontendPinned { snapshot } => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::Committed(
+                    snapshot.batch_query_epoch(&self.scan_tables)?.0,
+                )),
+            },
+            ReadSnapshot::BarrierRead => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::Current(u64::MAX)),
+            },
+            ReadSnapshot::Other(e) => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
+            },
+        })
+    }
+
+    pub fn inline_now_proc_time(&self) -> Result<InlineNowProcTime, SchedulerError> {
+        let epoch = match &self.snapshot {
+            ReadSnapshot::FrontendPinned { snapshot, .. } => {
+                snapshot.batch_query_epoch(&self.scan_tables)?
+            }
             ReadSnapshot::Other(epoch) => *epoch,
+            ReadSnapshot::BarrierRead => Epoch::now(),
         };
-        InlineNowProcTime::new(epoch)
+        Ok(InlineNowProcTime::new(epoch))
     }
 
     /// Returns true if this snapshot is a barrier read.
     pub fn support_barrier_read(&self) -> bool {
-        match self {
-            ReadSnapshot::FrontendPinned {
-                snapshot: _,
-                is_barrier_read,
-            } => *is_barrier_read,
-            ReadSnapshot::Other(_) => false,
-        }
+        matches!(&self.snapshot, ReadSnapshot::BarrierRead)
     }
 }
 
@@ -104,17 +120,35 @@ impl std::fmt::Debug for PinnedSnapshot {
 pub type PinnedSnapshotRef = Arc<PinnedSnapshot>;
 
 impl PinnedSnapshot {
-    fn batch_query_epoch(&self, is_barrier_read: bool) -> BatchQueryEpoch {
-        let epoch = if is_barrier_read {
-            batch_query_epoch::Epoch::Current(u64::MAX)
-        } else {
-            batch_query_epoch::Epoch::Committed(self.value.max_committed_epoch)
-        };
-        BatchQueryEpoch { epoch: Some(epoch) }
+    fn batch_query_epoch(&self, scan_tables: &HashSet<TableId>) -> Result<Epoch, SchedulerError> {
+        // use the min committed epoch of tables involved in the scan
+        let epoch = scan_tables
+            .iter()
+            .map(|table_id| {
+                self.value
+                    .state_table_info
+                    .info()
+                    .get(table_id)
+                    .map(|info| Epoch(info.committed_epoch))
+                    .ok_or_else(|| anyhow!("table id {table_id} may have been dropped"))
+            })
+            .try_fold(None, |prev_min_committed_epoch, committed_epoch| {
+                committed_epoch.map(|committed_epoch| {
+                    if let Some(prev_min_committed_epoch) = prev_min_committed_epoch
+                        && prev_min_committed_epoch >= committed_epoch
+                    {
+                        Some(prev_min_committed_epoch)
+                    } else {
+                        Some(committed_epoch)
+                    }
+                })
+            })?
+            .unwrap_or_else(Epoch::now); // When no table is involved, use current timestamp as epoch
+        Ok(epoch)
     }
 
-    pub fn committed_epoch(&self) -> u64 {
-        self.value.max_committed_epoch
+    pub fn version(&self) -> &FrontendHummockVersion {
+        &self.value
     }
 }
 
