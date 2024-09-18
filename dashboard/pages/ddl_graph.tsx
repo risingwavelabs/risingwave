@@ -17,23 +17,18 @@
 
 import {
   Box,
-  Button,
   Flex,
   FormControl,
   FormLabel,
-  HStack,
   Input,
   Select,
   Text,
   VStack,
 } from "@chakra-ui/react"
-import * as d3 from "d3"
-import { dagStratify } from "d3-dag"
 import _ from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import DdlGraph from "../components/DdlGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
@@ -45,12 +40,13 @@ import {
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
 import {
-  getFragmentsByJobId, getFragmentVertexToRelationMap, getRelationDependencies,
-  getRelationIdInfos,
-  getStreamingJobs, Relation, StreamingJob,
+  StreamingJob,
+  getFragmentVertexToRelationMap,
+  getRelationDependencies,
+  getStreamingJobs,
 } from "../lib/api/streaming"
-import {DdlBox, FragmentBox} from "../lib/layout"
-import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
+import { DdlBox, FragmentBox } from "../lib/layout"
+import { TableFragments } from "../proto/gen/meta"
 import { BackPressureInfo } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
@@ -106,7 +102,7 @@ const SampleDdlDependencyGraph: DdlBox[] = [
     parentIds: ["2", "3"],
     ddl_name: "mv3",
     schema_name: "s1",
-  }
+  },
 ]
 
 const SampleDdlBackpressures: Map<string, number> = new Map([
@@ -174,13 +170,11 @@ function buildFragmentDependencyAsEdges(
   return nodes
 }
 
-function buildDdlDependencyAsEdges(
-    relations: StreamingJob[],
-): DdlBox[] {
+function buildDdlDependencyAsEdges(relations: StreamingJob[]): DdlBox[] {
   // Filter out non-streaming relations, e.g. source, views.
   let relation_ids = new Set<number>()
   for (const relation of relations) {
-      relation_ids.add(relation.id)
+    relation_ids.add(relation.id)
   }
   console.log("relation_ids: ", relation_ids)
   const nodes: DdlBox[] = []
@@ -192,9 +186,11 @@ function buildDdlDependencyAsEdges(
       order: relation.id,
       width: 0,
       height: 0,
-      parentIds: parentIds.filter((x) => relation_ids.has(x)).map((x) => x.toString()),
+      parentIds: parentIds
+        .filter((x) => relation_ids.has(x))
+        .map((x) => x.toString()),
       ddl_name: relation.name,
-      schema_name: relation.schemaName
+      schema_name: relation.schemaName,
     })
   }
   return nodes
@@ -220,7 +216,9 @@ interface EmbeddedBackPressureInfo {
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: relationDeps } = useFetch(getRelationDependencies)
-  const { response: fragmentVertexToRelationMap } = useFetch(getFragmentVertexToRelationMap)
+  const { response: fragmentVertexToRelationMap } = useFetch(
+    getFragmentVertexToRelationMap
+  )
 
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
 
@@ -311,7 +309,7 @@ export default function Streaming() {
     }
     let inMap = fragmentVertexToRelationMap.inMap
     let outMap = fragmentVertexToRelationMap.outMap
-    console.log("fragmentVertexToRelationMap", fragmentVertexToRelationMap);
+    console.log("fragmentVertexToRelationMap", fragmentVertexToRelationMap)
     if (promethusMetrics || embeddedBackPressureInfo) {
       let map = new Map()
 
@@ -327,10 +325,7 @@ export default function Streaming() {
             output = outMap[output]
             input = inMap[input]
             let key = `${output}_${input}`
-            map.set(
-                key,
-                m.sample[0].value
-            )
+            map.set(key, m.sample[0].value)
           }
         }
       } else if (backPressureDataSource === "Prometheus" && promethusMetrics) {
@@ -353,7 +348,12 @@ export default function Streaming() {
       console.log("backpressure map: ", map)
       return map
     }
-  }, [backPressureDataSource, promethusMetrics, embeddedBackPressureInfo, fragmentVertexToRelationMap])
+  }, [
+    backPressureDataSource,
+    promethusMetrics,
+    embeddedBackPressureInfo,
+    fragmentVertexToRelationMap,
+  ])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">

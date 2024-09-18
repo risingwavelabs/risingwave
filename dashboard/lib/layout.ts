@@ -517,9 +517,7 @@ export function generateFragmentEdges(
   return links
 }
 
-export function generateDdlEdges(
-    layoutMap: DdlBoxPosition[]
-): Edge[] {
+export function generateDdlEdges(layoutMap: DdlBoxPosition[]): Edge[] {
   const links = []
   const ddlMap = new Map<string, DdlBoxPosition>()
   for (const x of layoutMap) {
@@ -568,4 +566,3 @@ export function generateDdlEdges(
   }
   return links
 }
-

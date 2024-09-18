@@ -29,7 +29,7 @@ import {
 import {
   FragmentVertexToRelationMap,
   ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
-  RelationIdInfos, FragmentIdToActorIdMap,
+  RelationIdInfos,
   TableFragments,
 } from "../../proto/gen/meta"
 import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
@@ -133,7 +133,8 @@ export async function getRelationDependencies() {
 
 export async function getFragmentVertexToRelationMap() {
   let res = await api.get("/fragment_vertex_to_relation_id_map")
-  let fragmentVertexToRelationMap: FragmentVertexToRelationMap = FragmentVertexToRelationMap.fromJSON(res)
+  let fragmentVertexToRelationMap: FragmentVertexToRelationMap =
+    FragmentVertexToRelationMap.fromJSON(res)
   console.log("fetch result", fragmentVertexToRelationMap)
   return fragmentVertexToRelationMap
 }

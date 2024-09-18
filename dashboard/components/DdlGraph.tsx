@@ -16,21 +16,19 @@ import * as d3 from "d3"
 import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import {
+  DdlBox,
+  DdlBoxPosition,
   Edge,
   Enter,
-  FragmentBox,
-  FragmentBoxPosition,
   Position,
-  generateFragmentEdges,
   generateDdlEdges,
-  layoutItem, DdlBox, DdlBoxPosition
+  layoutItem,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
-import { StreamNode } from "../proto/gen/stream_plan"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
-type FragmentLayout = {
+type DdlLayout = {
   id: string
   width: number
   height: number
@@ -60,9 +58,9 @@ export default function DdlGraph({
     const layoutDdlResult = new Map<string, any>()
     const includedDdlIds = new Set<string>()
     for (const ddlBox of ddlDependencyDag) {
-      let ddlId = ddlBox.id;
-      let width = 100;
-      let height = 100;
+      let ddlId = ddlBox.id
+      let width = 100
+      let height = 100
       layoutDdlResult.set(ddlId, {
         width,
         height,
@@ -259,11 +257,7 @@ export default function DdlGraph({
       edgeSelection.call(applyEdge)
       edgeSelection.exit().remove()
     }
-  }, [
-    fragmentLayout,
-    fragmentEdgeLayout,
-    backPressures,
-  ])
+  }, [fragmentLayout, fragmentEdgeLayout, backPressures])
 
   return (
     <Fragment>
