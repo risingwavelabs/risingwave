@@ -145,7 +145,8 @@ pub struct IcebergSplit {
     pub snapshot_id: i64,
     pub table_meta: TableMetadataJsonStr,
     pub files: Vec<IcebergFileScanTaskJsonStr>,
-    pub eq_delete_files: Vec<IcebergFileScanTaskJsonStr>,
+    pub equality_delete_files: Vec<IcebergFileScanTaskJsonStr>,
+    pub position_delete_files: Vec<IcebergFileScanTaskJsonStr>,
 }
 
 impl SplitMetaData for IcebergSplit {
@@ -214,10 +215,11 @@ impl IcebergSplitEnumerator {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
             return Ok(vec![IcebergSplit {
                 split_id: 0,
-                snapshot_id: 0, // unused
+                snapshot_id: 0,
                 table_meta: TableMetadataJsonStr::serialize(table.metadata()),
                 files: vec![],
-                eq_delete_files: vec![],
+                equality_delete_files: vec![],
+                position_delete_files: vec![],
             }]);
         }
 
@@ -255,36 +257,10 @@ impl IcebergSplitEnumerator {
                 current_snapshot.unwrap().snapshot_id()
             }
         };
-        let require_names = Self::get_require_field_names(&table, snapshot_id, schema).await?;
-
-        let mut data_files = vec![];
-        let mut eq_delete_files = vec![];
-
-        let scan = table
-            .scan()
-            .snapshot_id(snapshot_id)
-            .select(require_names)
-            .build()
-            .map_err(|e| anyhow!(e))?;
-
-        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
-
-        #[for_await]
-        for task in file_scan_stream {
-            let mut task: FileScanTask = task.map_err(|e| anyhow!(e))?;
-            match task.data_file_content {
-                iceberg::spec::DataContentType::Data => {
-                    data_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
-                }
-                iceberg::spec::DataContentType::EqualityDeletes => {
-                    task.project_field_ids = task.equality_ids.clone();
-                    eq_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
-                }
-                iceberg::spec::DataContentType::PositionDeletes => {
-                    bail!("Position delete file is not supported")
-                }
-            }
-        }
+        let (equality_delete_files, data_files) =
+            Self::get_equality_delete_and_data_file_tasks(&table, snapshot_id, &schema).await?;
+        let position_delete_files =
+            Self::get_position_delete_file_tasks(&table, snapshot_id).await?;
 
         let table_meta = TableMetadataJsonStr::serialize(table.metadata());
 
@@ -301,7 +277,8 @@ impl IcebergSplitEnumerator {
                 snapshot_id,
                 table_meta: table_meta.clone(),
                 files: data_files[start..end].to_vec(),
-                eq_delete_files: eq_delete_files.clone(),
+                equality_delete_files: equality_delete_files.clone(),
+                position_delete_files: position_delete_files.clone(),
             };
             splits.push(split);
         }
@@ -319,7 +296,7 @@ impl IcebergSplitEnumerator {
     async fn get_require_field_names(
         table: &Table,
         snapshot_id: i64,
-        rw_schema: Schema,
+        rw_schema: &Schema,
     ) -> ConnectorResult<Vec<String>> {
         let scan = table
             .scan()
@@ -355,6 +332,78 @@ impl IcebergSplitEnumerator {
             }
         }
         Ok(require_field_names)
+    }
+
+    async fn get_position_delete_file_tasks(
+        table: &Table,
+        snapshot_id: i64,
+    ) -> ConnectorResult<Vec<IcebergFileScanTaskJsonStr>> {
+        let mut position_delete_files = vec![];
+        let position_delete_scan = table
+            .scan()
+            .snapshot_id(snapshot_id)
+            .build()
+            .map_err(|e| anyhow!(e))?;
+        #[for_await]
+        for task in position_delete_scan
+            .plan_files()
+            .await
+            .map_err(|e| anyhow!(e))?
+        {
+            let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            match task.data_file_content {
+                iceberg::spec::DataContentType::Data => {
+                    // Don't need to do any things.
+                }
+                iceberg::spec::DataContentType::EqualityDeletes => {
+                    // Don't need to do any things.
+                }
+                iceberg::spec::DataContentType::PositionDeletes => {
+                    position_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+                }
+            }
+        }
+        Ok(position_delete_files)
+    }
+
+    async fn get_equality_delete_and_data_file_tasks(
+        table: &Table,
+        snapshot_id: i64,
+        schema: &Schema,
+    ) -> ConnectorResult<(
+        Vec<IcebergFileScanTaskJsonStr>,
+        Vec<IcebergFileScanTaskJsonStr>,
+    )> {
+        let require_names = Self::get_require_field_names(&table, snapshot_id, schema).await?;
+
+        let mut data_files = vec![];
+        let mut equality_delete_files = vec![];
+        let scan = table
+            .scan()
+            .snapshot_id(snapshot_id)
+            .select(require_names)
+            .build()
+            .map_err(|e| anyhow!(e))?;
+
+        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
+
+        #[for_await]
+        for task in file_scan_stream {
+            let mut task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            match task.data_file_content {
+                iceberg::spec::DataContentType::Data => {
+                    data_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+                }
+                iceberg::spec::DataContentType::EqualityDeletes => {
+                    task.project_field_ids = task.equality_ids.clone();
+                    equality_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+                }
+                iceberg::spec::DataContentType::PositionDeletes => {
+                    // Don't need to do any things.
+                }
+            }
+        }
+        Ok((equality_delete_files, data_files))
     }
 }
 
