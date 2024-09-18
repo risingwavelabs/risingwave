@@ -1741,29 +1741,28 @@ async fn test_split_compaction_group_trivial_expired() {
         .register_table_ids_for_test(&[(102, 2)])
         .await
         .unwrap();
+    let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let task = hummock_manager
-        .get_compact_task(2, &mut default_compaction_selector())
+        .get_compact_task(compaction_group_id, &mut default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
 
-    let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     hummock_manager
         .split_compaction_group(compaction_group_id, &[100], 0)
         .await
         .unwrap();
 
     let current_version = hummock_manager.get_current_version().await;
-    let new_compaction_group_id =
+    let left_compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
-    let old_compaction_group_id =
+    let right_compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
     assert_eq!(current_version.levels.len(), 3);
-    assert!(new_compaction_group_id > StaticCompactionGroupId::End as u64);
     assert_eq!(
         current_version
             .state_table_info
-            .compaction_group_member_table_ids(old_compaction_group_id)
+            .compaction_group_member_table_ids(right_compaction_group_id)
             .iter()
             .map(|table_id| table_id.table_id)
             .sorted()
@@ -1773,7 +1772,7 @@ async fn test_split_compaction_group_trivial_expired() {
     assert_eq!(
         current_version
             .state_table_info
-            .compaction_group_member_table_ids(new_compaction_group_id)
+            .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
             .map(|table_id| table_id.table_id)
             .collect_vec(),
@@ -1781,7 +1780,7 @@ async fn test_split_compaction_group_trivial_expired() {
     );
 
     let task2 = hummock_manager
-        .get_compact_task(new_compaction_group_id, &mut default_compaction_selector())
+        .get_compact_task(left_compaction_group_id, &mut default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
@@ -2026,6 +2025,8 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         "version should not change because compaction task has been cancelled"
     );
 
+    let compaction_group_id =
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
     let compaction_task =
         get_manual_compact_task(hummock_manager.clone(), compaction_group_id, 0).await;
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
@@ -2343,27 +2344,27 @@ async fn test_unregister_moved_table() {
         .split_compaction_group(compaction_group_id, &[100], 0)
         .await
         .unwrap();
-    assert_ne!(new_compaction_group_id, 2);
-    assert!(new_compaction_group_id > StaticCompactionGroupId::End as u64);
 
     let current_version = hummock_manager.get_current_version().await;
-    assert_eq!(
-        new_compaction_group_id,
-        current_version.levels.keys().max().cloned().unwrap()
-    );
+    let left_compaction_group_id =
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
+    assert_eq!(new_compaction_group_id, left_compaction_group_id);
     assert_eq!(current_version.levels.len(), 3);
+
+    let right_compaction_group_id =
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
     assert_eq!(
-        get_compaction_group_object_ids(&current_version, 2),
+        get_compaction_group_object_ids(&current_version, right_compaction_group_id),
         vec![11]
     );
     assert_eq!(
-        get_compaction_group_object_ids(&current_version, new_compaction_group_id),
+        get_compaction_group_object_ids(&current_version, left_compaction_group_id),
         vec![10, 11]
     );
     assert_eq!(
         current_version
             .state_table_info
-            .compaction_group_member_table_ids(2)
+            .compaction_group_member_table_ids(right_compaction_group_id)
             .iter()
             .map(|table_id| table_id.table_id)
             .collect_vec(),
@@ -2372,7 +2373,7 @@ async fn test_unregister_moved_table() {
     assert_eq!(
         current_version
             .state_table_info
-            .compaction_group_member_table_ids(new_compaction_group_id)
+            .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
             .map(|table_id| table_id.table_id)
             .collect_vec(),
@@ -2380,25 +2381,22 @@ async fn test_unregister_moved_table() {
     );
 
     hummock_manager
-        .unregister_table_ids([TableId::new(100)])
+        .unregister_table_ids([TableId::new(101)])
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
     assert_eq!(current_version.levels.len(), 2);
-    assert!(!current_version
-        .levels
-        .contains_key(&new_compaction_group_id));
     assert_eq!(
-        get_compaction_group_object_ids(&current_version, 2),
-        vec![11]
+        get_compaction_group_object_ids(&current_version, left_compaction_group_id),
+        vec![10, 11]
     );
     assert_eq!(
         current_version
             .state_table_info
-            .compaction_group_member_table_ids(2)
+            .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
             .map(|table_id| table_id.table_id)
             .collect_vec(),
-        vec![101]
+        vec![100]
     );
 }
