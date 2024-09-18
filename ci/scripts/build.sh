@@ -46,6 +46,10 @@ else
     RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
     export OPENSSL_LIB_DIR=/usr/local/lib/
     export OPENSSL_INCLUDE_DIR=/usr/local/include
+    echo "--- list openssl lib"
+    ls $OPENSSL_LIB_DIR
+    echo "--- list openssl include"
+    ls $OPENSSL_INCLUDE_DIR
     export OPENSSL_STATIC=1
 fi
 
