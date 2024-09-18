@@ -1331,12 +1331,22 @@ pub async fn handle_create_table(
                 bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
             };
 
-            let Ok(s3_ak) = std::env::var("AWS_ACCESS_KEY_ID") else {
-                bail!("To create an iceberg engine table, AWS_ACCESS_KEY_ID needed to be set");
+            let s3_ak = if let Ok(s3_ak) = std::env::var("AWS_ACCESS_KEY_ID") {
+                s3_ak
+            } else if nimtable_dev {
+                bail!("To create an iceberg engine table in dev mode, AWS_ACCESS_KEY_ID needed to be set")
+            } else {
+                // In prod mode, use a placeholder for iceberg sink and source
+                "xxx".to_string()
             };
 
-            let Ok(s3_sk) = std::env::var("AWS_SECRET_ACCESS_KEY") else {
-                bail!("To create an iceberg engine table, AWS_SECRET_ACCESS_KEY needed to be set");
+            let s3_sk = if let Ok(s3_sk) = std::env::var("AWS_SECRET_ACCESS_KEY") {
+                s3_sk
+            } else if nimtable_dev {
+                bail!("To create an iceberg engine table in dev mode, AWS_SECRET_ACCESS_KEY needed to be set")
+            } else {
+                // In prod mode, use a placeholder for iceberg sink and source
+                "xxx".to_string()
             };
 
             let Ok(meta_store_endpoint) = std::env::var("RW_SQL_ENDPOINT") else {
