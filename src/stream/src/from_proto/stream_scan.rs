@@ -25,7 +25,7 @@ use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::{
     ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, RearrangedChainExecutor,
-    SnapshotBackfillExecutor, TroublemakerExecutor,
+    TroublemakerExecutor,
 };
 
 pub struct StreamScanExecutorBuilder;
@@ -144,34 +144,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 }
             }
             StreamScanType::SnapshotBackfill => {
-                let table_desc: &StorageTableDesc = node.get_table_desc()?;
-
-                let column_ids = node
-                    .upstream_column_ids
-                    .iter()
-                    .map(ColumnId::from)
-                    .collect_vec();
-
-                let vnodes = params.vnode_bitmap.map(Arc::new);
-                let barrier_rx = params
-                    .shared_context
-                    .local_barrier_manager
-                    .subscribe_barrier(params.actor_context.id);
-
-                let upstream_table =
-                    StorageTable::new_partial(state_store.clone(), column_ids, vnodes, table_desc);
-                SnapshotBackfillExecutor::new(
-                    upstream_table,
-                    upstream,
-                    output_indices,
-                    params.actor_context.clone(),
-                    progress,
-                    params.env.config().developer.chunk_size,
-                    node.rate_limit.map(|x| x as _),
-                    barrier_rx,
-                    params.executor_stats.clone(),
-                )
-                .boxed()
+                unreachable!("SnapshotBackfillExecutor is handled specially when in `StreamActorManager::create_nodes_inner`")
             }
             StreamScanType::Unspecified => unreachable!(),
         };

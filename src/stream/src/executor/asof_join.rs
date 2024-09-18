@@ -933,6 +933,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
 
     async fn create_in_memory_state_table(
@@ -947,12 +948,16 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        StateTable::new_without_distribution(
+        StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::new(table_id),
+                column_descs,
+                order_types.to_vec(),
+                pk_indices.to_vec(),
+                0,
+            ),
             mem_state.clone(),
-            TableId::new(table_id),
-            column_descs,
-            order_types.to_vec(),
-            pk_indices.to_vec(),
+            None,
         )
         .await
     }

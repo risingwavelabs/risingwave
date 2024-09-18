@@ -28,7 +28,6 @@ mod barrier_manager;
 mod env;
 mod stream_manager;
 
-pub(crate) use barrier_manager::SubscribeMutationItem;
 pub use barrier_manager::*;
 pub use env::*;
 pub use stream_manager::*;
@@ -46,10 +45,6 @@ struct PartialGraphId(u32);
 impl PartialGraphId {
     fn new(id: u32) -> Self {
         Self(id)
-    }
-
-    fn is_global_graph(&self) -> bool {
-        self.0 == u32::MAX
     }
 }
 

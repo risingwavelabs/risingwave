@@ -29,7 +29,7 @@ num-bigint = "0.4"
 prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = { version = "0.14", features = ["serde"] }
 prost-types = "0.13"
-protobuf-native = "0.2.2"
+protox = "0.7"
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = "1"
@@ -47,7 +47,6 @@ tokio = { version = "0.2", package = "madsim-tokio" }
 
 [build-dependencies]
 prost-build = "0.12"
-protobuf-src = "1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

@@ -425,6 +425,7 @@ impl ClickHouseSink {
         fields_type: &DataType,
         ck_column: &SystemColumn,
     ) -> Result<()> {
+        // FIXME: the "contains" based implementation is wrong
         let is_match = match fields_type {
             risingwave_common::types::DataType::Boolean => Ok(ck_column.r#type.contains("Bool")),
             risingwave_common::types::DataType::Int16 => Ok(ck_column.r#type.contains("UInt16")

@@ -527,27 +527,32 @@ mod tests {
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
     use super::*;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
 
     async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
     ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
-        let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
+        let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)];
+        let order_types = vec![OrderType::ascending()];
+        let pk_indices = vec![0];
         // TODO: use consistent operations for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
-        let state_table_l = StateTable::new_without_distribution_inconsistent_op(
+        let state_table_l = StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::new(0),
+                column_descs.clone(),
+                order_types.clone(),
+                pk_indices.clone(),
+                0,
+            ),
             mem_state.clone(),
-            TableId::new(0),
-            vec![column_descs.clone()],
-            vec![OrderType::ascending()],
-            vec![0],
+            None,
         )
         .await;
-        let state_table_r = StateTable::new_without_distribution_inconsistent_op(
+        let state_table_r = StateTable::from_table_catalog(
+            &gen_pbtable(TableId::new(1), column_descs, order_types, pk_indices, 0),
             mem_state,
-            TableId::new(1),
-            vec![column_descs],
-            vec![OrderType::ascending()],
-            vec![0],
+            None,
         )
         .await;
         (state_table_l, state_table_r)
