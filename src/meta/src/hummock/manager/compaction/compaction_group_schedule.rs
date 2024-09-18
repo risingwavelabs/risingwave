@@ -260,7 +260,7 @@ impl HummockManager {
 
         self.metrics
             .merge_compaction_group_count
-            .with_label_values(&[&group_1.to_string(), &group_2.to_string()])
+            .with_label_values(&[&left_group_id.to_string()])
             .inc();
 
         Ok(())

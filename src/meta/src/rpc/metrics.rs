@@ -735,7 +735,7 @@ impl MetaMetrics {
         let merge_compaction_group_count = register_int_counter_vec_with_registry!(
             "storage_merge_compaction_group_count",
             "Count of trigger merge compaction group",
-            &["group_left", "group_right"],
+            &["group"],
             registry
         )
         .unwrap();

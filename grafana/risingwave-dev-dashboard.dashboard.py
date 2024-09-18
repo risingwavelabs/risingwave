@@ -3264,7 +3264,7 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
 
                         panels.target(
                             f"sum({table_metric('storage_merge_compaction_group_count')}) by (group)",
-                            "merge_compaction_group_count left-{{group_left}} right-{{group_right}}",
+                            "merge_compaction_group_count cg-{{group}}",
                         ),
                     ],
                 ),
