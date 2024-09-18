@@ -2141,14 +2141,14 @@ mod tests {
             let split_key = group_split::build_split_key(3, VirtualNode::ZERO);
             let mut origin_sst = sst.clone();
             let sst_size = origin_sst.sst_size;
-            let split_type = group_split::need_to_split(&origin_sst, split_key.clone().into());
+            let split_type = group_split::need_to_split(&origin_sst, split_key.clone());
             assert_eq!(SstSplitType::Both, split_type);
 
             let mut new_sst_id = 10;
             let branched_sst = group_split::split_sst(
                 &mut origin_sst,
                 &mut new_sst_id,
-                split_key.into(),
+                split_key,
                 sst_size / 2,
                 sst_size / 2,
             );
@@ -2173,14 +2173,14 @@ mod tests {
             let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
             let mut origin_sst = sst.clone();
             let sst_size = origin_sst.sst_size;
-            let split_type = group_split::need_to_split(&origin_sst, split_key.clone().into());
+            let split_type = group_split::need_to_split(&origin_sst, split_key.clone());
             assert_eq!(SstSplitType::Both, split_type);
 
             let mut new_sst_id = 10;
             let branched_sst = group_split::split_sst(
                 &mut origin_sst,
                 &mut new_sst_id,
-                split_key.into(),
+                split_key,
                 sst_size / 2,
                 sst_size / 2,
             );
@@ -2199,38 +2199,39 @@ mod tests {
         {
             let split_key = group_split::build_split_key(6, VirtualNode::ZERO);
             let origin_sst = sst.clone();
-            let split_type = group_split::need_to_split(&origin_sst, split_key.into());
+            let split_type = group_split::need_to_split(&origin_sst, split_key);
             assert_eq!(SstSplitType::Left, split_type);
         }
 
         {
             let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
             let origin_sst = sst.clone();
-            let split_type = group_split::need_to_split(&origin_sst, split_key.into());
+            let split_type = group_split::need_to_split(&origin_sst, split_key);
             assert_eq!(SstSplitType::Both, split_type);
 
             let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
             let origin_sst = sst.clone();
-            let split_type = group_split::need_to_split(&origin_sst, split_key.into());
+            let split_type = group_split::need_to_split(&origin_sst, split_key);
             assert_eq!(SstSplitType::Right, split_type);
         }
     }
 
     #[test]
     fn test_split_sst_info_for_level() {
-        let mut version = HummockVersion::default();
-
-        version.id = HummockVersionId(0);
-        version.levels = HashMap::from_iter([(
-            1,
-            build_initial_compaction_group_levels(
+        let mut version = HummockVersion {
+            id: HummockVersionId(0),
+            levels: HashMap::from_iter([(
                 1,
-                &CompactionConfig {
-                    max_level: 6,
-                    ..Default::default()
-                },
-            ),
-        )]);
+                build_initial_compaction_group_levels(
+                    1,
+                    &CompactionConfig {
+                        max_level: 6,
+                        ..Default::default()
+                    },
+                ),
+            )]),
+            ..Default::default()
+        };
 
         let cg1 = version.levels.get_mut(&1).unwrap();
 
