@@ -62,9 +62,6 @@ cargo build \
 
 artifacts=(risingwave sqlsmith compaction-test risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test)
 
-echo "--- Show openssl libs via pkg-config"
-pkg-config --libs openssl
-
 echo "--- Show link info"
 ldd target/"$profile"/risingwave
 
