@@ -1708,3 +1708,26 @@ impl CompactionState {
         }
     }
 }
+
+impl Compaction {
+    pub fn get_compact_task_assignments_by_group_id(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Vec<CompactTaskAssignment> {
+        self.compact_task_assignment
+            .iter()
+            .filter_map(|(_, assignment)| {
+                if assignment.compact_task.as_ref().map_or(false, |task| {
+                    task.compaction_group_id == compaction_group_id
+                }) {
+                    Some(CompactTaskAssignment {
+                        compact_task: assignment.compact_task.clone(),
+                        context_id: assignment.context_id,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+}

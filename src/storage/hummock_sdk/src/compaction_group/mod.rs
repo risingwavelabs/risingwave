@@ -145,7 +145,7 @@ pub mod group_split {
             (l, r)
         };
         let (table_ids_l, table_ids_r) =
-            split_table_ids(&origin_sst_info.table_ids, split_key.clone());
+            split_table_ids_with_split_key(&origin_sst_info.table_ids, split_key.clone());
 
         // rebuild the key_range and size and sstable file size
         {
@@ -202,13 +202,24 @@ pub mod group_split {
     }
 
     // Should avoid split same table_id into two groups
-    pub fn split_table_ids(table_ids: &Vec<u32>, split_key: Bytes) -> (Vec<u32>, Vec<u32>) {
+    pub fn split_table_ids_with_split_key(
+        table_ids: &Vec<u32>,
+        split_key: Bytes,
+    ) -> (Vec<u32>, Vec<u32>) {
         assert!(table_ids.is_sorted());
         let split_full_key = FullKey::decode(&split_key);
         let split_user_key = split_full_key.user_key;
         let vnode = split_user_key.get_vnode_id();
         let table_id = split_user_key.table_id.table_id();
+        split_table_ids_with_table_id_and_vnode(table_ids, table_id, vnode)
+    }
 
+    pub fn split_table_ids_with_table_id_and_vnode(
+        table_ids: &Vec<u32>,
+        table_id: StateTableId,
+        vnode: usize,
+    ) -> (Vec<u32>, Vec<u32>) {
+        assert!(table_ids.is_sorted());
         assert_eq!(VirtualNode::ZERO, VirtualNode::from_index(vnode));
         let pos = table_ids.partition_point(|&id| id < table_id);
         (table_ids[..pos].to_vec(), table_ids[pos..].to_vec())
@@ -332,18 +343,16 @@ pub mod group_split {
         if level.table_infos.is_empty() {
             return vec![];
         }
-        if level.level_type == PbLevelType::Overlapping {
-            let mut left_sst = vec![];
-            let mut right_sst = vec![];
 
-            for sst in &mut level.table_infos {
+        let mut insert_table_infos = vec![];
+        if level.level_type == PbLevelType::Overlapping {
+            level.table_infos.retain_mut(|sst| {
                 let sst_split_type = need_to_split(sst, split_key.clone());
                 match sst_split_type {
-                    SstSplitType::Left => {
-                        left_sst.push(sst.clone());
-                    }
+                    SstSplitType::Left => true,
                     SstSplitType::Right => {
-                        right_sst.push(sst.clone());
+                        insert_table_infos.push(sst.clone());
+                        false
                     }
                     SstSplitType::Both => {
                         let estimated_size = sst.sst_size;
@@ -354,21 +363,17 @@ pub mod group_split {
                             estimated_size / 2,
                             estimated_size / 2,
                         );
-                        right_sst.push(branch_sst.clone());
-                        left_sst.push(sst.clone());
+                        insert_table_infos.push(branch_sst.clone());
+                        true
                     }
                 }
-            }
-
-            level.table_infos = left_sst;
-            right_sst
+            });
         } else {
             let pos = get_split_pos(&level.table_infos, split_key.clone());
             if pos >= level.table_infos.len() {
-                return vec![];
+                return insert_table_infos;
             }
 
-            let mut insert_table_infos = vec![];
             let sst = &mut level.table_infos[pos];
             let sst_split_type = need_to_split(sst, split_key.clone());
             match sst_split_type {
@@ -397,8 +402,51 @@ pub mod group_split {
                     level.table_infos = level.table_infos[0..=pos].to_vec();
                 }
             };
-
-            insert_table_infos
         }
+
+        insert_table_infos
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::hash::VirtualNode;
+    fn test_split_table_ids() {
+        let table_ids = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
+            &table_ids,
+            5,
+            VirtualNode::ZERO.to_index(),
+        );
+        assert_eq!(left, vec![1, 2, 3, 4, 5]);
+        assert_eq!(right, vec![6, 7, 8, 9]);
+
+        // test table_id not in the table_ids
+
+        let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
+            &table_ids,
+            10,
+            VirtualNode::ZERO.to_index(),
+        );
+        assert_eq!(left, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(right, vec![]);
+
+        let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
+            &table_ids,
+            0,
+            VirtualNode::ZERO.to_index(),
+        );
+
+        assert_eq!(left, vec![]);
+        assert_eq!(right, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    }
+
+    fn test_split_table_ids_with_split_key() {
+        let table_ids = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let split_key = super::group_split::build_split_key(5, VirtualNode::ZERO);
+        let (left, right) =
+            super::group_split::split_table_ids_with_split_key(&table_ids, split_key);
+        assert_eq!(left, vec![1, 2, 3, 4, 5]);
+        assert_eq!(right, vec![6, 7, 8, 9]);
     }
 }

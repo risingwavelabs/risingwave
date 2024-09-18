@@ -233,19 +233,23 @@ impl HummockManager {
         let mut canceled_tasks = vec![];
         // after merge, all tasks in right_group_id should be canceled
         // otherwise, pending size calculation by level handler will make some mistake
-        for task_assignment in compaction_guard.compact_task_assignment.values() {
-            if let Some(task) = task_assignment.compact_task.as_ref() {
-                let need_cancel = task.compaction_group_id == right_group_id;
-                if need_cancel {
-                    canceled_tasks.push(ReportTask {
-                        task_id: task.task_id,
-                        task_status: TaskStatus::ManualCanceled,
-                        table_stats_change: HashMap::default(),
-                        sorted_output_ssts: vec![],
-                    });
+        let compact_task_assignments =
+            compaction_guard.get_compact_task_assignments_by_group_id(right_group_id);
+        compact_task_assignments
+            .into_iter()
+            .for_each(|task_assignment| {
+                if let Some(task) = task_assignment.compact_task.as_ref() {
+                    let need_cancel = task.compaction_group_id == right_group_id;
+                    if need_cancel {
+                        canceled_tasks.push(ReportTask {
+                            task_id: task.task_id,
+                            task_status: TaskStatus::ManualCanceled,
+                            table_stats_change: HashMap::default(),
+                            sorted_output_ssts: vec![],
+                        });
+                    }
                 }
-            }
-        }
+            });
 
         drop(versioning_guard);
         drop(compaction_guard);
@@ -336,10 +340,12 @@ impl HummockManager {
             )
             .await;
         match ret {
-            Ok(cg_id_to_table_ids) => {
+            Ok((target_compaction_group_id, cg_id_to_table_ids)) => {
                 tracing::info!(
-                    "split state table [{}] success cg_id_to_table_ids {:?}",
+                    "split state table [{}] success (source_group_id {} target_group_id {})  cg_id_to_table_ids {:?}",
                     table_id,
+                    parent_group_id,
+                    target_compaction_group_id,
                     cg_id_to_table_ids
                 );
             }
@@ -364,21 +370,13 @@ impl HummockManager {
         table_ids: &[StateTableId],
         partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
-        let cg_id_to_table_ids = self
+        let (target_compaction_group_id, _) = self
             .move_state_tables_to_dedicated_compaction_group(
                 parent_group_id,
                 table_ids,
                 partition_vnode_count,
             )
             .await?;
-
-        let target_compaction_group_id = {
-            cg_id_to_table_ids
-                .into_iter()
-                .filter(|(_, target_table_ids)| target_table_ids == table_ids)
-                .collect_vec()[0]
-                .0
-        };
 
         Ok(target_compaction_group_id)
     }
@@ -422,16 +420,27 @@ impl HummockManager {
             .map(|table_id| table_id.table_id)
             .collect_vec();
 
-        // not need to split
-        if table_id == *table_ids.first().unwrap() && group_split::is_vnode_split_to_right(vnode) {
-            result.push((parent_group_id, table_ids));
+        let split_key = group_split::build_split_key(table_id, vnode);
+        // avoid decode split_key when caller is aware of the table_id and vnode
+        let (table_ids_left, table_ids_right) =
+            group_split::split_table_ids_with_table_id_and_vnode(
+                &table_ids,
+                table_id,
+                vnode.to_index(),
+            );
+        if table_ids_left.is_empty() || table_ids_right.is_empty() {
+            // not need to split
+            if !table_ids_left.is_empty() {
+                result.push((parent_group_id, table_ids_left));
+            }
+
+            if !table_ids_right.is_empty() {
+                result.push((parent_group_id, table_ids_right));
+            }
             return Ok(result);
         }
 
-        if table_id == *table_ids.last().unwrap() && group_split::is_vnode_split_to_left(vnode) {
-            result.push((parent_group_id, table_ids));
-            return Ok(result);
-        }
+        result.push((parent_group_id, table_ids_left));
 
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
@@ -440,11 +449,6 @@ impl HummockManager {
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
-
-        let split_key = group_split::build_split_key(table_id, vnode);
-        let (table_ids_left, table_ids_right) =
-            group_split::split_table_ids(&table_ids, split_key.clone());
-        result.push((parent_group_id, table_ids_left));
 
         let split_sst_count = new_version_delta
             .latest_version()
@@ -515,22 +519,26 @@ impl HummockManager {
         // Instead of handling DeltaType::GroupConstruct for time travel, simply enforce a version snapshot.
         versioning.mark_next_time_travel_version_snapshot();
         let mut canceled_tasks = vec![];
-        for task_assignment in compaction_guard.compact_task_assignment.values() {
-            if let Some(task) = task_assignment.compact_task.as_ref() {
-                let need_cancel = HummockManager::is_compact_task_expired(
-                    &task.into(),
-                    &versioning.current_version,
-                );
-                if need_cancel {
-                    canceled_tasks.push(ReportTask {
-                        task_id: task.task_id,
-                        task_status: TaskStatus::ManualCanceled,
-                        table_stats_change: HashMap::default(),
-                        sorted_output_ssts: vec![],
-                    });
+        let compact_task_assignments =
+            compaction_guard.get_compact_task_assignments_by_group_id(parent_group_id);
+        compact_task_assignments
+            .into_iter()
+            .for_each(|task_assignment| {
+                if let Some(task) = task_assignment.compact_task.as_ref() {
+                    let need_cancel = HummockManager::is_compact_task_expired(
+                        &task.into(),
+                        &versioning.current_version,
+                    );
+                    if need_cancel {
+                        canceled_tasks.push(ReportTask {
+                            task_id: task.task_id,
+                            task_status: TaskStatus::ManualCanceled,
+                            table_stats_change: HashMap::default(),
+                            sorted_output_ssts: vec![],
+                        });
+                    }
                 }
-            }
-        }
+            });
 
         drop(versioning_guard);
         drop(compaction_guard);
@@ -551,7 +559,10 @@ impl HummockManager {
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
         partition_vnode_count: u32,
-    ) -> Result<BTreeMap<CompactionGroupId, Vec<StateTableId>>> {
+    ) -> Result<(
+        CompactionGroupId,
+        BTreeMap<CompactionGroupId, Vec<StateTableId>>,
+    )> {
         if table_ids.is_empty() {
             return Err(Error::CompactionGroup(
                 "table_ids must not be empty".to_string(),
@@ -659,6 +670,6 @@ impl HummockManager {
             }
         }
 
-        Ok(cg_id_to_table_ids)
+        Ok((target_compaction_group_id, cg_id_to_table_ids))
     }
 }
