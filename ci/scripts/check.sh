@@ -18,12 +18,7 @@ done
 source ci/scripts/common.sh
 
 echo "--- Set openssl static link env vars"
-export OPENSSL_STATIC=1
-export OPENSSL_LIB_DIR="$(dpkg -L libssl-dev | grep libssl.a | xargs dirname)"
-export OPENSSL_INCLUDE_DIR="$(dpkg -L libssl-dev | grep openssl/ssl.h | xargs dirname)"
-echo "OPENSSL_STATIC: $OPENSSL_STATIC"
-echo "OPENSSL_LIB_DIR: $OPENSSL_LIB_DIR"
-echo "OPENSSL_INCLUDE_DIR: $OPENSSL_INCLUDE_DIR"
+configure_static_openssl
 
 echo "--- Run trailing spaces check"
 scripts/check/check-trailing-spaces.sh
