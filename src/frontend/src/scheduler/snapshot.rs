@@ -29,7 +29,6 @@ use risingwave_pb::hummock::{HummockVersionDeltas, PbHummockSnapshot};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::watch;
-use tracing::warn;
 
 use crate::expr::InlineNowProcTime;
 use crate::meta_client::FrontendMetaClient;
@@ -180,35 +179,41 @@ impl HummockSnapshotManager {
     }
 
     pub fn init(&self, version: FrontendHummockVersion) {
-        self.worker_sender
-            .send(Operation::Pin(version.id, version.max_committed_epoch))
-            .unwrap();
-        // Then set the latest snapshot.
-        let snapshot = Arc::new(PinnedSnapshot {
-            value: version,
-            unpin_sender: self.worker_sender.clone(),
-        });
-        if self.latest_snapshot.send(snapshot).is_err() {
-            warn!("fail to set init version");
-        }
+        self.update_inner(|_| Some(version));
     }
 
     /// Update the latest snapshot.
     ///
     /// Should only be called by the observer manager.
     pub fn update(&self, deltas: HummockVersionDeltas) {
-        self.latest_snapshot.send_if_modified(move |old_snapshot| {
+        self.update_inner(|old_snapshot| {
             if deltas.version_deltas.is_empty() {
+                return None;
+            }
+            let mut snapshot = old_snapshot.clone();
+            for delta in deltas.version_deltas {
+                snapshot.apply_delta(FrontendHummockVersionDelta::from_protobuf(delta));
+            }
+            Some(snapshot)
+        })
+    }
+
+    fn update_inner(
+        &self,
+        get_new_snapshot: impl FnOnce(&FrontendHummockVersion) -> Option<FrontendHummockVersion>,
+    ) {
+        self.latest_snapshot.send_if_modified(move |old_snapshot| {
+            let new_snapshot = get_new_snapshot(&old_snapshot.value);
+            let Some(snapshot) = new_snapshot else {
+                return false;
+            };
+            if snapshot.id <= old_snapshot.value.id {
+                assert_eq!(
+                    snapshot.id, old_snapshot.value.id,
+                    "receive stale frontend version"
+                );
                 return false;
             }
-            let snapshot = {
-                let mut snapshot = old_snapshot.value.clone();
-                for delta in deltas.version_deltas {
-                    snapshot.apply_delta(FrontendHummockVersionDelta::from_protobuf(delta));
-                }
-                snapshot
-            };
-
             // First tell the worker that a new snapshot is going to be pinned.
             self.worker_sender
                 .send(Operation::Pin(snapshot.id, snapshot.max_committed_epoch))
