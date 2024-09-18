@@ -398,7 +398,6 @@ impl GlobalBarrierManager {
                         &BarrierKind::Initial,
                         &info,
                         Some(&info),
-                        HashMap::new(),
                         Some(node_actors),
                         vec![],
                         vec![],

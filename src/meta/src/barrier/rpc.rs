@@ -23,7 +23,6 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
@@ -275,7 +274,6 @@ impl ControlStreamManager {
         command_ctx: &CommandContext,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
-        actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
     ) -> MetaResult<HashSet<WorkerId>> {
         let mutation = command_ctx.to_mutation();
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
@@ -295,14 +293,12 @@ impl ControlStreamManager {
             &command_ctx.kind,
             pre_applied_graph_info,
             applied_graph_info,
-            actor_ids_to_pre_sync_mutation,
             command_ctx.command.actors_to_create(),
             subscriptions_to_add,
             subscriptions_to_remove,
         )
     }
 
-    #[expect(clippy::too_many_arguments)]
     pub(super) fn inject_barrier(
         &mut self,
         creating_table_id: Option<TableId>,
@@ -311,7 +307,6 @@ impl ControlStreamManager {
         kind: &BarrierKind,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
-        actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
         mut new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
         subscriptions_to_add: Vec<SubscriptionUpstreamInfo>,
         subscriptions_to_remove: Vec<SubscriptionUpstreamInfo>,
@@ -321,10 +316,7 @@ impl ControlStreamManager {
         ));
 
         let partial_graph_id = creating_table_id
-            .map(|table_id| {
-                assert!(actor_ids_to_pre_sync_mutation.is_empty());
-                table_id.table_id
-            })
+            .map(|table_id| table_id.table_id)
             .unwrap_or(u32::MAX);
 
         for worker_id in pre_applied_graph_info
@@ -401,13 +393,6 @@ impl ControlStreamManager {
                                         actor_ids_to_collect,
                                         table_ids_to_sync,
                                         partial_graph_id,
-                                        actor_ids_to_pre_sync_barrier_mutation:
-                                            actor_ids_to_pre_sync_mutation
-                                                .get(node_id)
-                                                .into_iter()
-                                                .flatten()
-                                                .cloned()
-                                                .collect(),
                                         broadcast_info: new_actors_location_to_broadcast.clone(),
                                         actors_to_build: new_actors
                                             .as_mut()

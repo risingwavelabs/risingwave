@@ -81,7 +81,7 @@ use self::hash_join::*;
 use self::hop_window::*;
 use self::lookup::*;
 use self::lookup_union::*;
-use self::merge::*;
+pub(crate) use self::merge::MergeExecutorBuilder;
 use self::mview::*;
 use self::no_op::*;
 use self::now::NowExecutorBuilder;
