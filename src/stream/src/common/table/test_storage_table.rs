@@ -76,7 +76,7 @@ async fn test_storage_table_value_indices() {
         column_descs.clone(),
         order_types.clone(),
         pk_indices,
-        value_indices.into_iter().map(|v| v as usize).collect_vec(),
+        value_indices,
     );
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     test_env
