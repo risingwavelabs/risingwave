@@ -44,8 +44,8 @@ if [[ "$profile" == "ci-dev" ]]; then
     RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
 else
     RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
-    export OPENSSL_LIB_DIR="dpkg -L libssl-dev | grep libssl.a | xargs dirname"
-    export OPENSSL_INCLUDE_DIR="dpkg -L libssl-dev | grep openssl/ssl.h | xargs dirname"
+    export OPENSSL_LIB_DIR="$(dpkg -L libssl-dev | grep libssl.a | xargs dirname)"
+    export OPENSSL_INCLUDE_DIR="$(dpkg -L libssl-dev | grep openssl/ssl.h | xargs dirname)"
     echo "--- list openssl lib: $OPENSSL_LIB_DIR"
     ls $OPENSSL_LIB_DIR
     echo "--- list openssl include: $OPENSSL_INCLUDE_DIR"
