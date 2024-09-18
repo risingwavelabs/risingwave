@@ -353,7 +353,7 @@ impl OpendalStreamingUploader {
                     .with_jitter(),
             )
             .writer_with(&path)
-            .concurrent(config.opendal_upload_concurrency)
+            .concurrent(usize::MAX)
             .executor(Executor::with(monitored_execute))
             .await?;
         Ok(Self {
