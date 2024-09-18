@@ -17,7 +17,7 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_common::hash::WorkerSlotId;
-use risingwave_simulation::cluster::Configuration;
+use risingwave_simulation::cluster::{Configuration, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::{
     identity_contains, upstream_fragment_count, BoxedPredicate,
 };
@@ -67,7 +67,10 @@ async fn nexmark_q4_ref() -> Result<()> {
     Ok(())
 }
 
-async fn nexmark_q4_common(predicates: impl IntoIterator<Item = BoxedPredicate>) -> Result<()> {
+async fn nexmark_q4_common(
+    predicates: impl IntoIterator<Item = BoxedPredicate>,
+    recovery: bool,
+) -> Result<()> {
     let mut cluster = init().await?;
 
     let fragment = cluster.locate_one_fragment(predicates).await?;
@@ -90,6 +93,11 @@ async fn nexmark_q4_common(predicates: impl IntoIterator<Item = BoxedPredicate>)
         .await?;
 
     sleep(Duration::from_secs(5)).await;
+
+    if recovery {
+        // Trigger recovery
+        cluster.kill_node(&KillOpts::ALL).await;
+    }
 
     // 5~15s
     cluster.run(SELECT).await?.assert_result_ne(RESULT);
@@ -116,25 +124,47 @@ async fn nexmark_q4_common(predicates: impl IntoIterator<Item = BoxedPredicate>)
 
 #[tokio::test]
 async fn nexmark_q4_materialize_agg() -> Result<()> {
-    nexmark_q4_common([
-        identity_contains("materialize"),
-        identity_contains("hashagg"),
-    ])
+    nexmark_q4_common(
+        [
+            identity_contains("materialize"),
+            identity_contains("hashagg"),
+        ],
+        false,
+    )
+    .await
+}
+#[tokio::test]
+async fn nexmark_q4_materialize_agg_with_recovery() -> Result<()> {
+    nexmark_q4_common(
+        [
+            identity_contains("materialize"),
+            identity_contains("hashagg"),
+        ],
+        true,
+    )
     .await
 }
 
 #[tokio::test]
 async fn nexmark_q4_source() -> Result<()> {
-    nexmark_q4_common([identity_contains("source: bid")]).await
+    nexmark_q4_common([identity_contains("source: bid")], false).await
+}
+
+#[tokio::test]
+async fn nexmark_q4_source_with_recovery() -> Result<()> {
+    nexmark_q4_common([identity_contains("source: bid")], true).await
 }
 
 #[tokio::test]
 async fn nexmark_q4_agg_join() -> Result<()> {
-    nexmark_q4_common([
-        identity_contains("hashagg"),
-        identity_contains("hashjoin"),
-        upstream_fragment_count(2),
-    ])
+    nexmark_q4_common(
+        [
+            identity_contains("hashagg"),
+            identity_contains("hashjoin"),
+            upstream_fragment_count(2),
+        ],
+        false,
+    )
     .await
 }
 
