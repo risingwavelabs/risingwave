@@ -87,21 +87,6 @@ message GroupConstruct {
   CompatibilityVersion version = 6;
 }
 
-message GroupMetaChange {
-  option deprecated = true;
-  repeated uint32 table_ids_add = 1 [deprecated = true];
-  repeated uint32 table_ids_remove = 2 [deprecated = true];
-}
-
-message GroupTableChange {
-  option deprecated = true;
-  repeated uint32 table_ids = 1 [deprecated = true];
-  uint64 target_group_id = 2;
-  uint64 origin_group_id = 3;
-  uint64 new_sst_start_id = 4;
-  CompatibilityVersion version = 5;
-}
-
 message GroupDestroy {}
 
 message GroupMerge {
@@ -114,10 +99,13 @@ message GroupDelta {
     IntraLevelDelta intra_level = 1;
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
-    GroupMetaChange group_meta_change = 4 [deprecated = true];
-    GroupTableChange group_table_change = 5 [deprecated = true];
     GroupMerge group_merge = 6;
   }
+
+  reserved 4;
+  reserved "group_meta_change";
+  reserved 5;
+  reserved "group_table_change";
 }
 
 message UncommittedEpoch {
