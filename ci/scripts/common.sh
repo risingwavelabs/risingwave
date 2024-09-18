@@ -137,3 +137,13 @@ configure_static_openssl() {
     echo "OPENSSL_LIB_DIR: $OPENSSL_LIB_DIR"
     echo "OPENSSL_INCLUDE_DIR: $OPENSSL_INCLUDE_DIR"
 }
+
+check_link_info() {
+  ldd_output=$(ldd target/"$1"/risingwave)
+  echo "$ldd_output"
+  # enforce that libssl is not present if we are building with static openssl
+  if [[ "$profile" == "ci-release" ]] && [[ "$ldd_output" == *"libssl"* ]]; then
+      echo "libssl should not be dynamically linked"
+      exit 1
+  fi
+}
