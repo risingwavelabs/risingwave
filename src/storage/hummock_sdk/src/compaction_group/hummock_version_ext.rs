@@ -36,8 +36,8 @@ use crate::level::{Level, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
-    GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
-    IntraLevelDelta,
+    GroupDelta, GroupDeltas, HummockVersion, HummockVersionCommon, HummockVersionDelta,
+    HummockVersionStateTableInfo, IntraLevelDelta,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
@@ -357,27 +357,56 @@ impl HummockVersion {
     pub fn count_new_ssts_in_group_split(
         &self,
         parent_group_id: CompactionGroupId,
-        member_table_ids: HashSet<StateTableId>,
+        split_key: Bytes,
     ) -> u64 {
         self.levels
             .get(&parent_group_id)
             .map_or(0, |parent_levels| {
-                parent_levels
-                    .l0
-                    .sub_levels
-                    .iter()
-                    .chain(parent_levels.levels.iter())
-                    .flat_map(|level| &level.table_infos)
-                    .map(|sst_info| {
-                        // `sst_info.table_ids` will never be empty.
-                        for table_id in &sst_info.table_ids {
-                            if member_table_ids.contains(table_id) {
-                                return 2;
-                            }
-                        }
-                        0
-                    })
-                    .sum()
+                let l0 = &parent_levels.l0;
+                let mut split_count = 0;
+                for sub_level in &l0.sub_levels {
+                    if sub_level.level_type == PbLevelType::Overlapping {
+                        // TODO: use table_id / vnode / key_range filter
+                        split_count += sub_level
+                            .table_infos
+                            .iter()
+                            .map(|sst| {
+                                if let group_split::SstSplitType::Both =
+                                    group_split::need_to_split(sst, split_key.clone())
+                                {
+                                    2
+                                } else {
+                                    0
+                                }
+                            })
+                            .sum::<u64>();
+                        continue;
+                    }
+
+                    let pos = group_split::get_split_pos(&sub_level.table_infos, split_key.clone());
+                    let sst = sub_level.table_infos.get(pos).unwrap();
+
+                    if let group_split::SstSplitType::Both =
+                        group_split::need_to_split(sst, split_key.clone())
+                    {
+                        split_count += 2;
+                    }
+                }
+
+                for level in &parent_levels.levels {
+                    if level.table_infos.is_empty() {
+                        continue;
+                    }
+                    let pos = group_split::get_split_pos(&level.table_infos, split_key.clone());
+                    let sst = level.table_infos.get(pos).unwrap();
+                    if let group_split::SstSplitType::Both =
+                        group_split::need_to_split(sst, split_key.clone())
+                    {
+                        split_count += 2;
+                    }
+                }
+
+                split_count
             })
     }
 
@@ -611,12 +640,27 @@ impl HummockVersion {
                         BTreeSet::from_iter(group_construct.table_ids.clone())
                     };
 
-                self.init_with_parent_group(
-                    parent_group_id,
-                    *compaction_group_id,
-                    member_table_ids,
-                    group_construct.get_new_sst_start_id(),
-                );
+                if group_construct.version >= CompatibilityVersion::SplitGroupByTable as _ {
+                    // split
+                    let split_key = if group_construct.split_key.is_some() {
+                        Some(Bytes::from(group_construct.split_key.clone().unwrap()))
+                    } else {
+                        None
+                    };
+                    self.init_with_parent_group_v2(
+                        parent_group_id,
+                        *compaction_group_id,
+                        group_construct.get_new_sst_start_id(),
+                        split_key.clone(),
+                    );
+                } else {
+                    self.init_with_parent_group(
+                        parent_group_id,
+                        *compaction_group_id,
+                        member_table_ids,
+                        group_construct.get_new_sst_start_id(),
+                    );
+                }
             } else if let Some(group_change) = &summary.group_table_change {
                 // TODO: may deprecate this branch? This enum variant is not created anywhere
                 assert!(
@@ -635,7 +679,12 @@ impl HummockVersion {
                 let levels = self
                     .levels
                     .get_mut(&group_change.origin_group_id)
-                    .expect("compaction group should exist");
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "compaction group {} does not exist",
+                            group_change.origin_group_id
+                        )
+                    });
                 #[expect(deprecated)]
                 // for backward-compatibility of previous hummock version delta
                 let mut moving_tables = levels
@@ -646,7 +695,9 @@ impl HummockVersion {
                 // for backward-compatibility of previous hummock version delta
                 self.levels
                     .get_mut(compaction_group_id)
-                    .expect("compaction group should exist")
+                    .unwrap_or_else(|| {
+                        panic!("compaction group {} does not exist", compaction_group_id)
+                    })
                     .member_table_ids
                     .append(&mut moving_tables);
             } else if let Some(group_merge) = &summary.group_merge {
@@ -893,6 +944,122 @@ impl HummockVersion {
         });
 
         group_split::merge_levels(left_levels, right_levels);
+    }
+}
+
+impl HummockVersionCommon<SstableInfo> {
+    pub fn init_with_parent_group_v2(
+        &mut self,
+        parent_group_id: CompactionGroupId,
+        group_id: CompactionGroupId,
+        new_sst_start_id: u64,
+        split_key: Option<Bytes>,
+    ) {
+        let mut new_sst_id = new_sst_start_id;
+        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
+            if new_sst_start_id != 0 {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "non-zero sst start id {} for NewCompactionGroup",
+                        new_sst_start_id
+                    );
+                } else {
+                    warn!(
+                        new_sst_start_id,
+                        "non-zero sst start id for NewCompactionGroup"
+                    );
+                }
+            }
+            return;
+        } else if !self.levels.contains_key(&parent_group_id) {
+            warn!(parent_group_id, "non-existing parent group id to init from");
+            return;
+        }
+
+        let [parent_levels, cur_levels] = self
+            .levels
+            .get_many_mut([&parent_group_id, &group_id])
+            .unwrap();
+        let l0 = &mut parent_levels.l0;
+        {
+            for sub_level in &mut l0.sub_levels {
+                let target_l0 = &mut cur_levels.l0;
+                // Remove SST from sub level may result in empty sub level. It will be purged
+                // whenever another compaction task is finished.
+                let insert_table_infos = if let Some(split_key) = &split_key {
+                    group_split::split_sst_info_for_level_v2(
+                        sub_level,
+                        &mut new_sst_id,
+                        split_key.clone(),
+                    )
+                } else {
+                    vec![]
+                };
+
+                if insert_table_infos.is_empty() {
+                    continue;
+                }
+
+                sub_level
+                    .table_infos
+                    .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                    .for_each(|sst_info| {
+                        sub_level.total_file_size -= sst_info.sst_size;
+                        sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                        l0.total_file_size -= sst_info.sst_size;
+                        l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                    });
+                match get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
+                    Ok(idx) => {
+                        add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
+                    }
+                    Err(idx) => {
+                        insert_new_sub_level(
+                            target_l0,
+                            sub_level.sub_level_id,
+                            sub_level.level_type,
+                            insert_table_infos,
+                            Some(idx),
+                        );
+                    }
+                }
+            }
+        }
+
+        for (idx, level) in parent_levels.levels.iter_mut().enumerate() {
+            let insert_table_infos = if let Some(split_key) = &split_key {
+                group_split::split_sst_info_for_level_v2(level, &mut new_sst_id, split_key.clone())
+            } else {
+                vec![]
+            };
+
+            if insert_table_infos.is_empty() {
+                continue;
+            }
+
+            cur_levels.levels[idx].total_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.sst_size)
+                .sum::<u64>();
+            cur_levels.levels[idx].uncompressed_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.uncompressed_file_size)
+                .sum::<u64>();
+            cur_levels.levels[idx]
+                .table_infos
+                .extend(insert_table_infos);
+            cur_levels.levels[idx]
+                .table_infos
+                .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+            assert!(can_concat(&cur_levels.levels[idx].table_infos));
+            level
+                .table_infos
+                .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                .for_each(|sst_info| {
+                    level.total_file_size -= sst_info.sst_size;
+                    level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                });
+        }
     }
 }
 
