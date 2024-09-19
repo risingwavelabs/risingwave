@@ -18,13 +18,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::Deref;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
 };
 use async_trait::async_trait;
-use iceberg::{NamespaceIdent, TableCreation};
+use iceberg::{Catalog as CatalogV2, NamespaceIdent, TableCreation, TableIdent};
 use icelake::catalog::CatalogRef;
 use icelake::io_v2::input_wrapper::{DeltaWriter, RecordBatchWriter};
 use icelake::io_v2::prometheus::{PrometheusWriterBuilder, WriterMetrics};
@@ -76,7 +77,7 @@ pub struct IcebergConfig {
     pub force_append_only: bool,
 
     #[serde(flatten)]
-    pub common: IcebergCommon,
+    common: IcebergCommon,
 
     #[serde(
         rename = "s3.path.style.access",
@@ -164,6 +165,35 @@ impl IcebergConfig {
 
         Ok(config)
     }
+
+    pub fn catalog_type(&self) -> &str {
+        self.common.catalog_type()
+    }
+
+    pub async fn create_catalog(&self) -> Result<CatalogRef> {
+        self.common
+            .create_catalog(&self.path_style_access, &self.java_catalog_props)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn load_table(&self) -> Result<Table> {
+        self.common
+            .load_table(&self.path_style_access, &self.java_catalog_props)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn create_catalog_v2(&self) -> Result<Arc<dyn CatalogV2>> {
+        self.common
+            .create_catalog_v2(&self.path_style_access, &self.java_catalog_props)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub fn full_table_name_v2(&self) -> Result<TableIdent> {
+        self.common.full_table_name_v2().map_err(Into::into)
+    }
 }
 
 pub struct IcebergSink {
@@ -198,11 +228,7 @@ impl IcebergSink {
 
         let table = self
             .config
-            .common
-            .load_table(
-                &self.config.path_style_access,
-                &self.config.java_catalog_props,
-            )
+            .load_table()
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
@@ -222,17 +248,9 @@ impl IcebergSink {
     }
 
     async fn create_table_if_not_exists(&self) -> Result<()> {
-        let catalog = self
-            .config
-            .common
-            .create_catalog_v2(
-                &self.config.path_style_access,
-                &self.config.java_catalog_props,
-            )
-            .await?;
+        let catalog = self.config.create_catalog_v2().await?;
         let table_id = self
             .config
-            .common
             .full_table_name_v2()
             .context("Unable to parse table name")?;
         if !catalog
@@ -333,7 +351,7 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
-        if "glue".eq_ignore_ascii_case(self.config.common.catalog_type()) {
+        if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
             risingwave_common::license::Feature::IcebergSinkWithGlue
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
@@ -378,14 +396,7 @@ impl Sink for IcebergSink {
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        let catalog = self
-            .config
-            .common
-            .create_catalog(
-                &self.config.path_style_access,
-                &self.config.java_catalog_props,
-            )
-            .await?;
+        let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
 
@@ -970,14 +981,7 @@ mod test {
     async fn test_create_catalog(configs: BTreeMap<String, String>) {
         let iceberg_config = IcebergConfig::from_btreemap(configs).unwrap();
 
-        let table = iceberg_config
-            .common
-            .load_table(
-                &iceberg_config.path_style_access,
-                &iceberg_config.java_catalog_props,
-            )
-            .await
-            .unwrap();
+        let table = iceberg_config.load_table().await.unwrap();
 
         println!("{:?}", table.table_name());
     }
