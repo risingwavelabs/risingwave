@@ -178,14 +178,14 @@ export default function StreamingGraph() {
   }, [backPressureDataSource, toast, resetEmbeddedBackPressures])
 
   // Get relationId-relationId -> backpressure rate map
-  const backPressures = useMemo(() => {
+  const backPressures: Map<string, number> | undefined = useMemo(() => {
     if (!fragmentVertexToRelationMap) {
-      return new Map()
+      return new Map<string, number>()
     }
     let inMap = fragmentVertexToRelationMap.inMap
     let outMap = fragmentVertexToRelationMap.outMap
     if (prometheusMetrics || embeddedBackPressureInfo) {
-      let map = new Map()
+      let map = new Map<string, number>()
 
       if (backPressureDataSource === "Embedded" && embeddedBackPressureInfo) {
         const metrics = calculateBPRate(

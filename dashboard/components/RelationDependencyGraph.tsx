@@ -66,7 +66,7 @@ export default function RelationDependencyGraph({
   nodes: RelationPoint[]
   selectedId: string | undefined
   setSelectedId: (id: string) => void
-  backPressures: Map<string, number> // relationId-relationId->back_pressure_rate})
+  backPressures?: Map<string, number> // relationId-relationId->back_pressure_rate})
 }) {
   const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
 
