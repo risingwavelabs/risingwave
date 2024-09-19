@@ -258,6 +258,11 @@ impl HummockManager {
         drop(compaction_guard);
         self.report_compact_tasks(canceled_tasks).await?;
 
+        self.metrics
+            .merge_compaction_group_count
+            .with_label_values(&[&left_group_id.to_string()])
+            .inc();
+
         Ok(())
     }
 
