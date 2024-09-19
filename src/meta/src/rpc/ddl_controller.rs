@@ -51,7 +51,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
+    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType, WaitVersion,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
@@ -278,7 +278,9 @@ impl DdlController {
     /// has been interrupted during executing, the request will be cancelled by tonic. Since we have
     /// a lot of logic for revert, status management, notification and so on, ensuring consistency
     /// would be a huge hassle and pain if we don't spawn here.
-    pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
+    ///
+    /// Though returning `Option`, it's always `Some`, to simplify the handling logic
+    pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
         }
@@ -351,7 +353,16 @@ impl DdlController {
             }
         }
         .in_current_span();
-        tokio::spawn(fut).await.unwrap()
+        let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
+        Ok(Some(WaitVersion {
+            catalog_version: notification_version,
+            hummock_version_id: self
+                .barrier_manager
+                .hummock_manager()
+                .get_version_id()
+                .await
+                .to_u64(),
+        }))
     }
 
     pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {

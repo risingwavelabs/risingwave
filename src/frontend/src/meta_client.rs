@@ -52,7 +52,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_snapshot(&self) -> Result<HummockSnapshot>;
 
-    async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
+    async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId>;
 
     async fn wait(&self) -> Result<()>;
 
@@ -157,7 +157,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_snapshot().await
     }
 
-    async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
+    async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId> {
         self.0.flush(checkpoint).await
     }
 

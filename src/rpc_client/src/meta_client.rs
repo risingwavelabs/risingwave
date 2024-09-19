@@ -26,7 +26,7 @@ use cluster_limit_service_client::ClusterLimitServiceClient;
 use either::Either;
 use futures::stream::BoxStream;
 use lru::LruCache;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, SecretId, TableId};
+use risingwave_common::catalog::{FunctionId, IndexId, SecretId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -171,7 +171,7 @@ impl MetaClient {
         schema_id: u32,
         owner_id: u32,
         req: create_connection_request::Payload,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = CreateConnectionRequest {
             name: connection_name,
             database_id,
@@ -180,7 +180,9 @@ impl MetaClient {
             payload: Some(req),
         };
         let resp = self.inner.create_connection(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn create_secret(
@@ -190,7 +192,7 @@ impl MetaClient {
         schema_id: u32,
         owner_id: u32,
         value: Vec<u8>,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = CreateSecretRequest {
             name: secret_name,
             database_id,
@@ -199,7 +201,9 @@ impl MetaClient {
             value,
         };
         let resp = self.inner.create_secret(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
@@ -208,18 +212,22 @@ impl MetaClient {
         Ok(resp.connections)
     }
 
-    pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<CatalogVersion> {
+    pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<WaitVersion> {
         let request = DropConnectionRequest { connection_id };
         let resp = self.inner.drop_connection(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_secret(&self, secret_id: SecretId) -> Result<CatalogVersion> {
+    pub async fn drop_secret(&self, secret_id: SecretId) -> Result<WaitVersion> {
         let request = DropSecretRequest {
             secret_id: secret_id.into(),
         };
         let resp = self.inner.drop_secret(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
@@ -365,27 +373,31 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_database(&self, db: PbDatabase) -> Result<CatalogVersion> {
+    pub async fn create_database(&self, db: PbDatabase) -> Result<WaitVersion> {
         let request = CreateDatabaseRequest { db: Some(db) };
         let resp = self.inner.create_database(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn create_schema(&self, schema: PbSchema) -> Result<CatalogVersion> {
+    pub async fn create_schema(&self, schema: PbSchema) -> Result<WaitVersion> {
         let request = CreateSchemaRequest {
             schema: Some(schema),
         };
         let resp = self.inner.create_schema(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn create_materialized_view(
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
@@ -393,45 +405,53 @@ impl MetaClient {
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn drop_materialized_view(
         &self,
         table_id: TableId,
         cascade: bool,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = DropMaterializedViewRequest {
             table_id: table_id.table_id(),
             cascade,
         };
 
         let resp = self.inner.drop_materialized_view(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn create_source(&self, source: PbSource) -> Result<CatalogVersion> {
+    pub async fn create_source(&self, source: PbSource) -> Result<WaitVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
             fragment_graph: None,
         };
 
         let resp = self.inner.create_source(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn create_source_with_graph(
         &self,
         source: PbSource,
         graph: StreamFragmentGraph,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
             fragment_graph: Some(graph),
         };
 
         let resp = self.inner.create_source(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn create_sink(
@@ -439,7 +459,7 @@ impl MetaClient {
         sink: PbSink,
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceTablePlan>,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
@@ -447,27 +467,30 @@ impl MetaClient {
         };
 
         let resp = self.inner.create_sink(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-    ) -> Result<CatalogVersion> {
+    pub async fn create_subscription(&self, subscription: PbSubscription) -> Result<WaitVersion> {
         let request = CreateSubscriptionRequest {
             subscription: Some(subscription),
         };
 
         let resp = self.inner.create_subscription(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn create_function(&self, function: PbFunction) -> Result<CatalogVersion> {
+    pub async fn create_function(&self, function: PbFunction) -> Result<WaitVersion> {
         let request = CreateFunctionRequest {
             function: Some(function),
         };
         let resp = self.inner.create_function(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn create_table(
@@ -476,7 +499,7 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
@@ -485,67 +508,81 @@ impl MetaClient {
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn comment_on(&self, comment: PbComment) -> Result<CatalogVersion> {
+    pub async fn comment_on(&self, comment: PbComment) -> Result<WaitVersion> {
         let request = CommentOnRequest {
             comment: Some(comment),
         };
         let resp = self.inner.comment_on(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn alter_name(
         &self,
         object: alter_name_request::Object,
         name: &str,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = AlterNameRequest {
             object: Some(object),
             new_name: name.to_string(),
         };
         let resp = self.inner.alter_name(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     // only adding columns is supported
-    pub async fn alter_source_column(&self, source: PbSource) -> Result<CatalogVersion> {
+    pub async fn alter_source_column(&self, source: PbSource) -> Result<WaitVersion> {
         let request = AlterSourceRequest {
             source: Some(source),
         };
         let resp = self.inner.alter_source(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<CatalogVersion> {
+    pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<WaitVersion> {
         let request = AlterOwnerRequest {
             object: Some(object),
             owner_id,
         };
         let resp = self.inner.alter_owner(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
         new_schema_id: u32,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = AlterSetSchemaRequest {
             new_schema_id,
             object: Some(object),
         };
         let resp = self.inner.alter_set_schema(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn alter_source_with_sr(&self, source: PbSource) -> Result<CatalogVersion> {
+    pub async fn alter_source_with_sr(&self, source: PbSource) -> Result<WaitVersion> {
         let request = AlterSourceRequest {
             source: Some(source),
         };
         let resp = self.inner.alter_source(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn alter_parallelism(
@@ -571,7 +608,7 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
         job_type: PbTableJobType,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = ReplaceTablePlanRequest {
             plan: Some(ReplaceTablePlan {
                 source,
@@ -583,7 +620,9 @@ impl MetaClient {
         };
         let resp = self.inner.replace_table_plan(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn auto_schema_change(&self, schema_change: SchemaChangeEnvelope) -> Result<()> {
@@ -594,11 +633,13 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_view(&self, view: PbView) -> Result<CatalogVersion> {
+    pub async fn create_view(&self, view: PbView) -> Result<WaitVersion> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn create_index(
@@ -606,7 +647,7 @@ impl MetaClient {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = CreateIndexRequest {
             index: Some(index),
             index_table: Some(table),
@@ -614,7 +655,9 @@ impl MetaClient {
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn drop_table(
@@ -622,7 +665,7 @@ impl MetaClient {
         source_id: Option<u32>,
         table_id: TableId,
         cascade: bool,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = DropTableRequest {
             source_id: source_id.map(SourceId::Id),
             table_id: table_id.table_id(),
@@ -630,19 +673,25 @@ impl MetaClient {
         };
 
         let resp = self.inner.drop_table(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<CatalogVersion> {
+    pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<WaitVersion> {
         let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<CatalogVersion> {
+    pub async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<WaitVersion> {
         let request = DropSourceRequest { source_id, cascade };
         let resp = self.inner.drop_source(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn drop_sink(
@@ -650,27 +699,31 @@ impl MetaClient {
         sink_id: u32,
         cascade: bool,
         affected_table_change: Option<ReplaceTablePlan>,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = DropSinkRequest {
             sink_id,
             cascade,
             affected_table_change,
         };
         let resp = self.inner.drop_sink(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn drop_subscription(
         &self,
         subscription_id: u32,
         cascade: bool,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<WaitVersion> {
         let request = DropSubscriptionRequest {
             subscription_id,
             cascade,
         };
         let resp = self.inner.drop_subscription(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn list_change_log_epochs(
@@ -688,33 +741,41 @@ impl MetaClient {
         Ok(resp.epochs)
     }
 
-    pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<CatalogVersion> {
+    pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<WaitVersion> {
         let request = DropIndexRequest {
             index_id: index_id.index_id,
             cascade,
         };
         let resp = self.inner.drop_index(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_function(&self, function_id: FunctionId) -> Result<CatalogVersion> {
+    pub async fn drop_function(&self, function_id: FunctionId) -> Result<WaitVersion> {
         let request = DropFunctionRequest {
             function_id: function_id.0,
         };
         let resp = self.inner.drop_function(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_database(&self, database_id: DatabaseId) -> Result<CatalogVersion> {
+    pub async fn drop_database(&self, database_id: DatabaseId) -> Result<WaitVersion> {
         let request = DropDatabaseRequest { database_id };
         let resp = self.inner.drop_database(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<CatalogVersion> {
+    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<WaitVersion> {
         let request = DropSchemaRequest { schema_id };
         let resp = self.inner.drop_schema(request).await?;
-        Ok(resp.version)
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     // TODO: using UserInfoVersion instead as return type.
@@ -898,10 +959,10 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
+    pub async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId> {
         let request = FlushRequest { checkpoint };
         let resp = self.inner.flush(request).await?;
-        Ok(resp.snapshot.unwrap())
+        Ok(HummockVersionId::new(resp.hummock_version_id))
     }
 
     pub async fn wait(&self) -> Result<()> {
