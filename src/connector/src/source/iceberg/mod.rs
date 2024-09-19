@@ -30,13 +30,13 @@ use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
 use crate::connector_common::IcebergCommon;
+use crate::deserialize_optional_bool_from_string;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::source::{
     BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
 };
-
 pub const ICEBERG_CONNECTOR: &str = "iceberg";
 
 #[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
@@ -49,6 +49,13 @@ pub struct IcebergProperties {
     pub jdbc_user: Option<String>,
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
+
+    #[serde(
+        rename = "enable_config_load",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub enable_config_load: Option<bool>,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
