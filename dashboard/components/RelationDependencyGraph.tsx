@@ -16,6 +16,7 @@
  */
 
 import { theme } from "@chakra-ui/react"
+import { tinycolor } from "@ctrl/tinycolor"
 import * as d3 from "d3"
 import { useCallback, useEffect, useRef } from "react"
 import {
@@ -25,15 +26,15 @@ import {
   relationTypeTitleCase,
 } from "../lib/api/streaming"
 import {
+  Edge,
   Enter,
   Position,
   RelationPoint,
   RelationPointPosition,
   flipLayoutRelation,
-  generateRelationEdges, Edge,
+  generateRelationEdges,
 } from "../lib/layout"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
-import {tinycolor} from "@ctrl/tinycolor";
 
 function boundBox(
   relationPosition: RelationPointPosition[],
@@ -118,7 +119,6 @@ export default function RelationDependencyGraph({
     const isSelected = (id: string) => id === selectedId
 
     const applyEdge = (sel: EdgeSelection) => {
-
       const color = (d: Edge) => {
         if (backPressures) {
           let value = backPressures.get(`${d.target}_${d.source}`)
@@ -142,13 +142,13 @@ export default function RelationDependencyGraph({
       }
 
       return sel
-          .attr("d", ({ points }) => line(points))
-          .attr("fill", "none")
-          .attr("stroke-width", width)
-          .attr("stroke", color)
-          .attr("opacity", (d) =>
-              isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
-          )
+        .attr("d", ({ points }) => line(points))
+        .attr("fill", "none")
+        .attr("stroke-width", width)
+        .attr("stroke", color)
+        .attr("opacity", (d) =>
+          isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
+        )
     }
 
     const createEdge = (sel: Enter<EdgeSelection>) =>
@@ -244,7 +244,7 @@ export default function RelationDependencyGraph({
     nodeSelection.enter().call(createNode)
     nodeSelection.call(applyNode)
     nodeSelection.exit().remove()
-  }, [layoutMap, links, selectedId, setModalId, setSelectedId])
+  }, [layoutMap, links, selectedId, setModalId, setSelectedId, backPressures])
 
   return (
     <>
@@ -280,8 +280,8 @@ function backPressureColor(value: number) {
   const ceil = Math.ceil(pos)
 
   const color = tinycolor(colorRange[floor])
-      .mix(tinycolor(colorRange[ceil]), (pos - floor) * 100)
-      .toHexString()
+    .mix(tinycolor(colorRange[ceil]), (pos - floor) * 100)
+    .toHexString()
 
   return color
 }
