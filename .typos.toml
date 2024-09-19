@@ -14,7 +14,9 @@ mosquitto = "mosquitto" # This is a MQTT broker.
 abd = "abd"
 iy = "iy"
 Pn = "Pn"
+
 [default.extend-identifiers]
+TABLE_SCHEM = "TABLE_SCHEM"
 
 [files]
 extend-exclude = [
@@ -30,4 +32,9 @@ extend-exclude = [
     "**/Cargo.toml",
     "**/go.mod",
     "**/go.sum",
+    # https://github.com/risingwavelabs/risingwave/blob/0ce6228df6a4da183ae91146f2cdfff1ca9cc6a7/src/common/src/cast/mod.rs#L30
+    # We don't want to fix "fals" here, but may want in other places.
+    # Ideally, we should just ignore that line: https://github.com/crate-ci/typos/issues/316
+    "src/common/src/cast/mod.rs",
+    "src/tests/simulation/tests/integration_tests/scale/shared_source.rs",
 ]

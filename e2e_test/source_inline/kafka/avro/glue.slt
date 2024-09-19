@@ -12,6 +12,33 @@ rpk topic produce -f '%v{hex}\n' 'glue-sample-my-event' <<EOF
 EOF
 
 statement ok
+ALTER SYSTEM SET license_key TO '';
+
+statement error
+create source t with (
+  connector = 'kafka',
+  properties.bootstrap.server='${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+  topic = 'glue-sample-my-event')
+format plain encode avro (
+  aws.glue.schema_arn = 'arn:aws:glue:ap-southeast-1:123456123456:schema/default-registry/MyEvent',
+  aws.glue.mock_config = '{
+    "by_id": {},
+    "arn_to_latest_id: {}"
+  }');
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: connector error
+  2: feature GlueSchemaRegistry is only available for tier Paid and above, while the current tier is Free
+
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+
+
+statement ok
+ALTER SYSTEM SET license_key TO DEFAULT;
+
+statement ok
 create source t with (
   connector = 'kafka',
   properties.bootstrap.server='${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
@@ -47,6 +48,7 @@ pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
+pub use self::sql_server::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
 pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 pub use self::unified::Access;
 use self::unified::AccessImpl;
@@ -82,6 +84,7 @@ mod mysql;
 pub mod parquet_parser;
 pub mod plain_parser;
 mod postgres;
+mod sql_server;
 
 mod protobuf;
 pub mod scalar_adapter;
@@ -89,6 +92,7 @@ mod unified;
 mod upsert_parser;
 mod util;
 
+use debezium::schema_change::SchemaChangeEnvelope;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use risingwave_common::bitmap::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
@@ -485,6 +489,11 @@ impl SourceStreamChunkRowWriter<'_> {
                             .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
                     ));
                 }
+                (_, &Some(AdditionalColumnType::Payload(_))) => {
+                    // ingest the whole payload as a single column
+                    // do special logic in `KvEvent::access_field`
+                    parse_field(desc)
+                }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
                     parse_field(desc)
@@ -579,6 +588,9 @@ pub enum ParseResult {
     Rows,
     /// A transaction control message is parsed.
     TransactionControl(TransactionControl),
+
+    /// A schema change message is parsed.
+    SchemaChange(SchemaChangeEnvelope),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -704,6 +716,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
         len: usize,
     }
     let mut current_transaction = None;
+    let mut direct_cdc_event_lag_latency_metrics = HashMap::new();
 
     #[for_await]
     for batch in data_stream {
@@ -753,10 +766,15 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
             if let SourceMeta::DebeziumCdc(msg_meta) = &msg.meta {
                 let lag_ms = process_time_ms - msg_meta.source_ts_ms;
                 // report to promethus
-                GLOBAL_SOURCE_METRICS
-                    .direct_cdc_event_lag_latency
-                    .with_guarded_label_values(&[&msg_meta.full_table_name])
-                    .observe(lag_ms as f64);
+                let full_table_name = msg_meta.full_table_name.clone();
+                let direct_cdc_event_lag_latency = direct_cdc_event_lag_latency_metrics
+                    .entry(full_table_name)
+                    .or_insert_with(|| {
+                        GLOBAL_SOURCE_METRICS
+                            .direct_cdc_event_lag_latency
+                            .with_guarded_label_values(&[&msg_meta.full_table_name])
+                    });
+                direct_cdc_event_lag_latency.observe(lag_ms as f64);
             }
 
             let old_len = builder.len();
@@ -829,6 +847,28 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         }
                     }
                 },
+
+                Ok(ParseResult::SchemaChange(schema_change)) => {
+                    if schema_change.is_empty() {
+                        continue;
+                    }
+
+                    let (oneshot_tx, oneshot_rx) = tokio::sync::oneshot::channel();
+                    // we bubble up the schema change event to the source executor via channel,
+                    // and wait for the source executor to finish the schema change process before
+                    // parsing the following messages.
+                    if let Some(ref tx) = parser.source_ctx().schema_change_tx {
+                        tx.send((schema_change, oneshot_tx))
+                            .await
+                            .expect("send schema change to executor");
+                        match oneshot_rx.await {
+                            Ok(()) => {}
+                            Err(e) => {
+                                tracing::error!(error = %e.as_report(), "failed to wait for schema change");
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -869,14 +909,11 @@ pub enum AccessBuilderImpl {
 }
 
 impl AccessBuilderImpl {
-    pub async fn new_default(
-        config: EncodingProperties,
-        kv: EncodingType,
-    ) -> ConnectorResult<Self> {
+    pub async fn new_default(config: EncodingProperties) -> ConnectorResult<Self> {
         let accessor = match config {
             EncodingProperties::Avro(_) => {
                 let config = AvroParserConfig::new(config).await?;
-                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config, kv)?)
+                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config)?)
             }
             EncodingProperties::Protobuf(_) => {
                 let config = ProtobufParserConfig::new(config).await?;
@@ -1072,7 +1109,6 @@ impl SpecificParserConfig {
 #[derive(Debug, Default, Clone)]
 pub struct AvroProperties {
     pub schema_location: SchemaLocation,
-    pub enable_upsert: bool,
     pub record_name: Option<String>,
     pub key_record_name: Option<String>,
     pub map_handling: Option<MapHandling>,
@@ -1224,12 +1260,12 @@ impl SpecificParserConfig {
                     map_handling: MapHandling::from_options(&format_encode_options_with_secret)?,
                     ..Default::default()
                 };
-                if format == SourceFormat::Upsert {
-                    config.enable_upsert = true;
-                }
                 config.schema_location = if let Some(schema_arn) =
                     format_encode_options_with_secret.get(AWS_GLUE_SCHEMA_ARN_KEY)
                 {
+                    risingwave_common::license::Feature::GlueSchemaRegistry
+                        .check_available()
+                        .map_err(anyhow::Error::from)?;
                     SchemaLocation::Glue {
                         schema_arn: schema_arn.clone(),
                         aws_auth_props: serde_json::from_value::<AwsAuthProps>(

@@ -25,8 +25,8 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
-    DataType, Date, DatumCow, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
-    ToOwnedDatum,
+    DataType, Date, DatumCow, Interval, JsonbVal, MapValue, ScalarImpl, Time, Timestamp,
+    Timestamptz, ToOwnedDatum,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -136,10 +136,7 @@ impl<'a> AvroParseOptions<'a> {
                 let expected_field_name = avro_schema_to_struct_field_name(variant_schema)?;
 
                 let mut fields = Vec::with_capacity(struct_type_info.len());
-                for (field_name, field_type) in struct_type_info
-                    .names()
-                    .zip_eq_fast(struct_type_info.types())
-                {
+                for (field_name, field_type) in struct_type_info.iter() {
                     if field_name == expected_field_name {
                         let datum = Self {
                             schema: Some(variant_schema),
@@ -235,9 +232,11 @@ impl<'a> AvroParseOptions<'a> {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Date -----
-            (DataType::Date, Value::Date(days)) => Date::with_days(days + unix_epoch_days())
-                .map_err(|_| create_error())?
-                .into(),
+            (DataType::Date, Value::Date(days)) => {
+                Date::with_days_since_ce(days + unix_epoch_days())
+                    .map_err(|_| create_error())?
+                    .into()
+            }
             // ---- Varchar -----
             (DataType::Varchar, Value::Enum(_, symbol)) => borrowed!(symbol.as_str()),
             (DataType::Varchar, Value::String(s)) => borrowed!(s.as_str()),
@@ -315,6 +314,34 @@ impl<'a> AvroParseOptions<'a> {
             }
             (DataType::Varchar, Value::Uuid(uuid)) => {
                 uuid.as_hyphenated().to_string().into_boxed_str().into()
+            }
+            (DataType::Map(map_type), Value::Map(map)) => {
+                let schema = self.extract_inner_schema(None);
+                let mut builder = map_type
+                    .clone()
+                    .into_struct()
+                    .create_array_builder(map.len());
+                // Since the map is HashMap, we can ensure
+                // key is non-null and unique, keys and values have the same length.
+
+                // NOTE: HashMap's iter order is non-deterministic, but MapValue's
+                // order matters. We sort by key here to have deterministic order
+                // in tests. We might consider removing this, or make all MapValue sorted
+                // in the future.
+                for (k, v) in map.iter().sorted_by_key(|(k, _v)| *k) {
+                    let value_datum = Self {
+                        schema,
+                        relax_numeric: self.relax_numeric,
+                    }
+                    .convert_to_datum(v, map_type.value())?
+                    .to_owned_datum();
+                    builder.append(
+                        StructValue::new(vec![Some(k.as_str().into()), value_datum])
+                            .to_owned_datum(),
+                    );
+                }
+                let list = ListValue::new(builder.finish());
+                MapValue::from_entries(list).into()
             }
 
             (_expected, _got) => Err(create_error())?,

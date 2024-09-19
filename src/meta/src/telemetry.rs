@@ -17,12 +17,14 @@ use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
-    current_timestamp, telemetry_cluster_type_from_env_var, SystemData, TelemetryNodeType,
-    TelemetryReportBase, TelemetryResult,
+    current_timestamp, report_event_common, telemetry_cluster_type_from_env_var, SystemData,
+    TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::telemetry::PbTelemetryClusterType;
+use risingwave_pb::telemetry::{
+    PbTelemetryClusterType, PbTelemetryDatabaseObject, PbTelemetryEventStage,
+};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -30,6 +32,25 @@ use crate::manager::MetadataManager;
 use crate::model::ClusterId;
 
 const TELEMETRY_META_REPORT_TYPE: &str = "meta";
+
+pub(crate) fn report_event(
+    event_stage: PbTelemetryEventStage,
+    event_name: &str,
+    catalog_id: i64,
+    connector_name: Option<String>,
+    component: Option<PbTelemetryDatabaseObject>,
+    attributes: Option<jsonbb::Value>, // any json string
+) {
+    report_event_common(
+        event_stage,
+        event_name,
+        catalog_id,
+        connector_name,
+        component,
+        attributes,
+        TELEMETRY_META_REPORT_TYPE.to_string(),
+    );
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NodeCount {

@@ -15,6 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message;
 use risingwave_common::bail_not_implemented;
+use risingwave_common::license::Feature;
 use risingwave_sqlparser::ast::{CreateSecretStatement, SqlOption, Value};
 
 use crate::error::{ErrorCode, Result};
@@ -30,6 +31,10 @@ pub async fn handle_create_secret(
     handler_args: HandlerArgs,
     stmt: CreateSecretStatement,
 ) -> Result<RwPgResponse> {
+    Feature::SecretManagement
+        .check_available()
+        .map_err(|e| anyhow::anyhow!(e))?;
+
     let session = handler_args.session.clone();
     let db_name = session.database();
     let (schema_name, connection_name) =

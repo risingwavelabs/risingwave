@@ -83,11 +83,13 @@ impl FunctionAttr {
         attrs
     }
 
-    /// Generate the type infer function.
+    /// Generate the type infer function: `fn(&[DataType]) -> Result<DataType>`
     fn generate_type_infer_fn(&self) -> Result<TokenStream2> {
         if let Some(func) = &self.type_infer {
-            if func == "panic" {
-                return Ok(quote! { |_| panic!("type inference function is not implemented") });
+            if func == "unreachable" {
+                return Ok(
+                    quote! { |_| unreachable!("type inference for this function should be specially handled in frontend, and should not call sig.type_infer") },
+                );
             }
             // use the user defined type inference function
             return Ok(func.parse().unwrap());
@@ -115,6 +117,11 @@ impl FunctionAttr {
                 // infer as the type of "struct" argument
                 return Ok(quote! { |args| Ok(args[#i].clone()) });
             }
+        } else if self.ret == "anymap" {
+            if let Some(i) = self.args.iter().position(|t| t == "anymap") {
+                // infer as the type of "anymap" argument
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
         } else {
             // the return type is fixed
             let ty = data_type(&self.ret);
@@ -122,13 +129,17 @@ impl FunctionAttr {
         }
         Err(Error::new(
             Span::call_site(),
-            "type inference function is required",
+            "type inference function cannot be automatically derived. You should provide: `type_infer = \"|args| Ok(...)\"`",
         ))
     }
 
-    /// Generate a descriptor of the scalar or table function.
+    /// Generate a descriptor (`FuncSign`) of the scalar or table function.
     ///
     /// The types of arguments and return value should not contain wildcard.
+    ///
+    /// # Arguments
+    /// `build_fn`: whether the user provided a function is a build function.
+    /// (from the `#[build_function]` macro)
     pub fn generate_function_descriptor(
         &self,
         user_fn: &UserFunctionAttr,
@@ -156,6 +167,7 @@ impl FunctionAttr {
         } else if self.rewritten {
             quote! { |_, _| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
+            // This is the core logic for `#[function]`
             self.generate_build_scalar_function(user_fn, true)?
         };
         let type_infer_fn = self.generate_type_infer_fn()?;
@@ -695,7 +707,7 @@ impl FunctionAttr {
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
                 FuncSign {
-                    name: risingwave_expr::aggregate::AggKind::#pb_type.into(),
+                    name: risingwave_pb::expr::agg_call::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,
@@ -1302,6 +1314,7 @@ fn sig_data_type(ty: &str) -> TokenStream2 {
     match ty {
         "any" => quote! { SigDataType::Any },
         "anyarray" => quote! { SigDataType::AnyArray },
+        "anymap" => quote! { SigDataType::AnyMap },
         "struct" => quote! { SigDataType::AnyStruct },
         _ if ty.starts_with("struct") && ty.contains("any") => quote! { SigDataType::AnyStruct },
         _ => {
@@ -1320,6 +1333,12 @@ fn data_type(ty: &str) -> TokenStream2 {
         return quote! { DataType::Struct(#ty.parse().expect("invalid struct type")) };
     }
     let variant = format_ident!("{}", types::data_type(ty));
+    // TODO: enable the check
+    // assert!(
+    //     !matches!(ty, "any" | "anyarray" | "anymap" | "struct"),
+    //     "{ty}, {variant}"
+    // );
+
     quote! { DataType::#variant }
 }
 

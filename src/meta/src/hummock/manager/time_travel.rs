@@ -16,8 +16,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::time_travel::{
     refill_version, IncompleteHummockVersion, IncompleteHummockVersionDelta,
 };
@@ -25,15 +28,16 @@ use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
 };
+use risingwave_meta_model_v2::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model_v2::{
     hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
     hummock_time_travel_version,
 };
-use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta, PbSstableInfo};
+use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    ColumnTrait, Condition, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
     TransactionTrait,
 };
 
@@ -51,10 +55,16 @@ impl HummockManager {
         }
     }
 
+    pub(crate) async fn time_travel_enabled(&self) -> bool {
+        self.env
+            .system_params_reader()
+            .await
+            .time_travel_retention_ms()
+            > 0
+            && self.sql_store().is_some()
+    }
+
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
-        if self.env.opts.enable_hummock_time_travel && self.sql_store().is_none() {
-            return Err(require_sql_meta_store_err());
-        }
         let Some(sql_store) = self.sql_store() else {
             return Ok(());
         };
@@ -92,6 +102,7 @@ impl HummockManager {
                     .lt(risingwave_meta_model_v2::Epoch::try_from(epoch_watermark).unwrap()),
             )
             .order_by_desc(hummock_epoch_to_version::Column::Epoch)
+            .order_by_asc(hummock_epoch_to_version::Column::VersionId)
             .one(&txn)
             .await?;
         let Some(version_watermark) = version_watermark else {
@@ -133,7 +144,8 @@ impl HummockManager {
                 .select_only()
                 .column(hummock_time_travel_version::Column::VersionId)
                 .filter(
-                    hummock_time_travel_version::Column::VersionId.lt(earliest_valid_version_id),
+                    hummock_time_travel_version::Column::VersionId
+                        .lt(earliest_valid_version_id.to_u64()),
                 )
                 .order_by_desc(hummock_time_travel_version::Column::VersionId)
                 .into_tuple()
@@ -143,7 +155,10 @@ impl HummockManager {
             hummock_time_travel_delta::Entity::find()
                 .select_only()
                 .column(hummock_time_travel_delta::Column::VersionId)
-                .filter(hummock_time_travel_delta::Column::VersionId.lt(earliest_valid_version_id))
+                .filter(
+                    hummock_time_travel_delta::Column::VersionId
+                        .lt(earliest_valid_version_id.to_u64()),
+                )
                 .into_tuple()
                 .all(&txn)
                 .await?;
@@ -203,23 +218,28 @@ impl HummockManager {
         }
 
         let res = hummock_time_travel_version::Entity::delete_many()
-            .filter(hummock_time_travel_version::Column::VersionId.lt(earliest_valid_version_id))
+            .filter(
+                hummock_time_travel_version::Column::VersionId
+                    .lt(earliest_valid_version_id.to_u64()),
+            )
             .exec(&txn)
             .await?;
         tracing::debug!(
-            epoch_watermark_version_id = version_watermark.version_id,
-            earliest_valid_version_id,
+            epoch_watermark_version_id = ?version_watermark.version_id,
+            ?earliest_valid_version_id,
             "delete {} rows from hummock_time_travel_version",
             res.rows_affected
         );
 
         let res = hummock_time_travel_delta::Entity::delete_many()
-            .filter(hummock_time_travel_delta::Column::VersionId.lt(earliest_valid_version_id))
+            .filter(
+                hummock_time_travel_delta::Column::VersionId.lt(earliest_valid_version_id.to_u64()),
+            )
             .exec(&txn)
             .await?;
         tracing::debug!(
-            epoch_watermark_version_id = version_watermark.version_id,
-            earliest_valid_version_id,
+            epoch_watermark_version_id = ?version_watermark.version_id,
+            ?earliest_valid_version_id,
             "delete {} rows from hummock_time_travel_delta",
             res.rows_affected
         );
@@ -257,9 +277,19 @@ impl HummockManager {
     /// The version is retrieved from `hummock_epoch_to_version`, selecting the entry with the largest epoch that's lte `query_epoch`.
     ///
     /// The resulted version is complete, i.e. with correct `SstableInfo`.
-    pub async fn epoch_to_version(&self, query_epoch: HummockEpoch) -> Result<HummockVersion> {
+    pub async fn epoch_to_version(
+        &self,
+        query_epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<HummockVersion> {
         let sql_store = self.sql_store().ok_or_else(require_sql_meta_store_err)?;
         let epoch_to_version = hummock_epoch_to_version::Entity::find()
+            .filter(
+                Condition::any()
+                    .add(hummock_epoch_to_version::Column::TableId.eq(i64::from(table_id)))
+                    // for backward compatibility
+                    .add(hummock_epoch_to_version::Column::TableId.eq(0)),
+            )
             .filter(
                 hummock_epoch_to_version::Column::Epoch
                     .lte(risingwave_meta_model_v2::Epoch::try_from(query_epoch).unwrap()),
@@ -323,7 +353,7 @@ impl HummockManager {
                 .all(&sql_store.conn)
                 .await?;
             for sst_info in sst_infos {
-                let sst_info = sst_info.sstable_info.to_protobuf();
+                let sst_info: SstableInfo = sst_info.sstable_info.to_protobuf().into();
                 sst_id_to_info.insert(sst_info.sst_id, sst_info);
             }
         }
@@ -344,9 +374,21 @@ impl HummockManager {
         delta: HummockVersionDelta,
         group_parents: &HashMap<CompactionGroupId, CompactionGroupId>,
         skip_sst_ids: &HashSet<HummockSstableId>,
+        tables_to_commit: impl Iterator<Item = (&TableId, &CompactionGroupId)>,
+        committed_epoch: u64,
     ) -> Result<Option<HashSet<HummockSstableId>>> {
+        let select_groups = group_parents
+            .iter()
+            .filter_map(|(cg_id, _)| {
+                if should_ignore_group(find_root_group(*cg_id, group_parents)) {
+                    None
+                } else {
+                    Some(*cg_id)
+                }
+            })
+            .collect::<HashSet<_>>();
         async fn write_sstable_infos(
-            sst_infos: impl Iterator<Item = &PbSstableInfo>,
+            sst_infos: impl Iterator<Item = &SstableInfo>,
             txn: &DatabaseTransaction,
         ) -> Result<usize> {
             let mut count = 0;
@@ -354,7 +396,7 @@ impl HummockManager {
                 let m = hummock_sstable_info::ActiveModel {
                     sst_id: Set(sst_info.sst_id.try_into().unwrap()),
                     object_id: Set(sst_info.object_id.try_into().unwrap()),
-                    sstable_info: Set(sst_info.into()),
+                    sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
                 };
                 hummock_sstable_info::Entity::insert(m)
                     .on_conflict(
@@ -370,27 +412,23 @@ impl HummockManager {
             Ok(count)
         }
 
-        let epoch = delta.max_committed_epoch;
-        let version_id = delta.id;
-        let m = hummock_epoch_to_version::ActiveModel {
-            epoch: Set(epoch.try_into().unwrap()),
-            version_id: Set(version_id.try_into().unwrap()),
-        };
-        hummock_epoch_to_version::Entity::insert(m)
-            .exec(txn)
-            .await?;
+        for (table_id, cg_id) in tables_to_commit {
+            if !select_groups.contains(cg_id) {
+                continue;
+            }
+            let version_id: u64 = delta.id.to_u64();
+            let m = hummock_epoch_to_version::ActiveModel {
+                epoch: Set(committed_epoch.try_into().unwrap()),
+                table_id: Set(table_id.table_id.into()),
+                version_id: Set(version_id.try_into().unwrap()),
+            };
+            // There should be no conflict rows.
+            hummock_epoch_to_version::Entity::insert(m)
+                .exec(txn)
+                .await?;
+        }
 
         let mut version_sst_ids = None;
-        let select_groups = group_parents
-            .iter()
-            .filter_map(|(cg_id, _)| {
-                if should_ignore_group(find_root_group(*cg_id, group_parents)) {
-                    None
-                } else {
-                    Some(*cg_id)
-                }
-            })
-            .collect::<HashSet<_>>();
         if let Some(version) = version {
             version_sst_ids = Some(
                 version
@@ -406,9 +444,10 @@ impl HummockManager {
             )
             .await?;
             let m = hummock_time_travel_version::ActiveModel {
-                version_id: Set(
-                    risingwave_meta_model_v2::HummockVersionId::try_from(version.id).unwrap(),
-                ),
+                version_id: Set(risingwave_meta_model_v2::HummockVersionId::try_from(
+                    version.id.to_u64(),
+                )
+                .unwrap()),
                 version: Set((&IncompleteHummockVersion::from((version, &select_groups))
                     .to_protobuf())
                     .into()),
@@ -433,9 +472,10 @@ impl HummockManager {
         // Ignore delta which adds no data.
         if written > 0 {
             let m = hummock_time_travel_delta::ActiveModel {
-                version_id: Set(
-                    risingwave_meta_model_v2::HummockVersionId::try_from(delta.id).unwrap(),
-                ),
+                version_id: Set(risingwave_meta_model_v2::HummockVersionId::try_from(
+                    delta.id.to_u64(),
+                )
+                .unwrap()),
                 version_delta: Set((&IncompleteHummockVersionDelta::from((
                     &delta,
                     &select_groups,
@@ -463,18 +503,12 @@ fn replay_archive(
     deltas: impl Iterator<Item = PbHummockVersionDelta>,
 ) -> HummockVersion {
     let mut last_version = HummockVersion::from_persisted_protobuf(&version);
-    let mut mce = last_version.max_committed_epoch;
     for d in deltas {
         let d = HummockVersionDelta::from_persisted_protobuf(&d);
-        assert!(
-            d.max_committed_epoch > mce,
-            "time travel expects delta from commit_epoch only"
-        );
-        mce = d.max_committed_epoch;
         // Need to work around the assertion in `apply_version_delta`.
         // Because compaction deltas are not included in time travel archive.
         while last_version.id < d.prev_id {
-            last_version.id += 1;
+            last_version.id = last_version.id + 1;
         }
         last_version.apply_version_delta(&d);
     }
@@ -501,6 +535,6 @@ fn should_ignore_group(root_group_id: CompactionGroupId) -> bool {
     root_group_id == StaticCompactionGroupId::StateDefault as CompactionGroupId
 }
 
-pub(crate) fn require_sql_meta_store_err() -> Error {
-    Error::TimeTravel(anyhow!("time travel requires SQL meta store"))
+pub fn require_sql_meta_store_err() -> Error {
+    Error::TimeTravel(anyhow!("require SQL meta store"))
 }

@@ -21,17 +21,19 @@ use std::time::Duration;
 use anyhow::anyhow;
 use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
-use risingwave_common::system_param::{check_missing_params, set_system_param};
+use risingwave_common::system_param::{
+    check_missing_params, set_system_param, TIME_TRAVEL_RETENTION_MS_KEY,
+};
 use risingwave_common::{for_all_params, key_of};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::info;
 
 use self::model::SystemParamsModel;
 use super::NotificationManagerRef;
+use crate::hummock::time_travel::require_sql_meta_store_err;
 use crate::model::{InMemValTransaction, ValTransaction, VarTransaction};
 use crate::storage::{MetaStore, MetaStoreRef, Transaction};
 use crate::{MetaError, MetaResult};
@@ -66,7 +68,15 @@ impl SystemParamsManager {
             ));
         };
 
-        info!("system parameters: {:?}", params);
+        if params
+            .time_travel_retention_ms
+            .map(|r| r > 0)
+            .unwrap_or(false)
+        {
+            return Err(require_sql_meta_store_err().into());
+        }
+
+        tracing::info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
 
         Ok(Self {
@@ -86,6 +96,10 @@ impl SystemParamsManager {
     }
 
     pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<SystemParams> {
+        if name == TIME_TRAVEL_RETENTION_MS_KEY {
+            return Err(require_sql_meta_store_err().into());
+        }
+
         let mut params_guard = self.params.write().await;
         let params = params_guard.deref_mut();
         let mut mem_txn = VarTransaction::new(params);

@@ -1,4 +1,5 @@
 [env]
+CARGO_MAKE_CRATE_INSTALLATION_LOCKED = true
 RISEDEV = "1"
 RUST_BACKTRACE = "1"
 OS = { source = "${CARGO_MAKE_RUST_TARGET_OS}", mapping = { linux = "linux", macos = "darwin" } }
@@ -34,7 +35,7 @@ condition = { env_not_set = [ "RISEDEV_CONFIGURED" ] }
 script = '''
 #!/usr/bin/env bash
 set -e
-echo "RiseDev is not configured, please run ./risedev configure"
+echo "RiseDev is not configured, please run ${RISEDEV_CMD} configure"
 exit 1
 '''
 

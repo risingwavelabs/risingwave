@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{
-    default_key_column_name_version_mapping, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
+    default_key_column_name_version_mapping, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
+use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
-use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
@@ -28,7 +27,6 @@ use risingwave_pb::plan_common::{
 };
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_storage::panic_store::PanicStateStore;
-use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
 use crate::executor::source::{
@@ -40,6 +38,8 @@ const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
 
 pub fn create_source_desc_builder(
+    source_type: &str, // "source" or "source backfill"
+    source_id: &TableId,
     mut source_columns: Vec<PbColumnCatalog>,
     params: &ExecutorParams,
     source_info: PbStreamSourceInfo,
@@ -110,6 +110,8 @@ pub fn create_source_desc_builder(
         });
     }
 
+    telemetry_source_build(source_type, source_id, &source_info, &with_properties);
+
     SourceDescBuilder::new(
         source_columns.clone(),
         params.env.source_metrics(),
@@ -138,10 +140,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         node: &Self::Node,
         store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let (sender, barrier_receiver) = unbounded_channel();
-        params
-            .create_actor_context
-            .register_sender(params.actor_context.id, sender);
+        let barrier_receiver = params
+            .shared_context
+            .local_barrier_manager
+            .subscribe_barrier(params.actor_context.id);
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
@@ -153,11 +155,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 if source_info.format_encode_options.is_empty() {
                     // compatible code: quick fix for <https://github.com/risingwavelabs/risingwave/issues/14755>,
                     // will move the logic to FragmentManager::init in release 1.7.
-                    let connector = source
-                        .with_properties
-                        .get(UPSTREAM_SOURCE_KEY)
-                        .unwrap_or(&String::default())
-                        .to_owned();
+                    let connector = get_connector_name(&source.with_properties);
                     source_info.format_encode_options.extend(
                         source.with_properties.iter().filter_map(|(k, v)| {
                             should_copy_to_format_encode_options(k, &connector)
@@ -172,6 +170,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 );
 
                 let source_desc_builder = create_source_desc_builder(
+                    "source",
+                    &source_id,
                     source.columns.clone(),
                     &params,
                     source_info,
@@ -198,11 +198,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     state_table_handler,
                 );
 
-                let connector = source
-                    .with_properties
-                    .get("connector")
-                    .map(|c| c.to_ascii_lowercase())
-                    .unwrap_or_default();
+                let connector = get_connector_name(&source.with_properties);
                 let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
                 let is_fs_v2_connector = source.with_properties.is_new_fs_connector();
 

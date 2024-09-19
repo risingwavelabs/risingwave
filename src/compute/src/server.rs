@@ -55,7 +55,8 @@ use risingwave_storage::hummock::compactor::{
     new_compaction_await_tree_reg_ref, start_compactor, CompactionExecutor, CompactorContext,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
+use risingwave_storage::hummock::utils::HummockMemoryCollector;
+use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{
     global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
     GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, GLOBAL_OBJECT_STORE_METRICS,
@@ -127,11 +128,11 @@ pub async fn compute_node_serve(
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
             is_unschedulable: false,
+            internal_rpc_host_addr: "".to_string(),
         },
         &config.meta,
     )
-    .await
-    .unwrap();
+    .await;
 
     let state_store_url = system_params.state_store();
 
@@ -287,7 +288,7 @@ pub async fn compute_node_serve(
     let batch_mgr = Arc::new(BatchManager::new(
         config.batch.clone(),
         batch_manager_metrics,
-        batch_mem_limit(compute_memory_bytes),
+        batch_mem_limit(compute_memory_bytes, opts.role.for_serving()),
     ));
 
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
@@ -345,7 +346,9 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize batch environment.
-    let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+    let batch_client_pool = Arc::new(ComputeClientPool::new(
+        config.batch_exchange_connection_pool_size(),
+    ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
         advertise_addr.clone(),
@@ -354,7 +357,7 @@ pub async fn compute_node_serve(
         state_store.clone(),
         batch_task_metrics.clone(),
         batch_executor_metrics.clone(),
-        client_pool,
+        batch_client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
         batch_spill_metrics.clone(),
@@ -362,6 +365,9 @@ pub async fn compute_node_serve(
     );
 
     // Initialize the streaming environment.
+    let stream_client_pool = Arc::new(ComputeClientPool::new(
+        config.streaming_exchange_connection_pool_size(),
+    ));
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
         stream_config,
@@ -371,6 +377,7 @@ pub async fn compute_node_serve(
         system_params_manager.clone(),
         source_metrics,
         meta_client.clone(),
+        stream_client_pool,
     );
 
     let stream_mgr = LocalStreamManager::new(
@@ -399,7 +406,7 @@ pub async fn compute_node_serve(
         meta_cache,
         block_cache,
     );
-    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
+    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr.clone());
     let health_srv = HealthServiceImpl::new();
 
     let telemetry_manager = TelemetryManager::new(
@@ -417,7 +424,9 @@ pub async fn compute_node_serve(
 
     // Clean up the spill directory.
     #[cfg(not(madsim))]
-    SpillOp::clean_spill_directory().await.unwrap();
+    if config.batch.enable_spill {
+        SpillOp::clean_spill_directory().await.unwrap();
+    }
 
     let server = tonic::transport::Server::builder()
         .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
@@ -463,8 +472,12 @@ pub async fn compute_node_serve(
     // Wait for the shutdown signal.
     shutdown.cancelled().await;
 
-    // TODO(shutdown): gracefully unregister from the meta service (need to cautious since it may
-    // trigger auto-scaling)
+    // Unregister from the meta service, then...
+    // - batch queries will not be scheduled to this compute node,
+    // - streaming actors will not be scheduled to this compute node after next recovery.
+    meta_client.try_unregister().await;
+    // Shutdown the streaming manager.
+    let _ = stream_mgr.shutdown().await;
 
     // NOTE(shutdown): We can't simply join the tonic server here because it only returns when all
     // existing connections are closed, while we have long-running streaming calls that never

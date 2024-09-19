@@ -125,3 +125,44 @@ message FrontendReport {
 message CompactorReport {
   ReportBase base = 1;
 }
+
+enum TelemetryEventStage {
+  TELEMETRY_EVENT_STAGE_UNSPECIFIED = 0;
+  TELEMETRY_EVENT_STAGE_CREATE_STREAM_JOB = 1;
+  TELEMETRY_EVENT_STAGE_UPDATE_STREAM_JOB = 2;
+  TELEMETRY_EVENT_STAGE_DROP_STREAM_JOB = 3;
+  TELEMETRY_EVENT_STAGE_QUERY = 4;
+  TELEMETRY_EVENT_STAGE_RECOVERY = 5;
+}
+
+enum TelemetryDatabaseObject {
+  TELEMETRY_DATABASE_OBJECT_UNSPECIFIED = 0;
+  TELEMETRY_DATABASE_OBJECT_SOURCE = 1;
+  TELEMETRY_DATABASE_OBJECT_MV = 2;
+  TELEMETRY_DATABASE_OBJECT_TABLE = 3;
+  TELEMETRY_DATABASE_OBJECT_SINK = 4;
+  TELEMETRY_DATABASE_OBJECT_INDEX = 5;
+}
+
+message EventMessage {
+  // tracking_id is persistent in meta data
+  string tracking_id = 1;
+  // event_time is when the event is created
+  uint64 event_time_sec = 3;
+  // event_stage describes in which process the event happens
+  TelemetryEventStage event_stage = 4;
+  // feature_name is the name of the feature triggered the event
+  string event_name = 5;
+  // connector_name is the name of the connector involves
+  optional string connector_name = 6;
+  // connector_direction is the direction of data flow, can be source or sink
+  optional TelemetryDatabaseObject object = 10;
+  // catalog_id is the id of the catalog involves (table_id/source_id/...)
+  int64 catalog_id = 7;
+  // attributes is the additional information of the event: json format ser to string
+  optional string attributes = 8;
+  // node is the node that creates the event
+  string node = 9;
+  // mark the event is a test message
+  bool is_test = 11;
+}

@@ -19,9 +19,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::{
-    ParallelUnit, PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode,
-};
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::ddl_service::TableJobType;
@@ -75,6 +73,7 @@ fn make_sum_aggcall(idx: u32) -> AggCall {
         filter: None,
         direct_args: vec![],
         udf: None,
+        scalar: None,
     }
 }
 
@@ -420,31 +419,18 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let parallel_units = (0..8)
-        .map(|id| {
-            (
-                id,
-                ParallelUnit {
-                    id,
-                    worker_node_id: 0,
-                },
-            )
-        })
-        .collect();
-
     let worker_nodes = std::iter::once((
         0,
         WorkerNode {
             id: 0,
+            parallelism: 8,
             ..Default::default()
         },
     ))
     .collect();
-    let unschedulable_parallel_units = Default::default();
     StreamingClusterInfo {
         worker_nodes,
-        parallel_units,
-        unschedulable_parallel_units,
+        unschedulable_workers: Default::default(),
     }
 }
 

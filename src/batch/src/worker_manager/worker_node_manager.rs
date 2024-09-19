@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
+use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
@@ -213,10 +214,20 @@ impl WorkerNodeManager {
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
         let mut guard = self.inner.write().unwrap();
-        guard
-            .streaming_fragment_vnode_mapping
-            .remove(fragment_id)
-            .unwrap();
+
+        let res = guard.streaming_fragment_vnode_mapping.remove(fragment_id);
+        match &res {
+            Some(_) => {}
+            None if OBJECT_ID_PLACEHOLDER == *fragment_id => {
+                // Do nothing for placeholder fragment.
+            }
+            None => {
+                panic!(
+                    "Streaming vnode mapping not found for fragment_id: {}",
+                    fragment_id
+                )
+            }
+        };
     }
 
     /// Returns fragment's vnode mapping for serving.
@@ -335,36 +346,26 @@ impl WorkerNodeSelector {
         if self.enable_barrier_read {
             self.manager.get_streaming_fragment_mapping(&fragment_id)
         } else {
-            let (hint, parallelism) = match self.manager.serving_fragment_mapping(fragment_id) {
-                Ok(o) => {
-                    if self.manager.worker_node_mask().is_empty() {
-                        // 1. Stable mapping for most cases.
-                        return Ok(o);
-                    }
-                    // If it's a singleton, set max_parallelism=1 for place_vnode.
-                    let max_parallelism = o.to_single().map(|_| 1);
-                    (Some(o), max_parallelism)
-                }
-                Err(e) => {
-                    if !matches!(e, BatchError::ServingVnodeMappingNotFound(_)) {
-                        return Err(e);
-                    }
-                    // We cannot tell whether it's a singleton, set max_parallelism=1 for place_vnode as if it's a singleton.
-                    let max_parallelism = 1;
-                    tracing::warn!(
-                        fragment_id,
-                        max_parallelism,
-                        "Serving fragment mapping not found, fall back to temporary one."
-                    );
-                    // Workaround the case that new mapping is not available yet due to asynchronous
-                    // notification.
-                    (None, Some(max_parallelism))
-                }
-            };
-            // 2. Temporary mapping that filters out unavailable workers.
-            let new_workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
-            let masked_mapping = place_vnode(hint.as_ref(), &new_workers, parallelism);
-            masked_mapping.ok_or_else(|| BatchError::EmptyWorkerNodes)
+            let mapping = (self.manager.serving_fragment_mapping(fragment_id)).or_else(|_| {
+                tracing::warn!(
+                    fragment_id,
+                    "Serving fragment mapping not found, fall back to streaming one."
+                );
+                self.manager.get_streaming_fragment_mapping(&fragment_id)
+            })?;
+
+            // Filter out unavailable workers.
+            if self.manager.worker_node_mask().is_empty() {
+                Ok(mapping)
+            } else {
+                let workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
+                // If it's a singleton, set max_parallelism=1 for place_vnode.
+                let max_parallelism = mapping.to_single().map(|_| 1);
+                let masked_mapping =
+                    place_vnode(Some(&mapping), &workers, max_parallelism, mapping.len())
+                        .ok_or_else(|| BatchError::EmptyWorkerNodes)?;
+                Ok(masked_mapping)
+            }
         }
     }
 
@@ -414,11 +415,12 @@ mod tests {
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
-                parallel_units: vec![],
+                parallelism: 0,
                 property: Some(Property {
                     is_unschedulable: false,
                     is_serving: true,
                     is_streaming: true,
+                    internal_rpc_host_addr: "".to_string(),
                 }),
                 transactional_id: Some(1),
                 ..Default::default()
@@ -428,11 +430,12 @@ mod tests {
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
-                parallel_units: vec![],
+                parallelism: 0,
                 property: Some(Property {
                     is_unschedulable: false,
                     is_serving: true,
                     is_streaming: false,
+                    internal_rpc_host_addr: "".to_string(),
                 }),
                 transactional_id: Some(2),
                 ..Default::default()

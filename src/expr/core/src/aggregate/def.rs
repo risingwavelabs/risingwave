@@ -14,17 +14,20 @@
 
 //! Aggregation function definitions.
 
+use std::fmt::Display;
 use std::iter::Peekable;
+use std::str::FromStr;
 use std::sync::Arc;
 
+use anyhow::Context;
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
-use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
-use risingwave_pb::expr::agg_call::PbType;
-use risingwave_pb::expr::{PbAggCall, PbInputRef, PbUserDefinedFunctionMetadata};
+pub use risingwave_pb::expr::agg_call::PbType as PbAggKind;
+use risingwave_pb::expr::{PbAggCall, PbExprNode, PbInputRef, PbUserDefinedFunctionMetadata};
 
 use crate::expr::{
     build_from_prost, BoxedExpression, ExpectExt, Expression, LiteralExpression, Token,
@@ -40,8 +43,10 @@ use crate::Result;
 pub struct AggCall {
     /// Aggregation kind for constructing agg state.
     pub kind: AggKind,
+
     /// Arguments of aggregation function input.
     pub args: AggArgs,
+
     /// The return type of aggregation function.
     pub return_type: DataType,
 
@@ -56,14 +61,15 @@ pub struct AggCall {
 
     /// Constant arguments.
     pub direct_args: Vec<LiteralExpression>,
-
-    /// Additional metadata for user defined functions.
-    pub user_defined: Option<PbUserDefinedFunctionMetadata>,
 }
 
 impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
-        let agg_kind = AggKind::from_protobuf(agg_call.get_type()?)?;
+        let agg_kind = AggKind::from_protobuf(
+            agg_call.get_type()?,
+            agg_call.udf.as_ref(),
+            agg_call.scalar.as_ref(),
+        )?;
         let args = AggArgs::from_protobuf(agg_call.get_args())?;
         let column_orders = agg_call
             .get_order_by()
@@ -97,7 +103,6 @@ impl AggCall {
             filter,
             distinct: agg_call.distinct,
             direct_args,
-            user_defined: agg_call.udf.clone(),
         })
     }
 
@@ -155,7 +160,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
         self.tokens.next(); // Consume the RParen
 
         AggCall {
-            kind: AggKind::from_protobuf(func).unwrap(),
+            kind: AggKind::from_protobuf(func, None, None).unwrap(),
             args: AggArgs {
                 data_types: children.iter().map(|(_, ty)| ty.clone()).collect(),
                 val_indices: children.iter().map(|(idx, _)| *idx).collect(),
@@ -165,7 +170,6 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
             filter: None,
             distinct,
             direct_args: Vec::new(),
-            user_defined: None,
         }
     }
 
@@ -186,10 +190,10 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
         (idx, ty)
     }
 
-    fn parse_function(&mut self) -> PbType {
+    fn parse_function(&mut self) -> PbAggKind {
         match self.tokens.next().expect("Unexpected end of input") {
             Token::Literal(name) => {
-                PbType::from_str_name(&name.to_uppercase()).expect_str("function", &name)
+                PbAggKind::from_str_name(&name.to_uppercase()).expect_str("function", &name)
             }
             t => panic!("Expected a Literal, got {t:?}"),
         }
@@ -210,191 +214,171 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
     }
 }
 
-/// Kind of aggregation function
-#[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
-#[display(style = "snake_case")]
+/// Aggregate function kind.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum AggKind {
-    BitAnd,
-    BitOr,
-    BitXor,
-    BoolAnd,
-    BoolOr,
-    Min,
-    Max,
-    Sum,
-    Sum0,
-    Count,
-    Avg,
-    StringAgg,
-    ApproxCountDistinct,
-    ArrayAgg,
-    JsonbAgg,
-    JsonbObjectAgg,
-    FirstValue,
-    LastValue,
-    VarPop,
-    VarSamp,
-    StddevPop,
-    StddevSamp,
-    PercentileCont,
-    PercentileDisc,
-    Mode,
-    Grouping,
+    /// Built-in aggregate function.
+    ///
+    /// The associated value should not be `UserDefined` or `WrapScalar`.
+    Builtin(PbAggKind),
 
-    /// Return last seen one of the input values.
-    InternalLastSeenValue,
-    UserDefined,
+    /// User defined aggregate function.
+    UserDefined(PbUserDefinedFunctionMetadata),
+
+    /// Wrap a scalar function that takes a list as input as an aggregation function.
+    WrapScalar(PbExprNode),
+}
+
+impl Display for AggKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Builtin(kind) => write!(f, "{}", kind.as_str_name().to_lowercase()),
+            Self::UserDefined(_) => write!(f, "udaf"),
+            Self::WrapScalar(_) => write!(f, "wrap_scalar"),
+        }
+    }
+}
+
+/// `FromStr` for builtin aggregate functions.
+impl FromStr for AggKind {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let kind = PbAggKind::from_str(s)?;
+        Ok(AggKind::Builtin(kind))
+    }
+}
+
+impl From<PbAggKind> for AggKind {
+    fn from(pb: PbAggKind) -> Self {
+        assert!(!matches!(
+            pb,
+            PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar
+        ));
+        AggKind::Builtin(pb)
+    }
 }
 
 impl AggKind {
-    pub fn from_protobuf(pb_type: PbType) -> Result<Self> {
+    pub fn from_protobuf(
+        pb_type: PbAggKind,
+        user_defined: Option<&PbUserDefinedFunctionMetadata>,
+        scalar: Option<&PbExprNode>,
+    ) -> Result<Self> {
         match pb_type {
-            PbType::BitAnd => Ok(AggKind::BitAnd),
-            PbType::BitOr => Ok(AggKind::BitOr),
-            PbType::BitXor => Ok(AggKind::BitXor),
-            PbType::BoolAnd => Ok(AggKind::BoolAnd),
-            PbType::BoolOr => Ok(AggKind::BoolOr),
-            PbType::Min => Ok(AggKind::Min),
-            PbType::Max => Ok(AggKind::Max),
-            PbType::Sum => Ok(AggKind::Sum),
-            PbType::Sum0 => Ok(AggKind::Sum0),
-            PbType::Avg => Ok(AggKind::Avg),
-            PbType::Count => Ok(AggKind::Count),
-            PbType::StringAgg => Ok(AggKind::StringAgg),
-            PbType::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
-            PbType::ArrayAgg => Ok(AggKind::ArrayAgg),
-            PbType::JsonbAgg => Ok(AggKind::JsonbAgg),
-            PbType::JsonbObjectAgg => Ok(AggKind::JsonbObjectAgg),
-            PbType::FirstValue => Ok(AggKind::FirstValue),
-            PbType::LastValue => Ok(AggKind::LastValue),
-            PbType::StddevPop => Ok(AggKind::StddevPop),
-            PbType::StddevSamp => Ok(AggKind::StddevSamp),
-            PbType::VarPop => Ok(AggKind::VarPop),
-            PbType::VarSamp => Ok(AggKind::VarSamp),
-            PbType::PercentileCont => Ok(AggKind::PercentileCont),
-            PbType::PercentileDisc => Ok(AggKind::PercentileDisc),
-            PbType::Mode => Ok(AggKind::Mode),
-            PbType::Grouping => Ok(AggKind::Grouping),
-            PbType::InternalLastSeenValue => Ok(AggKind::InternalLastSeenValue),
-            PbType::UserDefined => Ok(AggKind::UserDefined),
-            PbType::Unspecified => bail!("Unrecognized agg."),
+            PbAggKind::UserDefined => {
+                let user_defined = user_defined.context("expect user defined")?;
+                Ok(AggKind::UserDefined(user_defined.clone()))
+            }
+            PbAggKind::WrapScalar => {
+                let scalar = scalar.context("expect scalar")?;
+                Ok(AggKind::WrapScalar(scalar.clone()))
+            }
+            PbAggKind::Unspecified => bail!("Unrecognized agg."),
+            _ => Ok(AggKind::Builtin(pb_type)),
         }
     }
 
-    pub fn to_protobuf(self) -> PbType {
+    pub fn to_protobuf(&self) -> PbAggKind {
         match self {
-            Self::BitAnd => PbType::BitAnd,
-            Self::BitOr => PbType::BitOr,
-            Self::BitXor => PbType::BitXor,
-            Self::BoolAnd => PbType::BoolAnd,
-            Self::BoolOr => PbType::BoolOr,
-            Self::Min => PbType::Min,
-            Self::Max => PbType::Max,
-            Self::Sum => PbType::Sum,
-            Self::Sum0 => PbType::Sum0,
-            Self::Avg => PbType::Avg,
-            Self::Count => PbType::Count,
-            Self::StringAgg => PbType::StringAgg,
-            Self::ApproxCountDistinct => PbType::ApproxCountDistinct,
-            Self::ArrayAgg => PbType::ArrayAgg,
-            Self::JsonbAgg => PbType::JsonbAgg,
-            Self::JsonbObjectAgg => PbType::JsonbObjectAgg,
-            Self::FirstValue => PbType::FirstValue,
-            Self::LastValue => PbType::LastValue,
-            Self::StddevPop => PbType::StddevPop,
-            Self::StddevSamp => PbType::StddevSamp,
-            Self::VarPop => PbType::VarPop,
-            Self::VarSamp => PbType::VarSamp,
-            Self::PercentileCont => PbType::PercentileCont,
-            Self::PercentileDisc => PbType::PercentileDisc,
-            Self::Mode => PbType::Mode,
-            Self::Grouping => PbType::Grouping,
-            Self::InternalLastSeenValue => PbType::InternalLastSeenValue,
-            Self::UserDefined => PbType::UserDefined,
+            Self::Builtin(pb) => *pb,
+            Self::UserDefined(_) => PbAggKind::UserDefined,
+            Self::WrapScalar(_) => PbAggKind::WrapScalar,
         }
     }
 }
 
-/// Macros to generate match arms for [`AggKind`](crate::aggregate::AggKind).
+/// Macros to generate match arms for [`AggKind`](AggKind).
 /// IMPORTANT: These macros must be carefully maintained especially when adding new
-/// [`AggKind`](crate::aggregate::AggKind) variants.
+/// [`AggKind`](AggKind) variants.
 pub mod agg_kinds {
-    /// [`AggKind`](crate::aggregate::AggKind)s that are currently not supported in streaming mode.
+    /// [`AggKind`](super::AggKind)s that are currently not supported in streaming mode.
     #[macro_export]
     macro_rules! unimplemented_in_stream {
         () => {
-            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
+            AggKind::Builtin(
+                PbAggKind::PercentileCont | PbAggKind::PercentileDisc | PbAggKind::Mode,
+            )
         };
     }
     pub use unimplemented_in_stream;
 
-    /// [`AggKind`](crate::aggregate::AggKind)s that should've been rewritten to other kinds. These kinds
+    /// [`AggKind`](super::AggKind)s that should've been rewritten to other kinds. These kinds
     /// should not appear when generating physical plan nodes.
     #[macro_export]
     macro_rules! rewritten {
         () => {
-            AggKind::Avg
-                | AggKind::StddevPop
-                | AggKind::StddevSamp
-                | AggKind::VarPop
-                | AggKind::VarSamp
-                | AggKind::Grouping
+            AggKind::Builtin(
+                PbAggKind::Avg
+                    | PbAggKind::StddevPop
+                    | PbAggKind::StddevSamp
+                    | PbAggKind::VarPop
+                    | PbAggKind::VarSamp
+                    | PbAggKind::Grouping
+                    // ApproxPercentile always uses custom agg executors,
+                    // rather than an aggregation operator
+                    | PbAggKind::ApproxPercentile
+            )
         };
     }
     pub use rewritten;
 
-    /// [`AggKind`](crate::aggregate::AggKind)s of which the aggregate results are not affected by the
+    /// [`AggKind`](super::AggKind)s of which the aggregate results are not affected by the
     /// user given ORDER BY clause.
     #[macro_export]
     macro_rules! result_unaffected_by_order_by {
         () => {
-            AggKind::BitAnd
-                | AggKind::BitOr
-                | AggKind::BitXor // XOR is commutative and associative
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
-                | AggKind::Min
-                | AggKind::Max
-                | AggKind::Sum
-                | AggKind::Sum0
-                | AggKind::Count
-                | AggKind::Avg
-                | AggKind::ApproxCountDistinct
-                | AggKind::VarPop
-                | AggKind::VarSamp
-                | AggKind::StddevPop
-                | AggKind::StddevSamp
+            AggKind::Builtin(PbAggKind::BitAnd
+                | PbAggKind::BitOr
+                | PbAggKind::BitXor // XOR is commutative and associative
+                | PbAggKind::BoolAnd
+                | PbAggKind::BoolOr
+                | PbAggKind::Min
+                | PbAggKind::Max
+                | PbAggKind::Sum
+                | PbAggKind::Sum0
+                | PbAggKind::Count
+                | PbAggKind::Avg
+                | PbAggKind::ApproxCountDistinct
+                | PbAggKind::VarPop
+                | PbAggKind::VarSamp
+                | PbAggKind::StddevPop
+                | PbAggKind::StddevSamp)
         };
     }
     pub use result_unaffected_by_order_by;
 
-    /// [`AggKind`](crate::aggregate::AggKind)s that must be called with ORDER BY clause. These are
+    /// [`AggKind`](super::AggKind)s that must be called with ORDER BY clause. These are
     /// slightly different from variants not in [`result_unaffected_by_order_by`], in that
     /// variants returned by this macro should be banned while the others should just be warned.
     #[macro_export]
     macro_rules! must_have_order_by {
         () => {
-            AggKind::FirstValue
-                | AggKind::LastValue
-                | AggKind::PercentileCont
-                | AggKind::PercentileDisc
-                | AggKind::Mode
+            AggKind::Builtin(
+                PbAggKind::FirstValue
+                    | PbAggKind::LastValue
+                    | PbAggKind::PercentileCont
+                    | PbAggKind::PercentileDisc
+                    | PbAggKind::Mode,
+            )
         };
     }
     pub use must_have_order_by;
 
-    /// [`AggKind`](crate::aggregate::AggKind)s of which the aggregate results are not affected by the
+    /// [`AggKind`](super::AggKind)s of which the aggregate results are not affected by the
     /// user given DISTINCT keyword.
     #[macro_export]
     macro_rules! result_unaffected_by_distinct {
         () => {
-            AggKind::BitAnd
-                | AggKind::BitOr
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
-                | AggKind::Min
-                | AggKind::Max
-                | AggKind::ApproxCountDistinct
+            AggKind::Builtin(
+                PbAggKind::BitAnd
+                    | PbAggKind::BitOr
+                    | PbAggKind::BoolAnd
+                    | PbAggKind::BoolOr
+                    | PbAggKind::Min
+                    | PbAggKind::Max
+                    | PbAggKind::ApproxCountDistinct,
+            )
         };
     }
     pub use result_unaffected_by_distinct;
@@ -403,62 +387,90 @@ pub mod agg_kinds {
     #[macro_export]
     macro_rules! simply_cannot_two_phase {
         () => {
-            AggKind::StringAgg
-                | AggKind::ApproxCountDistinct
-                | AggKind::ArrayAgg
-                | AggKind::JsonbAgg
-                | AggKind::JsonbObjectAgg
-                | AggKind::FirstValue
-                | AggKind::LastValue
-                | AggKind::PercentileCont
-                | AggKind::PercentileDisc
-                | AggKind::Mode
-                // FIXME(wrj): move `BoolAnd` and `BoolOr` out
-                //  after we support general merge in stateless_simple_agg
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
-                | AggKind::BitAnd
-                | AggKind::BitOr
-                | AggKind::UserDefined
+            AggKind::Builtin(
+                PbAggKind::StringAgg
+                    | PbAggKind::ApproxCountDistinct
+                    | PbAggKind::ArrayAgg
+                    | PbAggKind::JsonbAgg
+                    | PbAggKind::JsonbObjectAgg
+                    | PbAggKind::FirstValue
+                    | PbAggKind::LastValue
+                    | PbAggKind::PercentileCont
+                    | PbAggKind::PercentileDisc
+                    | PbAggKind::Mode
+                    // FIXME(wrj): move `BoolAnd` and `BoolOr` out
+                    //  after we support general merge in stateless_simple_agg
+                    | PbAggKind::BoolAnd
+                    | PbAggKind::BoolOr
+                    | PbAggKind::BitAnd
+                    | PbAggKind::BitOr
+            )
+            | AggKind::UserDefined(_)
+            | AggKind::WrapScalar(_)
         };
     }
     pub use simply_cannot_two_phase;
 
-    /// [`AggKind`](crate::aggregate::AggKind)s that are implemented with a single value state (so-called
+    /// [`AggKind`](super::AggKind)s that are implemented with a single value state (so-called
     /// stateless).
     #[macro_export]
     macro_rules! single_value_state {
         () => {
-            AggKind::Sum
-                | AggKind::Sum0
-                | AggKind::Count
-                | AggKind::BitAnd
-                | AggKind::BitOr
-                | AggKind::BitXor
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
-                | AggKind::ApproxCountDistinct
-                | AggKind::InternalLastSeenValue
-                | AggKind::UserDefined
+            AggKind::Builtin(
+                PbAggKind::Sum
+                    | PbAggKind::Sum0
+                    | PbAggKind::Count
+                    | PbAggKind::BitAnd
+                    | PbAggKind::BitOr
+                    | PbAggKind::BitXor
+                    | PbAggKind::BoolAnd
+                    | PbAggKind::BoolOr
+                    | PbAggKind::ApproxCountDistinct
+                    | PbAggKind::InternalLastSeenValue
+                    | PbAggKind::ApproxPercentile,
+            ) | AggKind::UserDefined(_)
         };
     }
     pub use single_value_state;
 
-    /// [`AggKind`](crate::aggregate::AggKind)s that are implemented with a single value state (so-called
+    /// [`AggKind`](super::AggKind)s that are implemented with a single value state (so-called
     /// stateless) iff the input is append-only.
     #[macro_export]
     macro_rules! single_value_state_iff_in_append_only {
         () => {
-            AggKind::Max | AggKind::Min
+            AggKind::Builtin(PbAggKind::Max | PbAggKind::Min)
         };
     }
     pub use single_value_state_iff_in_append_only;
+
+    /// [`AggKind`](super::AggKind)s that are implemented with a materialized input state.
+    #[macro_export]
+    macro_rules! materialized_input_state {
+        () => {
+            AggKind::Builtin(
+                PbAggKind::Min
+                    | PbAggKind::Max
+                    | PbAggKind::FirstValue
+                    | PbAggKind::LastValue
+                    | PbAggKind::StringAgg
+                    | PbAggKind::ArrayAgg
+                    | PbAggKind::JsonbAgg
+                    | PbAggKind::JsonbObjectAgg,
+            ) | AggKind::WrapScalar(_)
+        };
+    }
+    pub use materialized_input_state;
 
     /// Ordered-set aggregate functions.
     #[macro_export]
     macro_rules! ordered_set {
         () => {
-            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
+            AggKind::Builtin(
+                PbAggKind::PercentileCont
+                    | PbAggKind::PercentileDisc
+                    | PbAggKind::Mode
+                    | PbAggKind::ApproxPercentile,
+            )
         };
     }
     pub use ordered_set;
@@ -466,16 +478,24 @@ pub mod agg_kinds {
 
 impl AggKind {
     /// Get the total phase agg kind from the partial phase agg kind.
-    pub fn partial_to_total(self) -> Option<Self> {
+    pub fn partial_to_total(&self) -> Option<Self> {
         match self {
-            AggKind::BitXor
-            | AggKind::Min
-            | AggKind::Max
-            | AggKind::Sum
-            | AggKind::InternalLastSeenValue => Some(self),
-            AggKind::Sum0 | AggKind::Count => Some(AggKind::Sum0),
+            AggKind::Builtin(
+                PbAggKind::BitXor
+                | PbAggKind::Min
+                | PbAggKind::Max
+                | PbAggKind::Sum
+                | PbAggKind::InternalLastSeenValue,
+            ) => Some(self.clone()),
+            AggKind::Builtin(PbAggKind::Sum0 | PbAggKind::Count) => {
+                Some(Self::Builtin(PbAggKind::Sum0))
+            }
             agg_kinds::simply_cannot_two_phase!() => None,
             agg_kinds::rewritten!() => None,
+            // invalid variants
+            AggKind::Builtin(
+                PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar,
+            ) => None,
         }
     }
 }

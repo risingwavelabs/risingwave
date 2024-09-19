@@ -71,13 +71,6 @@ type PartId = i32;
 
 /// MinIO and S3 share the same minimum part ID and part size.
 const MIN_PART_ID: PartId = 1;
-/// The minimum number of bytes that is buffered before they are uploaded as a part.
-/// Its value must be greater than the minimum part size of 5MiB.
-///
-/// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html>
-const S3_PART_SIZE: usize = 16 * 1024 * 1024;
-// TODO: we should do some benchmark to determine the proper part size for MinIO
-const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
 /// Stop multipart uploads that don't complete within a specified number of days after being
 /// initiated. (Day is the smallest granularity)
 const S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
@@ -110,14 +103,23 @@ pub struct S3StreamingUploader {
 }
 
 impl S3StreamingUploader {
+    const MEDIA_TYPE: &'static str = "s3";
+
     pub fn new(
         client: Client,
         bucket: String,
-        part_size: usize,
         key: String,
         metrics: Arc<ObjectStoreMetrics>,
         config: Arc<ObjectStoreConfig>,
     ) -> S3StreamingUploader {
+        /// The minimum number of bytes that is buffered before they are uploaded as a part.
+        /// Its value must be greater than the minimum part size of 5MiB.
+        ///
+        /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html>
+        const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
+        const MAX_PART_SIZE: usize = 5 * 1024 * 1024 * 1024;
+        let part_size = config.upload_part_size.clamp(MIN_PART_SIZE, MAX_PART_SIZE);
+
         Self {
             client,
             bucket,
@@ -159,6 +161,7 @@ impl S3StreamingUploader {
                 &self.config,
                 OperationType::StreamingUploadInit,
                 self.metrics.clone(),
+                Self::MEDIA_TYPE,
             )
             .await;
 
@@ -221,7 +224,14 @@ impl S3StreamingUploader {
                     })
             };
 
-            let res = retry_request(builder, &config, operation_type, metrics.clone()).await;
+            let res = retry_request(
+                builder,
+                &config,
+                operation_type,
+                metrics.clone(),
+                Self::MEDIA_TYPE,
+            )
+            .await;
             try_update_failure_metric(&metrics, &res, operation_type_str);
             Ok((part_id, res?))
         }));
@@ -280,7 +290,14 @@ impl S3StreamingUploader {
                 })
         };
 
-        let res = retry_request(builder, &self.config, operation_type, self.metrics.clone()).await;
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.metrics.clone(),
+            Self::MEDIA_TYPE,
+        )
+        .await;
         try_update_failure_metric(&self.metrics, &res, operation_type.as_str());
         let _res = res?;
 
@@ -353,9 +370,14 @@ impl StreamingUploader for S3StreamingUploader {
                         })
                 };
 
-                let res =
-                    retry_request(builder, &self.config, operation_type, self.metrics.clone())
-                        .await;
+                let res = retry_request(
+                    builder,
+                    &self.config,
+                    operation_type,
+                    self.metrics.clone(),
+                    Self::MEDIA_TYPE,
+                )
+                .await;
                 try_update_failure_metric(&self.metrics, &res, operation_type.as_str());
                 res?;
                 Ok(())
@@ -391,7 +413,6 @@ fn get_upload_body(data: Vec<Bytes>) -> ByteStream {
 pub struct S3ObjectStore {
     client: Client,
     bucket: String,
-    part_size: usize,
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
 
@@ -436,7 +457,6 @@ impl ObjectStore for S3ObjectStore {
         Ok(S3StreamingUploader::new(
             self.client.clone(),
             self.bucket.clone(),
-            self.part_size,
             path.to_string(),
             self.metrics.clone(),
             self.config.clone(),
@@ -715,7 +735,6 @@ impl S3ObjectStore {
         Self {
             client,
             bucket,
-            part_size: S3_PART_SIZE,
             metrics,
             config,
         }
@@ -778,7 +797,6 @@ impl S3ObjectStore {
         Self {
             client,
             bucket: bucket.to_string(),
-            part_size: MINIO_PART_SIZE,
             metrics,
             config: object_store_config,
         }

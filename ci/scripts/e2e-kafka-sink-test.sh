@@ -150,20 +150,7 @@ echo "preparing confluent schema registry"
 python3 -m pip install --break-system-packages requests confluent-kafka
 
 echo "testing protobuf"
-cp src/connector/src/test_data/proto_recursive/recursive.pb ./proto-recursive
-rpk topic create test-rw-sink-append-only-protobuf
-rpk topic create test-rw-sink-append-only-protobuf-csr-a
-rpk topic create test-rw-sink-append-only-protobuf-csr-hi
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-append-only-protobuf-csr-a-value' src/connector/src/test_data/test-index-array.proto
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-append-only-protobuf-csr-hi-value' src/connector/src/test_data/test-index-array.proto
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/protobuf.slt'
-rpk topic delete test-rw-sink-append-only-protobuf
-rpk topic delete test-rw-sink-append-only-protobuf-csr-a
-rpk topic delete test-rw-sink-append-only-protobuf-csr-hi
 
 echo "testing avro"
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-upsert-avro-value' src/connector/src/test_data/all-types.avsc
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-upsert-avro-key' src/connector/src/test_data/all-types.avsc 'string_field,int32_field'
-rpk topic create test-rw-sink-upsert-avro
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/avro.slt'
-rpk topic delete test-rw-sink-upsert-avro

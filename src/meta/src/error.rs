@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::error::BoxedError;
-use risingwave_common::hash::ParallelUnitError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
@@ -126,13 +125,6 @@ pub enum MetaErrorInner {
     // Indicates that recovery was triggered manually.
     #[error("adhoc recovery triggered")]
     AdhocRecovery,
-
-    #[error("ParallelUnit error: {0}")]
-    ParallelUnit(
-        #[from]
-        #[backtrace]
-        ParallelUnitError,
-    ),
 }
 
 impl MetaError {

@@ -25,7 +25,7 @@ with error as (
     limit 1
 )
 select
-case when error like '%Actor % exited unexpectedly: Executor error: %Numeric out of range%' then 'ok'
+case when error like '%get error from control stream, in worker node %: %Actor % exited unexpectedly: Executor error: %Numeric out of range%' then 'ok'
      else error
 end as result
 from error;

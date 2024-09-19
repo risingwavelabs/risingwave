@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
@@ -35,6 +37,7 @@ use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
+use crate::utils::ordinal;
 
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
@@ -79,11 +82,34 @@ pub(super) fn get_column_names(
     Ok(col_names)
 }
 
-/// Generate create MV plan, return plan and mv table info.
+/// Bind and generate create MV plan, return plan and mv table info.
 pub fn gen_create_mv_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     query: Query,
+    name: ObjectName,
+    columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
+) -> Result<(PlanRef, PbTable)> {
+    let mut binder = Binder::new_for_stream(session);
+    let bound = binder.bind_query(query)?;
+    gen_create_mv_plan_bound(
+        session,
+        context,
+        bound,
+        binder.included_relations(),
+        name,
+        columns,
+        emit_mode,
+    )
+}
+
+/// Generate create MV plan from a bound query
+pub fn gen_create_mv_plan_bound(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    query: BoundQuery,
+    dependent_relations: HashSet<TableId>,
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
@@ -99,23 +125,17 @@ pub fn gen_create_mv_plan(
 
     let definition = context.normalized_sql().to_owned();
 
-    let (dependent_relations, bound) = {
-        let mut binder = Binder::new_for_stream(session);
-        let bound = binder.bind_query(query)?;
-        (binder.included_relations(), bound)
-    };
-
-    let check_items = resolve_query_privileges(&bound);
+    let check_items = resolve_query_privileges(&query);
     session.check_privileges(&check_items)?;
 
-    let col_names = get_column_names(&bound, session, columns)?;
+    let col_names = get_column_names(&query, session, columns)?;
 
     let emit_on_window_close = emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
 
-    let mut plan_root = Planner::new(context).plan_query(bound)?;
+    let mut plan_root = Planner::new(context).plan_query(query)?;
     if let Some(col_names) = col_names {
         for name in &col_names {
             check_valid_column_name(name)?;
@@ -156,7 +176,36 @@ pub async fn handle_create_mv(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
+    let (dependent_relations, bound) = {
+        let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
+        let bound = binder.bind_query(query)?;
+        (binder.included_relations(), bound)
+    };
+    handle_create_mv_bound(
+        handler_args,
+        if_not_exists,
+        name,
+        bound,
+        dependent_relations,
+        columns,
+        emit_mode,
+    )
+    .await
+}
+
+pub async fn handle_create_mv_bound(
+    handler_args: HandlerArgs,
+    if_not_exists: bool,
+    name: ObjectName,
+    query: BoundQuery,
+    dependent_relations: HashSet<TableId>,
+    columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
+) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
+
+    // Check cluster limits
+    session.check_cluster_limits().await?;
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         name.clone(),
@@ -176,28 +225,24 @@ pub async fn handle_create_mv(
             ))));
         }
 
-        let has_order_by = !query.order_by.is_empty();
+        let has_order_by = !query.order.is_empty();
         if has_order_by {
             context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
 "#.to_string());
         }
 
-        let (plan, table) =
-            gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
+        let (plan, table) = gen_create_mv_plan_bound(
+            &session,
+            context.into(),
+            query,
+            dependent_relations,
+            name,
+            columns,
+            emit_mode,
+        )?;
 
-        let context = plan.plan_base().ctx().clone();
-        let mut graph = build_graph(plan)?;
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
-        // Set the timezone for the stream context
-        let ctx = graph.ctx.as_mut().unwrap();
-        ctx.timezone = context.get_session_timezone();
+        let graph = build_graph(plan)?;
 
         (table, graph)
     };
@@ -223,20 +268,6 @@ It only indicates the physical clustering of the data, which may improve the per
     Ok(PgResponse::empty_result(
         StatementType::CREATE_MATERIALIZED_VIEW,
     ))
-}
-
-fn ordinal(i: usize) -> String {
-    let s = i.to_string();
-    let suffix = if s.ends_with('1') && !s.ends_with("11") {
-        "st"
-    } else if s.ends_with('2') && !s.ends_with("12") {
-        "nd"
-    } else if s.ends_with('3') && !s.ends_with("13") {
-        "rd"
-    } else {
-        "th"
-    };
-    s + suffix
 }
 
 #[cfg(test)]

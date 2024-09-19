@@ -43,7 +43,8 @@ impl Expression for VnodeExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let vnodes = VirtualNode::compute_chunk(input, &self.dist_key_indices);
+        // TODO(var-vnode): get vnode count from context
+        let vnodes = VirtualNode::compute_chunk(input, &self.dist_key_indices, VirtualNode::COUNT);
         let mut builder = I16ArrayBuilder::new(input.capacity());
         vnodes
             .into_iter()
@@ -52,8 +53,9 @@ impl Expression for VnodeExpression {
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        // TODO(var-vnode): get vnode count from context
         Ok(Some(
-            VirtualNode::compute_row(input, &self.dist_key_indices)
+            VirtualNode::compute_row(input, &self.dist_key_indices, VirtualNode::COUNT)
                 .to_scalar()
                 .into(),
         ))

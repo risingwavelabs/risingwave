@@ -134,13 +134,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_row_id_gen_executor() {
+        // This test only works when vnode count is 256.
+        assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
+
         let schema = Schema::new(vec![
             Field::unnamed(DataType::Serial),
             Field::unnamed(DataType::Int64),
         ]);
         let pk_indices = vec![0];
         let row_id_index = 0;
-        let row_id_generator = Bitmap::ones(VirtualNode::COUNT);
+        let row_id_generator = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
         let (mut tx, upstream) = MockSource::channel();
         let upstream = upstream.into_executor(schema.clone(), pk_indices.clone());
 

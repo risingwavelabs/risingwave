@@ -23,11 +23,13 @@ message AddMutation {
   // All actors to be added (to the main connected component of the graph) in this update.
   repeated uint32 added_actors = 3;
   // We may embed a source change split mutation here.
+  // `Source` and `SourceBackfill` are handled together here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
   // We may embed a pause mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   bool pause = 4;
+  repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
 }
 
 message StopMutation {
@@ -69,6 +71,7 @@ message UpdateMutation {
   // All actors to be dropped in this update.
   repeated uint32 dropped_actors = 4;
   // Source updates.
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 5;
   // When modifying the Materialized View, we need to recreate the Dispatcher from the old upstream to the new TableFragment.
   // Consistent with the semantics in AddMutation.
@@ -76,6 +79,7 @@ message UpdateMutation {
 }
 
 message SourceChangeSplitMutation {
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
@@ -95,14 +99,14 @@ message CombinedMutation {
   repeated BarrierMutation mutations = 1;
 }
 
-message CreateSubscriptionMutation {
-  uint32 subscription_id = 1;
+message SubscriptionUpstreamInfo {
+  // can either be subscription_id or table_id of creating TableFragments
+  uint32 subscriber_id = 1;
   uint32 upstream_mv_table_id = 2;
 }
 
-message DropSubscriptionMutation {
-  uint32 subscription_id = 1;
-  uint32 upstream_mv_table_id = 2;
+message DropSubscriptionsMutation {
+  repeated SubscriptionUpstreamInfo info = 1;
 }
 
 message BarrierMutation {
@@ -122,10 +126,8 @@ message BarrierMutation {
     ResumeMutation resume = 8;
     // Throttle specific source exec or chain exec.
     ThrottleMutation throttle = 10;
-    // Create subscription on mv
-    CreateSubscriptionMutation create_subscription = 11;
     // Drop subscription on mv
-    DropSubscriptionMutation drop_subscription = 12;
+    DropSubscriptionsMutation drop_subscriptions = 12;
     // Combined mutation.
     CombinedMutation combined = 100;
   }
@@ -366,6 +368,9 @@ message SimpleAggNode {
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
   uint32 row_count_index = 7;
   AggNodeVersion version = 8;
+  // Required by the downstream `RowMergeNode`,
+  // currently only used by the `approx_percentile`'s two phase plan
+  bool must_output_per_barrier = 9;
 }
 
 message HashAggNode {
@@ -450,6 +455,32 @@ message HashJoinNode {
   bool is_append_only = 14;
 }
 
+message AsOfJoinNode {
+  plan_common.AsOfJoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  // Used for internal table states.
+  catalog.Table left_table = 4;
+  // Used for internal table states.
+  catalog.Table right_table = 5;
+  // Used for internal table states.
+  catalog.Table left_degree_table = 6;
+  // Used for internal table states.
+  catalog.Table right_degree_table = 7;
+  // The output indices of current node
+  repeated uint32 output_indices = 8;
+  // Left deduped input pk indices. The pk of the left_table and
+  // The pk of the left_table is  [left_join_key | left_inequality_key | left_deduped_input_pk_indices]
+  // left_inequality_key is not used but for forward compatibility.
+  repeated uint32 left_deduped_input_pk_indices = 9;
+  // Right deduped input pk indices.
+  // The pk of the right_table is  [right_join_key | right_inequality_key | right_deduped_input_pk_indices]
+  // right_inequality_key is not used but for forward compatibility.
+  repeated uint32 right_deduped_input_pk_indices = 10;
+  repeated bool null_safe = 11;
+  optional plan_common.AsOfJoinDesc asof_desc = 12;
+}
+
 message TemporalJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
@@ -480,7 +511,7 @@ message DynamicFilterNode {
   // When the condition changes, we will tell downstream to insert the LHS records which now match the condition.
   // If this is false, we need to store RHS records which match the condition in the internal table.
   // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
-  bool condition_always_relax = 5;
+  bool condition_always_relax = 5 [deprecated = true];
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -545,6 +576,9 @@ enum StreamScanType {
 
   // ArrangementBackfillExecutor
   STREAM_SCAN_TYPE_ARRANGEMENT_BACKFILL = 5;
+
+  // SnapshotBackfillExecutor
+  STREAM_SCAN_TYPE_SNAPSHOT_BACKFILL = 6;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -790,6 +824,23 @@ message OverWindowNode {
   OverWindowCachePolicy cache_policy = 5;
 }
 
+message LocalApproxPercentileNode {
+  double base = 1;
+  uint32 percentile_index = 2;
+}
+
+message GlobalApproxPercentileNode {
+  double base = 1;
+  double quantile = 2;
+  catalog.Table bucket_state_table = 3;
+  catalog.Table count_state_table = 4;
+}
+
+message RowMergeNode {
+  catalog.ColIndexMapping lhs_mapping = 1;
+  catalog.ColIndexMapping rhs_mapping = 2;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -835,6 +886,9 @@ message StreamNode {
     CdcFilterNode cdc_filter = 140;
     SourceBackfillNode source_backfill = 142;
     ChangeLogNode changelog = 143;
+    LocalApproxPercentileNode local_approx_percentile = 144;
+    GlobalApproxPercentileNode global_approx_percentile = 145;
+    RowMergeNode row_merge = 146;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -931,6 +985,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_DML = 128;
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
   FRAGMENT_TYPE_FLAG_SOURCE_SCAN = 1024;
+  FRAGMENT_TYPE_FLAG_SNAPSHOT_BACKFILL_STREAM_SCAN = 2048;
 }
 
 // The streaming context associated with a stream plan

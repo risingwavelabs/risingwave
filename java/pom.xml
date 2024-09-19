@@ -74,7 +74,7 @@
         <commons.io.version>2.11.0</commons.io.version>
         <commons.text.version>1.10.0</commons.text.version>
         <commons.lang3.version>3.12.0</commons.lang3.version>
-        <debezium.version>2.4.2.Final</debezium.version>
+        <debezium.version>2.6.2.Final</debezium.version>
         <jackson.version>2.15.0</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.4.0</hadoop.version>
@@ -171,6 +171,11 @@
             <dependency>
                 <groupId>io.debezium</groupId>
                 <artifactId>debezium-connector-mongodb</artifactId>
+                <version>${debezium.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.debezium</groupId>
+                <artifactId>debezium-connector-sqlserver</artifactId>
                 <version>${debezium.version}</version>
             </dependency>
             <dependency>

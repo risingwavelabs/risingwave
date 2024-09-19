@@ -26,7 +26,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,6 +55,7 @@ impl StreamFsFetch {
             source.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
             FixedBitSet::with_capacity(source.column_catalog.len()),
+            MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
         Self {
@@ -118,7 +119,7 @@ impl StreamNode for StreamFsFetch {
                     .map(|c| c.to_protobuf())
                     .collect_vec(),
                 with_properties,
-                rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+                rate_limit: self.base.ctx().overwrite_options().source_rate_limit,
                 secret_refs,
             }
         });

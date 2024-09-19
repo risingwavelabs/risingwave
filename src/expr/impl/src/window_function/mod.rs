@@ -28,7 +28,7 @@ fn create_window_state_impl(call: &WindowFuncCall) -> Result<BoxedWindowState> {
     assert!(call.frame.bounds.validate().is_ok());
 
     use WindowFuncKind::*;
-    Ok(match call.kind {
+    Ok(match &call.kind {
         RowNumber => Box::new(rank::RankState::<rank::RowNumber>::new(call)),
         Rank => Box::new(rank::RankState::<rank::Rank>::new(call)),
         DenseRank => Box::new(rank::RankState::<rank::DenseRank>::new(call)),

@@ -28,9 +28,10 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::level::Level;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
-use risingwave_pb::hummock::{Level, SstableInfo};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -83,11 +84,11 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         for level in version.get_combined_levels() {
             for sstable_info in &level.table_infos {
                 if let Some(object_id) = &args.object_id {
-                    if *object_id == sstable_info.get_object_id() {
+                    if *object_id == sstable_info.object_id {
                         print_level(level, sstable_info);
                         sst_dump_via_sstable_store(
                             &sstable_store,
-                            sstable_info.get_object_id(),
+                            sstable_info.object_id,
                             sstable_info.meta_offset,
                             sstable_info.file_size,
                             &table_data,
@@ -100,7 +101,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
                     print_level(level, sstable_info);
                     sst_dump_via_sstable_store(
                         &sstable_store,
-                        sstable_info.get_object_id(),
+                        sstable_info.object_id,
                         sstable_info.meta_offset,
                         sstable_info.file_size,
                         &table_data,
@@ -161,7 +162,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
 }
 
 fn print_level(level: &Level, sst_info: &SstableInfo) {
-    println!("Level Type: {}", level.level_type);
+    println!("Level Type: {}", level.level_type.as_str_name());
     println!("Level Idx: {}", level.level_idx);
     if level.level_idx == 0 {
         println!("L0 Sub-Level Idx: {}", level.sub_level_id);
@@ -227,14 +228,6 @@ pub async fn sst_dump_via_sstable_store(
     println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
     println!("Key Count: {}", sstable_meta.key_count);
     println!("Version: {}", sstable_meta.version);
-    println!(
-        "Monotonoic Deletes Count: {}",
-        sstable_meta.monotonic_tombstone_events.len()
-    );
-    for monotonic_delete in &sstable_meta.monotonic_tombstone_events {
-        println!("\tevent key: {:?}", monotonic_delete.event_key);
-        println!("\tnew epoch: {:?}", monotonic_delete.new_epoch);
-    }
 
     println!("Block Count: {}", sstable.block_count());
     for i in 0..sstable.block_count() {

@@ -91,7 +91,7 @@ pub type HummockSstableObjectId = i64;
 pub type FragmentId = i32;
 pub type ActorId = i32;
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum JobStatus {
     #[sea_orm(string_value = "INITIAL")]
@@ -260,6 +260,12 @@ macro_rules! derive_array_from_blob {
                 Self(vec![])
             }
         }
+
+        impl sea_orm::sea_query::Nullable for $struct_name {
+            fn null() -> Value {
+                Value::Bytes(None)
+            }
+        }
     };
 }
 
@@ -396,11 +402,6 @@ derive_from_blob!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_blob!(VnodeBitmap, risingwave_pb::common::Buffer);
 derive_from_blob!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
 derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
-
-derive_from_blob!(
-    FragmentVnodeMapping,
-    risingwave_pb::common::ParallelUnitMapping
-);
 
 derive_array_from_blob!(
     HummockVersionDeltaArray,

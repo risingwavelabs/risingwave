@@ -269,6 +269,12 @@ CREATE TABLE person_new (
 ) FROM pg_source TABLE 'person';
 
 statement ok
+CREATE TABLE upper_orders_shared (
+    id int PRIMARY KEY,
+    name varchar
+) FROM pg_source TABLE 'public.Orders';
+
+statement ok
 CREATE TABLE person_new (
     id int,
     name varchar,
@@ -509,3 +515,8 @@ select * from enum_to_varchar_shared order by id;
 ----
 1 happy
 2 ok
+
+query II
+select * from upper_orders_shared order by id;
+----
+1 happy

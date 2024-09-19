@@ -21,6 +21,7 @@ use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -32,7 +33,6 @@ use risingwave_pb::plan_common::as_of::AsOfType;
 use risingwave_pb::plan_common::{as_of, PbAsOf, StorageTableDesc};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::TableDistribution;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use crate::error::{BatchError, Result};
@@ -210,7 +210,8 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             Some(vnodes) => Some(Bitmap::from(vnodes).into()),
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            None => Some(TableDistribution::all_vnodes()),
+            // TODO(var-vnode): use vnode count from table desc
+            None => Some(Bitmap::ones(VirtualNode::COUNT).into()),
         };
 
         let scan_ranges = {
@@ -237,7 +238,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         let ordered = seq_scan_node.ordered;
 
-        let epoch = source.epoch.clone();
+        let epoch = source.epoch;
         let limit = seq_scan_node.limit;
         let as_of = seq_scan_node
             .as_of
@@ -341,8 +342,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         for point_get in point_gets {
             let table = table.clone();
             if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch.clone(), histogram.clone())
-                    .await?
+                Self::execute_point_get(table, point_get, query_epoch, histogram.clone()).await?
             {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     returned += chunk.cardinality() as u64;
@@ -373,7 +373,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 table.clone(),
                 range,
                 ordered,
-                query_epoch.clone(),
+                query_epoch,
                 chunk_size,
                 limit,
                 histogram.clone(),
@@ -500,6 +500,6 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 pub fn unix_timestamp_sec_to_epoch(ts: i64) -> risingwave_common::util::epoch::Epoch {
     let ts = ts.checked_add(1).unwrap();
     risingwave_common::util::epoch::Epoch::from_unix_millis_or_earliest(
-        u64::try_from(ts).unwrap().checked_mul(1000).unwrap(),
+        u64::try_from(ts).unwrap_or(0).checked_mul(1000).unwrap(),
     )
 }

@@ -54,9 +54,9 @@ Caused by these errors (recent errors listed first):
   4: Item not found: Invalid column: bar
 
 
-# TODO: Add support for dropping generated columns for table with schema registry
+# Can't drop non-generated column
 statement error
-ALTER TABLE t DROP COLUMN gen_col;
+ALTER TABLE t DROP COLUMN foo;
 ----
 db error: ERROR: Failed to run the query
 
@@ -65,17 +65,18 @@ Caused by:
 HINT: try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead
 
 
-# statement ok
-# ALTER TABLE t DROP COLUMN gen_col;
+# Drop generated column
+statement ok
+ALTER TABLE t DROP COLUMN gen_col;
 
-# # Refresh table schema
-# statement ok
-# ALTER TABLE t REFRESH SCHEMA;
+# Refresh table schema
+statement ok
+ALTER TABLE t REFRESH SCHEMA;
 
-# query ?
-# select * from t
-# ----
-# ABC
+query ?
+select * from t
+----
+ABC
 
 statement ok
 drop table t;

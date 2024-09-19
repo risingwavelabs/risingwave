@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 pub mod big_query;
 pub mod boxed;
 pub mod catalog;
@@ -26,6 +25,7 @@ pub mod elasticsearch;
 pub mod elasticsearch_opensearch_common;
 pub mod elasticsearch_rust;
 pub mod encoder;
+pub mod file_sink;
 pub mod formatter;
 pub mod google_pubsub;
 pub mod iceberg;
@@ -56,6 +56,15 @@ use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use clickhouse::CLICKHOUSE_SINK;
+use decouple_checkpoint_log_sink::{
+    COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+};
+use deltalake::DELTALAKE_SINK;
+use iceberg::ICEBERG_SINK;
+use opendal::Error as OpendalError;
+use risingwave_common::array::ArrayError;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
@@ -67,6 +76,7 @@ use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
+use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 pub use tracing;
@@ -76,9 +86,9 @@ use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEn
 use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
-
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
 macro_rules! for_all_sinks {
@@ -97,13 +107,20 @@ macro_rules! for_all_sinks {
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
-                { Opensearch, $crate::sink::remote::OpensearchSink },
+                { Opensearch, $crate::sink::remote::OpenSearchSink },
                 { ElasticSearchRust, $crate::sink::elasticsearch_rust::ElasticSearchSink },
                 { OpensearchRust, $crate::sink::opensearch::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>},
+
+                { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::gcs::GcsSink>  },
+                { Azblob, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::azblob::AzblobSink>},
+                { Webhdfs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::webhdfs::WebhdfsSink>},
+
+                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
                 { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
@@ -277,21 +294,20 @@ impl SinkParam {
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration_metrics: LabelGuardedHistogram<3>,
-    pub connector_sink_rows_received: LabelGuardedIntCounter<2>,
-    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_write_rows: LabelGuardedIntCounter<3>,
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_read_rows: LabelGuardedIntCounter<3>,
+    pub sink_commit_duration_metrics: LabelGuardedHistogram<4>,
+    pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_write_rows: LabelGuardedIntCounter<4>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_read_rows: LabelGuardedIntCounter<4>,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
 
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
-
-    pub iceberg_write_qps: LabelGuardedIntCounter<2>,
-    pub iceberg_write_latency: LabelGuardedHistogram<2>,
-    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
-    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<2>,
-    pub iceberg_partition_num: LabelGuardedIntGauge<2>,
+    pub iceberg_write_qps: LabelGuardedIntCounter<3>,
+    pub iceberg_write_latency: LabelGuardedHistogram<3>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<3>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<3>,
+    pub iceberg_partition_num: LabelGuardedIntGauge<3>,
 }
 
 impl SinkMetrics {
@@ -363,16 +379,57 @@ impl SinkWriterParam {
     }
 }
 
+fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
+    matches!(
+        sink_name,
+        ICEBERG_SINK | CLICKHOUSE_SINK | STARROCKS_SINK | DELTALAKE_SINK
+    )
+}
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
+    fn set_default_commit_checkpoint_interval(
+        desc: &mut SinkDesc,
+        user_specified: &SinkDecouple,
+    ) -> Result<()> {
+        if is_sink_support_commit_checkpoint_interval(Self::SINK_NAME) {
+            match desc.properties.get(COMMIT_CHECKPOINT_INTERVAL) {
+                Some(commit_checkpoint_interval) => {
+                    let commit_checkpoint_interval = commit_checkpoint_interval
+                        .parse::<u64>()
+                        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+                    if matches!(user_specified, SinkDecouple::Disable)
+                        && commit_checkpoint_interval > 1
+                    {
+                        return Err(SinkError::Config(anyhow!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")));
+                    }
+                }
+                None => match user_specified {
+                    SinkDecouple::Default | SinkDecouple::Enable => {
+                        desc.properties.insert(
+                            COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
+                        );
+                    }
+                    SinkDecouple::Disable => {
+                        desc.properties.insert(
+                            COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
+                        );
+                    }
+                },
+            }
+        }
+        Ok(())
+    }
+
     /// `user_specified` is the value of `sink_decouple` config.
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Disable | SinkDecouple::Default => Ok(false),
-            SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
         }
     }
 
@@ -486,14 +543,14 @@ macro_rules! def_sink_impl {
         #[derive(Debug)]
         pub enum SinkImpl {
             $(
-                $variant_name($sink_type),
+                $variant_name(Box<$sink_type>),
             )*
         }
 
         $(
             impl From<$sink_type> for SinkImpl {
                 fn from(sink: $sink_type) -> SinkImpl {
-                    SinkImpl::$variant_name(sink)
+                    SinkImpl::$variant_name(Box::new(sink))
                 }
             }
         )*
@@ -584,6 +641,8 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
+    #[error("File error: {0}")]
+    File(String),
     #[error("Snowflake error: {0}")]
     Snowflake(
         #[source]
@@ -643,6 +702,24 @@ pub enum SinkError {
 impl From<icelake::Error> for SinkError {
     fn from(value: icelake::Error) -> Self {
         SinkError::Iceberg(anyhow!(value))
+    }
+}
+
+impl From<OpendalError> for SinkError {
+    fn from(error: OpendalError) -> Self {
+        SinkError::File(error.to_report_string())
+    }
+}
+
+impl From<parquet::errors::ParquetError> for SinkError {
+    fn from(error: parquet::errors::ParquetError) -> Self {
+        SinkError::File(error.to_report_string())
+    }
+}
+
+impl From<ArrayError> for SinkError {
+    fn from(error: ArrayError) -> Self {
+        SinkError::File(error.to_report_string())
     }
 }
 

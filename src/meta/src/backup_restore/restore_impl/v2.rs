@@ -37,7 +37,7 @@ impl Loader<MetadataV2> for LoaderV2 {
     async fn load(&self, target_id: MetaSnapshotId) -> BackupResult<MetaSnapshot<MetadataV2>> {
         let snapshot_list = &self.backup_store.manifest().snapshot_metadata;
         let mut target_snapshot: MetaSnapshotV2 = self.backup_store.get(target_id).await?;
-        tracing::info!(
+        tracing::debug!(
             "snapshot {} before rewrite:\n{}",
             target_id,
             target_snapshot
@@ -73,11 +73,11 @@ impl Loader<MetadataV2> for LoaderV2 {
             }
             target_snapshot.metadata.hummock_sequences = newest_snapshot.metadata.hummock_sequences;
             tracing::info!(
-                "snapshot {} after rewrite by snapshot {}:\n{}",
+                "snapshot {} is rewritten by snapshot {}:\n",
                 target_id,
                 newest_id,
-                target_snapshot,
             );
+            tracing::debug!("{target_snapshot}");
         }
         Ok(target_snapshot)
     }
@@ -106,8 +106,8 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.workers.clone(), db).await?;
         insert_models(metadata.worker_properties.clone(), db).await?;
         insert_models(metadata.users.clone(), db).await?;
-        insert_models(metadata.user_privileges.clone(), db).await?;
         insert_models(metadata.objects.clone(), db).await?;
+        insert_models(metadata.user_privileges.clone(), db).await?;
         insert_models(metadata.object_dependencies.clone(), db).await?;
         insert_models(metadata.databases.clone(), db).await?;
         insert_models(metadata.schemas.clone(), db).await?;

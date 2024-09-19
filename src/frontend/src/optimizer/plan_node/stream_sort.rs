@@ -24,6 +24,7 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::{Monotonicity, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -53,8 +54,14 @@ impl StreamEowcSort {
         let stream_key = input.stream_key().map(|v| v.to_vec());
         let fd_set = input.functional_dependency().clone();
         let dist = input.distribution().clone();
+
         let mut watermark_columns = FixedBitSet::with_capacity(input.schema().len());
         watermark_columns.insert(sort_column_index);
+
+        // StreamEowcSort makes the sorting watermark column non-decreasing
+        let mut columns_monotonicity = MonotonicityMap::new();
+        columns_monotonicity.insert(sort_column_index, Monotonicity::NonDecreasing);
+
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
@@ -64,6 +71,7 @@ impl StreamEowcSort {
             true,
             true,
             watermark_columns,
+            columns_monotonicity,
         );
         Self {
             base,

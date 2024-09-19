@@ -33,7 +33,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
 
-use crate::array::{ListValue, StructValue};
+use crate::array::{ListValue, MapValue, StructValue};
 use crate::types::{
     DataType, Date, Decimal, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, Serial,
     Time, Timestamp, Timestamptz, F32, F64,
@@ -561,7 +561,7 @@ impl HashKeySer<'_> for Date {
 impl HashKeyDe for Date {
     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
         let days = buf.get_i32_ne();
-        Date::with_days(days).unwrap()
+        Date::with_days_since_ce(days).unwrap()
     }
 }
 
@@ -627,6 +627,7 @@ impl_value_encoding_hash_key_serde!(JsonbVal);
 // use the memcmp encoding for safety.
 impl_memcmp_encoding_hash_key_serde!(StructValue);
 impl_memcmp_encoding_hash_key_serde!(ListValue);
+impl_memcmp_encoding_hash_key_serde!(MapValue);
 
 #[cfg(test)]
 mod tests {

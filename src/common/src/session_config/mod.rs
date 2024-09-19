@@ -54,7 +54,8 @@ type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 
 // NOTE(kwannoel): We declare it separately as a constant,
 // otherwise seems like it can't infer the type of -1 when written inline.
-const DISABLE_STREAMING_RATE_LIMIT: i32 = -1;
+const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
+const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 
 #[serde_as]
 /// This is the Session Config of RisingWave.
@@ -160,6 +161,9 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_use_arrangement_backfill: bool,
 
+    #[parameter(default = false)]
+    streaming_use_snapshot_backfill: bool,
+
     /// Allow `jsonb` in stream key
     #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
@@ -253,11 +257,17 @@ pub struct SessionConfig {
     #[parameter(default = STANDARD_CONFORMING_STRINGS)]
     standard_conforming_strings: String,
 
+    /// Set streaming rate limit (rows per second) for each parallelism for mv / source / sink backfilling
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the snapshot read / source read.
+    #[parameter(default = DISABLE_BACKFILL_RATE_LIMIT)]
+    backfill_rate_limit: i32,
+
     /// Set streaming rate limit (rows per second) for each parallelism for mv / source backfilling, source reads.
     /// If set to -1, disable rate limit.
     /// If set to 0, this pauses the snapshot read / source read.
-    #[parameter(default = DISABLE_STREAMING_RATE_LIMIT)]
-    streaming_rate_limit: i32,
+    #[parameter(default = DISABLE_SOURCE_RATE_LIMIT)]
+    source_rate_limit: i32,
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
@@ -282,6 +292,12 @@ pub struct SessionConfig {
 
     #[parameter(default = "hex", check_hook = check_bytea_output)]
     bytea_output: String,
+
+    /// Bypass checks on cluster limits
+    ///
+    /// When enabled, `CREATE MATERIALIZED VIEW` will not fail if the cluster limit is hit.
+    #[parameter(default = false)]
+    bypass_cluster_limits: bool,
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {

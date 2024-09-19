@@ -35,7 +35,10 @@ mod tests {
 
     #[test]
     fn test_date_builder() {
-        let v = (0..1000).map(Date::with_days).map(|x| x.ok()).collect_vec();
+        let v = (0..1000)
+            .map(Date::with_days_since_ce)
+            .map(|x| x.ok())
+            .collect_vec();
         let mut builder = DateArrayBuilder::new(0);
         for i in &v {
             builder.append(*i);
@@ -48,9 +51,9 @@ mod tests {
     #[test]
     fn test_date_array_to_protobuf() {
         let input = vec![
-            Date::with_days(12345).ok(),
+            Date::with_days_since_ce(12345).ok(),
             None,
-            Date::with_days(67890).ok(),
+            Date::with_days_since_ce(67890).ok(),
         ];
 
         let array = DateArray::from_iter(&input);

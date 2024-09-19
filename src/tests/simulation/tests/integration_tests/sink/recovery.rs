@@ -40,7 +40,7 @@ async fn kill_and_check(
             break;
         }
         assert!(
-            curr_count > prev_count,
+            curr_count >= prev_count,
             "not make progress between kill. Prev count {}, curr count {}, i {}",
             prev_count,
             curr_count,

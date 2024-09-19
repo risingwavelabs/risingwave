@@ -1,13 +1,22 @@
+system ok
+${CASSANDRA_DIR}/bin/cqlsh --request-timeout=20 -e "CREATE KEYSPACE demo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};use demo;CREATE table demo_bhv_table(v1 int primary key,v2 smallint,v3 bigint,v4 float,v5 double,v6 text,v7 date,v8 timestamp,v9 boolean);"
+
+system ok
+${CASSANDRA_DIR}/bin/cqlsh --request-timeout=20 -e "use demo;CREATE table \"Test_uppercase\"(\"TEST_V1\" int primary key, \"TEST_V2\" int,\"TEST_V3\" int);"
+
 statement ok
 CREATE TABLE t6 (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, v6 varchar, v7 date, v8 timestamptz, v9 boolean);
 
 statement ok
-CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
+CREATE TABLE t7 ("TEST_V1" int primary key, "TEST_V2" int, "TEST_V3" int);
+
+statement ok
+set sink_decouple = false;
 
 statement ok
 CREATE SINK s6
 FROM
-    mv6 WITH (
+    t6 WITH (
     connector = 'cassandra',
     type = 'append-only',
     force_append_only='true',
@@ -18,7 +27,23 @@ FROM
 );
 
 statement ok
+CREATE SINK s7
+FROM
+    t7 WITH (
+    connector = 'cassandra',
+    type = 'append-only',
+    force_append_only='true',
+    cassandra.url = 'cassandra-server:9042',
+    cassandra.keyspace  = 'demo',
+    cassandra.table = 'Test_uppercase',
+    cassandra.datacenter = 'datacenter1',
+);
+
+statement ok
 INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01+00:00' , false);
+
+statement ok
+INSERT INTO t7 VALUES (1, 1, 1);
 
 statement ok
 FLUSH;
@@ -27,7 +52,27 @@ statement ok
 DROP SINK s6;
 
 statement ok
-DROP MATERIALIZED VIEW mv6;
+DROP TABLE t6;
 
 statement ok
-DROP TABLE t6;
+DROP SINK s7;
+
+statement ok
+DROP TABLE t7;
+
+system ok
+${CASSANDRA_DIR}/bin/cqlsh --request-timeout=20 -e "COPY demo.demo_bhv_table TO './query_result.csv' WITH HEADER = false AND ENCODING = 'UTF-8';"
+
+system ok
+${CASSANDRA_DIR}/bin/cqlsh --request-timeout=20 -e "COPY demo.\"Test_uppercase\" TO './query_result2.csv' WITH HEADER = false AND ENCODING = 'UTF-8';"
+
+system ok
+cat ./query_result.csv
+----
+1,1,1,1.1,1.2,test,2013-01-01,2013-01-01 01:01:01.000+0000,False
+
+
+system ok
+cat ./query_result2.csv
+----
+1,1,1

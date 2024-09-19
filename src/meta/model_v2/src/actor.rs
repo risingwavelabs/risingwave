@@ -56,7 +56,6 @@ pub struct Model {
     pub fragment_id: FragmentId,
     pub status: ActorStatus,
     pub splits: Option<ConnectorSplits>,
-    pub parallel_unit_id: i32,
     pub worker_id: WorkerId,
     pub upstream_actor_ids: ActorUpstreamActors,
     pub vnode_bitmap: Option<VnodeBitmap>,

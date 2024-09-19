@@ -85,9 +85,12 @@ impl MySqlExternalTable {
             .host(&config.host)
             .port(config.port.parse::<u16>().unwrap())
             .database(&config.database)
-            .ssl_mode(match config.sslmode {
+            .ssl_mode(match config.ssl_mode {
                 SslMode::Disabled | SslMode::Preferred => sqlx::mysql::MySqlSslMode::Disabled,
                 SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
+                _ => {
+                    return Err(anyhow!("unsupported SSL mode").into());
+                }
             });
 
         let connection = MySqlPool::connect_with(options).await?;
@@ -106,7 +109,7 @@ impl MySqlExternalTable {
         let mut column_descs = vec![];
         let mut pk_names = vec![];
         for col in columns {
-            let data_type = type_to_rw_type(&col.col_type)?;
+            let data_type = mysql_type_to_rw_type(&col.col_type)?;
             // column name in mysql is case-insensitive, convert to lowercase
             let col_name = col.name.to_lowercase();
             column_descs.push(ColumnDesc::named(
@@ -138,7 +141,57 @@ impl MySqlExternalTable {
     }
 }
 
-fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
+pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
+    macro_rules! column_type {
+        ($($name:literal => $variant:ident),* $(,)?) => {
+            match ty_name.to_lowercase().as_str() {
+                $(
+                    $name => Some(ColumnType::$variant(Default::default())),
+                )*
+                "json" => Some(ColumnType::Json),
+                _ => None,
+            }
+        };
+    }
+
+    column_type! {
+        "bit" => Bit,
+        "tinyint" => TinyInt,
+        "smallint" => SmallInt,
+        "mediumint" => MediumInt,
+        "int" => Int,
+        "bigint" => BigInt,
+        "decimal" => Decimal,
+        "float" => Float,
+        "double" => Double,
+        "time" => Time,
+        "datetime" => DateTime,
+        "timestamp" => Timestamp,
+        "char" => Char,
+        "nchar" => NChar,
+        "varchar" => Varchar,
+        "nvarchar" => NVarchar,
+        "binary" => Binary,
+        "varbinary" => Varbinary,
+        "text" => Text,
+        "tinytext" => TinyText,
+        "mediumtext" => MediumText,
+        "longtext" => LongText,
+        "blob" => Blob,
+        "enum" => Enum,
+        "set" => Set,
+        "geometry" => Geometry,
+        "point" => Point,
+        "linestring" => LineString,
+        "polygon" => Polygon,
+        "multipoint" => MultiPoint,
+        "multilinestring" => MultiLineString,
+        "multipolygon" => MultiPolygon,
+        "geometrycollection" => GeometryCollection,
+    }
+}
+
+pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
     let dtype = match col_type {
         ColumnType::Serial => DataType::Int32,
         ColumnType::Bit(attr) => {
@@ -258,9 +311,10 @@ impl MySqlExternalTableReader {
             .tcp_port(config.port.parse::<u16>().unwrap())
             .db_name(Some(config.database));
 
-        opts_builder = match config.sslmode {
+        opts_builder = match config.ssl_mode {
             SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-            SslMode::Required => {
+            // verify-ca and verify-full are same as required for mysql now
+            SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
                 let ssl_without_verify = mysql_async::SslOpts::default()
                     .with_danger_accept_invalid_certs(true)
                     .with_danger_skip_domain_validation(true);
@@ -479,7 +533,8 @@ mod tests {
             database: "mydb".to_string(),
             schema: "".to_string(),
             table: "part".to_string(),
-            sslmode: Default::default(),
+            ssl_mode: Default::default(),
+            ssl_root_cert: None,
         };
 
         let table = MySqlExternalTable::connect(config).await.unwrap();

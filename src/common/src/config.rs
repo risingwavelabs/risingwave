@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{LfuConfig, LruConfig, S3FifoConfig};
+use foyer::{LfuConfig, LruConfig, RecoverMode, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -33,7 +33,6 @@ use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
 use crate::for_all_params;
-use crate::hash::VirtualNode;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
@@ -222,14 +221,6 @@ pub struct MetaConfig {
     /// version delta need to be manually deleted.
     #[serde(default = "default::meta::enable_hummock_data_archive")]
     pub enable_hummock_data_archive: bool,
-
-    /// If enabled, time travel query is available.
-    #[serde(default = "default::meta::enable_hummock_time_travel")]
-    pub enable_hummock_time_travel: bool,
-
-    /// The data retention period for time travel.
-    #[serde(default = "default::meta::hummock_time_travel_retention_ms")]
-    pub hummock_time_travel_retention_ms: u64,
 
     /// The interval at which a Hummock version snapshot is taken for time travel.
     ///
@@ -435,16 +426,13 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
                     )))
                 }
             }
-            Parallelism::Int(i) => Ok(DefaultParallelism::Default(if i > VirtualNode::COUNT {
-                Err(serde::de::Error::custom(format!(
-                    "default parallelism should be not great than {}",
-                    VirtualNode::COUNT
-                )))?
-            } else {
+            Parallelism::Int(i) => Ok(DefaultParallelism::Default(
+                // Note: we won't check whether this exceeds the maximum parallelism (i.e., vnode count)
+                // here because it requires extra context. The check will be done when scheduling jobs.
                 NonZeroUsize::new(i).ok_or_else(|| {
-                    serde::de::Error::custom("default parallelism should be greater than 0")
-                })?
-            })),
+                    serde::de::Error::custom("default parallelism should not be 0")
+                })?,
+            )),
         }
     }
 }
@@ -474,6 +462,16 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default = "default::developer::max_get_task_probe_times")]
     pub max_get_task_probe_times: usize,
+
+    /// Max number of actor allowed per parallelism (default = 100).
+    /// CREATE MV/Table will be noticed when the number of actors exceeds this limit.
+    #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_soft_limit")]
+    pub actor_cnt_per_worker_parallelism_soft_limit: usize,
+
+    /// Max number of actor allowed per parallelism (default = 400).
+    /// CREATE MV/Table will be rejected when the number of actors exceeds this limit.
+    #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
+    pub actor_cnt_per_worker_parallelism_hard_limit: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -483,8 +481,14 @@ pub struct ServerConfig {
     #[serde(default = "default::server::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
 
+    /// The default number of the connections when connecting to a gRPC server.
+    ///
+    /// For the connections used in streaming or batch exchange, please refer to the entries in
+    /// `[stream.developer]` and `[batch.developer]` sections. This value will be used if they
+    /// are not specified.
     #[serde(default = "default::server::connection_pool_size")]
-    pub connection_pool_size: u16,
+    // Intentionally made private to avoid abuse. Check the related methods on `RwConfig`.
+    connection_pool_size: u16,
 
     /// Used for control the metrics level, similar to log level.
     #[serde(default = "default::server::metrics_level")]
@@ -695,6 +699,9 @@ pub struct StorageConfig {
     #[serde(default)]
     pub prefetch_buffer_capacity_mb: Option<usize>,
 
+    #[serde(default)]
+    pub max_cached_recent_versions_number: Option<usize>,
+
     /// max prefetch block number
     #[serde(default = "default::storage::max_prefetch_block_number")]
     pub max_prefetch_block_number: usize,
@@ -865,6 +872,18 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
 
+    /// Recover mode.
+    ///
+    /// Options:
+    ///
+    /// - "None": Do not recover disk cache.
+    /// - "Quiet": Recover disk cache and skip errors.
+    /// - "Strict": Recover disk cache and panic on errors.
+    ///
+    /// More details, see [`RecoverMode::None`], [`RecoverMode::Quiet`] and [`RecoverMode::Strict`],
+    #[serde(default = "default::file_cache::recover_mode")]
+    pub recover_mode: RecoverMode,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1012,6 +1031,15 @@ pub struct StreamingDeveloperConfig {
     /// Actor tokio metrics is enabled if `enable_actor_tokio_metrics` is set or metrics level >= Debug.
     #[serde(default = "default::developer::enable_actor_tokio_metrics")]
     pub enable_actor_tokio_metrics: bool,
+
+    /// The number of the connections for streaming remote exchange between two nodes.
+    /// If not specified, the value of `server.connection_pool_size` will be used.
+    #[serde(default = "default::developer::stream_exchange_connection_pool_size")]
+    pub exchange_connection_pool_size: Option<u16>,
+
+    /// A flag to allow disabling the auto schema change handling
+    #[serde(default = "default::developer::stream_enable_auto_schema_change")]
+    pub enable_auto_schema_change: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1031,6 +1059,11 @@ pub struct BatchDeveloperConfig {
     /// The size of a chunk produced by `RowSeqScanExecutor`
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
+
+    /// The number of the connections for batch remote exchange between two nodes.
+    /// If not specified, the value of `server.connection_pool_size` will be used.
+    #[serde(default = "default::developer::batch_exchange_connection_pool_size")]
+    exchange_connection_pool_size: Option<u16>,
 }
 
 macro_rules! define_system_config {
@@ -1080,6 +1113,9 @@ pub struct ObjectStoreConfig {
     // TODO: the following field will be deprecated after opendal is stablized
     #[serde(default)]
     pub opendal_writer_abort_on_err: bool,
+
+    #[serde(default = "default::object_store_config::upload_part_size")]
+    pub upload_part_size: usize,
 }
 
 impl ObjectStoreConfig {
@@ -1138,7 +1174,7 @@ pub struct S3ObjectStoreDeveloperConfig {
     )]
     pub retryable_service_error_codes: Vec<String>,
 
-    // TODO: the following field will be deprecated after opendal is stablized
+    // TODO: deprecate this config when we are completely deprecate aws sdk.
     #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
     pub use_opendal: bool,
 }
@@ -1238,7 +1274,7 @@ impl SystemConfig {
         macro_rules! fields {
             ($({ $field:ident, $($rest:tt)* },)*) => {
                 SystemParams {
-                    $($field: self.$field,)*
+                    $($field: self.$field.map(Into::into),)*
                     ..Default::default() // deprecated fields
                 }
             };
@@ -1264,6 +1300,30 @@ impl SystemConfig {
             }
         }
         system_params
+    }
+}
+
+impl RwConfig {
+    pub const fn default_connection_pool_size(&self) -> u16 {
+        self.server.connection_pool_size
+    }
+
+    /// Returns [`StreamingDeveloperConfig::exchange_connection_pool_size`] if set,
+    /// otherwise [`ServerConfig::connection_pool_size`].
+    pub fn streaming_exchange_connection_pool_size(&self) -> u16 {
+        self.streaming
+            .developer
+            .exchange_connection_pool_size
+            .unwrap_or_else(|| self.default_connection_pool_size())
+    }
+
+    /// Returns [`BatchDeveloperConfig::exchange_connection_pool_size`] if set,
+    /// otherwise [`ServerConfig::connection_pool_size`].
+    pub fn batch_exchange_connection_pool_size(&self) -> u16 {
+        self.batch
+            .developer
+            .exchange_connection_pool_size
+            .unwrap_or_else(|| self.default_connection_pool_size())
     }
 }
 
@@ -1301,14 +1361,6 @@ pub mod default {
 
         pub fn enable_hummock_data_archive() -> bool {
             false
-        }
-
-        pub fn enable_hummock_time_travel() -> bool {
-            false
-        }
-
-        pub fn hummock_time_travel_retention_ms() -> u64 {
-            24 * 3600 * 1000
         }
 
         pub fn hummock_time_travel_snapshot_interval() -> u64 {
@@ -1646,6 +1698,8 @@ pub mod default {
     }
 
     pub mod file_cache {
+        use foyer::RecoverMode;
+
         pub fn dir() -> String {
             "".to_string()
         }
@@ -1684,6 +1738,10 @@ pub mod default {
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
             None
+        }
+
+        pub fn recover_mode() -> RecoverMode {
+            RecoverMode::None
         }
     }
 
@@ -1748,6 +1806,12 @@ pub mod default {
             1024
         }
 
+        /// Default to unset to be compatible with the behavior before this config is introduced,
+        /// that is, follow the value of `server.connection_pool_size`.
+        pub fn batch_exchange_connection_pool_size() -> Option<u16> {
+            None
+        }
+
         pub fn stream_enable_executor_row_count() -> bool {
             false
         }
@@ -1804,16 +1868,24 @@ pub mod default {
             5
         }
 
+        pub fn actor_cnt_per_worker_parallelism_soft_limit() -> usize {
+            100
+        }
+
+        pub fn actor_cnt_per_worker_parallelism_hard_limit() -> usize {
+            400
+        }
+
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
 
         pub fn memory_controller_threshold_graceful() -> f64 {
-            0.8
+            0.81
         }
 
         pub fn memory_controller_threshold_stable() -> f64 {
-            0.7
+            0.72
         }
 
         pub fn memory_controller_eviction_factor_aggressive() -> f64 {
@@ -1844,8 +1916,17 @@ pub mod default {
             2048
         }
 
+        /// Default to 1 to be compatible with the behavior before this config is introduced.
+        pub fn stream_exchange_connection_pool_size() -> Option<u16> {
+            Some(1)
+        }
+
         pub fn enable_actor_tokio_metrics() -> bool {
             false
+        }
+
+        pub fn stream_enable_auto_schema_change() -> bool {
+            true
         }
     }
 
@@ -1889,17 +1970,19 @@ pub mod default {
     }
 
     pub mod compaction_config {
-        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
-        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
+        const MB: u64 = 1024 * 1024;
+        const GB: u64 = 1024 * 1024 * 1024;
+        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * GB; // 2GB
+        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * MB; // 128MB
+        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * MB; // 512MB
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
         const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
-        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024;
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * MB;
         // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
-        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
+        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * MB; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
@@ -1908,6 +1991,7 @@ pub mod default {
         const DEFAULT_EMERGENCY_PICKER: bool = true;
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
+        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1977,6 +2061,10 @@ pub mod default {
 
         pub fn max_l0_compact_level_count() -> u32 {
             DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT
+        }
+
+        pub fn sst_allowed_trivial_move_min_size() -> u64 {
+            DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
         }
     }
 
@@ -2072,6 +2160,11 @@ pub mod default {
             8
         }
 
+        pub fn upload_part_size() -> usize {
+            // 16m
+            16 * 1024 * 1024
+        }
+
         pub mod s3 {
             const DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S: u64 = 5;
 
@@ -2098,10 +2191,6 @@ pub mod default {
             }
 
             pub mod developer {
-                use crate::util::env_var::env_var_is_true_or;
-
-                const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
-
                 pub fn retry_unknown_service_error() -> bool {
                     false
                 }
@@ -2111,11 +2200,7 @@ pub mod default {
                 }
 
                 pub fn use_opendal() -> bool {
-                    // TODO: deprecate this config when we are completely switch from aws sdk to opendal.
-                    // The reason why we use !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) here is
-                    // 1. Maintain compatibility so that there is no behavior change in cluster with RW_USE_OPENDAL_FOR_S3 set.
-                    // 2. Change the default behavior to use opendal for s3 if RW_USE_OPENDAL_FOR_S3 is not set.
-                    env_var_is_true_or(RW_USE_OPENDAL_FOR_S3, false)
+                    true
                 }
             }
         }
@@ -2336,12 +2421,14 @@ pub struct CompactionConfig {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_license::LicenseKey;
+
     use super::*;
 
     fn default_config_for_docs() -> RwConfig {
         let mut config = RwConfig::default();
-        // Set `license_key` to empty to avoid showing the test-only license key in the docs.
-        config.system.license_key = Some("".to_owned());
+        // Set `license_key` to empty in the docs to avoid any confusion.
+        config.system.license_key = Some(LicenseKey::empty());
         config
     }
 

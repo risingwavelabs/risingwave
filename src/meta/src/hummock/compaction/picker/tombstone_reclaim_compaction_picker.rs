@@ -14,8 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::InputLevel;
+use risingwave_hummock_sdk::level::{InputLevel, Levels};
 
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::CompactionInput;
@@ -104,11 +103,11 @@ impl TombstoneReclaimCompactionPicker {
                     }
                 };
                 return Some(CompactionInput {
-                    select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+                    select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
                     target_input_size: target_level
                         .table_infos
                         .iter()
-                        .map(|sst| sst.file_size)
+                        .map(|sst| sst.sst_size)
                         .sum(),
                     total_file_count: (select_input_ssts.len() + target_level.table_infos.len())
                         as u64,
@@ -133,8 +132,6 @@ impl TombstoneReclaimCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_pb::hummock::OverlappingLevel;
-
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::create_overlap_strategy;
@@ -143,7 +140,6 @@ pub mod tests {
     #[test]
     fn test_basic() {
         let mut levels = Levels {
-            l0: Some(OverlappingLevel::default()),
             levels: vec![
                 generate_level(1, vec![]),
                 generate_level(

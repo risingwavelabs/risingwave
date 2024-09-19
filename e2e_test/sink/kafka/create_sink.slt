@@ -153,7 +153,7 @@ create sink multiple_pk_throttle from t_kafka with (
     topic = 'test-rw-sink-debezium',
     type = 'debezium',
     primary_key = 'id,v_varchar',
-    streaming_rate_limit = 200
+    backfill_rate_limit = 200
 );
 
 statement ok
@@ -165,7 +165,7 @@ create sink multiple_pk_throttle_1
     topic = 'test-rw-sink-debezium',
     type = 'debezium',
     primary_key = 'id,v_varchar',
-    streaming_rate_limit = 200
+    backfill_rate_limit = 200
 );
 
 statement ok

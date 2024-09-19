@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::util::stream_graph_visitor::visit_fragment;
+use risingwave_common::util::stream_graph_visitor::{visit_fragment, visit_stream_node};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::CreateType;
@@ -81,12 +81,20 @@ impl DdlController {
             .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
+        let id = streaming_job.id();
+        let name = streaming_job.name();
+        let definition = streaming_job.definition();
+        let source_id = match &streaming_job {
+            StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
+            _ => None,
+        };
+
         // create streaming job.
         match self
             .create_streaming_job_inner_v2(
                 mgr,
                 ctx,
-                &mut streaming_job,
+                streaming_job,
                 fragment_graph,
                 affected_table_replace_info,
             )
@@ -94,11 +102,11 @@ impl DdlController {
         {
             Ok(version) => Ok(version),
             Err(err) => {
-                tracing::error!(id = job_id, error = ?err.as_report(), "failed to create streaming job");
+                tracing::error!(id = job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
-                    id: streaming_job.id(),
-                    name: streaming_job.name(),
-                    definition: streaming_job.definition(),
+                    id,
+                    name,
+                    definition,
                     error: err.as_report().to_string(),
                 };
                 self.env.event_log_manager_ref().add_event_logs(vec![
@@ -110,11 +118,10 @@ impl DdlController {
                     .await?;
                 if aborted {
                     tracing::warn!(id = job_id, "aborted streaming job");
-                    match &streaming_job {
-                        StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => {
-                            self.source_manager.unregister_sources(vec![src.id]).await;
-                        }
-                        _ => {}
+                    if let Some(source_id) = source_id {
+                        self.source_manager
+                            .unregister_sources(vec![source_id])
+                            .await;
                     }
                 }
                 Err(err)
@@ -126,12 +133,12 @@ impl DdlController {
         &self,
         mgr: &MetadataManagerV2,
         ctx: StreamContext,
-        streaming_job: &mut StreamingJob,
+        mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
-            StreamFragmentGraph::new(&self.env, fragment_graph, streaming_job).await?;
+            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
         streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
 
@@ -139,7 +146,7 @@ impl DdlController {
         let internal_tables = fragment_graph.internal_tables().into_values().collect_vec();
         let table_id_map = mgr
             .catalog_controller
-            .create_internal_table_catalog(streaming_job.id() as _, internal_tables)
+            .create_internal_table_catalog(&streaming_job, internal_tables)
             .await?;
         fragment_graph.refill_internal_table_ids(table_id_map);
 
@@ -173,6 +180,8 @@ impl DdlController {
             )
             .await?;
 
+        let streaming_job = &ctx.streaming_job;
+
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
                 Self::validate_cdc_table(table, &table_fragments).await?;
@@ -181,13 +190,7 @@ impl DdlController {
                 // Register the source on the connector node.
                 self.source_manager.register_source(source).await?;
             }
-            StreamingJob::Sink(sink, target_table) => {
-                if let Some((StreamingJob::Table(source, table, _), ..)) =
-                    &ctx.replace_table_job_info
-                {
-                    *target_table = Some((table.clone(), source.clone()));
-                }
-
+            StreamingJob::Sink(sink, _) => {
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
             }
@@ -204,50 +207,25 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match (streaming_job.create_type(), streaming_job) {
+        match (streaming_job.create_type(), &streaming_job) {
             (CreateType::Unspecified, _)
             | (CreateType::Foreground, _)
             // FIXME(kwannoel): Unify background stream's creation path with MV below.
             | (CreateType::Background, StreamingJob::Sink(_, _)) => {
-                let replace_table_job_info = ctx.replace_table_job_info.as_ref().map(
-                    |(streaming_job, ctx, table_fragments)| {
-                        (
-                            streaming_job.clone(),
-                            ctx.merge_updates.clone(),
-                            table_fragments.table_id().table_id(),
-                        )
-                    },
-                );
-
-                self.stream_manager
+                let version = self.stream_manager
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
-
-                let version = mgr
-                    .catalog_controller
-                    .finish_streaming_job(stream_job_id as _, replace_table_job_info)
-                    .await?;
-
                 Ok(version)
             }
             (CreateType::Background, _) => {
                 let ctrl = self.clone();
-                let mgr = mgr.clone();
                 let fut = async move {
-                    let result = ctrl
+                    let _ = ctrl
                         .stream_manager
                         .create_streaming_job(table_fragments, ctx)
                         .await.inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
-                    if result.is_ok() {
-                        let _ = mgr
-                            .catalog_controller
-                            .finish_streaming_job(stream_job_id as _, None)
-                            .await.inspect_err(|err| {
-                                tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to finish background streaming job");
-                            });
-                    }
                 };
                 tokio::spawn(fut);
                 Ok(IGNORED_NOTIFICATION_VERSION)
@@ -359,6 +337,7 @@ impl DdlController {
                             None,
                             None,
                             Some(sink_id),
+                            vec![],
                         )
                         .await?;
                     Ok(version)
@@ -465,8 +444,10 @@ impl DdlController {
             .await?;
 
         tracing::debug!(id = streaming_job.id(), "building replace streaming job");
+        let mut updated_sink_catalogs = vec![];
+
         let result: MetaResult<Vec<PbMergeUpdate>> = try {
-            let (ctx, table_fragments) = self
+            let (mut ctx, mut table_fragments) = self
                 .build_replace_table(
                     ctx,
                     &streaming_job,
@@ -475,6 +456,59 @@ impl DdlController {
                     dummy_id as _,
                 )
                 .await?;
+
+            let mut union_fragment_id = None;
+
+            for (fragment_id, fragment) in &mut table_fragments.fragments {
+                for actor in &mut fragment.actors {
+                    if let Some(node) = &mut actor.nodes {
+                        visit_stream_node(node, |body| {
+                            if let NodeBody::Union(_) = body {
+                                if let Some(union_fragment_id) = union_fragment_id.as_mut() {
+                                    // The union fragment should be unique.
+                                    assert_eq!(*union_fragment_id, *fragment_id);
+                                } else {
+                                    union_fragment_id = Some(*fragment_id);
+                                }
+                            }
+                        })
+                    };
+                }
+            }
+
+            let target_fragment_id =
+                union_fragment_id.expect("fragment of placeholder merger not found");
+
+            let catalogs = self
+                .metadata_manager
+                .get_sink_catalog_by_ids(&table.incoming_sinks)
+                .await?;
+
+            for sink in catalogs {
+                let sink_id = &sink.id;
+
+                let sink_table_fragments = self
+                    .metadata_manager
+                    .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(*sink_id))
+                    .await?;
+
+                let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
+
+                Self::inject_replace_table_plan_for_sink(
+                    Some(*sink_id),
+                    &sink_fragment,
+                    table,
+                    &mut ctx,
+                    &mut table_fragments,
+                    target_fragment_id,
+                    Some(&sink.unique_identity()),
+                );
+
+                if sink.original_target_columns.is_empty() {
+                    updated_sink_catalogs.push(sink.id);
+                }
+            }
+
             let merge_updates = ctx.merge_updates.clone();
 
             mgr.catalog_controller
@@ -498,6 +532,7 @@ impl DdlController {
                         table_col_index_mapping,
                         None,
                         None,
+                        updated_sink_catalogs,
                     )
                     .await?;
                 Ok(version)

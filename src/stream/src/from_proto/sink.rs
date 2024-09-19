@@ -19,22 +19,51 @@ use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
-use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{
     SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
+use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
 use crate::common::log_store_impl::kv_log_store::{
     KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
 };
-use crate::executor::SinkExecutor;
+use crate::executor::{SinkExecutor, StreamExecutorError};
+use crate::telemetry::report_event;
 
 pub struct SinkExecutorBuilder;
+
+fn telemetry_sink_build(
+    sink_id: &SinkId,
+    connector_name: &str,
+    sink_format_desc: &Option<SinkFormatDesc>,
+) {
+    let attr = sink_format_desc.as_ref().map(|f| {
+        let mut builder = jsonbb::Builder::<Vec<u8>>::new();
+        builder.begin_object();
+        builder.add_string("format");
+        builder.add_value(jsonbb::ValueRef::String(f.format.to_string().as_str()));
+        builder.add_string("encode");
+        builder.add_value(jsonbb::ValueRef::String(f.encode.to_string().as_str()));
+        builder.end_object();
+        builder.finish()
+    });
+
+    report_event(
+        PbTelemetryEventStage::CreateStreamJob,
+        "sink",
+        sink_id.sink_id() as i64,
+        Some(connector_name.to_string()),
+        Some(PbTelemetryDatabaseObject::Sink),
+        attr,
+    )
+}
 
 fn resolve_pk_info(
     input_schema: &Schema,
@@ -111,7 +140,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
-        let sink_id = sink_desc.get_id().into();
+        let sink_id: SinkId = sink_desc.get_id().into();
         let sink_name = sink_desc.get_name().to_owned();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
@@ -131,7 +160,10 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let connector = {
             let sink_type = properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
-                SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))
+                StreamExecutorError::from((
+                    SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)),
+                    sink_id.sink_id,
+                ))
             })?;
 
             match_sink_name_str!(
@@ -139,19 +171,24 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 SinkType,
                 Ok(SinkType::SINK_NAME),
                 |other| {
-                    Err(SinkError::Config(anyhow!(
-                        "unsupported sink connector {}",
-                        other
+                    Err(StreamExecutorError::from((
+                        SinkError::Config(anyhow!("unsupported sink connector {}", other)),
+                        sink_id.sink_id,
                     )))
                 }
             )
         }?;
         let format_desc = match &sink_desc.format_desc {
             // Case A: new syntax `format ... encode ...`
-            Some(f) => Some(f.clone().try_into()?),
+            Some(f) => Some(
+                f.clone()
+                    .try_into()
+                    .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?,
+            ),
             None => match sink_desc.properties.get(SINK_TYPE_OPTION) {
                 // Case B: old syntax `type = '...'`
-                Some(t) => SinkFormatDesc::from_legacy_type(connector, t)?,
+                Some(t) => SinkFormatDesc::from_legacy_type(connector, t)
+                    .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?,
                 // Case C: no format + encode required
                 None => None,
             },
@@ -160,7 +197,18 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let properties_with_secret =
             LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
 
-        let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)?;
+        let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)
+            .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?;
+
+        let actor_id_str = format!("{}", params.actor_context.id);
+        let sink_id_str = format!("{}", sink_id.sink_id);
+
+        let sink_metrics = params.executor_stats.new_sink_metrics(
+            &actor_id_str,
+            &sink_id_str,
+            &sink_name,
+            connector,
+        );
 
         let sink_param = SinkParam {
             sink_id,
@@ -178,14 +226,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_from_name,
         };
 
-        let sink_id_str = format!("{}", sink_id.sink_id);
-
-        let sink_metrics = params.executor_stats.new_sink_metrics(
-            &params.info.identity,
-            sink_id_str.as_str(),
-            connector,
-        );
-
         let sink_write_param = SinkWriterParam {
             executor_id: params.executor_id,
             vnode_bitmap: params.vnode_bitmap.clone(),
@@ -198,6 +238,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             "sink[{}]-[{}]-executor[{}]",
             connector, sink_id.sink_id, params.executor_id
         );
+
+        telemetry_sink_build(&sink_id, connector, &sink_param.format_desc);
 
         let exec = match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
@@ -221,7 +263,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             SinkLogStoreType::KvLogStore => {
                 let metrics = KvLogStoreMetrics::new(
                     &params.executor_stats,
-                    &params.info.identity,
+                    params.actor_context.id,
                     &sink_param,
                     connector,
                 );

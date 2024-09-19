@@ -306,7 +306,10 @@ where
         self.seal_current().await?;
         try_join_all(self.concurrent_upload_join_handle.into_iter())
             .await
-            .map_err(HummockError::sstable_upload_error)?;
+            .map_err(HummockError::sstable_upload_error)?
+            .into_iter()
+            .collect::<HummockResult<Vec<()>>>()?;
+
         Ok(self.sst_outputs)
     }
 }

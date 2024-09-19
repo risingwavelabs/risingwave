@@ -48,6 +48,10 @@ impl LocalSecretManager {
                 .join(cluster_id)
                 .join(worker_id.to_string());
             std::fs::remove_dir_all(&secret_file_dir).ok();
+
+            // This will cause file creation conflict in simulation tests.
+            // Should skip testing secret files in simulation tests.
+            #[cfg(not(madsim))]
             std::fs::create_dir_all(&secret_file_dir).unwrap();
 
             Self {
@@ -87,7 +91,10 @@ impl LocalSecretManager {
             "Failed to remove secret directory")
             })
             .ok();
+
+        #[cfg(not(madsim))]
         std::fs::create_dir_all(&self.secret_file_dir).unwrap();
+
         for secret in secrets {
             secret_guard.insert(secret.id, secret.value);
         }

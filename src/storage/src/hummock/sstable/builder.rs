@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
-use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::{BloomFilterType, SstableInfo};
+use risingwave_pb::hummock::BloomFilterType;
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -195,12 +195,20 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     ) -> HummockResult<bool> {
         let table_id = smallest_key.user_key.table_id.table_id;
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
+            if !self.block_builder.is_empty() {
+                // Try to finish the previous `Block`` when the `table_id` is switched, making sure that the data in the `Block` doesn't span two `table_ids`.
+                self.build_block().await?;
+            }
+
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
             self.last_table_id = Some(table_id);
         }
+
         if !self.block_builder.is_empty() {
             let min_block_size = std::cmp::min(MIN_BLOCK_SIZE, self.options.block_capacity / 4);
+
+            // If the previous block is too small, we should merge it into the previous block.
             if self.block_builder.approximate_len() < min_block_size {
                 let block = Block::decode(buf, meta.uncompressed_size as usize)?;
                 let mut iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
@@ -217,6 +225,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 }
                 return Ok(false);
             }
+
             self.build_block().await?;
         }
         self.last_full_key = largest_key;
@@ -233,6 +242,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
         self.writer.write_block_bytes(buf, block_meta).await?;
+
         Ok(true)
     }
 
@@ -399,6 +409,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .map(|block_meta| block_meta.uncompressed_size as u64)
             .sum::<u64>();
 
+        #[expect(deprecated)]
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
             bloom_filter,
@@ -437,21 +448,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                     encoded_size_u32, meta_offset_u32, self.last_table_id, self.table_ids
                 )
             });
-
-        // Expand the epoch of the whole sst by tombstone epoch
-        let (tombstone_min_epoch, tombstone_max_epoch) = {
-            let mut tombstone_min_epoch = HummockEpoch::MAX;
-            let mut tombstone_max_epoch = u64::MIN;
-
-            for monotonic_delete in &meta.monotonic_tombstone_events {
-                if !is_max_epoch(monotonic_delete.new_epoch) {
-                    tombstone_min_epoch = cmp::min(tombstone_min_epoch, monotonic_delete.new_epoch);
-                    tombstone_max_epoch = cmp::max(tombstone_max_epoch, monotonic_delete.new_epoch);
-                }
-            }
-
-            (tombstone_min_epoch, tombstone_max_epoch)
-        };
 
         let (avg_key_size, avg_value_size) = if self.table_stats.is_empty() {
             (0, 0)
@@ -498,21 +494,22 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let sst_info = SstableInfo {
             object_id: self.sstable_id,
             sst_id: self.sstable_id,
-            bloom_filter_kind: bloom_filter_kind as i32,
-            key_range: Some(risingwave_pb::hummock::KeyRange {
-                left: meta.smallest_key.clone(),
-                right: meta.largest_key.clone(),
+            bloom_filter_kind,
+            key_range: KeyRange {
+                left: Bytes::from(meta.smallest_key.clone()),
+                right: Bytes::from(meta.largest_key.clone()),
                 right_exclusive,
-            }),
+            },
             file_size: meta.estimated_size as u64,
             table_ids: self.table_ids.into_iter().collect(),
             meta_offset: meta.meta_offset,
             stale_key_count,
             total_key_count,
             uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
-            min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
-            max_epoch: cmp::max(max_epoch, tombstone_max_epoch),
-            range_tombstone_count: meta.monotonic_tombstone_events.len() as u64,
+            min_epoch,
+            max_epoch,
+            range_tombstone_count: 0,
+            sst_size: meta.estimated_size as u64,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
@@ -525,7 +522,22 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.epoch_set.len()
         );
         let bloom_filter_size = meta.bloom_filter.len();
-        let sstable_file_size = sst_info.get_file_size() as usize;
+        let sstable_file_size = sst_info.file_size as usize;
+
+        if !meta.block_metas.is_empty() {
+            // fill total_compressed_size
+            let mut last_table_id = meta.block_metas[0].table_id().table_id();
+            let mut last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
+            for block_meta in &meta.block_metas {
+                let block_table_id = block_meta.table_id();
+                if last_table_id != block_table_id.table_id() {
+                    last_table_id = block_table_id.table_id();
+                    last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
+                }
+
+                last_table_stats.total_compressed_size += block_meta.len as u64;
+            }
+        }
 
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
@@ -715,13 +727,10 @@ pub(super) mod tests {
         let output = b.finish().await.unwrap();
         let info = output.sst_info.sst_info;
 
-        assert_bytes_eq!(
-            test_key_of(0).encode(),
-            info.key_range.as_ref().unwrap().left
-        );
+        assert_bytes_eq!(test_key_of(0).encode(), info.key_range.left);
         assert_bytes_eq!(
             test_key_of(TEST_KEYS_COUNT - 1).encode(),
-            info.key_range.as_ref().unwrap().right
+            info.key_range.right
         );
         let (data, meta) = output.writer_output;
         assert_eq!(info.file_size, meta.estimated_size as u64);

@@ -17,13 +17,13 @@ normal = ["workspace-hack"]
 anyhow = "1"
 async-trait = "0.1"
 easy-ext = "1"
-either = "1.12.0"
+either = "1.13.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-http = "0.2"
-hyper = "0.14" # required by tonic
+http = "1"
+hyper = "1"
 itertools = { workspace = true }
 lru = { workspace = true }
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12.0", features = ["future"] }
 paste = "1"
 rand = { workspace = true }
 risingwave_common = { workspace = true }
@@ -43,7 +43,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-retry = "0.3"
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tower = "0.4"
 tracing = "0.1"

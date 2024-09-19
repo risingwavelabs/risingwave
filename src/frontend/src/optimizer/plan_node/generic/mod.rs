@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module contains the generic plan nodes that are shared by all the plan nodes.
+//! They are meant to reuse the common fields between logical, batch and stream nodes.
+
 use std::borrow::Cow;
 use std::hash::Hash;
 

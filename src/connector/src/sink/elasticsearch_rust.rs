@@ -20,11 +20,9 @@ use futures::prelude::TryFuture;
 use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_json::Value;
 use tonic::async_trait;
 
-use super::catalog::desc::SinkDesc;
 use super::elasticsearch_opensearch_common::{
     validate_config, ElasticSearchOpenSearchConfig, ElasticSearchOpenSearchFormatter,
 };
@@ -67,13 +65,6 @@ impl Sink for ElasticSearchSink {
     type LogSinker = AsyncTruncateLogSinkerOf<ElasticSearchSinkWriter>;
 
     const SINK_NAME: &'static str = ES_SINK;
-
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         validate_config(&self.config, &self.schema)?;

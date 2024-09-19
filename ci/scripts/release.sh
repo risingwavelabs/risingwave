@@ -71,9 +71,15 @@ if [ "${ARCH}" == "aarch64" ]; then
   # see https://github.com/tikv/jemallocator/blob/802969384ae0c581255f3375ee2ba774c8d2a754/jemalloc-sys/build.rs#L218
   export JEMALLOC_SYS_WITH_LG_PAGE=16
 fi
-OPENSSL_STATIC=1 cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --profile release
-OPENSSL_STATIC=1 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
-cd target/release && chmod +x risingwave risectl
+
+configure_static_openssl
+
+cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --profile production
+cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile production
+
+check_link_info production
+
+cd target/production && chmod +x risingwave risectl
 
 echo "--- Upload nightly binary to s3"
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
@@ -90,7 +96,7 @@ cd "${REPO_ROOT}"/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   echo "--- Collect all release assets"
   cd "${REPO_ROOT}" && mkdir release-assets && cd release-assets
-  cp -r "${REPO_ROOT}"/target/release/* .
+  cp -r "${REPO_ROOT}"/target/production/* .
   mv "${REPO_ROOT}"/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
   tar -zxvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz libs
   ls -l

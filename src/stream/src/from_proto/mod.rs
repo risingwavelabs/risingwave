@@ -16,6 +16,7 @@
 
 mod agg_common;
 mod append_only_dedup;
+mod asof_join;
 mod barrier_recv;
 mod batch_query;
 mod cdc_filter;
@@ -53,6 +54,10 @@ mod union;
 mod values;
 mod watermark_filter;
 
+mod row_merge;
+
+mod approx_percentile;
+
 // import for submodules
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -60,6 +65,8 @@ use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
 use risingwave_storage::StateStore;
 
 use self::append_only_dedup::*;
+use self::approx_percentile::global::*;
+use self::approx_percentile::local::*;
 use self::barrier_recv::*;
 use self::batch_query::*;
 use self::cdc_filter::CdcFilterExecutorBuilder;
@@ -74,7 +81,7 @@ use self::hash_join::*;
 use self::hop_window::*;
 use self::lookup::*;
 use self::lookup_union::*;
-use self::merge::*;
+pub(crate) use self::merge::MergeExecutorBuilder;
 use self::mview::*;
 use self::no_op::*;
 use self::now::NowExecutorBuilder;
@@ -82,6 +89,7 @@ use self::over_window::*;
 use self::project::*;
 use self::project_set::*;
 use self::row_id_gen::RowIdGenExecutorBuilder;
+use self::row_merge::*;
 use self::simple_agg::*;
 use self::sink::*;
 use self::sort::*;
@@ -175,5 +183,8 @@ pub async fn create_executor(
         NodeBody::StreamFsFetch => FsFetchExecutorBuilder,
         NodeBody::SourceBackfill => SourceBackfillExecutorBuilder,
         NodeBody::Changelog => ChangeLogExecutorBuilder,
+        NodeBody::GlobalApproxPercentile => GlobalApproxPercentileExecutorBuilder,
+        NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
+        NodeBody::RowMerge => RowMergeExecutorBuilder,
     }
 }

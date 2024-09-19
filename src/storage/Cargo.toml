@@ -36,7 +36,7 @@ libc = "0.2"
 lz4 = "1.25.0"
 memcomparable = "0.2"
 metrics-prometheus = "0.7"
-moka = { version = "0.12", features = ["future", "sync"] }
+moka = { version = "0.12.0", features = ["future", "sync"] }
 more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = { workspace = true }
@@ -96,7 +96,7 @@ workspace-hack = { path = "../workspace-hack" }
 bincode = "1"
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
-risingwave_hummock_sdk = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
@@ -106,7 +106,7 @@ fiemap = "0.1.1"
 [features]
 # rocksdb-local = ["rocksdb"]
 # tikv = ["tikv-client"]
-test = []
+test = ["risingwave_hummock_sdk/test"]
 failpoints = ["fail/failpoints"]
 bpf = []
 hm-trace = []

@@ -188,6 +188,9 @@ impl DorisSink {
             risingwave_common::types::DataType::Int256 => {
                 Err(SinkError::Doris("doris can not support Int256".to_string()))
             }
+            risingwave_common::types::DataType::Map(_) => {
+                Err(SinkError::Doris("doris can not support Map".to_string()))
+            }
         }
     }
 }
@@ -268,11 +271,11 @@ impl DorisSinkWriter {
             .build_get_client()
             .get_schema_from_doris()
             .await?;
-        doris_schema.properties.iter().for_each(|s| {
-            if let Some(v) = s.get_decimal_pre_scale() {
+        for s in &doris_schema.properties {
+            if let Some(v) = s.get_decimal_pre_scale()? {
                 decimal_map.insert(s.name.clone(), v);
             }
-        });
+        }
 
         let header_builder = HeaderBuilder::new()
             .add_common_header()
@@ -491,11 +494,27 @@ pub struct DorisField {
     aggregation_type: String,
 }
 impl DorisField {
-    pub fn get_decimal_pre_scale(&self) -> Option<u8> {
+    pub fn get_decimal_pre_scale(&self) -> Result<Option<u8>> {
         if self.r#type.contains("DECIMAL") {
-            Some(self.scale.clone().unwrap().parse::<u8>().unwrap())
+            let scale = self
+                .scale
+                .as_ref()
+                .ok_or_else(|| {
+                    SinkError::Doris(format!(
+                        "In doris, the type of {} is DECIMAL, but `scale` is not found",
+                        self.name
+                    ))
+                })?
+                .parse::<u8>()
+                .map_err(|err| {
+                    SinkError::Doris(format!(
+                        "Unable to convert decimal's scale to u8. error: {:?}",
+                        err.kind()
+                    ))
+                })?;
+            Ok(Some(scale))
         } else {
-            None
+            Ok(None)
         }
     }
 }

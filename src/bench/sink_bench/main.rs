@@ -31,10 +31,12 @@ use futures::stream::select_with_strategy;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use plotlib::page::Page;
-use plotlib::repr::Plot;
-use plotlib::style::{LineJoin, LineStyle};
-use plotlib::view::ContinuousView;
+use plotters::backend::SVGBackend;
+use plotters::chart::ChartBuilder;
+use plotters::drawing::IntoDrawingArea;
+use plotters::element::{Circle, EmptyElement};
+use plotters::series::{LineSeries, PointSeries};
+use plotters::style::{IntoFont, RED, WHITE};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnId;
 use risingwave_connector::dispatch_sink;
@@ -215,34 +217,48 @@ impl ThroughputMetric {
         println!("p90: {:?} rows/s ", p90);
         println!("p95: {:?} rows/s ", p95);
         println!("p99: {:?} rows/s ", p99);
-        let draw_vec: Vec<(f64, f64)> = throughput_vec
+        let draw_vec: Vec<(f32, f32)> = throughput_vec
             .iter()
             .enumerate()
             .map(|(index, &value)| {
                 (
-                    (index as f64) * (THROUGHPUT_METRIC_RECORD_INTERVAL as f64 / 1000_f64),
-                    value as f64,
+                    (index as f32) * (THROUGHPUT_METRIC_RECORD_INTERVAL as f32 / 1000_f32),
+                    value as f32,
                 )
             })
             .collect();
 
-        let s1: Plot = Plot::new(draw_vec).line_style(
-            LineStyle::new()
-                .colour("burlywood")
-                .linejoin(LineJoin::Round),
-        );
-
-        let v = ContinuousView::new()
-            .add(s1)
-            .x_range(0.0, BENCH_TIME as f64)
-            .y_range(
-                **throughput_vec_sorted.first().unwrap() as f64,
-                **throughput_vec_sorted.last().unwrap() as f64,
+        let root = SVGBackend::new("throughput.svg", (640, 480)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root.margin(10, 10, 10, 10);
+        let mut chart = ChartBuilder::on(&root)
+            .caption("Throughput Sink", ("sans-serif", 40).into_font())
+            .x_label_area_size(20)
+            .y_label_area_size(40)
+            .build_cartesian_2d(
+                0.0..BENCH_TIME as f32,
+                **throughput_vec_sorted.first().unwrap() as f32
+                    ..**throughput_vec_sorted.last().unwrap() as f32,
             )
-            .x_label("Time (s)")
-            .y_label("Throughput (rows/s)");
+            .unwrap();
 
-        Page::single(&v).save("throughput.svg").unwrap();
+        chart
+            .configure_mesh()
+            .x_labels(5)
+            .y_labels(5)
+            .y_label_formatter(&|x| format!("{:.0}", x))
+            .draw()
+            .unwrap();
+
+        chart
+            .draw_series(LineSeries::new(draw_vec.clone(), &RED))
+            .unwrap();
+        chart
+            .draw_series(PointSeries::of_element(draw_vec, 5, &RED, &|c, s, st| {
+                EmptyElement::at(c) + Circle::new((0, 0), s, st.filled())
+            }))
+            .unwrap();
+        root.present().unwrap();
 
         println!(
             "Throughput Sink: {:?}",
@@ -533,7 +549,7 @@ async fn main() {
         println!("Start Sink Bench!, Wait {:?}s", BENCH_TIME);
         tokio::spawn(async move {
             dispatch_sink!(sink, sink, {
-                consume_log_stream(sink, mock_range_log_reader, sink_writer_param).boxed()
+                consume_log_stream(*sink, mock_range_log_reader, sink_writer_param).boxed()
             })
             .await
             .unwrap();

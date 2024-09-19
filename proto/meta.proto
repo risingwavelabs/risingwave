@@ -65,8 +65,8 @@ message TableFragments {
       // Running normally
       RUNNING = 2;
     }
-    // Current on which parallel unit
-    common.ParallelUnit parallel_unit = 1;
+    // Current on which worker
+    common.ActorLocation location = 1;
     // Current state
     ActorState state = 2;
   }
@@ -81,9 +81,13 @@ message TableFragments {
     uint32 fragment_type_mask = 2;
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
+
+    // NOTE: vnode_mapping is deprecated, we will generate the vnode_mapping by actors' bitmaps
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
     // This field is always set to `Some`. For singleton, the parallel unit for all vnodes will be the same.
-    common.ParallelUnitMapping vnode_mapping = 5;
+    reserved 5;
+    reserved "vnode_mapping";
+
     repeated uint32 state_table_ids = 6;
     // Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
     // but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,
@@ -95,20 +99,18 @@ message TableFragments {
   State state = 2;
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
   stream_plan.StreamContext ctx = 6;
   TableParallelism parallelism = 7;
-}
 
-/// Parallel unit mapping with fragment id, used for notification.
-message FragmentParallelUnitMapping {
-  uint32 fragment_id = 1;
-  common.ParallelUnitMapping mapping = 2;
-}
+  // Actors of a materialize view, sink, or table can only be scheduled on nodes with matching node_label.
+  string node_label = 8;
 
-message FragmentParallelUnitMappings {
-  repeated FragmentParallelUnitMapping mappings = 1;
+  // If this is a materialized view: True if backfill is done, else false.
+  // If this is a regular table: Always true.
+  bool backfill_done = 9;
 }
 
 /// Worker slot mapping with fragment id, used for notification.
@@ -128,8 +130,13 @@ message ActorLocation {
 }
 
 message MigrationPlan {
+  // NOTE: parallel_unit_migration_plan is deprecated, using worker_slot_migration_plan instead
   // map<parallel_unit_id, parallel_unit>, the plan indicates that the actors will be migrated from old parallel unit to the new one.
-  map<uint32, common.ParallelUnit> parallel_unit_migration_plan = 1;
+  reserved 1;
+  reserved "parallel_unit_migration_plan";
+
+  // map<src_worker_slot_id, dst_worker_slot_id>, the plan indicates that the actors will be migrated from old worker_slot to the new one.
+  map<uint64, uint64> worker_slot_migration_plan = 2;
 }
 
 message FlushRequest {
@@ -244,8 +251,10 @@ message ListActorStatesResponse {
   message ActorState {
     uint32 actor_id = 1;
     uint32 fragment_id = 2;
-    uint32 parallel_unit_id = 3;
+    reserved 3;
+    reserved "parallel_unit_id";
     TableFragments.ActorStatus.ActorState state = 4;
+    uint32 worker_id = 5;
   }
   repeated ActorState states = 1;
 }
@@ -265,6 +274,7 @@ enum ThrottleTarget {
   SOURCE = 1;
   MV = 2;
   TABLE_WITH_SOURCE = 3;
+  CDC_TABLE = 4;
 }
 
 message ApplyThrottleRequest {
@@ -303,6 +313,8 @@ message AddWorkerNodeRequest {
     bool is_streaming = 2;
     bool is_serving = 3;
     bool is_unschedulable = 4;
+    // This is used for frontend node to register its rpc address
+    string internal_rpc_host_addr = 5;
   }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
@@ -312,9 +324,6 @@ message AddWorkerNodeRequest {
 }
 
 message AddWorkerNodeResponse {
-  reserved 3;
-  reserved "system_params";
-  common.Status status = 1;
   optional uint32 node_id = 2;
   string cluster_id = 4;
 }
@@ -465,7 +474,10 @@ message SubscribeResponse {
   }
   common.Status status = 1;
   Operation operation = 2;
+
+  // Catalog version
   uint64 version = 3;
+
   oneof info {
     catalog.Database database = 4;
     catalog.Schema schema = 5;
@@ -502,21 +514,25 @@ message GetClusterInfoRequest {}
 message GetClusterInfoResponse {
   repeated common.WorkerNode worker_nodes = 1;
   repeated TableFragments table_fragments = 2;
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 3;
   map<uint32, catalog.Source> source_infos = 4;
   uint64 revision = 5;
 }
 
-message Reschedule {
-  repeated uint32 added_parallel_units = 1;
-  repeated uint32 removed_parallel_units = 2;
+// For each fragment that needs to be rescheduled, there will be a WorkerReschedule,
+// indicating on which workers the actors of this fragment need to be changed and by how many.
+message WorkerReschedule {
+  // worker_id -> actor_diff
+  map<uint32, int32> worker_actor_diff = 1;
 }
 
 message RescheduleRequest {
-  // reschedule plan for each fragment
-  map<uint32, Reschedule> reschedules = 1;
+  reserved "reschedules";
+  reserved 1;
   uint64 revision = 2;
   bool resolve_no_shuffle_upstream = 3;
+  map<uint32, WorkerReschedule> worker_reschedules = 4;
 }
 
 message RescheduleResponse {
@@ -544,9 +560,38 @@ message TableParallelism {
   }
 }
 
+// Changes a streaming job in place by overwriting its node_label.
+// This may cause the re-scheduling of the streaming job actors.
+message UpdateStreamingJobNodeLabelsRequest {
+  // Id of the materialized view, table, or sink which we want to update
+  uint32 id = 1;
+
+  // replace the node_label of the streaming job with a given id with below value
+  string node_label = 2;
+}
+
+// We do not need to add an explicit status field here, we can just use the RPC status
+message UpdateStreamingJobNodeLabelsResponse {}
+
+message GetServerlessStreamingJobsStatusRequest {}
+
+// Descriptions of MVs and sinks
+message GetServerlessStreamingJobsStatusResponse {
+  message Status {
+    uint32 table_id = 1;
+    string node_label = 2;
+    bool backfill_done = 3;
+  }
+
+  repeated Status streaming_job_statuses = 1;
+}
+
+// This is used by `risectl`
 service ScaleService {
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
+  rpc UpdateStreamingJobNodeLabels(UpdateStreamingJobNodeLabelsRequest) returns (UpdateStreamingJobNodeLabelsResponse);
+  rpc GetServerlessStreamingJobsStatus(GetServerlessStreamingJobsStatusRequest) returns (GetServerlessStreamingJobsStatusResponse);
 }
 
 message MembersRequest {}
@@ -588,6 +633,7 @@ message SystemParams {
   optional bool enable_tracing = 15;
   optional bool use_new_object_prefix_strategy = 16;
   optional string license_key = 17;
+  optional uint64 time_travel_retention_ms = 18;
 }
 
 message GetSystemParamsRequest {}
@@ -687,6 +733,12 @@ message EventLog {
     common.HostAddress host_addr = 3;
     string panic_info = 4;
   }
+  message EventAutoSchemaChangeFail {
+    uint32 table_id = 1;
+    string table_name = 2;
+    string cdc_table_id = 3;
+    string upstream_ddl = 4;
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -699,6 +751,7 @@ message EventLog {
     EventInjectBarrierFail inject_barrier_fail = 7;
     EventCollectBarrierFail collect_barrier_fail = 8;
     EventLog.EventWorkerNodePanic worker_node_panic = 9;
+    EventLog.EventAutoSchemaChangeFail auto_schema_change_fail = 10;
   }
 }
 
@@ -720,4 +773,48 @@ message AddEventLogResponse {}
 service EventLogService {
   rpc ListEventLog(ListEventLogRequest) returns (ListEventLogResponse);
   rpc AddEventLog(AddEventLogRequest) returns (AddEventLogResponse);
+}
+
+message ActorIds {
+  repeated uint32 ids = 1;
+}
+
+message FragmentIdToActorIdMap {
+  map<uint32, ActorIds> map = 1;
+}
+
+/// Provides all the ids: relation_id, fragment_id, actor_id
+/// in an hierarchical format.
+/// relation_id -> [fragment_id]
+/// fragment_id -> [actor_id]
+message RelationIdInfos {
+  // relation_id -> FragmentIdToActorIdMap
+  map<uint32, FragmentIdToActorIdMap> map = 1;
+}
+
+message ActorCountPerParallelism {
+  message WorkerActorCount {
+    uint64 actor_count = 1;
+    uint64 parallelism = 2;
+  }
+  map<uint32, WorkerActorCount> worker_id_to_actor_count = 1;
+  uint64 hard_limit = 2;
+  uint64 soft_limit = 3;
+}
+
+message ClusterLimit {
+  oneof limit {
+    ActorCountPerParallelism actor_count = 1;
+    // TODO: limit DDL using compaction pending bytes
+  }
+}
+
+message GetClusterLimitsRequest {}
+
+message GetClusterLimitsResponse {
+  repeated ClusterLimit active_limits = 1;
+}
+
+service ClusterLimitService {
+  rpc GetClusterLimits(GetClusterLimitsRequest) returns (GetClusterLimitsResponse);
 }

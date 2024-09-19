@@ -14,8 +14,11 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::hash;
+use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
@@ -24,15 +27,23 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
-    view, worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping,
-    I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
+    view, ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId,
+    SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
 };
-use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
-use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping};
+use risingwave_pb::catalog::{
+    PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
+};
+use risingwave_pb::meta::relation::PbRelationInfo;
+use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
+use risingwave_pb::meta::{
+    FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
+use risingwave_sqlparser::ast::Statement as SqlStatement;
+use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
     WithClause,
@@ -41,10 +52,9 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DerivePartialModel, EntityTrait, FromQueryResult, JoinType,
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
+use thiserror_ext::AsReport;
 
-use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
-
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
 ///
 /// # Examples
@@ -220,7 +230,7 @@ pub fn construct_sink_cycle_check_query(
         .to_owned()
 }
 
-#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[derive(Clone, DerivePartialModel, FromQueryResult, Debug)]
 #[sea_orm(entity = "Object")]
 pub struct PartialObject {
     pub oid: ObjectId,
@@ -242,7 +252,7 @@ pub struct PartialFragmentStateTables {
 pub struct PartialActorLocation {
     pub actor_id: ActorId,
     pub fragment_id: FragmentId,
-    pub parallel_unit_id: i32,
+    pub worker_id: WorkerId,
     pub status: ActorStatus,
 }
 
@@ -842,46 +852,109 @@ pub async fn get_fragment_mappings<C>(
 where
     C: ConnectionTrait,
 {
-    let parallel_unit_to_worker = get_parallel_unit_to_worker_map(db).await?;
-
-    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+    let job_actors: Vec<(
+        FragmentId,
+        DistributionType,
+        ActorId,
+        Option<VnodeBitmap>,
+        WorkerId,
+        ActorStatus,
+    )> = Actor::find()
         .select_only()
-        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::DistributionType,
+        ])
+        .columns([
+            actor::Column::ActorId,
+            actor::Column::VnodeBitmap,
+            actor::Column::WorkerId,
+            actor::Column::Status,
+        ])
+        .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
         .filter(fragment::Column::JobId.eq(job_id))
         .into_tuple()
         .all(db)
         .await?;
 
-    CatalogController::convert_fragment_mappings(fragment_mappings, &parallel_unit_to_worker)
+    Ok(rebuild_fragment_mapping_from_actors(job_actors))
 }
 
-/// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
-pub async fn get_fragment_mappings_by_jobs<C>(
-    db: &C,
-    job_ids: Vec<ObjectId>,
-) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
-where
-    C: ConnectionTrait,
-{
-    if job_ids.is_empty() {
-        return Ok(vec![]);
+pub fn rebuild_fragment_mapping_from_actors(
+    job_actors: Vec<(
+        FragmentId,
+        DistributionType,
+        ActorId,
+        Option<VnodeBitmap>,
+        WorkerId,
+        ActorStatus,
+    )>,
+) -> Vec<FragmentWorkerSlotMapping> {
+    let mut all_actor_locations = HashMap::new();
+    let mut actor_bitmaps = HashMap::new();
+    let mut fragment_actors = HashMap::new();
+    let mut fragment_dist = HashMap::new();
+
+    for (fragment_id, dist, actor_id, bitmap, worker_id, actor_status) in job_actors {
+        if actor_status == ActorStatus::Inactive {
+            continue;
+        }
+
+        all_actor_locations
+            .entry(fragment_id)
+            .or_insert(HashMap::new())
+            .insert(actor_id as hash::ActorId, worker_id as u32);
+        actor_bitmaps.insert(actor_id, bitmap);
+        fragment_actors
+            .entry(fragment_id)
+            .or_insert_with(Vec::new)
+            .push(actor_id);
+        fragment_dist.insert(fragment_id, dist);
     }
 
-    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
-        .select_only()
-        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
-        .filter(fragment::Column::JobId.is_in(job_ids))
-        .into_tuple()
-        .all(db)
-        .await?;
+    let mut result = vec![];
+    for (fragment_id, dist) in fragment_dist {
+        let mut actor_locations = all_actor_locations.remove(&fragment_id).unwrap();
+        let fragment_worker_slot_mapping = match dist {
+            DistributionType::Single => {
+                let actor = fragment_actors
+                    .remove(&fragment_id)
+                    .unwrap()
+                    .into_iter()
+                    .exactly_one()
+                    .unwrap() as hash::ActorId;
+                let actor_location = actor_locations.remove(&actor).unwrap();
 
-    Ok(fragment_mappings
-        .into_iter()
-        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
-            fragment_id: fragment_id as _,
-            mapping: Some(mapping.to_protobuf()),
+                WorkerSlotMapping::new_single(WorkerSlotId::new(actor_location, 0))
+            }
+            DistributionType::Hash => {
+                let actors = fragment_actors.remove(&fragment_id).unwrap();
+
+                let all_actor_bitmaps: HashMap<_, _> = actors
+                    .iter()
+                    .map(|actor_id| {
+                        let vnode_bitmap = actor_bitmaps
+                            .remove(actor_id)
+                            .flatten()
+                            .expect("actor bitmap shouldn't be none in hash fragment");
+
+                        let bitmap = Bitmap::from(&vnode_bitmap.to_protobuf());
+                        (*actor_id as hash::ActorId, bitmap)
+                    })
+                    .collect();
+
+                let actor_mapping = ActorMapping::from_bitmaps(&all_actor_bitmaps);
+
+                actor_mapping.to_worker_slot(&actor_locations)
+            }
+        };
+
+        result.push(PbFragmentWorkerSlotMapping {
+            fragment_id: fragment_id as u32,
+            mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
         })
-        .collect())
+    }
+    result
 }
 
 pub async fn get_fragment_ids_by_jobs<C>(
@@ -1000,29 +1073,91 @@ where
     ))
 }
 
-pub(crate) async fn get_parallel_unit_to_worker_map<C>(db: &C) -> MetaResult<HashMap<u32, u32>>
-where
-    C: ConnectionTrait,
-{
-    let worker_parallel_units = WorkerProperty::find()
-        .select_only()
-        .columns([
-            worker_property::Column::WorkerId,
-            worker_property::Column::ParallelUnitIds,
-        ])
-        .into_tuple::<(WorkerId, I32Array)>()
-        .all(db)
-        .await?;
+pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> NotificationInfo {
+    let mut relations = vec![];
+    for obj in relation_objects {
+        match obj.obj_type {
+            ObjectType::Table => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Table(PbTable {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Source => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Source(PbSource {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Sink => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Sink(PbSink {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Subscription => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Subscription(PbSubscription {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::View => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::View(PbView {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Index => {
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Index(PbIndex {
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
+                        ..Default::default()
+                    })),
+                });
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Table(PbTable {
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
+                        ..Default::default()
+                    })),
+                });
+            }
+            _ => unreachable!("only relations will be dropped."),
+        }
+    }
+    NotificationInfo::RelationGroup(PbRelationGroup { relations })
+}
 
-    let parallel_unit_to_worker = worker_parallel_units
-        .into_iter()
-        .flat_map(|(worker_id, parallel_unit_ids)| {
-            parallel_unit_ids
-                .into_inner()
-                .into_iter()
-                .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
+pub fn extract_external_table_name_from_definition(table_definition: &str) -> Option<String> {
+    let [mut definition]: [_; 1] = Parser::parse_sql(table_definition)
+        .context("unable to parse table definition")
+        .inspect_err(|e| {
+            tracing::error!(
+                target: "auto_schema_change",
+                error = %e.as_report(),
+                "failed to parse table definition")
         })
-        .collect::<HashMap<_, _>>();
-
-    Ok(parallel_unit_to_worker)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    if let SqlStatement::CreateTable { cdc_table_info, .. } = &mut definition {
+        cdc_table_info
+            .clone()
+            .map(|cdc_table_info| cdc_table_info.external_table_name)
+    } else {
+        None
+    }
 }

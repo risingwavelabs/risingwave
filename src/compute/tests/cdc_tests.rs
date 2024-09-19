@@ -43,6 +43,7 @@ use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_stream::common::table::state_table::StateTable;
+use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
@@ -79,6 +80,8 @@ impl MockOffsetGenExecutor {
                 lsn: None,
                 txid: None,
                 tx_usec: None,
+                change_lsn: None,
+                commit_lsn: None,
             },
             is_heartbeat: false,
         };
@@ -209,12 +212,16 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         ColumnDesc::unnamed(ColumnId::from(4), state_schema[4].data_type.clone()),
     ];
 
-    let state_table = StateTable::new_without_distribution(
+    let state_table = StateTable::from_table_catalog(
+        &gen_pbtable(
+            TableId::from(0x42),
+            column_descs,
+            vec![OrderType::ascending()],
+            vec![0],
+            0,
+        ),
         memory_state_store.clone(),
-        TableId::from(0x42),
-        column_descs.clone(),
-        vec![OrderType::ascending()],
-        vec![0_usize],
+        None,
     )
     .await;
 
@@ -311,6 +318,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             added_actors: HashSet::new(),
             splits,
             pause: false,
+            subscriptions_to_add: vec![],
         }));
 
     tx.send_barrier(init_barrier);

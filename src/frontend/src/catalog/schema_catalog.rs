@@ -168,10 +168,7 @@ impl SchemaCatalog {
     pub fn create_index(&mut self, prost: &PbIndex) {
         let name = prost.name.clone();
         let id = prost.id.into();
-
-        let index_table = self
-            .get_created_table_by_id(&prost.index_table_id.into())
-            .unwrap();
+        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
         let primary_table = self
             .get_created_table_by_id(&prost.primary_table_id.into())
             .unwrap();

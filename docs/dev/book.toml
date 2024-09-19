@@ -11,5 +11,6 @@ smart-punctuation = true
 git-repository-url = "https://github.com/risingwavelabs/risingwave/tree/main/docs/dev/src"
 edit-url-template = "https://github.com/risingwavelabs/risingwave/edit/main/docs/dev/{path}"
 search.use-boolean-and = true
+mathjax-support = true
 
 [output.linkcheck]

@@ -23,7 +23,7 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common_estimate_size::EstimateSize;
 use smallvec::SmallVec;
 
-use crate::common::cache::{StateCache, StateCacheFiller};
+use crate::common::state_cache::{StateCache, StateCacheFiller};
 
 /// Cache key type.
 type CacheKey = MemcmpEncoded;

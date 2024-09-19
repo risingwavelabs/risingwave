@@ -19,7 +19,7 @@ use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
-use strum::EnumDiscriminants;
+use strum::{EnumDiscriminants, EnumIs};
 
 use super::{get_refed_secret_ids_from_sink, get_refed_secret_ids_from_source};
 use crate::model::FragmentId;
@@ -27,7 +27,7 @@ use crate::MetaResult;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug, Clone, EnumDiscriminants)]
+#[derive(Debug, Clone, EnumDiscriminants, EnumIs)]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),
@@ -238,6 +238,16 @@ impl StreamingJob {
             StreamingJob::Table(_, table, ..) => table.owner,
             StreamingJob::Index(index, _) => index.owner,
             StreamingJob::Source(source) => source.owner,
+        }
+    }
+
+    pub fn job_type_str(&self) -> &'static str {
+        match self {
+            StreamingJob::MaterializedView(_) => "materialized view",
+            StreamingJob::Sink(_, _) => "sink",
+            StreamingJob::Table(_, _, _) => "table",
+            StreamingJob::Index(_, _) => "index",
+            StreamingJob::Source(_) => "source",
         }
     }
 

@@ -35,8 +35,11 @@ enum WorkerType {
   WORKER_TYPE_META = 5;
 }
 
-message ParallelUnit {
-  uint32 id = 1;
+// renamed from `ParallelUnit`
+message ActorLocation {
+  // previous `id` field for parallel unit id is deprecated.
+  reserved "id";
+  reserved 1;
   uint32 worker_node_id = 2;
 }
 
@@ -51,6 +54,8 @@ message WorkerNode {
     bool is_streaming = 1;
     bool is_serving = 2;
     bool is_unschedulable = 3;
+    // This is used for frontend node to register its rpc address
+    string internal_rpc_host_addr = 4;
   }
   message Resource {
     string rw_version = 1;
@@ -61,8 +66,10 @@ message WorkerNode {
   WorkerType type = 2;
   HostAddress host = 3;
   State state = 4;
-  // TODO #8940 `parallel_units` should be moved into `Property`
-  repeated ParallelUnit parallel_units = 5;
+
+  reserved 5;
+  reserved "parallel_units";
+
   Property property = 6;
 
   // Ranges from 0 to 1023, used to generate the machine ID field in the global unique ID.
@@ -75,6 +82,12 @@ message WorkerNode {
   // It's populated by meta node, when the worker node is added by meta node.
   // It's not persistent in meta store.
   optional uint64 started_at = 9;
+
+  uint32 parallelism = 10;
+
+  // Meta may assign labels to worker nodes to partition workload by label.
+  // This is used for serverless backfilling of materialized views.
+  string node_label = 11;
 }
 
 message Buffer {
@@ -84,12 +97,6 @@ message Buffer {
   }
   CompressionType compression = 1;
   bytes body = 2;
-}
-
-// Vnode mapping for stream fragments. Stores mapping from virtual node to parallel unit id.
-message ParallelUnitMapping {
-  repeated uint32 original_indices = 1;
-  repeated uint32 data = 2;
 }
 
 // Vnode mapping for stream fragments. Stores mapping from virtual node to (worker id, slot index).

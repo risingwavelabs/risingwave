@@ -25,18 +25,19 @@ use bytes::Bytes;
 use foyer::CacheContext;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
-use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
-use super::{HummockError, HummockResult};
+use super::{HummockError, SstableStoreRef};
 use crate::error::StorageResult;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
+use crate::monitor::MemoryCollector;
 use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead};
 
 pub fn range_overlap<R, B>(
@@ -70,52 +71,14 @@ where
     !too_left && !too_right
 }
 
-pub fn validate_safe_epoch(
-    version: &HummockVersion,
-    table_id: TableId,
-    epoch: u64,
-) -> HummockResult<()> {
-    if let Some(info) = version.state_table_info.info().get(&table_id)
-        && epoch < info.safe_epoch
-    {
-        return Err(HummockError::expired_epoch(
-            table_id,
-            info.safe_epoch,
-            epoch,
-        ));
-    }
-
-    Ok(())
-}
-
-pub fn validate_table_key_range(version: &HummockVersion) {
-    for l in version.levels.values().flat_map(|levels| {
-        levels
-            .l0
-            .as_ref()
-            .unwrap()
-            .sub_levels
-            .iter()
-            .chain(levels.levels.iter())
-    }) {
-        for t in &l.table_infos {
-            assert!(
-                t.key_range.is_some(),
-                "key_range in table [{}] is none",
-                t.get_object_id()
-            );
-        }
-    }
-}
-
 pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool
 where
     R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]> + EmptySliceRef,
 {
-    let table_range = info.key_range.as_ref().unwrap();
-    let table_start = FullKey::decode(table_range.left.as_slice()).user_key;
-    let table_end = FullKey::decode(table_range.right.as_slice()).user_key;
+    let table_range = &info.key_range;
+    let table_start = FullKey::decode(table_range.left.as_ref()).user_key;
+    let table_end = FullKey::decode(table_range.right.as_ref()).user_key;
     let (left, right) = bound_table_key_range(table_id, table_key_range);
     let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
     let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
@@ -127,18 +90,13 @@ where
         } else {
             Bound::Included(&table_end)
         },
-    ) && info
-        .get_table_ids()
-        .binary_search(&table_id.table_id())
-        .is_ok()
+    ) && info.table_ids.binary_search(&table_id.table_id()).is_ok()
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
 pub(crate) fn search_sst_idx(ssts: &[SstableInfo], key: UserKey<&[u8]>) -> usize {
     ssts.partition_point(|table| {
-        let ord = FullKey::decode(&table.key_range.as_ref().unwrap().left)
-            .user_key
-            .cmp(&key);
+        let ord = FullKey::decode(&table.key_range.left).user_key.cmp(&key);
         ord == Ordering::Less || ord == Ordering::Equal
     })
 }
@@ -654,6 +612,59 @@ pub(crate) async fn wait_for_epoch(
                 }
             }
         }
+    }
+}
+
+pub struct HummockMemoryCollector {
+    sstable_store: SstableStoreRef,
+    limiter: Arc<MemoryLimiter>,
+    storage_memory_config: StorageMemoryConfig,
+}
+
+impl HummockMemoryCollector {
+    pub fn new(
+        sstable_store: SstableStoreRef,
+        limiter: Arc<MemoryLimiter>,
+        storage_memory_config: StorageMemoryConfig,
+    ) -> Self {
+        Self {
+            sstable_store,
+            limiter,
+            storage_memory_config,
+        }
+    }
+}
+
+impl MemoryCollector for HummockMemoryCollector {
+    fn get_meta_memory_usage(&self) -> u64 {
+        self.sstable_store.get_meta_memory_usage()
+    }
+
+    fn get_data_memory_usage(&self) -> u64 {
+        self.sstable_store.block_cache().memory().usage() as _
+    }
+
+    fn get_uploading_memory_usage(&self) -> u64 {
+        self.limiter.get_memory_usage()
+    }
+
+    fn get_prefetch_memory_usage(&self) -> usize {
+        self.sstable_store.get_prefetch_memory_usage()
+    }
+
+    fn get_meta_cache_memory_usage_ratio(&self) -> f64 {
+        self.sstable_store.get_meta_memory_usage() as f64
+            / (self.storage_memory_config.meta_cache_capacity_mb * 1024 * 1024) as f64
+    }
+
+    fn get_block_cache_memory_usage_ratio(&self) -> f64 {
+        self.get_data_memory_usage() as f64
+            / (self.storage_memory_config.block_cache_capacity_mb * 1024 * 1024) as f64
+    }
+
+    fn get_shared_buffer_usage_ratio(&self) -> f64 {
+        self.limiter.get_memory_usage() as f64
+            / (self.storage_memory_config.shared_buffer_capacity_mb * 1024 * 1024) as f64
     }
 }
 

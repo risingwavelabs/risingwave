@@ -76,6 +76,7 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
             };
             ret.push(state);
         }
+        tracing::trace!("scan SourceBackfill state table: {:?}", ret);
         Ok(ret)
     }
 

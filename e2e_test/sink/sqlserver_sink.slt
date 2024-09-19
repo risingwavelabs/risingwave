@@ -1,4 +1,7 @@
 statement ok
+set sink_decouple = false;
+
+statement ok
 create table t_many_data_type_rw (
   k1 int, k2 int,
   c_boolean bool,

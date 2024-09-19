@@ -1,5 +1,6 @@
 [meta]
-enable_hummock_time_travel = true
-hummock_time_travel_retention_ms = 300000
 hummock_time_travel_snapshot_interval = 30
 min_sst_retention_time_sec = 1
+
+[system]
+time_travel_retention_ms = 300000

@@ -213,7 +213,7 @@ pub async fn compact_once(
     hummock_manager_ref
         .report_compact_task(
             result_task.task_id,
-            result_task.task_status(),
+            result_task.task_status,
             result_task.sorted_output_ssts,
             Some(to_prost_table_stats_map(task_stats)),
         )
@@ -242,7 +242,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         hummock_meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
         &hummock_manager_ref,
-        TableId::from(existing_table_id),
+        &[existing_table_id],
     )
     .await;
     let (compact_ctx, filter_key_extractor_manager) =
@@ -302,7 +302,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         test_epoch(101),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(&hummock_meta_client, &storage, test_epoch(100)).await;
+    flush_and_commit(
+        &hummock_meta_client,
+        &storage,
+        test_epoch(100),
+        local.table_id(),
+    )
+    .await;
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
@@ -337,7 +343,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         test_epoch(102),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(&hummock_meta_client, &storage, test_epoch(101)).await;
+    flush_and_commit(
+        &hummock_meta_client,
+        &storage,
+        test_epoch(101),
+        local.table_id(),
+    )
+    .await;
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
@@ -372,7 +384,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         test_epoch(103),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(&hummock_meta_client, &storage, test_epoch(102)).await;
+    flush_and_commit(
+        &hummock_meta_client,
+        &storage,
+        test_epoch(102),
+        local.table_id(),
+    )
+    .await;
     // move this two file to the same level.
     compact_once(
         hummock_manager_ref.clone(),
@@ -401,7 +419,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         u64::MAX,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(&hummock_meta_client, &storage, test_epoch(103)).await;
+    flush_and_commit(
+        &hummock_meta_client,
+        &storage,
+        test_epoch(103),
+        local.table_id(),
+    )
+    .await;
     // move this two file to the same level.
     compact_once(
         hummock_manager_ref.clone(),
@@ -417,16 +441,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
         .levels[4];
     assert_eq!(base_level.table_infos.len(), 3);
-    assert!(
-        base_level.table_infos[0]
-            .key_range
-            .as_ref()
-            .unwrap()
-            .right_exclusive
-    );
+    assert!(base_level.table_infos[0].key_range.right_exclusive);
     assert_eq!(
-        user_key(&base_level.table_infos[0].key_range.as_ref().unwrap().right),
-        user_key(&base_level.table_infos[1].key_range.as_ref().unwrap().left),
+        user_key(&base_level.table_infos[0].key_range.right),
+        user_key(&base_level.table_infos[1].key_range.left),
     );
     storage.wait_version(version).await;
     let read_options = ReadOptions {

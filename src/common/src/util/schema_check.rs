@@ -15,7 +15,7 @@
 use itertools::Itertools;
 
 use crate::array::{ArrayImpl, ArrayRef};
-use crate::for_all_type_pairs;
+use crate::for_all_variants;
 use crate::types::DataType;
 
 /// Check if the schema of `columns` matches the expected `data_types`. Used for debugging.
@@ -30,9 +30,9 @@ where
         .enumerate()
     {
         macro_rules! matches {
-            ($( { $DataType:ident, $PhysicalType:ident }),*) => {
+            ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty }),*) => {
                 match (pair.as_ref().left(), pair.as_ref().right()) {
-                    $( (Some(DataType::$DataType { .. }), Some(ArrayImpl::$PhysicalType(_))) => continue, )*
+                    $( (Some(DataType::$data_type { .. }), Some(ArrayImpl::$variant_name(_))) => continue, )*
                     (data_type, array) => {
                         let array_ident = array.map(|a| a.get_ident());
                         return Err(format!(
@@ -43,7 +43,7 @@ where
             }
         }
 
-        for_all_type_pairs! { matches }
+        for_all_variants! { matches }
     }
 
     Ok(())

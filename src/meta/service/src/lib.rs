@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lint_reasons)]
 #![feature(let_chains)]
-#![feature(lazy_cell)]
 #![feature(impl_trait_in_assoc_type)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
@@ -22,6 +20,7 @@ use risingwave_meta::*;
 
 pub mod backup_service;
 pub mod cloud_service;
+pub mod cluster_limit_service;
 pub mod cluster_service;
 pub mod ddl_service;
 pub mod event_log_service;

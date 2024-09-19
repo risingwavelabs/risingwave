@@ -27,7 +27,7 @@ use std::task::{ready, Context, Poll};
 
 use futures::FutureExt;
 use itertools::Itertools;
-use more_asserts::{assert_ge, assert_gt};
+use more_asserts::assert_gt;
 use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{HistogramTimer, IntGauge};
 use risingwave_common::bitmap::BitmapBuilder;
@@ -37,7 +37,7 @@ use risingwave_common::must_match;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use task_manager::{TaskManager, UploadingTaskStatus};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
@@ -88,7 +88,6 @@ pub struct UploadTaskInfo {
     pub task_size: usize,
     pub epochs: Vec<HummockEpoch>,
     pub imm_ids: HashMap<LocalInstanceId, Vec<ImmId>>,
-    pub compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
 }
 
 impl Display for UploadTaskInfo {
@@ -249,7 +248,6 @@ impl UploadingTask {
             task_size,
             epochs,
             imm_ids,
-            compaction_group_index: context.pinned_version.compaction_group_index(),
         };
         context
             .buffer_tracker
@@ -850,7 +848,26 @@ impl UnsyncData {
         // called `start_epoch` because we have stopped writing on it.
         if !table_data.unsync_epochs.contains_key(&next_epoch) {
             if let Some(stopped_next_epoch) = table_data.stopped_next_epoch {
-                assert_eq!(stopped_next_epoch, next_epoch);
+                if stopped_next_epoch != next_epoch {
+                    let table_id = table_data.table_id.table_id;
+                    let unsync_epochs = table_data.unsync_epochs.keys().collect_vec();
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "table_id {} stop epoch {} different to prev stop epoch {}. unsync epochs: {:?}, syncing epochs {:?}, max_synced_epoch {:?}",
+                            table_id, next_epoch, stopped_next_epoch, unsync_epochs, table_data.syncing_epochs, table_data.max_synced_epoch
+                        );
+                    } else {
+                        warn!(
+                            table_id,
+                            stopped_next_epoch,
+                            next_epoch,
+                            ?unsync_epochs,
+                            syncing_epochs = ?table_data.syncing_epochs,
+                            max_synced_epoch = ?table_data.max_synced_epoch,
+                            "different stop epoch"
+                        );
+                    }
+                }
             } else {
                 if let Some(max_epoch) = table_data.max_epoch() {
                     assert_gt!(next_epoch, max_epoch);
@@ -965,7 +982,12 @@ impl UploaderData {
             .map(|task_id| {
                 let (sst, spill_table_ids) =
                     self.spilled_data.remove(task_id).expect("should exist");
-                assert_eq!(spill_table_ids, table_ids);
+                assert!(
+                    spill_table_ids.is_subset(&table_ids),
+                    "spilled tabled ids {:?} not a subset of sync table id {:?}",
+                    spill_table_ids,
+                    table_ids
+                );
                 sst
             })
             .collect();
@@ -1114,6 +1136,7 @@ impl HummockUploader {
         &self.context.buffer_tracker
     }
 
+    #[cfg(test)]
     pub(super) fn max_committed_epoch(&self) -> HummockEpoch {
         self.context.pinned_version.max_committed_epoch()
     }
@@ -1160,6 +1183,7 @@ impl HummockUploader {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
+        debug!(epoch, ?table_ids, "start epoch");
         for table_id in &table_ids {
             let table_data = data
                 .unsync_data
@@ -1221,10 +1245,6 @@ impl HummockUploader {
     }
 
     pub(crate) fn update_pinned_version(&mut self, pinned_version: PinnedVersion) {
-        assert_ge!(
-            pinned_version.max_committed_epoch(),
-            self.context.pinned_version.max_committed_epoch()
-        );
         if let UploaderState::Working(data) = &mut self.state {
             // TODO: may only `ack_committed` on table whose `committed_epoch` is changed.
             for (table_id, info) in pinned_version.version().state_table_info.info() {
@@ -1623,7 +1643,8 @@ pub(crate) mod tests {
         let new_pinned_version = uploader
             .context
             .pinned_version
-            .new_pin_version(test_hummock_version(epoch1));
+            .new_pin_version(test_hummock_version(epoch1))
+            .unwrap();
         uploader.update_pinned_version(new_pinned_version);
         assert_eq!(epoch1, uploader.max_committed_epoch());
     }
@@ -1652,7 +1673,8 @@ pub(crate) mod tests {
         let new_pinned_version = uploader
             .context
             .pinned_version
-            .new_pin_version(test_hummock_version(epoch1));
+            .new_pin_version(test_hummock_version(epoch1))
+            .unwrap();
         uploader.update_pinned_version(new_pinned_version);
         assert!(uploader.data().syncing_data.is_empty());
         assert_eq!(epoch1, uploader.max_committed_epoch());
@@ -1686,7 +1708,8 @@ pub(crate) mod tests {
         let new_pinned_version = uploader
             .context
             .pinned_version
-            .new_pin_version(test_hummock_version(epoch1));
+            .new_pin_version(test_hummock_version(epoch1))
+            .unwrap();
         uploader.update_pinned_version(new_pinned_version);
         assert!(uploader.data().syncing_data.is_empty());
         assert_eq!(epoch1, uploader.max_committed_epoch());
@@ -1710,11 +1733,21 @@ pub(crate) mod tests {
         let epoch4 = epoch3.next_epoch();
         let epoch5 = epoch4.next_epoch();
         let epoch6 = epoch5.next_epoch();
-        let version1 = initial_pinned_version.new_pin_version(test_hummock_version(epoch1));
-        let version2 = initial_pinned_version.new_pin_version(test_hummock_version(epoch2));
-        let version3 = initial_pinned_version.new_pin_version(test_hummock_version(epoch3));
-        let version4 = initial_pinned_version.new_pin_version(test_hummock_version(epoch4));
-        let version5 = initial_pinned_version.new_pin_version(test_hummock_version(epoch5));
+        let version1 = initial_pinned_version
+            .new_pin_version(test_hummock_version(epoch1))
+            .unwrap();
+        let version2 = initial_pinned_version
+            .new_pin_version(test_hummock_version(epoch2))
+            .unwrap();
+        let version3 = initial_pinned_version
+            .new_pin_version(test_hummock_version(epoch3))
+            .unwrap();
+        let version4 = initial_pinned_version
+            .new_pin_version(test_hummock_version(epoch4))
+            .unwrap();
+        let version5 = initial_pinned_version
+            .new_pin_version(test_hummock_version(epoch5))
+            .unwrap();
 
         uploader.start_epochs_for_test([epoch6]);
         uploader.init_instance(TEST_LOCAL_INSTANCE_ID, TEST_TABLE_ID, epoch6);

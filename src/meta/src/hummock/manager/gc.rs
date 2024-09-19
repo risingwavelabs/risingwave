@@ -331,16 +331,24 @@ mod tests {
     use std::time::Duration;
 
     use itertools::Itertools;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::HummockSstableObjectId;
+    use risingwave_rpc_client::HummockMetaClient;
 
     use super::ResponseEvent;
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
+    use crate::hummock::MockHummockMetaClient;
     use crate::MetaOpts;
 
     #[tokio::test]
     async fn test_full_gc() {
         let (mut env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
+        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+            hummock_manager.clone(),
+            worker_node.id,
+        ));
+        let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         // Use smaller spin interval to accelerate test.
         env.opts = Arc::new(MetaOpts {
@@ -426,11 +434,16 @@ mod tests {
         );
 
         // All committed SST ids should be excluded from GC.
-        let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
+        let sst_infos = add_test_tables(
+            hummock_manager.as_ref(),
+            hummock_meta_client.clone(),
+            compaction_group_id,
+        )
+        .await;
         let committed_object_ids = sst_infos
             .into_iter()
             .flatten()
-            .map(|s| s.get_object_id())
+            .map(|s| s.object_id)
             .sorted()
             .collect_vec();
         assert!(!committed_object_ids.is_empty());

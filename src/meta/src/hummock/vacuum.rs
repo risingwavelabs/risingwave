@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
@@ -77,16 +78,21 @@ impl VacuumManager {
                 break;
             }
         }
-        if self.env.opts.enable_hummock_time_travel {
-            let current_epoch_time = Epoch::now().physical_time();
-            let epoch_watermark = Epoch::from_physical_time(
-                current_epoch_time.saturating_sub(self.env.opts.hummock_time_travel_retention_ms),
-            )
-            .0;
-            self.hummock_manager
-                .truncate_time_travel_metadata(epoch_watermark)
-                .await?;
-        }
+
+        let current_epoch_time = Epoch::now().physical_time();
+        let epoch_watermark = Epoch::from_physical_time(
+            current_epoch_time.saturating_sub(
+                self.env
+                    .system_params_reader()
+                    .await
+                    .time_travel_retention_ms(),
+            ),
+        )
+        .0;
+        self.hummock_manager
+            .truncate_time_travel_metadata(epoch_watermark)
+            .await?;
+
         Ok(total_deleted)
     }
 
@@ -222,17 +228,23 @@ mod tests {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::HummockVersionId;
     use risingwave_pb::hummock::VacuumTask;
+    use risingwave_rpc_client::HummockMetaClient;
 
     use crate::backup_restore::BackupManager;
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
-    use crate::hummock::VacuumManager;
+    use crate::hummock::{MockHummockMetaClient, VacuumManager};
 
     #[tokio::test]
     async fn test_vacuum() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
+        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+            hummock_manager.clone(),
+            worker_node.id,
+        ));
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         let backup_manager =
             Arc::new(BackupManager::for_test(env.clone(), hummock_manager.clone()).await);
@@ -245,7 +257,13 @@ mod tests {
         assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
         assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
         hummock_manager.pin_version(context_id).await.unwrap();
-        let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
+        let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
+        let sst_infos = add_test_tables(
+            hummock_manager.as_ref(),
+            hummock_meta_client.clone(),
+            compaction_group_id,
+        )
+        .await;
         assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
         hummock_manager.create_version_checkpoint(1).await.unwrap();
         assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 6);
@@ -272,7 +290,7 @@ mod tests {
                     .first()
                     .unwrap()
                     .iter()
-                    .map(|s| s.get_object_id())
+                    .map(|s| s.object_id)
                     .collect_vec(),
             })
             .await

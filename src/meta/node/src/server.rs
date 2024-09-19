@@ -27,7 +27,6 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common_service::{MetricsManager, TracingExtractLayer};
-use risingwave_meta::barrier::StreamRpcManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
 use risingwave_meta::manager::{
@@ -40,6 +39,7 @@ use risingwave_meta::stream::ScaleController;
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
+use risingwave_meta_service::cluster_limit_service::ClusterLimitServiceImpl;
 use risingwave_meta_service::cluster_service::ClusterServiceImpl;
 use risingwave_meta_service::ddl_service::DdlServiceImpl;
 use risingwave_meta_service::event_log_service::EventLogServiceImpl;
@@ -63,6 +63,7 @@ use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoor
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
+use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
@@ -430,7 +431,7 @@ pub async fn start_service_as_election_leader(
                     .await
                     .unwrap(),
             );
-            let catalog_controller = Arc::new(CatalogController::new(env.clone()));
+            let catalog_controller = Arc::new(CatalogController::new(env.clone()).await?);
             MetadataManager::new_v2(cluster_controller, catalog_controller)
         }
     };
@@ -495,7 +496,7 @@ pub async fn start_service_as_election_leader(
             prometheus_client,
             prometheus_selector,
             metadata_manager: metadata_manager.clone(),
-            compute_clients: ComputeClientPool::default(),
+            compute_clients: ComputeClientPool::new(1), // typically no need for plural clients
             diagnose_command,
             trace_state,
         };
@@ -550,12 +551,9 @@ pub async fn start_service_as_election_leader(
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
-    let stream_rpc_manager = StreamRpcManager::new(env.clone());
-
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
         source_manager.clone(),
-        stream_rpc_manager.clone(),
         env.clone(),
     ));
 
@@ -567,9 +565,9 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
-        stream_rpc_manager.clone(),
         scale_controller.clone(),
-    );
+    )
+    .await;
 
     {
         let source_manager = source_manager.clone();
@@ -584,7 +582,6 @@ pub async fn start_service_as_election_leader(
             metadata_manager.clone(),
             barrier_scheduler.clone(),
             source_manager.clone(),
-            stream_rpc_manager,
             scale_controller.clone(),
         )
         .unwrap(),
@@ -618,6 +615,7 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         barrier_manager.context().clone(),
         sink_manager.clone(),
+        meta_metrics.clone(),
     )
     .await;
 
@@ -655,6 +653,7 @@ pub async fn start_service_as_election_leader(
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
     let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
+    let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -771,7 +770,7 @@ pub async fn start_service_as_election_leader(
         risingwave_pb::meta::event_log::Event::MetaNodeStart(event),
     ]);
 
-    let server = tonic::transport::Server::builder()
+    let server_builder = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
@@ -794,16 +793,19 @@ pub async fn start_service_as_election_leader(
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .add_service(EventLogServiceServer::new(event_log_srv))
-        .add_service(TraceServiceServer::new(trace_srv))
-        .monitored_serve_with_shutdown(
-            address_info.listen_addr,
-            "grpc-meta-leader-service",
-            TcpConfig {
-                tcp_nodelay: true,
-                keepalive_duration: None,
-            },
-            shutdown.clone().cancelled_owned(),
-        );
+        .add_service(ClusterLimitServiceServer::new(cluster_limit_srv));
+    #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
+    let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));
+
+    let server = server_builder.monitored_serve_with_shutdown(
+        address_info.listen_addr,
+        "grpc-meta-leader-service",
+        TcpConfig {
+            tcp_nodelay: true,
+            keepalive_duration: None,
+        },
+        shutdown.clone().cancelled_owned(),
+    );
     started::set();
     let _server_handle = tokio::spawn(server);
 

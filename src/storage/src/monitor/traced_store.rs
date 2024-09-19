@@ -19,6 +19,7 @@ use bytes::Bytes;
 use futures::{Future, FutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
@@ -232,6 +233,10 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         self.inner.update_vnode_bitmap(vnodes)
     }
+
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.inner.get_table_watermark(vnode)
+    }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
@@ -260,27 +265,8 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         })
     }
 
-    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        let _span = TraceSpan::new_seal_span(epoch, is_checkpoint, self.storage_type);
-        self.inner.seal_epoch(epoch, is_checkpoint);
-    }
-
-    async fn clear_shared_buffer(&self, prev_epoch: u64) {
-        let _span = TraceSpan::new_clear_shared_buffer_span(prev_epoch);
-        self.inner.clear_shared_buffer(prev_epoch).await;
-    }
-
     async fn new_local(&self, options: NewLocalOptions) -> Self::Local {
         TracedStateStore::new_local(self.inner.new_local(options.clone()).await, options)
-    }
-
-    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-        let span = TraceSpan::new_validate_read_epoch_span(epoch);
-        let res = self.inner.validate_read_epoch(epoch);
-        span.may_send_result(OperationResult::ValidateReadEpoch(
-            res.as_ref().map(|o| *o).into(),
-        ));
-        res
     }
 }
 

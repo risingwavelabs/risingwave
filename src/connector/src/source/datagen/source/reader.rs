@@ -18,6 +18,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
+use risingwave_common_estimate_size::EstimateSize;
 use thiserror_ext::AsReport;
 
 use super::generator::DatagenEventGenerator;
@@ -156,20 +157,30 @@ impl SplitReader for DatagenSplitReader {
                 let source_name = self.source_ctx.source_name.to_string();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
+                let partition_input_count_metric =
+                    metrics.partition_input_count.with_guarded_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ]);
+                let partition_input_bytes_metric =
+                    metrics.partition_input_bytes.with_guarded_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ]);
+
                 spawn_data_generation_stream(
                     self.generator
                         .into_native_stream()
                         .inspect_ok(move |stream_chunk| {
-                            metrics
-                                .partition_input_count
-                                .with_guarded_label_values(&[
-                                    &actor_id,
-                                    &source_id,
-                                    &split_id,
-                                    &source_name,
-                                    &fragment_id,
-                                ])
-                                .inc_by(stream_chunk.cardinality() as u64);
+                            partition_input_count_metric.inc_by(stream_chunk.cardinality() as u64);
+                            partition_input_bytes_metric
+                                .inc_by(stream_chunk.estimated_size() as u64);
                         }),
                     BUFFER_SIZE,
                 )

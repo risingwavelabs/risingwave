@@ -32,7 +32,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
@@ -75,6 +75,7 @@ impl StreamSourceScan {
             core.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
             FixedBitSet::with_capacity(core.column_catalog.len()),
+            MonotonicityMap::new(),
         );
 
         Self { base, core }
@@ -157,7 +158,7 @@ impl StreamSourceScan {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             with_properties,
-            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             secret_refs,
         };
 

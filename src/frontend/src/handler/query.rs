@@ -16,21 +16,20 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use futures::StreamExt;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
-use postgres_types::FromSql;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
-use super::{PgResponseStream, RwPgResponse};
-use crate::binder::{Binder, BoundStatement};
+use super::{create_mv, PgResponseStream, RwPgResponse};
+use crate::binder::{Binder, BoundCreateView, BoundStatement};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::flush::do_flush;
@@ -80,6 +79,7 @@ pub fn handle_parse(
     }))
 }
 
+/// Execute a "Portal", which is a prepared statement with bound parameters.
 pub async fn handle_execute(
     handler_args: HandlerArgs,
     portal: PortalResult,
@@ -87,17 +87,70 @@ pub async fn handle_execute(
     let PortalResult {
         bound_result,
         result_formats,
-        ..
+        statement,
     } = portal;
+    match statement {
+        Statement::Query(_)
+        | Statement::Insert { .. }
+        | Statement::Delete { .. }
+        | Statement::Update { .. } => {
+            // Execute a batch query
+            let session = handler_args.session.clone();
+            let plan_fragmenter_result = {
+                let context = OptimizerContext::from_handler_args(handler_args);
+                let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
 
-    let session = handler_args.session.clone();
-    let plan_fragmenter_result = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                gen_batch_plan_fragmenter(&session, plan_result)?
+            };
+            execute(session, plan_fragmenter_result, result_formats).await
+        }
+        Statement::CreateView { materialized, .. } if materialized => {
+            // Execute a CREATE MATERIALIZED VIEW
+            let BoundResult {
+                bound,
+                dependent_relations,
+                ..
+            } = bound_result;
+            let create_mv = if let BoundStatement::CreateView(create_mv) = bound {
+                create_mv
+            } else {
+                unreachable!("expect a BoundStatement::CreateView")
+            };
+            let BoundCreateView {
+                or_replace,
+                materialized: _,
+                if_not_exists,
+                name,
+                columns,
+                query,
+                emit_mode,
+                with_options,
+            } = *create_mv;
+            if or_replace {
+                bail_not_implemented!("CREATE OR REPLACE VIEW");
+            }
 
-        gen_batch_plan_fragmenter(&session, plan_result)?
-    };
-    execute(session, plan_fragmenter_result, result_formats).await
+            // Hack: replace the `with_options` with the bounded ones.
+            let handler_args = HandlerArgs {
+                session: handler_args.session.clone(),
+                sql: handler_args.sql.clone(),
+                normalized_sql: handler_args.normalized_sql.clone(),
+                with_options: crate::WithOptions::try_from(with_options.as_slice())?,
+            };
+
+            create_mv::handle_create_mv_bound(
+                handler_args,
+                if_not_exists,
+                name,
+                *query,
+                dependent_relations,
+                columns,
+                emit_mode,
+            )
+            .await
+        }
+        _ => unreachable!(),
+    }
 }
 
 pub fn gen_batch_plan_by_statement(
@@ -369,46 +422,8 @@ async fn execute(
     let stmt_type = plan_fragmenter_result.stmt_type;
 
     let query_start_time = Instant::now();
-    let (mut row_stream, pg_descs) =
+    let (row_stream, pg_descs) =
         create_stream(session.clone(), plan_fragmenter_result, formats).await?;
-
-    let row_cnt: Option<i32> = match stmt_type {
-        StatementType::SELECT
-        | StatementType::INSERT_RETURNING
-        | StatementType::DELETE_RETURNING
-        | StatementType::UPDATE_RETURNING => None,
-
-        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            let first_row_set = row_stream.next().await;
-            let first_row_set = match first_row_set {
-                None => {
-                    return Err(RwError::from(ErrorCode::InternalError(
-                        "no affected rows in output".to_string(),
-                    )))
-                }
-                Some(row) => row?,
-            };
-            let affected_rows_str = first_row_set[0].values()[0]
-                .as_ref()
-                .expect("compute node should return affected rows in output");
-            if let Format::Binary = first_field_format {
-                Some(
-                    i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
-                        .unwrap()
-                        .try_into()
-                        .expect("affected rows count large than i64"),
-                )
-            } else {
-                Some(
-                    String::from_utf8(affected_rows_str.to_vec())
-                        .unwrap()
-                        .parse()
-                        .unwrap_or_default(),
-                )
-            }
-        }
-        _ => unreachable!(),
-    };
 
     // We need to do some post work after the query is finished and before the `Complete` response
     // it sent. This is achieved by the `callback` in `PgResponse`.
@@ -455,13 +470,13 @@ async fn execute(
     };
 
     Ok(PgResponse::builder(stmt_type)
-        .row_cnt_opt(row_cnt)
+        .row_cnt_format_opt(Some(first_field_format))
         .values(row_stream, pg_descs)
         .callback(callback)
         .into())
 }
 
-async fn distribute_execute(
+pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
@@ -483,8 +498,7 @@ async fn distribute_execute(
         .map_err(|err| err.into())
 }
 
-#[expect(clippy::unused_async)]
-async fn local_execute(
+pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,

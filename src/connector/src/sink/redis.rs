@@ -233,12 +233,12 @@ impl Sink for RedisSink {
         ) {
             let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
                 SinkError::Config(anyhow!(
-                    "Cannot find 'key_format',please set it or use JSON"
+                    "Cannot find 'key_format', please set it or use JSON"
                 ))
             })?;
             let value_format = self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
                 SinkError::Config(anyhow!(
-                    "Cannot find 'value_format',please set it or use JSON"
+                    "Cannot find 'value_format', please set it or use JSON"
                 ))
             })?;
             TemplateEncoder::check_string_format(key_format, &pk_set)?;
@@ -288,7 +288,7 @@ impl RedisSinkPayloadWriter {
                 return Ok(());
             }
         }
-        self.pipe.query(self.conn.as_mut().unwrap()).await?;
+        self.pipe.query::<()>(self.conn.as_mut().unwrap()).await?;
         self.pipe.clear();
         Ok(())
     }
@@ -299,7 +299,7 @@ impl FormattedSink for RedisSinkPayloadWriter {
     type V = Vec<u8>;
 
     async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
-        let k = k.unwrap();
+        let k = k.ok_or_else(|| SinkError::Redis("The redis key cannot be null".to_string()))?;
         match v {
             Some(v) => self.pipe.set(k, v),
             None => self.pipe.del(k),

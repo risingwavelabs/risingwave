@@ -230,8 +230,7 @@ fn standalone(opts: StandaloneOpts) -> ! {
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
-    // TODO(shutdown): pass the shutdown token
-    risingwave_rt::main_okk(|_| risingwave_cmd_all::standalone(opts));
+    risingwave_rt::main_okk(|shutdown| risingwave_cmd_all::standalone(opts, shutdown));
 }
 
 /// For single node, the internals are just a config mapping from its
@@ -246,8 +245,7 @@ fn single_node(opts: SingleNodeOpts) -> ! {
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
-    // TODO(shutdown): pass the shutdown token
-    risingwave_rt::main_okk(|_| risingwave_cmd_all::standalone(opts));
+    risingwave_rt::main_okk(|shutdown| risingwave_cmd_all::standalone(opts, shutdown));
 }
 
 #[cfg(test)]

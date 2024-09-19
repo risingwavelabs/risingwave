@@ -94,7 +94,6 @@ pub trait ExprRewriter {
             order_by,
             filter,
             direct_args,
-            user_defined,
         } = agg_call;
         let args = args
             .into_iter()
@@ -110,7 +109,6 @@ pub trait ExprRewriter {
             order_by,
             filter,
             direct_args,
-            user_defined,
         }
         .into()
     }

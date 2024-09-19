@@ -29,6 +29,8 @@ jobs:
             echo "documentation_update=true" >> $GITHUB_OUTPUT
           elif [[ $PR_LABEL == *"user-facing-changes"* ]]; then
             echo "documentation_update=true" >> $GITHUB_OUTPUT
+          elif [[ $PR_LABEL == *"breaking-change"* ]]; then
+            echo "documentation_update=true" >> $GITHUB_OUTPUT
           else
             echo "documentation_update=false" >> $GITHUB_OUTPUT
           fi
@@ -39,7 +41,7 @@ jobs:
       - name: Create issue in other repository
         if: steps.check_merged.outputs.merged == 'true' && steps.check_documentation_update.outputs.documentation_update == 'true'
         run: |
-          ISSUE_CONTENT="This issue tracks the documentation update needed for the merged PR #$PR_ID.\n\nSource PR URL: $PR_URL\nSource PR Merged At: $PR_MERGED_AT"
+          ISSUE_CONTENT="This issue tracks the documentation update needed for the merged PR #$PR_ID.\n\nSource PR URL: $PR_URL\nSource PR Merged At: $PR_MERGED_AT\n\nIf it is a major improvement that deserves a new page or a new section in the documentation, please check if we should label it as an experiment feature."
 
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets.ACCESS_TOKEN }}" \

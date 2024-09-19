@@ -34,7 +34,8 @@ use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::encoder::{
-    JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
+    JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
 };
 use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam};
@@ -117,6 +118,9 @@ impl Sink for SnowflakeSink {
     }
 
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::SnowflakeSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
         if !self.is_append_only {
             return Err(SinkError::Config(
                 anyhow!("SnowflakeSink only supports append-only mode at present, please change the query to append-only, or use `force_append_only = 'true'`")
@@ -193,6 +197,7 @@ impl SnowflakeSinkWriter {
                 TimestampHandlingMode::String,
                 TimestamptzHandlingMode::UtcString,
                 TimeHandlingMode::String,
+                JsonbHandlingMode::String,
             ),
             // initial value of `epoch` will be set to 0
             epoch: 0,

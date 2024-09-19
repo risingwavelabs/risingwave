@@ -31,9 +31,11 @@ use risingwave_common::must_match;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::{KeyRange, SstableInfo, StateTableInfoDelta};
+use risingwave_pb::hummock::{PbHummockVersion, StateTableInfoDelta};
 use spin::Mutex;
 use tokio::spawn;
 use tokio::sync::mpsc::unbounded_channel;
@@ -87,9 +89,11 @@ impl HummockUploader {
 }
 
 pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
-    let mut version = HummockVersion::default();
-    version.id = epoch;
-    version.max_committed_epoch = epoch;
+    let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
+        id: epoch,
+        max_committed_epoch: epoch,
+        ..Default::default()
+    });
     version.state_table_info.apply_delta(
         &HashMap::from_iter([(
             TEST_TABLE_ID,
@@ -159,11 +163,11 @@ pub(super) fn gen_sstable_info(
     vec![LocalSstableInfo::for_test(SstableInfo {
         object_id: gen_sst_object_id,
         sst_id: gen_sst_object_id,
-        key_range: Some(KeyRange {
-            left: start_full_key.encode(),
-            right: end_full_key.encode(),
+        key_range: KeyRange {
+            left: start_full_key.encode().into(),
+            right: end_full_key.encode().into(),
             right_exclusive: true,
-        }),
+        },
         table_ids: vec![TEST_TABLE_ID.table_id],
         ..Default::default()
     })]

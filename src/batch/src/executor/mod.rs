@@ -87,6 +87,7 @@ pub use values::*;
 use self::log_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
 use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 use crate::error::Result;
+use crate::executor::s3_file_scan::FileScanExecutorBuilder;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -173,7 +174,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
             plan_node,
             self.task_id,
             self.context.clone(),
-            self.epoch.clone(),
+            self.epoch,
             self.shutdown_rx.clone(),
         )
     }
@@ -187,7 +188,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
     }
 
     pub fn epoch(&self) -> BatchQueryEpoch {
-        self.epoch.clone()
+        self.epoch
     }
 }
 
@@ -241,6 +242,8 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Source => SourceExecutor,
             NodeBody::SortOverWindow => SortOverWindowExecutor,
             NodeBody::MaxOneRow => MaxOneRowExecutor,
+            NodeBody::FileScan => FileScanExecutorBuilder,
+            NodeBody::IcebergScan => IcebergScanExecutorBuilder,
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,

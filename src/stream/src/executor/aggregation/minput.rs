@@ -24,14 +24,14 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction, PbAggKind};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
 use super::GroupKey;
-use crate::common::cache::{OrderedStateCache, TopNStateCache};
+use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
@@ -125,16 +125,19 @@ impl MaterializedInputState {
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
         let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
-            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => {
-                Box::new(GenericAggStateCache::new(
-                    TopNStateCache::new(extreme_cache_size),
-                    agg_call.args.arg_types(),
-                ))
-            }
-            AggKind::StringAgg
-            | AggKind::ArrayAgg
-            | AggKind::JsonbAgg
-            | AggKind::JsonbObjectAgg => Box::new(GenericAggStateCache::new(
+            AggKind::Builtin(
+                PbAggKind::Min | PbAggKind::Max | PbAggKind::FirstValue | PbAggKind::LastValue,
+            ) => Box::new(GenericAggStateCache::new(
+                TopNStateCache::new(extreme_cache_size),
+                agg_call.args.arg_types(),
+            )),
+            AggKind::Builtin(
+                PbAggKind::StringAgg
+                | PbAggKind::ArrayAgg
+                | PbAggKind::JsonbAgg
+                | PbAggKind::JsonbObjectAgg,
+            )
+            | AggKind::WrapScalar(_) => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
                 agg_call.args.arg_types(),
             )),
@@ -145,7 +148,9 @@ impl MaterializedInputState {
         };
         let output_first_value = matches!(
             agg_call.kind,
-            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue
+            AggKind::Builtin(
+                PbAggKind::Min | PbAggKind::Max | PbAggKind::FirstValue | PbAggKind::LastValue
+            )
         );
 
         Ok(Self {
@@ -239,32 +244,34 @@ fn generate_order_columns_before_version_issue_13465(
     pk_indices: &PkIndices,
     arg_col_indices: &[usize],
 ) -> (Vec<usize>, Vec<OrderType>) {
-    let (mut order_col_indices, mut order_types) =
-        if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
-            // `min`/`max` need not to order by any other columns, but have to
-            // order by the agg value implicitly.
-            let order_type = if agg_call.kind == AggKind::Min {
-                OrderType::ascending()
-            } else {
-                OrderType::descending()
-            };
-            (vec![arg_col_indices[0]], vec![order_type])
+    let (mut order_col_indices, mut order_types) = if matches!(
+        agg_call.kind,
+        AggKind::Builtin(PbAggKind::Min | PbAggKind::Max)
+    ) {
+        // `min`/`max` need not to order by any other columns, but have to
+        // order by the agg value implicitly.
+        let order_type = if matches!(agg_call.kind, AggKind::Builtin(PbAggKind::Min)) {
+            OrderType::ascending()
         } else {
-            agg_call
-                .column_orders
-                .iter()
-                .map(|p| {
-                    (
-                        p.column_index,
-                        if agg_call.kind == AggKind::LastValue {
-                            p.order_type.reverse()
-                        } else {
-                            p.order_type
-                        },
-                    )
-                })
-                .unzip()
+            OrderType::descending()
         };
+        (vec![arg_col_indices[0]], vec![order_type])
+    } else {
+        agg_call
+            .column_orders
+            .iter()
+            .map(|p| {
+                (
+                    p.column_index,
+                    if matches!(agg_call.kind, AggKind::Builtin(PbAggKind::LastValue)) {
+                        p.order_type.reverse()
+                    } else {
+                        p.order_type
+                    },
+                )
+            })
+            .unzip()
+    };
 
     if agg_call.distinct {
         // If distinct, we need to materialize input with the distinct keys
@@ -305,6 +312,7 @@ mod tests {
 
     use super::MaterializedInputState;
     use crate::common::table::state_table::StateTable;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::GroupKey;
     use crate::executor::{PkIndices, StreamExecutorResult};
@@ -334,12 +342,10 @@ mod tests {
             .collect_vec();
         let mapping = StateTableColumnMapping::new(upstream_columns, None);
         let pk_len = order_types.len();
-        let table = StateTable::new_without_distribution(
+        let table = StateTable::from_table_catalog(
+            &gen_pbtable(table_id, columns, order_types, (0..pk_len).collect(), 0),
             MemoryStateStore::new(),
-            table_id,
-            columns,
-            order_types,
-            (0..pk_len).collect(),
+            None,
         )
         .await;
         (table, mapping)

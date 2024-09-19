@@ -87,6 +87,7 @@ impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
         PbUserDefinedFunctionMetadata {
             arg_names: c.arg_names.clone(),
             arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
+            return_type: Some(c.return_type.to_protobuf()),
             language: c.language.clone(),
             link: c.link.clone(),
             identifier: c.identifier.clone(),

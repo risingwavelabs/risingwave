@@ -14,25 +14,26 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog;
+use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
-use risingwave_meta::stream::{ScaleControllerRef, TableRevision};
+use risingwave_meta::stream::{
+    RescheduleOptions, ScaleControllerRef, TableRevision, WorkerReschedule,
+};
 use risingwave_meta_model_v2::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, Reschedule, RescheduleRequest,
-    RescheduleResponse,
+    GetClusterInfoRequest, GetClusterInfoResponse, GetServerlessStreamingJobsStatusRequest,
+    GetServerlessStreamingJobsStatusResponse, PbWorkerReschedule, RescheduleRequest,
+    RescheduleResponse, UpdateStreamingJobNodeLabelsRequest, UpdateStreamingJobNodeLabelsResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::model::MetadataModel;
-use crate::stream::{
-    GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleOptions, SourceManagerRef,
-};
+use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 
 pub struct ScaleServiceImpl {
     metadata_manager: MetadataManager,
@@ -135,7 +136,7 @@ impl ScaleService for ScaleServiceImpl {
         self.barrier_manager.check_status_running()?;
 
         let RescheduleRequest {
-            reschedules,
+            worker_reschedules,
             revision,
             resolve_no_shuffle_upstream,
         } = request.into_inner();
@@ -160,7 +161,7 @@ impl ScaleService for ScaleServiceImpl {
                     for (table_id, table) in guard.table_fragments() {
                         if table
                             .fragment_ids()
-                            .any(|fragment_id| reschedules.contains_key(&fragment_id))
+                            .any(|fragment_id| worker_reschedules.contains_key(&fragment_id))
                         {
                             table_parallelisms.insert(*table_id, TableParallelism::Custom);
                         }
@@ -172,13 +173,16 @@ impl ScaleService for ScaleServiceImpl {
                     let streaming_job_ids = mgr
                         .catalog_controller
                         .get_fragment_job_id(
-                            reschedules.keys().map(|id| *id as FragmentId).collect(),
+                            worker_reschedules
+                                .keys()
+                                .map(|id| *id as FragmentId)
+                                .collect(),
                         )
                         .await?;
 
                     streaming_job_ids
                         .into_iter()
-                        .map(|id| (catalog::TableId::new(id as _), TableParallelism::Custom))
+                        .map(|id| (TableId::new(id as _), TableParallelism::Custom))
                         .collect()
                 }
             }
@@ -186,22 +190,17 @@ impl ScaleService for ScaleServiceImpl {
 
         self.stream_manager
             .reschedule_actors(
-                reschedules
+                worker_reschedules
                     .into_iter()
                     .map(|(fragment_id, reschedule)| {
-                        let Reschedule {
-                            added_parallel_units,
-                            removed_parallel_units,
-                        } = reschedule;
-
-                        let added_parallel_units = added_parallel_units.into_iter().collect();
-                        let removed_parallel_units = removed_parallel_units.into_iter().collect();
-
+                        let PbWorkerReschedule { worker_actor_diff } = reschedule;
                         (
                             fragment_id,
-                            ParallelUnitReschedule {
-                                added_parallel_units,
-                                removed_parallel_units,
+                            WorkerReschedule {
+                                worker_actor_diff: worker_actor_diff
+                                    .into_iter()
+                                    .map(|(worker_id, diff)| (worker_id as _, diff as _))
+                                    .collect(),
                             },
                         )
                     })
@@ -220,5 +219,19 @@ impl ScaleService for ScaleServiceImpl {
             success: true,
             revision: next_revision.into(),
         }))
+    }
+
+    async fn update_streaming_job_node_labels(
+        &self,
+        _request: Request<UpdateStreamingJobNodeLabelsRequest>,
+    ) -> Result<Response<UpdateStreamingJobNodeLabelsResponse>, Status> {
+        todo!()
+    }
+
+    async fn get_serverless_streaming_jobs_status(
+        &self,
+        _request: Request<GetServerlessStreamingJobsStatusRequest>,
+    ) -> Result<Response<GetServerlessStreamingJobsStatusResponse>, Status> {
+        todo!()
     }
 }

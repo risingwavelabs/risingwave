@@ -24,6 +24,8 @@ impl Planner {
             BoundStatement::Delete(d) => self.plan_delete(*d),
             BoundStatement::Update(u) => self.plan_update(*u),
             BoundStatement::Query(q) => self.plan_query(*q),
+            BoundStatement::FetchCursor(_) => unimplemented!(),
+            BoundStatement::CreateView(c) => self.plan_query(*c.query),
         }
     }
 }

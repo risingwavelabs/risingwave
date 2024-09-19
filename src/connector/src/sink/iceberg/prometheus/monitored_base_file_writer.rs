@@ -25,13 +25,13 @@ use risingwave_common::metrics::LabelGuardedIntGauge;
 pub struct MonitoredBaseFileWriterBuilder<B: FileWriterBuilder> {
     inner: BaseFileWriterBuilder<B>,
     // metrics
-    unflush_data_file: LabelGuardedIntGauge<2>,
+    unflush_data_file: LabelGuardedIntGauge<3>,
 }
 
 impl<B: FileWriterBuilder> MonitoredBaseFileWriterBuilder<B> {
     pub fn new(
         inner: BaseFileWriterBuilder<B>,
-        unflush_data_file: LabelGuardedIntGauge<2>,
+        unflush_data_file: LabelGuardedIntGauge<3>,
     ) -> Self {
         Self {
             inner,
@@ -59,7 +59,7 @@ pub struct MonitoredBaseFileWriter<B: FileWriterBuilder> {
     inner: BaseFileWriter<B>,
 
     // metrics
-    unflush_data_file: LabelGuardedIntGauge<2>,
+    unflush_data_file: LabelGuardedIntGauge<3>,
 
     cur_metrics: BaseFileWriterMetrics,
 }
