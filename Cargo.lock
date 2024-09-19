@@ -4814,7 +4814,6 @@ checksum = "55ac459de2512911e4b674ce33cf20befaba382d05b62b008afc1c8b57cbf181"
 dependencies = [
  "futures-core",
  "futures-sink",
- "nanorand",
  "spin 0.9.8",
 ]
 
@@ -4851,7 +4850,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.11.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=e32108b#e32108b640ddd7140e1bcfc62dd78ebe3a537b07"
+source = "git+https://github.com/foyer-rs/foyer?rev=474fd2f#474fd2fe7da36e77b859bd59cc5ea60ef1598cef"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -4868,7 +4867,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.9.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=e32108b#e32108b640ddd7140e1bcfc62dd78ebe3a537b07"
+source = "git+https://github.com/foyer-rs/foyer?rev=474fd2f#474fd2fe7da36e77b859bd59cc5ea60ef1598cef"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -4887,7 +4886,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.9.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=e32108b#e32108b640ddd7140e1bcfc62dd78ebe3a537b07"
+source = "git+https://github.com/foyer-rs/foyer?rev=474fd2f#474fd2fe7da36e77b859bd59cc5ea60ef1598cef"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -4896,7 +4895,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.7.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=e32108b#e32108b640ddd7140e1bcfc62dd78ebe3a537b07"
+source = "git+https://github.com/foyer-rs/foyer?rev=474fd2f#474fd2fe7da36e77b859bd59cc5ea60ef1598cef"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -4917,7 +4916,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.10.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=e32108b#e32108b640ddd7140e1bcfc62dd78ebe3a537b07"
+source = "git+https://github.com/foyer-rs/foyer?rev=474fd2f#474fd2fe7da36e77b859bd59cc5ea60ef1598cef"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -4930,7 +4929,6 @@ dependencies = [
  "clap",
  "either",
  "fastrace",
- "flume",
  "foyer-common",
  "foyer-memory",
  "fs4",
@@ -7487,15 +7485,6 @@ name = "naive-timer"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "034a0ad7deebf0c2abcf2435950a6666c3c15ea9d8fad0c0f48efa8a7f843fed"
-
-[[package]]
-name = "nanorand"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
-dependencies = [
- "getrandom",
-]
 
 [[package]]
 name = "native-tls"
