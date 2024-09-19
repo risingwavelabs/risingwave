@@ -66,7 +66,10 @@ use risingwave_expr::{function, ExprError, Result};
 /// 2
 /// ```
 #[function("array_position(anyarray, any) -> int4")]
-fn array_position(array: ListRef<'_>, element: Option<ScalarRefImpl<'_>>) -> Result<Option<i32>> {
+pub(super) fn array_position(
+    array: ListRef<'_>,
+    element: Option<ScalarRefImpl<'_>>,
+) -> Result<Option<i32>> {
     array_position_common(array, element, 0)
 }
 

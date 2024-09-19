@@ -10,6 +10,7 @@ members = [
     "src/common/fields-derive",
     "src/common/heap_profiling",
     "src/common/metrics",
+    "src/common/telemetry_event",
     "src/compute",
     "src/connector",
     "src/connector/codec",
@@ -69,7 +70,7 @@ exclude = ["e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
-version = "1.11.0-alpha"
+version = "2.1.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -77,7 +78,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.10.1", features = ["nightly", "mtrace"] }
+foyer = { version = "0.10.4", features = ["nightly", "mtrace"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -121,7 +122,8 @@ aws-smithy-types = { version = "1", default-features = false, features = [
 aws-endpoint = "0.60"
 aws-types = "1"
 axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
-etcd-client = { package = "madsim-etcd-client", version = "0.4" }
+axum-extra = "0.9"
+etcd-client = { package = "madsim-etcd-client", version = "0.6" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
@@ -129,21 +131,23 @@ rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.4.1" }
-tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
-otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
-prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "07d53893d7788b4e41fc11efad8a6be828405c31", features = [
+tonic = { package = "madsim-tonic", version = "0.5.1" }
+tonic-build = { package = "madsim-tonic-build", version = "0.5" }
+otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "e6cd165b9bc85783b42c106e99186b86b73e3507" }
+prost = { version = "0.13" }
+prost-build = { version = "0.13" }
+# branch dylan/fix_parquet_nested_type_field_id
+icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "3f4724158acee37a4785f56670a1427993a58739", features = [
     "prometheus",
 ] }
 arrow-array-iceberg = { package = "arrow-array", version = "52" }
 arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
 arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
 arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
-# TODO
-# After apache/iceberg-rust#411 is merged, we move to the upstream version.
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "24bd5869f2779a8b9786b5a6e1f9723844f5a82c" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "24bd5869f2779a8b9786b5a6e1f9723844f5a82c" }
+# branch dev
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
 opendal = "0.47"
 arrow-array = "50"
 arrow-arith = "50"
@@ -179,6 +183,7 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
     "profiling",
     "stats",
 ], rev = "64a2d9" }
+# TODO(http-bump): bump to use tonic 0.12 once minitrace-opentelemetry is updated
 opentelemetry = "0.23"
 opentelemetry-otlp = "0.16"
 opentelemetry_sdk = { version = "0.23", default-features = false }
@@ -193,7 +198,8 @@ sea-orm = { version = "0.12.14", features = [
     "sqlx-sqlite",
     "runtime-tokio-native-tls",
 ] }
-sqlx = "0.7"
+sqlx = { version = "0.7.3", default-features = false, features = ["bigdecimal", "chrono", "json", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055", features = ["net", "fs"] }
 tokio-util = "0.7"
 tracing-opentelemetry = "0.24"
 rand = { version = "0.8", features = ["small_rng"] }
@@ -240,6 +246,7 @@ risingwave_udf = { path = "./src/expr/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
+risingwave_telemetry_event = { path = "./src/common/telemetry_event" }
 rw_futures_util = { path = "src/utils/futures_util" }
 rw_resource_util = { path = "src/utils/resource_util" }
 rw_iter_util = { path = "src/utils/iter_util" }
@@ -297,6 +304,12 @@ incremental = true
 split-debuginfo = "packed"
 lto = "off"
 
+# Patch profile for production clusters.
+# It will trade-off lto for faster build time.
+[profile.patch-production]
+inherits = "production"
+lto = "off"
+
 [profile.production]
 inherits = "release"
 incremental = false
@@ -334,9 +347,15 @@ opt-level = 2
 # Patch third-party crates for deterministic simulation.
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
+# Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
+# Imagine an unpatched dependency depends on the original `tokio` and the patched `tokio-stream`.
+# tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
+# NOTE(kwannoel): patch sqlx to use a version compatible with madsim.
+# If we can merge in: https://github.com/madsim-rs/sqlx/pull/2,
+# we can change it to patch madsim version instead.
+sqlx = { git = "https://github.com/kwannoel/sqlx.git", rev = "5a32ad8ce842176c202df30910e1416655eda071" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }

@@ -17,7 +17,9 @@ use std::collections::HashMap;
 use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -89,7 +91,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String>;
 
-    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
+    async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
     async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>>;
 
@@ -135,6 +137,8 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<Vec<u64>>;
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
+
+    async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -228,7 +232,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.set_session_param(param, value).await
     }
 
-    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+    async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
         let ddl_progress = self.0.get_ddl_progress().await?;
         Ok(ddl_progress)
     }
@@ -281,7 +285,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>> {
         // FIXME #8612: there can be lots of version deltas, so better to fetch them by pages and refactor `SysRowSeqScanExecutor` to yield multiple chunks.
-        self.0.list_version_deltas(0, u32::MAX, u64::MAX).await
+        self.0
+            .list_version_deltas(HummockVersionId::new(0), u32::MAX, u64::MAX)
+            .await
     }
 
     async fn list_branched_objects(&self) -> Result<Vec<BranchedObject>> {
@@ -341,5 +347,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
         self.0.get_cluster_recovery_status().await
+    }
+
+    async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>> {
+        self.0.get_cluster_limits().await
     }
 }

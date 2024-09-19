@@ -25,23 +25,22 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
 use serde_derive::Deserialize;
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
 use tonic::async_trait;
 use tracing::warn;
 use with_options::WithOptions;
 
-use super::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
+use super::decouple_checkpoint_log_sink::{
+    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
+};
 use super::writer::SinkWriter;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
-use crate::deserialize_optional_u64_from_string;
 use crate::error::ConnectorResult;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::{
     Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
@@ -52,6 +51,7 @@ const QUERY_COLUMN: &str =
     "select distinct ?fields from system.columns where database = ? and table = ? order by ?";
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct ClickHouseCommon {
     #[serde(rename = "clickhouse.url")]
@@ -66,9 +66,10 @@ pub struct ClickHouseCommon {
     pub table: String,
     #[serde(rename = "clickhouse.delete.column")]
     pub delete_column: Option<String>,
-    /// Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
-    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
-    pub commit_checkpoint_interval: Option<u64>,
+    /// Commit every n(>0) checkpoints, default is 10.
+    #[serde(default = "default_commit_checkpoint_interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub commit_checkpoint_interval: u64,
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -424,6 +425,7 @@ impl ClickHouseSink {
         fields_type: &DataType,
         ck_column: &SystemColumn,
     ) -> Result<()> {
+        // FIXME: the "contains" based implementation is wrong
         let is_match = match fields_type {
             risingwave_common::types::DataType::Boolean => Ok(ck_column.r#type.contains("Bool")),
             risingwave_common::types::DataType::Int16 => Ok(ck_column.r#type.contains("UInt16")
@@ -473,6 +475,9 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Int256 => Err(SinkError::ClickHouse(
                 "clickhouse can not support Int256".to_string(),
             )),
+            risingwave_common::types::DataType::Map(_) => Err(SinkError::ClickHouse(
+                "clickhouse can not support Map".to_string(),
+            )),
         };
         if !is_match? {
             return Err(SinkError::ClickHouse(format!(
@@ -489,30 +494,6 @@ impl Sink for ClickHouseSink {
     type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
-
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let config_decouple = if let Some(interval) =
-            desc.properties.get("commit_checkpoint_interval")
-            && interval.parse::<u64>().unwrap_or(0) > 1
-        {
-            true
-        } else {
-            false
-        };
-
-        match user_specified {
-            SinkDecouple::Default => Ok(config_decouple),
-            SinkDecouple::Disable => {
-                if config_decouple {
-                    return Err(SinkError::Config(anyhow!(
-                        "config conflict: Clickhouse config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                    )));
-                }
-                Ok(false)
-            }
-            SinkDecouple::Enable => Ok(true),
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.
@@ -549,9 +530,9 @@ impl Sink for ClickHouseSink {
             self.check_pk_match(&clickhouse_column)?;
         }
 
-        if self.config.common.commit_checkpoint_interval == Some(0) {
+        if self.config.common.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
-                "commit_checkpoint_interval must be greater than 0"
+                "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
         Ok(())
@@ -566,7 +547,7 @@ impl Sink for ClickHouseSink {
         )
         .await?;
         let commit_checkpoint_interval =
-    NonZeroU64::new(self.config.common.commit_checkpoint_interval.unwrap_or(1)).expect(
+    NonZeroU64::new(self.config.common.commit_checkpoint_interval).expect(
         "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
     );
 
@@ -1018,6 +999,11 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Bytea(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse can not support Bytea".to_string(),
+                ))
+            }
+            ScalarRefImpl::Map(_) => {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse can not support Map".to_string(),
                 ))
             }
         };

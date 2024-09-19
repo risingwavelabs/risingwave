@@ -15,7 +15,6 @@
 #![feature(async_closure)]
 #![feature(extract_if)]
 #![feature(hash_extract_if)]
-#![feature(lint_reasons)]
 #![feature(map_many_mut)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
@@ -26,11 +25,15 @@
 mod key_cmp;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::ops::{Add, Sub};
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sstable_info::SstableInfo;
+use tracing::warn;
 
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::TableStatsMap;
@@ -57,16 +60,76 @@ use crate::table_watermark::TableWatermarks;
 pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;
-pub type HummockVersionId = u64;
 pub type HummockContextId = u32;
 pub type HummockEpoch = u64;
 pub type HummockCompactionTaskId = u64;
 pub type CompactionGroupId = u64;
-pub const INVALID_VERSION_ID: HummockVersionId = 0;
-pub const FIRST_VERSION_ID: HummockVersionId = 1;
+
+#[derive(Debug, Clone, PartialEq, Copy, Ord, PartialOrd, Eq, Hash)]
+pub struct HummockVersionId(u64);
+
+impl Display for HummockVersionId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Serialize for HummockVersionId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u64(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for HummockVersionId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self(<u64 as Deserialize>::deserialize(deserializer)?))
+    }
+}
+
+impl HummockVersionId {
+    pub const MAX: Self = Self(u64::MAX);
+
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    pub fn next(&self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    pub fn to_u64(self) -> u64 {
+        self.0
+    }
+}
+
+impl Add<u64> for HummockVersionId {
+    type Output = Self;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl Sub for HummockVersionId {
+    type Output = u64;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        self.0 - rhs.0
+    }
+}
+
+pub const INVALID_VERSION_ID: HummockVersionId = HummockVersionId(0);
+pub const FIRST_VERSION_ID: HummockVersionId = HummockVersionId(1);
 pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
 pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
 pub const OBJECT_SUFFIX: &str = "data";
+pub const HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH: usize = 20;
 
 #[macro_export]
 /// This is wrapper for `info` log.
@@ -128,6 +191,7 @@ impl LocalSstableInfo {
     }
 
     pub fn file_size(&self) -> u64 {
+        assert_eq!(self.sst_info.file_size, self.sst_info.sst_size);
         self.sst_info.file_size
     }
 }
@@ -143,8 +207,6 @@ impl PartialEq for LocalSstableInfo {
 pub enum HummockReadEpoch {
     /// We need to wait the `max_committed_epoch`
     Committed(HummockEpoch),
-    /// We need to wait the `max_current_epoch`
-    Current(HummockEpoch),
     /// We don't need to wait epoch, we usually do stream reading with it.
     NoWait(HummockEpoch),
     /// We don't need to wait epoch.
@@ -156,7 +218,15 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
     fn from(e: BatchQueryEpoch) -> Self {
         match e.epoch.unwrap() {
             batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::Committed(epoch),
-            batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::Current(epoch),
+            batch_query_epoch::Epoch::Current(epoch) => {
+                if epoch != HummockEpoch::MAX {
+                    warn!(
+                        epoch,
+                        "ignore specified current epoch and set it to u64::MAX"
+                    );
+                }
+                HummockReadEpoch::NoWait(HummockEpoch::MAX)
+            }
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
             batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
         }
@@ -173,7 +243,6 @@ impl HummockReadEpoch {
     pub fn get_epoch(&self) -> HummockEpoch {
         *match self {
             HummockReadEpoch::Committed(epoch) => epoch,
-            HummockReadEpoch::Current(epoch) => epoch,
             HummockReadEpoch::NoWait(epoch) => epoch,
             HummockReadEpoch::Backup(epoch) => epoch,
             HummockReadEpoch::TimeTravel(epoch) => epoch,
@@ -288,5 +357,16 @@ impl EpochWithGap {
 
     pub fn offset(&self) -> u64 {
         self.0 & EPOCH_SPILL_TIME_MASK
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_object_id_decimal_max_length() {
+        let len = HummockSstableObjectId::MAX.to_string().len();
+        assert_eq!(len, HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH)
     }
 }

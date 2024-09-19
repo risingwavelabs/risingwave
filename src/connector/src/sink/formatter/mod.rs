@@ -85,6 +85,10 @@ pub enum SinkFormatterImpl {
     UpsertTextJson(UpsertFormatter<TextEncoder, JsonEncoder>),
     UpsertAvro(UpsertFormatter<AvroEncoder, AvroEncoder>),
     UpsertTextAvro(UpsertFormatter<TextEncoder, AvroEncoder>),
+    // `UpsertFormatter<ProtoEncoder, ProtoEncoder>` is intentionally left out
+    // to avoid using `ProtoEncoder` as key:
+    // <https://docs.confluent.io/platform/7.7/control-center/topics/schema.html#c3-schemas-best-practices-key-value-pairs>
+    UpsertTextProto(UpsertFormatter<TextEncoder, ProtoEncoder>),
     UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
     UpsertTextTemplate(UpsertFormatter<TextEncoder, TemplateEncoder>),
     // debezium
@@ -356,6 +360,7 @@ impl SinkFormatterImpl {
                 (F::Upsert, E::Json, None) => Impl::UpsertJson(build(p).await?),
                 (F::Upsert, E::Avro, Some(E::Text)) => Impl::UpsertTextAvro(build(p).await?),
                 (F::Upsert, E::Avro, None) => Impl::UpsertAvro(build(p).await?),
+                (F::Upsert, E::Protobuf, Some(E::Text)) => Impl::UpsertTextProto(build(p).await?),
                 (F::Upsert, E::Template, Some(E::Text)) => {
                     Impl::UpsertTextTemplate(build(p).await?)
                 }
@@ -370,6 +375,8 @@ impl SinkFormatterImpl {
                 | (F::Upsert, E::Protobuf, _)
                 | (F::Debezium, E::Json, Some(_))
                 | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text, _)
+                | (_, E::Parquet, _)
+                | (_, _, Some(E::Parquet))
                 | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
                 => {
                     return Err(SinkError::Config(anyhow!(
@@ -399,6 +406,7 @@ macro_rules! dispatch_sink_formatter_impl {
             SinkFormatterImpl::UpsertTextJson($name) => $body,
             SinkFormatterImpl::UpsertAvro($name) => $body,
             SinkFormatterImpl::UpsertTextAvro($name) => $body,
+            SinkFormatterImpl::UpsertTextProto($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
@@ -423,6 +431,7 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
             SinkFormatterImpl::UpsertTextJson($name) => $body,
             SinkFormatterImpl::UpsertAvro(_) => unreachable!(),
             SinkFormatterImpl::UpsertTextAvro($name) => $body,
+            SinkFormatterImpl::UpsertTextProto($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,

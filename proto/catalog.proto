@@ -135,6 +135,8 @@ message Source {
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
+
+  optional uint32 rate_limit = 101;
 }
 
 enum SinkType {
@@ -337,6 +339,7 @@ message Table {
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
   repeated common.ColumnOrder pk = 6;
+  // For cdc table created from a cdc source, here records the source id.
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
@@ -408,6 +411,11 @@ message Table {
   // column" within all the columns. It is used for filtering during "on
   // conflict" operations.
   optional uint32 version_column_index = 38;
+
+  // The unique identifier of the upstream table if it is a CDC table.
+  // It will be used in auto schema change to get the Table which mapped to the
+  // upstream table.
+  optional string cdc_table_id = 39;
 
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for

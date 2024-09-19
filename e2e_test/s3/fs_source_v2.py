@@ -69,14 +69,17 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
         name TEXT,
         sex int,
         mark int,
-    ) WITH (
-        connector = 's3_v2',
+    )
+    INCLUDE payload as rw_payload
+    WITH (
+        connector = 's3',
         match_pattern = '{prefix}*.{fmt}',
         s3.region_name = '{config['S3_REGION']}',
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
+        refresh.interval.sec = 1
     ) FORMAT PLAIN ENCODE {_encode()};''')
 
     total_rows = file_num * item_num_per_file
@@ -103,6 +106,18 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
     _assert_eq('sum(id)', result[1], (total_rows - 1) * total_rows / 2)
     _assert_eq('sum(sex)', result[2], total_rows / 2)
     _assert_eq('sum(mark)', result[3], 0)
+
+    # check rw_payload
+    print('Check rw_payload')
+    stmt = f"select id, name, sex, mark, rw_payload from {_table()} limit 1;"
+    cur.execute(stmt)
+    result = cur.fetchone()
+    print("Got one line with rw_payload: ", result)
+    payload = json.loads(result[4])
+    _assert_eq('id', payload['id'], result[0])
+    _assert_eq('name', payload['name'], result[1])
+    _assert_eq('sex', payload['sex'], result[2])
+    _assert_eq('mark', payload['mark'], result[3])
 
     print('Test pass')
 

@@ -256,6 +256,7 @@ impl ClusterMetadata {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_hummock_sdk::HummockVersionId;
     use risingwave_pb::hummock::{CompactionGroup, TableStats};
 
     use crate::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
@@ -265,7 +266,7 @@ mod tests {
     #[test]
     fn test_snapshot_encoding_decoding() {
         let mut metadata = ClusterMetadata::default();
-        metadata.hummock_version.id = 321;
+        metadata.hummock_version.id = HummockVersionId::new(321);
         let raw = MetaSnapshot {
             format_version: 0,
             id: 123,
@@ -281,7 +282,7 @@ mod tests {
         let mut buf = vec![];
         let mut raw = ClusterMetadata::default();
         raw.default_cf.insert(vec![0, 1, 2], vec![3, 4, 5]);
-        raw.hummock_version.id = 1;
+        raw.hummock_version.id = HummockVersionId::new(1);
         raw.version_stats.hummock_version_id = 10;
         raw.version_stats.table_stats.insert(
             200,

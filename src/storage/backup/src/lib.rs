@@ -17,7 +17,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(extract_if)]
 #![feature(custom_test_frameworks)]
-#![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(hash_extract_if)]
 #![feature(btree_extract_if)]
@@ -75,7 +74,7 @@ impl MetaSnapshotMetadata {
             id,
             hummock_version_id: v.id,
             ssts: v.get_object_ids(),
-            max_committed_epoch: v.max_committed_epoch,
+            max_committed_epoch: v.visible_table_committed_epoch(),
             safe_epoch: v.visible_table_safe_epoch(),
             format_version,
             remarks,
@@ -114,7 +113,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
     fn from(m: &MetaSnapshotMetadata) -> Self {
         Self {
             id: m.id,
-            hummock_version_id: m.hummock_version_id,
+            hummock_version_id: m.hummock_version_id.to_u64(),
             max_committed_epoch: m.max_committed_epoch,
             safe_epoch: m.safe_epoch,
             format_version: Some(m.format_version),
@@ -122,7 +121,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             state_table_info: m
                 .state_table_info
                 .iter()
-                .map(|(t, i)| (t.table_id, i.clone()))
+                .map(|(t, i)| (t.table_id, *i))
                 .collect(),
             rw_version: m.rw_version.clone(),
         }

@@ -18,7 +18,7 @@ use risingwave_common::bail;
 use super::plan_node::RewriteExprsRecursive;
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
-use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
+use crate::expr::NowProcTimeFinder;
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, VisitExprsRecursive,
@@ -540,8 +540,7 @@ impl LogicalOptimizer {
             return plan;
         }
 
-        let epoch = ctx.session_ctx().pinned_snapshot().epoch();
-        let mut v = InlineNowProcTime::new(epoch);
+        let mut v = ctx.session_ctx().pinned_snapshot().inline_now_proc_time();
 
         let plan = plan.rewrite_exprs_recursive(&mut v);
 

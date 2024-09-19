@@ -8,4 +8,4 @@ SELECT auction,
        TO_CHAR(date_time, 'YYYY-MM-DD') as date,
        TO_CHAR(date_time, 'HH:MI')      as time
 FROM bid
-WITH ( connector = 'blackhole', type = 'append-only');
+WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

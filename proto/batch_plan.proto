@@ -72,6 +72,13 @@ message SourceNode {
   SourceType source_type = 7;
 }
 
+message IcebergScanNode {
+  repeated plan_common.ColumnCatalog columns = 1;
+  map<string, string> with_properties = 2;
+  repeated bytes split = 3;
+  map<string, secret.SecretRef> secret_refs = 4;
+}
+
 message FileScanNode {
   enum FileFormat {
     FILE_FORMAT_UNSPECIFIED = 0;
@@ -371,6 +378,7 @@ message PlanNode {
     MaxOneRowNode max_one_row = 36;
     LogRowSeqScanNode log_row_seq_scan = 37;
     FileScanNode file_scan = 38;
+    IcebergScanNode iceberg_scan = 39;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

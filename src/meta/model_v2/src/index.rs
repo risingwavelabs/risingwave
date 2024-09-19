@@ -28,7 +28,7 @@ pub struct Model {
     pub index_table_id: TableId,
     pub primary_table_id: TableId,
     pub index_items: ExprNodeArray,
-    pub index_column_properties: IndexColumnPropertiesArray,
+    pub index_column_properties: Option<IndexColumnPropertiesArray>,
     pub index_columns_len: i32,
 }
 
@@ -77,7 +77,7 @@ impl From<PbIndex> for ActiveModel {
             primary_table_id: Set(pb_index.primary_table_id as _),
             index_items: Set(pb_index.index_item.into()),
             index_columns_len: Set(pb_index.index_columns_len as _),
-            index_column_properties: Set(pb_index.index_column_properties.into()),
+            index_column_properties: Set(Some(pb_index.index_column_properties.into())),
         }
     }
 }

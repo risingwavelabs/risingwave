@@ -174,6 +174,7 @@ mod tests {
     use risingwave_backup::meta_snapshot_v1::MetaSnapshotV1;
     use risingwave_common::system_param::system_params_for_test;
     use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::HummockVersionId;
     use risingwave_pb::hummock::HummockVersionStats;
 
     use crate::backup_restore::meta_snapshot_builder;
@@ -190,13 +191,13 @@ mod tests {
 
         let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
         let mut hummock_version = HummockVersion::default();
-        hummock_version.id = 1;
+        hummock_version.id = HummockVersionId::new(1);
         let get_ckpt_builder = |v: &HummockVersion| {
             let v_ = v.clone();
             async move { v_ }
         };
         let hummock_version_stats = HummockVersionStats {
-            hummock_version_id: hummock_version.id,
+            hummock_version_id: hummock_version.id.to_u64(),
             ..Default::default()
         };
         hummock_version_stats.insert(&meta_store).await.unwrap();
@@ -250,7 +251,7 @@ mod tests {
             snapshot.metadata.default_cf.values().cloned().collect_vec(),
             vec![vec![100]]
         );
-        assert_eq!(snapshot.metadata.hummock_version.id, 1);
+        assert_eq!(snapshot.metadata.hummock_version.id.to_u64(), 1);
         assert_eq!(snapshot.metadata.version_stats.hummock_version_id, 1);
     }
 }

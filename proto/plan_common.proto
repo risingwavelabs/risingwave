@@ -141,6 +141,29 @@ enum JoinType {
   JOIN_TYPE_RIGHT_ANTI = 8;
 }
 
+enum AsOfJoinType {
+  AS_OF_JOIN_TYPE_UNSPECIFIED = 0;
+  AS_OF_JOIN_TYPE_INNER = 1;
+  AS_OF_JOIN_TYPE_LEFT_OUTER = 2;
+}
+
+enum AsOfJoinInequalityType {
+  AS_OF_INEQUALITY_TYPE_UNSPECIFIED = 0;
+  AS_OF_INEQUALITY_TYPE_GT = 1;
+  AS_OF_INEQUALITY_TYPE_GE = 2;
+  AS_OF_INEQUALITY_TYPE_LT = 3;
+  AS_OF_INEQUALITY_TYPE_LE = 4;
+}
+
+message AsOfJoinDesc {
+  // The index of the right side's as of column.
+  uint32 right_idx = 1;
+  // The index of the left side's as of column.
+  uint32 left_idx = 2;
+  // The type of the inequality.
+  AsOfJoinInequalityType inequality_type = 3;
+}
+
 // https://github.com/tokio-rs/prost/issues/80
 enum FormatType {
   FORMAT_TYPE_UNSPECIFIED = 0;
@@ -230,6 +253,8 @@ message AdditionalTableName {}
 
 message AdditionalCollectionName {}
 
+message AdditionalColumnPayload {}
+
 // this type means we read all headers as a whole
 message AdditionalColumnHeaders {}
 
@@ -246,6 +271,7 @@ message AdditionalColumn {
     AdditionalSchemaName schema_name = 9;
     AdditionalTableName table_name = 10;
     AdditionalCollectionName collection_name = 11;
+    AdditionalColumnPayload payload = 12;
   }
 }
 
@@ -258,4 +284,5 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_HEADER = 5;
   ADDITIONAL_COLUMN_TYPE_FILENAME = 6;
   ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
+  ADDITIONAL_COLUMN_TYPE_PAYLOAD = 8;
 }

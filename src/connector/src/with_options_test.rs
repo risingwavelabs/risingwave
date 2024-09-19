@@ -170,7 +170,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
 
     // Generate the output
     format!(
-        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n\n{}",
+        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n# UPDATE WITH: ./risedev generate-with-options\n\n{}",
         serde_yaml::to_string(&struct_infos).unwrap()
     )
 }
@@ -238,14 +238,14 @@ fn extract_comments(attrs: &[Attribute]) -> String {
             if let Ok(Meta::NameValue(mnv)) = attr.parse_meta() {
                 if mnv.path.is_ident("doc") {
                     if let syn::Lit::Str(lit_str) = mnv.lit {
-                        return Some(lit_str.value());
+                        return Some(lit_str.value().trim().to_string());
                     }
                 }
             }
             None
         })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join("\n")
         .trim()
         .to_string()
 }

@@ -9,4 +9,4 @@ WHERE auction = 1007
    OR auction = 2001
    OR auction = 2019
    OR auction = 2087
-WITH ( connector = 'blackhole', type = 'append-only');
+WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

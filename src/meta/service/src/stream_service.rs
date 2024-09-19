@@ -118,6 +118,11 @@ impl StreamManagerService for StreamServiceImpl {
                     .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
             }
+            ThrottleTarget::CdcTable => {
+                self.metadata_manager
+                    .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .await?
+            }
             ThrottleTarget::Unspecified => {
                 return Err(Status::invalid_argument("unspecified throttle target"))
             }

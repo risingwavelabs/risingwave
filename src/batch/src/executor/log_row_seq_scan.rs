@@ -22,13 +22,14 @@ use prometheus::Histogram;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, TableDistribution};
+use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -62,7 +63,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
     ) -> Self {
         let mut schema = table.schema().clone();
         schema.fields.push(Field::with_name(
-            risingwave_common::types::DataType::Int16,
+            risingwave_common::types::DataType::Varchar,
             "op",
         ));
         Self {
@@ -106,7 +107,8 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
             Some(vnodes) => Some(Bitmap::from(vnodes).into()),
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            None => Some(TableDistribution::all_vnodes()),
+            // TODO(var-vnode): use vnode count from table desc
+            None => Some(Bitmap::ones(VirtualNode::COUNT).into()),
         };
 
         let chunk_size = source.context.get_config().developer.chunk_size as u32;
@@ -212,7 +214,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
                         match r {
                             Ok(change_log_row) => {
                                 fn with_op(op: Op, row: impl Row) -> impl Row {
-                                    row.chain([Some(ScalarImpl::Int16(op.to_i16()))])
+                                    row.chain([Some(ScalarImpl::Utf8(op.to_varchar().into()))])
                                 }
                                 for (op, row) in change_log_row.into_op_value_iter() {
                                     yield Ok(with_op(op, row));

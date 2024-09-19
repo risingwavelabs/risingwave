@@ -46,6 +46,10 @@ pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
 const AWS_MSK_IAM_AUTH: &str = "AWS_MSK_IAM";
 
+/// The environment variable to disable using default credential from environment.
+/// It's recommended to set this variable to `false` in cloud hosting environment.
+const DISABLE_DEFAULT_CREDENTIAL: &str = "DISABLE_DEFAULT_CREDENTIAL";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
@@ -57,6 +61,7 @@ use aws_config::sts::AssumeRoleProvider;
 use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_types::region::Region;
 use aws_types::SdkConfig;
+use risingwave_common::util::env_var::env_var_is_true;
 
 /// A flatten config map for aws auth.
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -104,7 +109,7 @@ impl AwsAuthProps {
         }
     }
 
-    fn build_credential_provider(&self) -> ConnectorResult<SharedCredentialsProvider> {
+    async fn build_credential_provider(&self) -> ConnectorResult<SharedCredentialsProvider> {
         if self.access_key.is_some() && self.secret_key.is_some() {
             Ok(SharedCredentialsProvider::new(
                 aws_credential_types::Credentials::from_keys(
@@ -112,6 +117,10 @@ impl AwsAuthProps {
                     self.secret_key.as_ref().unwrap(),
                     self.session_token.clone(),
                 ),
+            ))
+        } else if !env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+            Ok(SharedCredentialsProvider::new(
+                aws_config::default_provider::credentials::default_provider().await,
             ))
         } else {
             bail!("Both \"access_key\" and \"secret_key\" are required.")
@@ -140,7 +149,7 @@ impl AwsAuthProps {
     pub async fn build_config(&self) -> ConnectorResult<SdkConfig> {
         let region = self.build_region().await?;
         let credentials_provider = self
-            .with_role_provider(self.build_credential_provider()?)
+            .with_role_provider(self.build_credential_provider().await?)
             .await?;
         let mut config_loader = aws_config::from_env()
             .region(region)
@@ -183,13 +192,25 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.ssl.ca.location")]
     ssl_ca_location: Option<String>,
 
+    /// CA certificate string (PEM format) for verifying the broker's key.
+    #[serde(rename = "properties.ssl.ca.pem")]
+    ssl_ca_pem: Option<String>,
+
     /// Path to client's certificate file (PEM).
     #[serde(rename = "properties.ssl.certificate.location")]
     ssl_certificate_location: Option<String>,
 
+    /// Client's public key string (PEM format) used for authentication.
+    #[serde(rename = "properties.ssl.certificate.pem")]
+    ssl_certificate_pem: Option<String>,
+
     /// Path to client's private key file (PEM).
     #[serde(rename = "properties.ssl.key.location")]
     ssl_key_location: Option<String>,
+
+    /// Client's private key string (PEM format) used for authentication.
+    #[serde(rename = "properties.ssl.key.pem")]
+    ssl_key_pem: Option<String>,
 
     /// Passphrase of client's private key.
     #[serde(rename = "properties.ssl.key.password")]
@@ -316,11 +337,20 @@ impl KafkaCommon {
         if let Some(ssl_ca_location) = self.ssl_ca_location.as_ref() {
             config.set("ssl.ca.location", ssl_ca_location);
         }
+        if let Some(ssl_ca_pem) = self.ssl_ca_pem.as_ref() {
+            config.set("ssl.ca.pem", ssl_ca_pem);
+        }
         if let Some(ssl_certificate_location) = self.ssl_certificate_location.as_ref() {
             config.set("ssl.certificate.location", ssl_certificate_location);
         }
+        if let Some(ssl_certificate_pem) = self.ssl_certificate_pem.as_ref() {
+            config.set("ssl.certificate.pem", ssl_certificate_pem);
+        }
         if let Some(ssl_key_location) = self.ssl_key_location.as_ref() {
             config.set("ssl.key.location", ssl_key_location);
+        }
+        if let Some(ssl_key_pem) = self.ssl_key_pem.as_ref() {
+            config.set("ssl.key.pem", ssl_key_pem);
         }
         if let Some(ssl_key_password) = self.ssl_key_password.as_ref() {
             config.set("ssl.key.password", ssl_key_password);
@@ -630,6 +660,7 @@ impl NatsCommon {
         stream: String,
         split_id: String,
         start_sequence: NatsOffset,
+        mut config: jetstream::consumer::pull::Config,
     ) -> ConnectorResult<
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
     > {
@@ -640,10 +671,6 @@ impl NatsCommon {
             .replace(',', "-")
             .replace(['.', '>', '*', ' ', '\t'], "_");
         let name = format!("risingwave-consumer-{}-{}", subject_name, split_id);
-        let mut config = jetstream::consumer::pull::Config {
-            ack_policy: jetstream::consumer::AckPolicy::None,
-            ..Default::default()
-        };
 
         let deliver_policy = match start_sequence {
             NatsOffset::Earliest => DeliverPolicy::All,
@@ -662,6 +689,7 @@ impl NatsCommon {
             },
             NatsOffset::None => DeliverPolicy::All,
         };
+
         let consumer = stream
             .get_or_create_consumer(&name, {
                 config.deliver_policy = deliver_policy;

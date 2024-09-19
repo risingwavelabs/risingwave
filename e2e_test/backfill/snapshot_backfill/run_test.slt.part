@@ -1,0 +1,28 @@
+control substitution on
+
+statement ok
+set backfill_rate_limit = 500;
+
+statement ok
+set streaming_use_snapshot_backfill = true;
+
+statement ok
+create materialized view ${TEST_NAME}_mv as select * from ${TEST_NAME}_v;
+
+statement ok
+create materialized view ${TEST_NAME}_extended_mv as select * from ${TEST_NAME}_mv;
+
+include ./check_data_equal.slt.part
+
+sleep 3s
+
+include ./check_data_equal.slt.part
+
+statement ok
+drop materialized view ${TEST_NAME}_extended_mv;
+
+statement ok
+drop materialized view ${TEST_NAME}_mv;
+
+statement ok
+drop view ${TEST_NAME}_v;

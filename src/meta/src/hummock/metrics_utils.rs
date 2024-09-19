@@ -397,7 +397,7 @@ pub fn trigger_pin_unpin_version_state(
     } else {
         metrics
             .min_pinned_version_id
-            .set(HummockVersionId::MAX as _);
+            .set(HummockVersionId::MAX.to_u64() as _);
     }
 }
 

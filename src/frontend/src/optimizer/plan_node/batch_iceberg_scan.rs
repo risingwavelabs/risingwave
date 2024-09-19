@@ -18,6 +18,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::source_node::SourceType;
 use risingwave_pb::batch_plan::SourceNode;
+use risingwave_pb::batch_plan::IcebergScanNode;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
@@ -100,9 +101,7 @@ impl ToBatchPb for BatchIcebergScan {
     fn to_batch_prost_body(&self) -> NodeBody {
         let source_catalog = self.source_catalog().unwrap();
         let (with_properties, secret_refs) = source_catalog.with_properties.clone().into_parts();
-        NodeBody::Source(SourceNode {
-            source_id: source_catalog.id,
-            info: Some(source_catalog.info.clone()),
+        NodeBody::IcebergScan(IcebergScanNode {
             columns: self
                 .core
                 .column_catalog

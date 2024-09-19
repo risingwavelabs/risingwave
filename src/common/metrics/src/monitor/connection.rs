@@ -24,10 +24,9 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use http::Uri;
-use hyper::client::connect::dns::{GaiAddrs, GaiFuture, GaiResolver, Name};
-use hyper::client::connect::Connection;
-use hyper::client::HttpConnector;
-use hyper::service::Service;
+use hyper_util::client::legacy::connect::dns::{GaiAddrs, GaiFuture, GaiResolver, Name};
+use hyper_util::client::legacy::connect::{Connected, Connection, HttpConnector};
+use hyper_util::rt::TokioIo;
 use itertools::Itertools;
 use pin_project_lite::pin_project;
 use prometheus::{
@@ -37,11 +36,13 @@ use prometheus::{
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::{Channel, Endpoint};
+use tower_service::Service;
 use tracing::{debug, info, warn};
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
 use crate::{register_guarded_int_counter_vec_with_registry, LabelGuardedIntCounterVec};
 
+#[auto_impl::auto_impl(&mut)]
 pub trait MonitorAsyncReadWrite {
     fn on_read(&mut self, _size: usize) {}
     fn on_eof(&mut self) {}
@@ -73,6 +74,14 @@ impl<C, M> MonitoredConnection<C, M> {
     fn project_into(this: Pin<&mut Self>) -> (Pin<&mut C>, &mut M) {
         let this = this.project();
         (this.inner, this.monitor)
+    }
+
+    /// Delegate async read/write traits between tokio and hyper.
+    fn hyper_tokio_delegate(
+        self: Pin<&mut Self>,
+    ) -> TokioIo<MonitoredConnection<TokioIo<Pin<&mut C>>, &mut M>> {
+        let (inner, monitor) = MonitoredConnection::project_into(self);
+        TokioIo::new(MonitoredConnection::new(TokioIo::new(inner), monitor))
     }
 }
 
@@ -109,6 +118,16 @@ impl<C: AsyncRead, M: MonitorAsyncReadWrite> AsyncRead for MonitoredConnection<C
             Poll::Pending => {}
         }
         ret
+    }
+}
+
+impl<C: hyper::rt::Read, M: MonitorAsyncReadWrite> hyper::rt::Read for MonitoredConnection<C, M> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: hyper::rt::ReadBufCursor<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        hyper::rt::Read::poll_read(std::pin::pin!(self.hyper_tokio_delegate()), cx, buf)
     }
 }
 
@@ -186,8 +205,41 @@ impl<C: AsyncWrite, M: MonitorAsyncReadWrite> AsyncWrite for MonitoredConnection
     }
 }
 
+impl<C: hyper::rt::Write, M: MonitorAsyncReadWrite> hyper::rt::Write for MonitoredConnection<C, M> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        hyper::rt::Write::poll_write(std::pin::pin!(self.hyper_tokio_delegate()), cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        hyper::rt::Write::poll_flush(std::pin::pin!(self.hyper_tokio_delegate()), cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        hyper::rt::Write::poll_shutdown(std::pin::pin!(self.hyper_tokio_delegate()), cx)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        hyper::rt::Write::poll_write_vectored(std::pin::pin!(self.hyper_tokio_delegate()), cx, bufs)
+    }
+}
+
 impl<C: Connection, M> Connection for MonitoredConnection<C, M> {
-    fn connected(&self) -> hyper::client::connect::Connected {
+    fn connected(&self) -> Connected {
         self.inner.connected()
     }
 }
@@ -272,6 +324,58 @@ where
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
+    }
+}
+
+// Compatibility implementation for hyper 0.14 ecosystem.
+// Should be the same as those with imports from `http::Uri` and `hyper_util::client::legacy`.
+// TODO(http-bump): remove this after there is no more dependency on hyper 0.14.
+mod compat {
+    use http_02::Uri;
+    use hyper_014::client::connect::{Connected, Connection};
+
+    use super::*;
+
+    impl<C: Service<Uri>, M: MonitorNewConnection + Clone + 'static> Service<Uri>
+        for MonitoredConnection<C, M>
+    where
+        C::Future: 'static,
+    {
+        type Error = C::Error;
+        type Response = MonitoredConnection<C::Response, M::ConnectionMonitor>;
+
+        type Future = impl Future<Output = Result<Self::Response, Self::Error>> + 'static;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            let ret = self.inner.poll_ready(cx);
+            if let Poll::Ready(Err(_)) = &ret {
+                self.monitor.on_err("<poll_ready>".to_string());
+            }
+            ret
+        }
+
+        fn call(&mut self, uri: Uri) -> Self::Future {
+            let endpoint = format!("{:?}", uri.host());
+            let monitor = self.monitor.clone();
+            self.inner
+                .call(uri)
+                .map(move |result: Result<_, _>| match result {
+                    Ok(resp) => Ok(MonitoredConnection::new(
+                        resp,
+                        monitor.new_connection_monitor(endpoint),
+                    )),
+                    Err(e) => {
+                        monitor.on_err(endpoint);
+                        Err(e)
+                    }
+                })
+        }
+    }
+
+    impl<C: Connection, M> Connection for MonitoredConnection<C, M> {
+        fn connected(&self) -> Connected {
+            self.inner.connected()
+        }
     }
 }
 
@@ -534,18 +638,16 @@ impl<L> tonic::transport::server::Router<L> {
         signal: impl Future<Output = ()>,
     ) -> impl Future<Output = ()>
     where
-        L: tower_layer::Layer<tonic::transport::server::Routes>,
-        L::Service: Service<
-                http::request::Request<hyper::Body>,
-                Response = http::response::Response<ResBody>,
-            > + Clone
+        L: tower_layer::Layer<tonic::service::Routes>,
+        L::Service: Service<http::Request<tonic::body::BoxBody>, Response = http::Response<ResBody>>
+            + Clone
             + Send
             + 'static,
-        <<L as tower_layer::Layer<tonic::transport::server::Routes>>::Service as Service<
-            http::request::Request<hyper::Body>,
+        <<L as tower_layer::Layer<tonic::service::Routes>>::Service as Service<
+            http::Request<tonic::body::BoxBody>,
         >>::Future: Send + 'static,
-        <<L as tower_layer::Layer<tonic::transport::server::Routes>>::Service as Service<
-            http::request::Request<hyper::Body>,
+        <<L as tower_layer::Layer<tonic::service::Routes>>::Service as Service<
+            http::Request<tonic::body::BoxBody>,
         >>::Error: Into<Box<dyn std::error::Error + Send + Sync>> + Send,
         ResBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
         ResBody::Error: Into<Box<dyn std::error::Error + Send + Sync>>,

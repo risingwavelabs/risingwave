@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lint_reasons)]
 #![feature(let_chains)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
@@ -25,6 +24,7 @@ use educe::Educe;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
+use risingwave_common::license::LicenseKey;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -187,8 +187,13 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
+    /// The license key to activate enterprise features.
+    #[clap(long, hide = true, env = "RW_LICENSE_KEY")]
+    #[override_opts(path = system.license_key)]
+    pub license_key: Option<LicenseKey>,
+
     /// 128-bit AES key for secret store in HEX format.
-    #[educe(Debug(ignore))]
+    #[educe(Debug(ignore))] // TODO: use newtype to redact debug impl
     #[clap(long, hide = true, env = "RW_SECRET_STORE_PRIVATE_KEY_HEX")]
     pub secret_store_private_key_hex: Option<String>,
 
@@ -290,7 +295,6 @@ pub fn start(
                 ),
             },
         };
-
         validate_config(&config);
 
         let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
@@ -452,6 +456,14 @@ pub fn start(
                 table_info_statistic_history_times: config
                     .storage
                     .table_info_statistic_history_times,
+                actor_cnt_per_worker_parallelism_hard_limit: config
+                    .meta
+                    .developer
+                    .actor_cnt_per_worker_parallelism_hard_limit,
+                actor_cnt_per_worker_parallelism_soft_limit: config
+                    .meta
+                    .developer
+                    .actor_cnt_per_worker_parallelism_soft_limit,
             },
             config.system.into_init_system_params(),
             Default::default(),

@@ -50,3 +50,7 @@
     ```sh
     cargo run -- status
     ```
+
+## Adding a migration
+
+- Add a new column to some catalogs. You can checkout the migration [m20240617_070131_index_column_properties.rs](src/m20240617_070131_index_column_properties.rs) as a reference.

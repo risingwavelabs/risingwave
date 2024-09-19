@@ -175,7 +175,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
             plan_node,
             self.task_id,
             self.context.clone(),
-            self.epoch.clone(),
+            self.epoch,
             self.shutdown_rx.clone(),
         )
     }
@@ -189,7 +189,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
     }
 
     pub fn epoch(&self) -> BatchQueryEpoch {
-        self.epoch.clone()
+        self.epoch
     }
 }
 
@@ -244,6 +244,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::SortOverWindow => SortOverWindowExecutor,
             NodeBody::MaxOneRow => MaxOneRowExecutor,
             NodeBody::FileScan => FileScanExecutorBuilder,
+            NodeBody::IcebergScan => IcebergScanExecutorBuilder,
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,

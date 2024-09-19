@@ -45,7 +45,7 @@ use risingwave_common::array::{Array, ArrayRef};
 use thiserror_ext::AsReport;
 
 pub use crate::source::filesystem::opendal_source::{
-    GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
 };
 pub use crate::source::filesystem::S3_CONNECTOR;
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;

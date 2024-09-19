@@ -61,12 +61,13 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-bigquery = { version = "0.9.0", features = ["auth"] }
-google-cloud-gax = "0.17.0"
-google-cloud-googleapis = { version = "0.13", features = ["pubsub", "bigquery"] }
-google-cloud-pubsub = "0.25"
+google-cloud-bigquery = { version = "0.12.0", features = ["auth"] }
+google-cloud-gax = "0.19.0"
+google-cloud-googleapis = { version = "0.15", features = ["pubsub", "bigquery"] }
+google-cloud-pubsub = "0.28"
 http = "0.2"
 iceberg = { workspace = true }
+iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
 icelake = { workspace = true }
 indexmap = { version = "2.2.6", features = ["serde"] }
@@ -75,7 +76,7 @@ jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = { workspace = true }
 jsonwebtoken = "9.2.0"
 maplit = "1.0.2"
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12.0", features = ["future"] }
 mongodb = { version = "2.8.2", features = ["tokio-runtime"] }
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
@@ -87,10 +88,12 @@ nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 opendal = { workspace = true, features = [
     "executors-tokio",
+    "services-azblob",
     "services-fs",
     "services-gcs",
     "services-memory",
     "services-s3",
+    "services-webhdfs",
 ] }
 openssl = "0.10"
 parking_lot = { workspace = true }
@@ -99,10 +102,9 @@ paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.12", features = ["no-recursion-limit"] }
-prost-reflect = "0.13"
-prost-types = "0.12"
-protobuf-native = "0.2.2"
+prost = { workspace = true, features = ["no-recursion-limit"] }
+prost-reflect = { version = "0.14", features = ["serde"] }
+prost-types = "0.13"
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
@@ -154,7 +156,7 @@ thiserror-ext = { workspace = true }
 tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834f2deeb9e2fb08afaf73865f330cf31a3876a", default-features = false, features = [
     "chrono",
     "sql-browser-tokio",
-    "vendored-openssl",
+    "rustls",
     "rust_decimal",
     "bigdecimal",
     "tds73",
@@ -172,7 +174,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
@@ -191,6 +193,7 @@ assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 deltalake = { workspace = true, features = ["datafusion"] }
 expect-test = "1"
+fs-err = "2"
 paste = "1"
 pretty_assertions = "1"
 quote = "1"
@@ -202,10 +205,6 @@ tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
 walkdir = "2"
-
-[build-dependencies]
-prost-build = "0.12"
-protobuf-src = "1"
 
 [[bench]]
 name = "debezium_json_parser"

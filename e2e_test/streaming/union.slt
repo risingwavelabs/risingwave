@@ -153,6 +153,9 @@ Caused by:
 
 
 statement ok
+drop table txx;
+
+statement ok
 drop table t1;
 
 statement ok

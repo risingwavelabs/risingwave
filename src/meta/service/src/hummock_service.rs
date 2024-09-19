@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{TableId, SYS_CATALOG_START_ID};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
@@ -75,7 +76,10 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<UnpinVersionBeforeResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .unpin_version_before(req.context_id, req.unpin_version_before)
+            .unpin_version_before(
+                req.context_id,
+                HummockVersionId::new(req.unpin_version_before),
+            )
             .await?;
         Ok(Response::new(UnpinVersionBeforeResponse { status: None }))
     }
@@ -84,10 +88,13 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         _request: Request<GetCurrentVersionRequest>,
     ) -> Result<Response<GetCurrentVersionResponse>, Status> {
-        let current_version = self.hummock_manager.get_current_version().await;
+        let current_version = self
+            .hummock_manager
+            .on_current_version(|version| version.into())
+            .await;
         Ok(Response::new(GetCurrentVersionResponse {
             status: None,
-            current_version: Some(current_version.into()),
+            current_version: Some(current_version),
         }))
     }
 
@@ -114,7 +121,10 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<TriggerCompactionDeterministicResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .trigger_compaction_deterministic(req.version_id, req.compaction_groups)
+            .trigger_compaction_deterministic(
+                HummockVersionId::new(req.version_id),
+                req.compaction_groups,
+            )
             .await?;
         Ok(Response::new(TriggerCompactionDeterministicResponse {}))
     }
@@ -136,7 +146,11 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(req.start_id, req.num_limit, req.committed_epoch_limit)
+            .list_version_deltas(
+                HummockVersionId::new(req.start_id),
+                req.num_limit,
+                req.committed_epoch_limit,
+            )
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(PbHummockVersionDeltas {
@@ -443,7 +457,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let new_group_id = self
             .hummock_manager
-            .split_compaction_group(req.group_id, &req.table_ids)
+            .split_compaction_group(req.group_id, &req.table_ids, req.partition_vnode_count)
             .await?;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
@@ -696,11 +710,25 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<GetVersionByEpochRequest>,
     ) -> Result<Response<GetVersionByEpochResponse>, Status> {
-        let GetVersionByEpochRequest { epoch } = request.into_inner();
-        let version = self.hummock_manager.epoch_to_version(epoch).await?;
+        let GetVersionByEpochRequest { epoch, table_id } = request.into_inner();
+        let version = self
+            .hummock_manager
+            .epoch_to_version(epoch, table_id)
+            .await?;
         Ok(Response::new(GetVersionByEpochResponse {
             version: Some(version.to_protobuf()),
         }))
+    }
+
+    async fn merge_compaction_group(
+        &self,
+        request: Request<MergeCompactionGroupRequest>,
+    ) -> Result<Response<MergeCompactionGroupResponse>, Status> {
+        let req = request.into_inner();
+        self.hummock_manager
+            .merge_compaction_group(req.left_group_id, req.right_group_id)
+            .await?;
+        Ok(Response::new(MergeCompactionGroupResponse {}))
     }
 }
 

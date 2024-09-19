@@ -507,7 +507,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -526,8 +526,11 @@ mod tests {
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
-        test_env.storage.seal_epoch(epoch1, false);
-        let sync_result = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
+        let sync_result = test_env
+            .storage
+            .seal_and_sync_epoch(epoch2, HashSet::from_iter([table.id.into()]))
+            .await
+            .unwrap();
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
         reader.init().await.unwrap();
@@ -614,7 +617,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -632,8 +635,6 @@ mod tests {
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
-
-        test_env.storage.seal_epoch(epoch1, false);
 
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
@@ -691,7 +692,10 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env.storage.clear_shared_buffer(epoch2).await;
+        test_env
+            .storage
+            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
+            .await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -803,7 +807,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -904,7 +908,10 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env.storage.clear_shared_buffer(epoch2).await;
+        test_env
+            .storage
+            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
+            .await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -1029,7 +1036,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1127,7 +1134,6 @@ mod tests {
         }
 
         // Truncation of reader1 on epoch1 should work because it is before this sync
-        test_env.storage.seal_epoch(epoch1, false);
         test_env.commit_epoch(epoch2).await;
         test_env
             .storage
@@ -1139,7 +1145,10 @@ mod tests {
         drop(writer2);
 
         // Recovery
-        test_env.storage.clear_shared_buffer(epoch2).await;
+        test_env
+            .storage
+            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
+            .await;
 
         let vnodes = build_bitmap(0..VirtualNode::COUNT);
         let factory = KvLogStoreFactory::new(
@@ -1222,7 +1231,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1362,7 +1371,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1504,6 +1513,13 @@ mod tests {
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
         assert_eq!(2, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch2,
+                chunk_id: chunk_ids[0],
+            })
+            .unwrap();
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
@@ -1692,7 +1708,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1711,7 +1727,6 @@ mod tests {
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
-        test_env.storage.seal_epoch(epoch1, false);
         test_env.commit_epoch(epoch2).await;
 
         reader.init().await.unwrap();
@@ -1751,7 +1766,10 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env.storage.clear_shared_buffer(epoch2).await;
+        test_env
+            .storage
+            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
+            .await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -1815,7 +1833,10 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env.storage.clear_shared_buffer(epoch3).await;
+        test_env
+            .storage
+            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
+            .await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(

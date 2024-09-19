@@ -282,6 +282,7 @@ pub mod agg_executor {
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::agg_common::{
         AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
@@ -324,13 +325,11 @@ pub mod agg_executor {
         agg_call: &AggCall,
         group_key_indices: &[usize],
         pk_indices: &[usize],
-        input_ref: &Executor,
+        input_fields: Vec<Field>,
         is_append_only: bool,
     ) -> AggStateStorage<S> {
         match agg_call.kind {
             AggKind::Builtin(PbAggKind::Min | PbAggKind::Max) if !is_append_only => {
-                let input_fields = input_ref.schema().fields();
-
                 let mut column_descs = Vec::new();
                 let mut order_types = Vec::new();
                 let mut upstream_columns = Vec::new();
@@ -364,12 +363,16 @@ pub mod agg_executor {
                     add_column(*idx, input_fields[*idx].data_type(), Some(OrderType::ascending()));
                 }
 
-                let state_table = StateTable::new_without_distribution(
+                let state_table = StateTable::from_table_catalog(
+                    &gen_pbtable(
+                        table_id,
+                        column_descs,
+                        order_types.clone(),
+                        (0..order_types.len()).collect(),
+                        0,
+                    ),
                     store,
-                    table_id,
-                    column_descs,
-                    order_types.clone(),
-                    (0..order_types.len()).collect(),
+                    None,
                 ).await;
 
                 AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None), order_columns }
@@ -397,10 +400,8 @@ pub mod agg_executor {
         table_id: TableId,
         agg_calls: &[AggCall],
         group_key_indices: &[usize],
-        input_ref: &Executor,
+        input_fields: Vec<Field>,
     ) -> StateTable<S> {
-        let input_fields = input_ref.schema().fields();
-
         let mut column_descs = Vec::new();
         let mut order_types = Vec::new();
 
@@ -422,12 +423,16 @@ pub mod agg_executor {
             add_column_desc(agg_call.return_type.clone());
         });
 
-        StateTable::new_without_distribution_inconsistent_op(
+        StateTable::from_table_catalog_inconsistent_op(
+            &gen_pbtable(
+                table_id,
+                column_descs,
+                order_types,
+                (0..group_key_indices.len()).collect(),
+                0,
+            ),
             store,
-            table_id,
-            column_descs,
-            order_types,
-            (0..group_key_indices.len()).collect(),
+            None,
         )
         .await
     }
@@ -455,7 +460,7 @@ pub mod agg_executor {
                     agg_call,
                     &group_key_indices,
                     &pk_indices,
-                    &input,
+                    input.info.schema.fields.clone(),
                     is_append_only,
                 )
                 .await,
@@ -467,7 +472,7 @@ pub mod agg_executor {
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &group_key_indices,
-            &input,
+            input.info.schema.fields.clone(),
         )
         .await;
 
@@ -515,6 +520,7 @@ pub mod agg_executor {
         row_count_index: usize,
         pk_indices: PkIndices,
         executor_id: u64,
+        must_output_per_barrier: bool,
     ) -> Executor {
         let storages = future::join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
             create_agg_state_storage(
@@ -523,7 +529,7 @@ pub mod agg_executor {
                 agg_call,
                 &[],
                 &pk_indices,
-                &input,
+                input.info.schema.fields.clone(),
                 is_append_only,
             )
         }))
@@ -534,7 +540,7 @@ pub mod agg_executor {
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &[],
-            &input,
+            input.info.schema.fields.clone(),
         )
         .await;
 
@@ -560,7 +566,9 @@ pub mod agg_executor {
             intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-            extra: SimpleAggExecutorExtraArgs {},
+            extra: SimpleAggExecutorExtraArgs {
+                must_output_per_barrier,
+            },
         })
         .unwrap();
         (info, exec).into()
@@ -575,6 +583,7 @@ pub mod top_n_executor {
     use risingwave_storage::memory::MemoryStateStore;
 
     use crate::common::table::state_table::StateTable;
+    use crate::common::table::test_utils::gen_pbtable;
 
     pub async fn create_in_memory_state_table(
         data_types: &[DataType],
@@ -601,12 +610,16 @@ pub mod top_n_executor {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        StateTable::new_without_distribution(
+        StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::new(0),
+                column_descs,
+                order_types.to_vec(),
+                pk_indices.to_vec(),
+                0,
+            ),
             state_store,
-            TableId::new(0),
-            column_descs,
-            order_types.to_vec(),
-            pk_indices.to_vec(),
+            None,
         )
         .await
     }
