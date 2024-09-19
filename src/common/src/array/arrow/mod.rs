@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod arrow_52;
 mod arrow_deltalake;
 mod arrow_iceberg;
 mod arrow_udf;
@@ -19,7 +20,21 @@ mod arrow_udf;
 pub use arrow_deltalake::DeltaLakeConvert;
 pub use arrow_iceberg::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 pub use arrow_udf::{FromArrow, ToArrow, UdfArrowConvert};
-
+pub use reexport::*;
+mod reexport {
+    pub use super::arrow_deltalake::{
+        arrow_array as arrow_array_deltalake, arrow_buffer as arrow_buffer_deltalake,
+        arrow_cast as arrow_cast_deltalake, arrow_schema as arrow_schema_deltalake,
+    };
+    pub use super::arrow_iceberg::{
+        arrow_array as arrow_array_iceberg, arrow_buffer as arrow_buffer_iceberg,
+        arrow_cast as arrow_cast_iceberg, arrow_schema as arrow_schema_iceberg,
+    };
+    pub use super::arrow_udf::{
+        arrow_array as arrow_array_udf, arrow_buffer as arrow_buffer_udf,
+        arrow_cast as arrow_cast_udf, arrow_schema as arrow_schema_udf,
+    };
+}
 use crate::types::Interval;
 
 trait ArrowIntervalTypeTrait {

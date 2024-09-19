@@ -17,18 +17,14 @@ normal = ["workspace-hack"]
 ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
-arrow-array = { workspace = true }
+arrow-52-array = { workspace = true }
+arrow-52-buffer = { workspace = true }
+arrow-52-cast = { workspace = true }
+arrow-52-schema = { workspace = true }
 arrow-array-deltalake = { workspace = true }
-arrow-array-iceberg = { workspace = true }
-arrow-buffer = { workspace = true }
 arrow-buffer-deltalake = { workspace = true }
-arrow-buffer-iceberg = { workspace = true }
-arrow-cast = { workspace = true }
 arrow-cast-deltalake = { workspace = true }
-arrow-cast-iceberg = { workspace = true }
-arrow-schema = { workspace = true }
 arrow-schema-deltalake = { workspace = true }
-arrow-schema-iceberg = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"

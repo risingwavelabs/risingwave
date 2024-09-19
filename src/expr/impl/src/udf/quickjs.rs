@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use arrow_schema::{DataType, Field};
 use arrow_udf_js::{CallMode, Runtime};
 use futures_util::StreamExt;
+use risingwave_common::array::arrow::arrow_schema_udf::{DataType, Field};
 use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
 
 use super::*;

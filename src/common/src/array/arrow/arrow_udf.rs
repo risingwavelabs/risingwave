@@ -20,15 +20,13 @@
 
 use std::sync::Arc;
 
-pub use arrow_impl::{FromArrow, ToArrow};
-use {arrow_array, arrow_buffer, arrow_cast, arrow_schema};
-type ArrowIntervalType = i128;
+pub use {
+    arrow_52_array as arrow_array, arrow_52_buffer as arrow_buffer, arrow_52_cast as arrow_cast,
+    arrow_52_schema as arrow_schema,
+};
 
+pub use super::arrow_52::{FromArrow, ToArrow};
 use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
-
-#[expect(clippy::duplicate_mod)]
-#[path = "./arrow_impl.rs"]
-mod arrow_impl;
 
 /// Arrow conversion for UDF.
 #[derive(Default, Debug)]

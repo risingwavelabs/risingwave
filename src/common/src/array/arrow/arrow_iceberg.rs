@@ -17,46 +17,16 @@ use std::collections::HashMap;
 use std::ops::{Div, Mul};
 use std::sync::Arc;
 
-use arrow_array_iceberg::{self as arrow_array, ArrayRef};
-use arrow_buffer_iceberg::IntervalMonthDayNano as ArrowIntervalType;
+use arrow_array::ArrayRef;
 use num_traits::abs;
-use {
-    arrow_buffer_iceberg as arrow_buffer, arrow_cast_iceberg as arrow_cast,
-    arrow_schema_iceberg as arrow_schema,
+pub use {
+    arrow_52_array as arrow_array, arrow_52_buffer as arrow_buffer, arrow_52_cast as arrow_cast,
+    arrow_52_schema as arrow_schema,
 };
 
+pub use super::arrow_52::{FromArrow, ToArrow};
 use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
-use crate::types::{Interval, StructType};
-
-impl ArrowIntervalTypeTrait for ArrowIntervalType {
-    fn to_interval(self) -> Interval {
-        // XXX: the arrow-rs decoding is incorrect
-        // let (months, days, ns) = arrow_array::types::IntervalMonthDayNanoType::to_parts(value);
-        Interval::from_month_day_usec(self.months, self.days, self.nanoseconds / 1000)
-    }
-
-    fn from_interval(value: Interval) -> Self {
-        // XXX: the arrow-rs encoding is incorrect
-        // arrow_array::types::IntervalMonthDayNanoType::make_value(
-        //     self.months(),
-        //     self.days(),
-        //     // TODO: this may overflow and we need `try_into`
-        //     self.usecs() * 1000,
-        // )
-        Self {
-            months: value.months(),
-            days: value.days(),
-            nanoseconds: value.usecs() * 1000,
-        }
-    }
-}
-
-#[path = "./arrow_impl.rs"]
-mod arrow_impl;
-
-use arrow_impl::{FromArrow, ToArrow};
-
-use crate::array::arrow::ArrowIntervalTypeTrait;
+use crate::types::StructType;
 
 pub struct IcebergArrowConvert;
 
@@ -261,10 +231,9 @@ impl ToArrow for IcebergCreateTableArrowConvert {
 mod test {
     use std::sync::Arc;
 
-    use arrow_array_iceberg::{ArrayRef, Decimal128Array};
-    use arrow_schema_iceberg::DataType;
-
+    use super::arrow_array::{ArrayRef, Decimal128Array};
     use super::arrow_impl::ToArrow;
+    use super::arrow_schema::DataType;
     use super::IcebergArrowConvert;
     use crate::array::{Decimal, DecimalArray};
 
