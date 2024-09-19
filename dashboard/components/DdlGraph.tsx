@@ -13,9 +13,10 @@ import {
 } from "../lib/layout"
 
 const nodeRadius = 12
-const ddlNameMargin = nodeRadius * 3
 const ddlMarginX = nodeRadius * 8
 const ddlMarginY = nodeRadius * 8
+const ddlNameMarginX = ddlMarginX / 2
+const ddlNameMarginY = nodeRadius * 7
 const ddlDistanceX = nodeRadius * 2
 const ddlDistanceY = nodeRadius * 2
 
@@ -50,10 +51,6 @@ export default function DdlGraph({
       ddlDistanceY
     )
 
-    const layoutResult = ddlLayout.map(({ x, y, ...data }) => {
-      return { x: x + ddlMarginX / 2, y: y + ddlMarginY / 2, ...data }
-    })
-
     let svgWidth = 0
     let svgHeight = 0
     ddlLayout.forEach(({ x, y }) => {
@@ -63,7 +60,7 @@ export default function DdlGraph({
     const edges = generateDdlEdges(ddlLayout)
 
     return {
-      layoutResult,
+      layoutResult: ddlLayout,
       svgWidth,
       svgHeight,
       edges,
@@ -97,7 +94,8 @@ export default function DdlGraph({
           .text(({ ddl_name, schema_name }) => `${schema_name}.${ddl_name}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "middle")
-          .attr("dy", ddlNameMargin)
+          .attr("dx", ddlNameMarginX)
+          .attr("dy", ddlNameMarginY)
           .attr("fill", "black")
           .attr("font-size", 12)
 
@@ -113,6 +111,8 @@ export default function DdlGraph({
         })
 
         circle
+          .attr("cx", ddlMarginX / 2)
+          .attr("cy", ddlMarginY / 2)
           .attr("fill", "white")
           .attr("stroke-width", 1)
           .attr("stroke", theme.colors.gray[500])
