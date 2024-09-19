@@ -28,6 +28,7 @@ use arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
 };
 use async_trait::async_trait;
+use clap::ValueEnum;
 use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table as TableV2;
@@ -51,6 +52,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::config::MetaBackend;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -153,8 +155,9 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
+    /// enable config load currently is used by nimtable, so it only support jdbc catalog.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
-    pub nimtable: bool,
+    pub enable_config_load: bool,
 }
 
 impl IcebergConfig {
@@ -211,16 +214,16 @@ impl IcebergConfig {
                 "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
-        config = config.fill_for_nimtable()?;
+        config = config.fill_for_config_load()?;
 
         Ok(config)
     }
 
-    pub fn fill_for_nimtable(mut self) -> Result<Self> {
-        if self.nimtable {
+    pub fn fill_for_config_load(mut self) -> Result<Self> {
+        if self.enable_config_load {
             if self.catalog_type.as_deref() != Some("jdbc") {
                 return Err(SinkError::Config(anyhow!(
-                    "nimtable only support jdbc catalog"
+                    "enable_config_load only support jdbc catalog right now"
                 )));
             }
 
@@ -246,18 +249,38 @@ impl IcebergConfig {
                 bail!("To create an iceberg engine table, RW_SQL_DATABASE needed to be set");
             };
 
-            self.uri = Some(format!(
-                "jdbc:postgresql://{}/{}",
-                meta_store_endpoint.clone(),
-                meta_store_database.clone()
-            ));
-
-            let Ok(meta_store_user) = std::env::var("RW_POSTGRES_USERNAME") else {
-                bail!("To create an iceberg engine table, RW_POSTGRES_USERNAME needed to be set");
+            let Ok(meta_store_backend) = std::env::var("RW_BACKEND") else {
+                bail!("To create an iceberg engine table, RW_BACKEND needed to be set");
+            };
+            let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
+                bail!("failed to parse meta backend: {}", meta_store_backend);
             };
 
-            let Ok(meta_store_password) = std::env::var("RW_POSTGRES_PASSWORD") else {
-                bail!("To create an iceberg engine table, RW_POSTGRES_PASSWORD needed to be set");
+            self.uri = match meta_backend {
+                MetaBackend::Postgres => Some(format!(
+                    "jdbc:postgresql://{}/{}",
+                    meta_store_endpoint.clone(),
+                    meta_store_database.clone()
+                )),
+                MetaBackend::Mysql => Some(format!(
+                    "jdbc:mysql://{}/{}",
+                    meta_store_endpoint.clone(),
+                    meta_store_database.clone()
+                )),
+                MetaBackend::Sqlite | MetaBackend::Etcd | MetaBackend::Sql | MetaBackend::Mem => {
+                    bail!(
+                        "Unsupported meta backend for iceberg engine table: {}",
+                        meta_store_backend
+                    );
+                }
+            };
+
+            let Ok(meta_store_user) = std::env::var("RW_SQL_USERNAME") else {
+                bail!("To create an iceberg engine table, RW_SQL_USERNAME needed to be set");
+            };
+
+            let Ok(meta_store_password) = std::env::var("RW_SQL_PASSWORD") else {
+                bail!("To create an iceberg engine table, RW_SQL_PASSWORD needed to be set");
             };
 
             let java_catalog_props = &mut self.java_catalog_props;
@@ -375,7 +398,7 @@ impl IcebergConfig {
         Ok(iceberg_configs)
     }
 
-    fn build_jni_catalog_configs_for_nimtable(
+    fn build_jni_catalog_configs_for_config_load(
         &self,
     ) -> Result<(BaseCatalogConfig, HashMap<String, String>)> {
         let mut iceberg_configs = HashMap::new();
@@ -447,8 +470,8 @@ impl IcebergConfig {
     }
 
     fn build_jni_catalog_configs(&self) -> Result<(BaseCatalogConfig, HashMap<String, String>)> {
-        if self.nimtable {
-            return self.build_jni_catalog_configs_for_nimtable();
+        if self.enable_config_load {
+            return self.build_jni_catalog_configs_for_config_load();
         }
 
         let mut iceberg_configs = HashMap::new();
@@ -1576,7 +1599,7 @@ mod test {
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
             create_table_if_not_exists: false,
-            nimtable: false,
+            enable_config_load: false,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

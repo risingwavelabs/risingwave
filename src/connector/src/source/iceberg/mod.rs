@@ -70,11 +70,11 @@ pub struct IcebergProperties {
     pub jdbc_password: Option<String>,
 
     #[serde(
-        rename = "nimtable",
+        rename = "enable_config_load",
         default,
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
-    pub nimtable: Option<bool>,
+    pub enable_config_load: Option<bool>,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
@@ -101,10 +101,10 @@ impl IcebergProperties {
             secret_key: self.s3_secret.clone(),
             region: self.region.clone(),
             java_catalog_props,
-            nimtable: self.nimtable.unwrap_or(false),
+            enable_config_load: self.enable_config_load.unwrap_or(false),
             ..Default::default()
         };
-        config = config.fill_for_nimtable().unwrap();
+        config = config.fill_for_config_load().unwrap();
         config
     }
 }

@@ -49,6 +49,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
+clap = { workspace = true }
 clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "d38c8b6391af098b724c114e5a4746aedab6ab8e", features = [
     "time",
 ] }

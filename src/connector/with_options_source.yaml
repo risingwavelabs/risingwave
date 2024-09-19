@@ -125,7 +125,7 @@ IcebergProperties:
   - name: catalog.jdbc.password
     field_type: String
     required: false
-  - name: nimtable
+  - name: enable_config_load
     field_type: bool
     required: false
     default: Default::default

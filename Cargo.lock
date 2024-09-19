@@ -10605,6 +10605,7 @@ dependencies = [
  "bytes",
  "cfg-or-panic",
  "chrono",
+ "clap",
  "clickhouse",
  "criterion",
  "csv",

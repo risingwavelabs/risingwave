@@ -17,6 +17,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
+use clap::ValueEnum;
 use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -25,6 +26,7 @@ use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, Engine, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
     INITIAL_TABLE_VERSION_ID, ROWID_PREFIX,
 };
+use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -1310,8 +1312,18 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            // nimtable_dev means we are running in nimtable development mode
-            let nimtable_dev = std::env::var("NIMTABLE_DEV").is_ok();
+            let nimtable_enable_config_load = if let Ok(nimtable_enable_config_load) =
+                std::env::var("NIMTABLE_ENABLE_CONFIG_LOAD")
+            {
+                nimtable_enable_config_load.parse().map_err(|e| {
+                    RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "NIMTABLE_ENABLE_CONFIG_LOAD must be a boolean value, got {}",
+                        e
+                    )))
+                })?
+            } else {
+                true
+            };
 
             let s3_endpoint = if let Ok(s3_endpoint) = std::env::var("AWS_ENDPOINT_URL") {
                 Some(s3_endpoint)
@@ -1333,20 +1345,20 @@ pub async fn handle_create_table(
 
             let s3_ak = if let Ok(s3_ak) = std::env::var("AWS_ACCESS_KEY_ID") {
                 s3_ak
-            } else if nimtable_dev {
-                bail!("To create an iceberg engine table in dev mode, AWS_ACCESS_KEY_ID needed to be set")
-            } else {
-                // In prod mode, use a placeholder for iceberg sink and source
+            } else if nimtable_enable_config_load {
+                // Since config load is enabled, we will use a placeholder for iceberg sink and source
                 "xxx".to_string()
+            } else {
+                bail!("To create an iceberg engine table in dev mode, AWS_ACCESS_KEY_ID needed to be set")
             };
 
             let s3_sk = if let Ok(s3_sk) = std::env::var("AWS_SECRET_ACCESS_KEY") {
                 s3_sk
-            } else if nimtable_dev {
-                bail!("To create an iceberg engine table in dev mode, AWS_SECRET_ACCESS_KEY needed to be set")
-            } else {
-                // In prod mode, use a placeholder for iceberg sink and source
+            } else if nimtable_enable_config_load {
+                // Since config load is enabled, we will use a placeholder for iceberg sink and source
                 "xxx".to_string()
+            } else {
+                bail!("To create an iceberg engine table in dev mode, AWS_SECRET_ACCESS_KEY needed to be set")
             };
 
             let Ok(meta_store_endpoint) = std::env::var("RW_SQL_ENDPOINT") else {
@@ -1452,16 +1464,37 @@ pub async fn handle_create_table(
                 into_table_name: None,
             };
 
-            let catalog_uri = if nimtable_dev {
-                // development mode
-                format!("jdbc:sqlite:{}", meta_store_database.clone())
-            } else {
-                // production mode
-                format!(
-                    "jdbc:postgresql://{}/{}",
-                    meta_store_endpoint.clone(),
-                    meta_store_database.clone()
-                )
+            let Ok(meta_store_backend) = std::env::var("RW_BACKEND") else {
+                bail!("To create an iceberg engine table, RW_BACKEND needed to be set");
+            };
+            let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
+                bail!("failed to parse meta backend: {}", meta_store_backend);
+            };
+
+            let catalog_uri = match meta_backend {
+                MetaBackend::Postgres => {
+                    format!(
+                        "jdbc:postgresql://{}/{}",
+                        meta_store_endpoint.clone(),
+                        meta_store_database.clone()
+                    )
+                }
+                MetaBackend::Mysql => {
+                    format!(
+                        "jdbc:mysql://{}/{}",
+                        meta_store_endpoint.clone(),
+                        meta_store_database.clone()
+                    )
+                }
+                MetaBackend::Sqlite => {
+                    format!("jdbc:sqlite:{}", meta_store_database.clone())
+                }
+                MetaBackend::Etcd | MetaBackend::Sql | MetaBackend::Mem => {
+                    bail!(
+                        "Unsupported meta backend for iceberg engine table: {}",
+                        meta_store_backend
+                    );
+                }
             };
 
             let warehouse_path = format!("s3://{}/{}/nimtable", s3_bucket, data_directory);
@@ -1491,9 +1524,8 @@ pub async fn handle_create_table(
             with.insert("table.name".to_string(), iceberg_table_name.to_string());
             with.insert("commit_checkpoint_interval".to_string(), "1".to_string());
             with.insert("create_table_if_not_exists".to_string(), "true".to_string());
-            if !nimtable_dev {
-                // production mode
-                with.insert("nimtable".to_string(), "true".to_string());
+            if nimtable_enable_config_load {
+                with.insert("enable_config_load".to_string(), "true".to_string());
             }
             sink_handler_args.with_options = WithOptions::new_with_options(with);
 
@@ -1535,9 +1567,8 @@ pub async fn handle_create_table(
             with.insert("catalog.name".to_string(), iceberg_catalog_name.clone());
             with.insert("database.name".to_string(), iceberg_database_name.clone());
             with.insert("table.name".to_string(), iceberg_table_name.to_string());
-            if !nimtable_dev {
-                // production mode
-                with.insert("nimtable".to_string(), "true".to_string());
+            if nimtable_enable_config_load {
+                with.insert("enable_config_load".to_string(), "true".to_string());
             }
             source_handler_args.with_options = WithOptions::new_with_options(with);
 
