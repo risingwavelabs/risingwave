@@ -21,13 +21,13 @@ use std::time::Duration;
 use anyhow::anyhow;
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
-use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
     FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
 };
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use risingwave_pb::hummock::{HummockVersionDeltas, PbHummockSnapshot};
+use risingwave_pb::hummock::{HummockVersionDeltas, PbHummockSnapshot, StateTableInfoDelta};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::watch;
@@ -230,6 +230,25 @@ impl HummockSnapshotManager {
             }
             Some(snapshot)
         })
+    }
+
+    pub fn add_table_for_test(&self, table_id: TableId) {
+        self.update_inner(|version| {
+            let mut version = version.clone();
+            version.id = version.id.next();
+            version.state_table_info.apply_delta(
+                &HashMap::from_iter([(
+                    table_id,
+                    StateTableInfoDelta {
+                        committed_epoch: INVALID_EPOCH,
+                        safe_epoch: INVALID_EPOCH,
+                        compaction_group_id: 0,
+                    },
+                )]),
+                &HashSet::new(),
+            );
+            Some(version)
+        });
     }
 
     fn update_inner(

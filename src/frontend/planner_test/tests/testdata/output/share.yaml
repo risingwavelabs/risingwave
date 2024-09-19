@@ -291,7 +291,7 @@
   before:
   - create_sources
   sql: |
-    select A.id as a_id, B.id as b_id, A.date_time as A_ts, B.date_time as B_ts from auction A join auction B on A.id = B.id where A.initial_bid = 1 and B.initial_bid = 2 and A.date_time > now() - INTERVAL '1' SECOND;
+    select A.id as a_id, B.id as b_id, A.date_time as A_ts, B.date_time as B_ts from auction A join auction B on A.id = B.id where A.initial_bid = 1 and B.initial_bid = 2 and A.date_time > '2021-04-01 00:00:00+00:00'::Timestamptz - INTERVAL '1' SECOND;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: id = id, output: [id, id, date_time, date_time] }
@@ -306,24 +306,18 @@
   stream_plan: |-
     StreamMaterialize { columns: [a_id, b_id, a_ts, b_ts, _row_id(hidden), _row_id#1(hidden)], stream_key: [_row_id, _row_id#1, a_id], pk_columns: [_row_id, _row_id#1, a_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(id, _row_id, _row_id) }
-      └─StreamHashJoin { type: Inner, predicate: id = id, output: [id, id, date_time, date_time, _row_id, _row_id] }
+      └─StreamHashJoin [append_only] { type: Inner, predicate: id = id, output: [id, id, date_time, date_time, _row_id, _row_id] }
         ├─StreamExchange { dist: HashShard(id) }
-        │ └─StreamProject { exprs: [id, date_time, _row_id] }
-        │   └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [id, date_time, $expr1, _row_id], cleaned_by_watermark: true }
-        │     ├─StreamProject { exprs: [id, date_time, AtTimeZone(date_time, 'UTC':Varchar) as $expr1, _row_id] }
-        │     │ └─StreamFilter { predicate: (initial_bid = 1:Int32) }
-        │     │   └─StreamShare { id: 4 }
-        │     │     └─StreamProject { exprs: [id, initial_bid, date_time, _row_id] }
-        │     │       └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
-        │     │         └─StreamRowIdGen { row_id_index: 10 }
-        │     │           └─StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
-        │     └─StreamExchange { dist: Broadcast }
-        │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:01':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
-        │         └─StreamNow { output: [now] }
+        │ └─StreamFilter { predicate: (initial_bid = 1:Int32) AND (AtTimeZone(date_time, 'UTC':Varchar) > '2021-03-31 23:59:59+00:00':Timestamptz) }
+        │   └─StreamShare { id: 4 }
+        │     └─StreamProject { exprs: [id, initial_bid, date_time, _row_id] }
+        │       └─StreamFilter { predicate: (((initial_bid = 1:Int32) AND (AtTimeZone(date_time, 'UTC':Varchar) > '2021-03-31 23:59:59+00:00':Timestamptz)) OR (initial_bid = 2:Int32)) }
+        │         └─StreamRowIdGen { row_id_index: 10 }
+        │           └─StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
         └─StreamExchange { dist: HashShard(id) }
           └─StreamFilter { predicate: (initial_bid = 2:Int32) }
             └─StreamShare { id: 4 }
               └─StreamProject { exprs: [id, initial_bid, date_time, _row_id] }
-                └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
+                └─StreamFilter { predicate: (((initial_bid = 1:Int32) AND (AtTimeZone(date_time, 'UTC':Varchar) > '2021-03-31 23:59:59+00:00':Timestamptz)) OR (initial_bid = 2:Int32)) }
                   └─StreamRowIdGen { row_id_index: 10 }
                     └─StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
