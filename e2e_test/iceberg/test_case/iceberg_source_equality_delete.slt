@@ -16,7 +16,7 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     connector = 'iceberg',
     type = 'upsert',
     database.name = 'demo_db',
-    table.name = 't1',
+    table.name = 'test_equality_delete',
     catalog.name = 'demo',
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
@@ -59,7 +59,7 @@ WITH (
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
     database.name = 'demo_db',
-    table.name = 't1',
+    table.name = 'test_equality_delete',
 );
 
 query I

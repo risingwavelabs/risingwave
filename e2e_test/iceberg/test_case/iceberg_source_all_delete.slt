@@ -13,7 +13,7 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     connector = 'iceberg',
     type = 'upsert',
     database.name = 'demo_db',
-    table.name = 't1',
+    table.name = 'test_all_delete',
     catalog.name = 'demo',
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
@@ -22,6 +22,7 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 5,
     primary_key = 'i1,i2',
 );
 
@@ -52,7 +53,7 @@ WITH (
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
     database.name = 'demo_db',
-    table.name = 't1',
+    table.name = 'test_all_delete',
 );
 
 statement ok
