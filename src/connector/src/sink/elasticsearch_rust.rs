@@ -86,6 +86,7 @@ impl Sink for ElasticSearchSink {
 pub struct ElasticSearchSinkWriter {
     client: Arc<Elasticsearch>,
     formatter: ElasticSearchOpenSearchFormatter,
+    config: ElasticSearchOpenSearchConfig,
 }
 
 impl ElasticSearchSinkWriter {
@@ -98,11 +99,11 @@ impl ElasticSearchSinkWriter {
         let formatter = ElasticSearchOpenSearchFormatter::new(
             pk_indices,
             &schema,
-            config.delimiter,
+            config.delimiter.clone(),
             config.index_column,
-            config.index,
+            config.index.clone(),
         )?;
-        Ok(Self { client, formatter })
+        Ok(Self { client, formatter, config})
     }
 }
 
@@ -117,7 +118,7 @@ impl AsyncTruncateSinkWriter for ElasticSearchSinkWriter {
         let mut bulks: Vec<BulkOperation<_>> = Vec::with_capacity(chunk.capacity());
         for (index, key, value) in self.formatter.covert_chunk(chunk)? {
             if let Some(value) = value {
-                bulks.push(BulkOperation::index(value).index(index).id(key).into());
+                bulks.push(BulkOperation::update(key,value).index(index).retry_on_conflict(self.config.retry_on_conflict.unwrap()).into());
             } else {
                 bulks.push(BulkOperation::delete(key).index(index).into());
             }

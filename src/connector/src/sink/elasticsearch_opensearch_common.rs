@@ -54,9 +54,20 @@ pub struct ElasticSearchOpenSearchConfig {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub index_column: Option<usize>,
 
-    #[serde(rename = "max_task_num")]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub max_task_num: Option<usize>,
+    // #[serde(rename = "max_task_num")]
+    // #[serde_as(as = "Option<DisplayFromStr>")]
+    // pub max_task_num: Option<usize>,
+    #[serde(rename = "retry_on_conflict")]
+    pub retry_on_conflict: Option<i32>,
+
+    #[serde(rename = "batch_num_messages")]
+    pub batch_num_messages: Option<usize>,
+
+    #[serde(rename = "batch_size_kb")]
+    pub batch_size_kb: Option<usize>,
+
+    #[serde(rename = "concurrent_requests")]
+    pub concurrent_requests: Option<usize>,
 }
 
 impl ElasticSearchOpenSearchConfig {
