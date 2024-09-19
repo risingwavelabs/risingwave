@@ -16,7 +16,8 @@
  */
 
 import {
-  Box, Button,
+  Box,
+  Button,
   Flex,
   FormControl,
   FormLabel,
@@ -92,12 +93,15 @@ export default function Streaming() {
     getFragmentVertexToRelationMap
   )
   const { response: schemas } = useFetch(getSchemas)
-  const [resetBackPressures, setResetBackPressures] = useState<boolean>(false)
+  const [resetEmbeddedBackPressures, setResetEmbeddedBackPressures] =
+    useState<boolean>(false)
 
   const toast = useErrorToast()
 
-  const toggleResetBackPressures = () => {
-    setResetBackPressures(resetBackPressures => !resetBackPressures)
+  const toggleResetEmbeddedBackPressures = () => {
+    setResetEmbeddedBackPressures(
+      (resetEmbeddedBackPressures) => !resetEmbeddedBackPressures
+    )
   }
 
   const ddlDependencyCallback = useCallback(() => {
@@ -134,9 +138,9 @@ export default function Streaming() {
   const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
     useState<EmbeddedBackPressureInfo>()
   useEffect(() => {
-    if (resetBackPressures) {
+    if (resetEmbeddedBackPressures) {
       setEmbeddedBackPressureInfo(undefined)
-      toggleResetBackPressures()
+      toggleResetEmbeddedBackPressures()
     }
     if (backPressureDataSource === "Embedded") {
       const interval = setInterval(() => {
@@ -173,7 +177,7 @@ export default function Streaming() {
         clearInterval(interval)
       }
     }
-  }, [backPressureDataSource, toast, resetBackPressures])
+  }, [backPressureDataSource, toast, resetEmbeddedBackPressures])
 
   // Map from (fragment_id, downstream_fragment_id) -> back pressure rate
   const backPressures = useMemo(() => {
@@ -260,7 +264,10 @@ export default function Streaming() {
               </option>
             </Select>
           </FormControl>
-          <Button onClick={(_) => toggleResetBackPressures()}>Reset Back Pressures</Button>
+          {/* NOTE(kwannoel): No need to reset prometheus bp, because it is stateless */}
+          <Button onClick={(_) => toggleResetEmbeddedBackPressures()}>
+            Reset Back Pressures
+          </Button>
         </VStack>
         <Box
           flex={1}
