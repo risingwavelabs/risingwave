@@ -52,9 +52,9 @@ const INTERVAL_MS = 5000
 
 function buildDdlDependencyAsEdges(relations: StreamingJob[]): DdlBox[] {
   // Filter out non-streaming relations, e.g. source, views.
-  let relation_ids = new Set<number>()
+  let relationIds = new Set<number>()
   for (const relation of relations) {
-    relation_ids.add(relation.id)
+    relationIds.add(relation.id)
   }
   const nodes: DdlBox[] = []
   for (const relation of relations) {
@@ -65,10 +65,10 @@ function buildDdlDependencyAsEdges(relations: StreamingJob[]): DdlBox[] {
       width: 0,
       height: 0,
       parentIds: parentIds
-        .filter((x) => relation_ids.has(x))
+        .filter((x) => relationIds.has(x))
         .map((x) => x.toString()),
-      ddl_name: relation.name,
-      schema_name: relation.schemaName ? relation.schemaName : "",
+      ddlName: relation.name,
+      schemaName: relation.schemaName ? relation.schemaName : "",
     })
   }
   return nodes
@@ -179,7 +179,7 @@ export default function Streaming() {
     }
   }, [backPressureDataSource, toast, resetEmbeddedBackPressures])
 
-  // Map from (fragment_id, downstream_fragment_id) -> back pressure rate
+  // Get relationId-relationId -> backpressure rate map
   const backPressures = useMemo(() => {
     if (!fragmentVertexToRelationMap) {
       return

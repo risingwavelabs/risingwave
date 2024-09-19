@@ -25,7 +25,7 @@ export default function DdlGraph({
   backPressures,
 }: {
   ddlDependency: DdlBox[] // Ddl adjacency list, metadata
-  backPressures?: Map<string, number> // relation_id_relation_id ->back_pressure_rate
+  backPressures?: Map<string, number> // relationId-relationId->back_pressure_rate
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -37,8 +37,8 @@ export default function DdlGraph({
     for (const ddlBox of ddlDependencyDag) {
       let ddlId = ddlBox.id
       layoutDdlResult.set(ddlId, {
-        ddl_name: ddlBox.ddl_name,
-        schema_name: ddlBox.schema_name,
+        ddlName: ddlBox.ddlName,
+        schemaName: ddlBox.schemaName,
       })
       includedDdlIds.add(ddlId)
     }
@@ -92,7 +92,7 @@ export default function DdlGraph({
 
           text
             .attr("fill", "black")
-            .text(({ ddl_name, schema_name }) => `${schema_name}.${ddl_name}`)
+            .text(({ ddlName, schemaName }) => `${schemaName}.${ddlName}`)
             .attr("font-family", "inherit")
             .attr("text-anchor", "middle")
             .attr("dx", ddlNameX)

@@ -294,8 +294,8 @@ export type FragmentBox = LayoutItemBase & {
 }
 
 export type DdlBox = LayoutItemBase & {
-  ddl_name: string
-  schema_name: string
+  ddlName: string
+  schemaName: string
 }
 
 export type RelationPoint = LayoutItemBase & {
