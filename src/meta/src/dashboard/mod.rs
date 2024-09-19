@@ -280,7 +280,6 @@ pub(super) mod handlers {
     }
 
     /// Provides a hierarchy of relation ids to fragments to actors.
-
     pub async fn get_relation_id_infos(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<RelationIdInfos>> {
