@@ -49,63 +49,15 @@ import { BackPressureInfo } from "../proto/gen/monitor_service"
 // Refresh interval (ms) for back pressure stats
 const INTERVAL_MS = 5000
 
-const SampleDdlDependencyGraph: DdlBox[] = [
-  {
-    id: "1",
-    order: 1, // preference order, item with larger order will be placed at right or down
-    width: 100,
-    height: 100,
-    parentIds: [],
-    ddl_name: "table",
-    schema_name: "s1",
-  },
-  {
-    id: "2",
-    order: 2,
-    width: 100,
-    height: 100,
-    parentIds: ["1"],
-    ddl_name: "mv1",
-    schema_name: "s1",
-  },
-  {
-    id: "3",
-    order: 3,
-    width: 100,
-    height: 100,
-    parentIds: ["1"],
-    ddl_name: "mv2",
-    schema_name: "s1",
-  },
-  {
-    id: "4",
-    order: 4,
-    width: 100,
-    height: 100,
-    parentIds: ["2", "3"],
-    ddl_name: "mv3",
-    schema_name: "s1",
-  },
-]
-
-const SampleDdlBackpressures: Map<string, number> = new Map([
-  ["1_2", 0.1],
-  ["1_3", 0.2],
-  ["2_4", 0.3],
-  ["3_4", 0.4],
-])
-
 function buildDdlDependencyAsEdges(relations: StreamingJob[]): DdlBox[] {
   // Filter out non-streaming relations, e.g. source, views.
   let relation_ids = new Set<number>()
   for (const relation of relations) {
     relation_ids.add(relation.id)
   }
-  console.log("relation_ids: ", relation_ids)
   const nodes: DdlBox[] = []
   for (const relation of relations) {
     let parentIds = relation.dependentRelations
-    console.log("parentIds: ", parentIds)
     nodes.push({
       id: relation.id.toString(),
       order: relation.id,
@@ -124,10 +76,6 @@ function buildDdlDependencyAsEdges(relations: StreamingJob[]): DdlBox[] {
 const SIDEBAR_WIDTH = 200
 
 type BackPressureDataSource = "Embedded" | "Prometheus"
-const backPressureDataSources: BackPressureDataSource[] = [
-  "Embedded",
-  "Prometheus",
-]
 
 // The state of the embedded back pressure metrics.
 // The metrics from previous fetch are stored here to calculate the rate.
@@ -170,7 +118,7 @@ export default function Streaming() {
     useState<BackPressureDataSource>("Embedded")
 
   // Periodically fetch Prometheus back-pressure from Meta node
-  const { response: promethusMetrics } = useFetch(
+  const { response: prometheusMetrics } = useFetch(
     fetchPrometheusBackPressure,
     INTERVAL_MS,
     backPressureDataSource === "Prometheus"
@@ -185,7 +133,6 @@ export default function Streaming() {
       const interval = setInterval(() => {
         fetchEmbeddedBackPressure().then(
           (newBP) => {
-            console.log(newBP)
             setEmbeddedBackPressureInfo((prev) =>
               prev
                 ? {
@@ -226,7 +173,7 @@ export default function Streaming() {
     }
     let inMap = fragmentVertexToRelationMap.inMap
     let outMap = fragmentVertexToRelationMap.outMap
-    if (promethusMetrics || embeddedBackPressureInfo) {
+    if (prometheusMetrics || embeddedBackPressureInfo) {
       let map = new Map()
 
       if (backPressureDataSource === "Embedded" && embeddedBackPressureInfo) {
@@ -244,8 +191,8 @@ export default function Streaming() {
             map.set(key, m.sample[0].value)
           }
         }
-      } else if (backPressureDataSource === "Prometheus" && promethusMetrics) {
-        for (const m of promethusMetrics.outputBufferBlockingDuration) {
+      } else if (backPressureDataSource === "Prometheus" && prometheusMetrics) {
+        for (const m of prometheusMetrics.outputBufferBlockingDuration) {
           if (m.sample.length > 0) {
             // Note: We issue an instant query to Prometheus to get the most recent value.
             // So there should be only one sample here.
@@ -260,7 +207,7 @@ export default function Streaming() {
               output = outMap[output]
               input = inMap[input]
               let key = `${output}_${input}`
-              map.set(key, m.sample[0].value)
+              map.set(key, value)
             }
           }
         }
@@ -269,7 +216,7 @@ export default function Streaming() {
     }
   }, [
     backPressureDataSource,
-    promethusMetrics,
+    prometheusMetrics,
     embeddedBackPressureInfo,
     fragmentVertexToRelationMap,
   ])
