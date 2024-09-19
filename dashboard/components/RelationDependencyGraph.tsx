@@ -30,9 +30,10 @@ import {
   RelationPoint,
   RelationPointPosition,
   flipLayoutRelation,
-  generateRelationEdges,
+  generateRelationEdges, Edge,
 } from "../lib/layout"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
+import {tinycolor} from "@ctrl/tinycolor";
 
 function boundBox(
   relationPosition: RelationPointPosition[],
@@ -59,10 +60,12 @@ export default function RelationDependencyGraph({
   nodes,
   selectedId,
   setSelectedId,
+  backPressures,
 }: {
   nodes: RelationPoint[]
   selectedId: string | undefined
   setSelectedId: (id: string) => void
+  backPressures: Map<string, number> // relationId-relationId->back_pressure_rate})
 }) {
   const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
 
@@ -114,22 +117,39 @@ export default function RelationDependencyGraph({
 
     const isSelected = (id: string) => id === selectedId
 
-    const applyEdge = (sel: EdgeSelection) =>
-      sel
-        .attr("d", ({ points }) => line(points))
-        .attr("fill", "none")
-        .attr("stroke-width", 1)
-        .attr("stroke-width", (d) =>
-          isSelected(d.source) || isSelected(d.target) ? 4 : 2
-        )
-        .attr("opacity", (d) =>
-          isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
-        )
-        .attr("stroke", (d) =>
-          isSelected(d.source) || isSelected(d.target)
-            ? theme.colors.blue["500"]
-            : theme.colors.gray["300"]
-        )
+    const applyEdge = (sel: EdgeSelection) => {
+
+      const color = (d: Edge) => {
+        if (backPressures) {
+          let value = backPressures.get(`${d.target}_${d.source}`)
+          if (value) {
+            return backPressureColor(value)
+          }
+        }
+
+        return theme.colors.gray["300"]
+      }
+
+      const width = (d: Edge) => {
+        if (backPressures) {
+          let value = backPressures.get(`${d.target}_${d.source}`)
+          if (value) {
+            return backPressureWidth(value)
+          }
+        }
+
+        return 2
+      }
+
+      return sel
+          .attr("d", ({ points }) => line(points))
+          .attr("fill", "none")
+          .attr("stroke-width", width)
+          .attr("stroke", color)
+          .attr("opacity", (d) =>
+              isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
+          )
+    }
 
     const createEdge = (sel: Enter<EdgeSelection>) =>
       sel.append("path").attr("class", "edge").call(applyEdge)
@@ -235,4 +255,45 @@ export default function RelationDependencyGraph({
       <CatalogModal modalData={modalData} onClose={() => setModalId(null)} />
     </>
   )
+}
+
+/**
+ * The color for the edge with given back pressure value.
+ *
+ * @param value The back pressure rate, between 0 and 100.
+ */
+function backPressureColor(value: number) {
+  const colorRange = [
+    theme.colors.green["100"],
+    theme.colors.green["300"],
+    theme.colors.yellow["400"],
+    theme.colors.orange["500"],
+    theme.colors.red["700"],
+  ].map((c) => tinycolor(c))
+
+  value = Math.max(value, 0)
+  value = Math.min(value, 100)
+
+  const step = colorRange.length - 1
+  const pos = (value / 100) * step
+  const floor = Math.floor(pos)
+  const ceil = Math.ceil(pos)
+
+  const color = tinycolor(colorRange[floor])
+      .mix(tinycolor(colorRange[ceil]), (pos - floor) * 100)
+      .toHexString()
+
+  return color
+}
+
+/**
+ * The width for the edge with given back pressure value.
+ *
+ * @param value The back pressure rate, between 0 and 100.
+ */
+function backPressureWidth(value: number) {
+  value = Math.max(value, 0)
+  value = Math.min(value, 100)
+
+  return 15 * (value / 100) + 2
 }

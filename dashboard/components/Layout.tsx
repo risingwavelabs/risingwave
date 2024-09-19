@@ -144,9 +144,8 @@ function Layout({ children }: { children: React.ReactNode }) {
           </Section>
           <Section>
             <NavTitle>Streaming</NavTitle>
-            <NavButton href="/dependency_graph/">Dependency Graph</NavButton>
+            <NavButton href="/dependency_graph/">Relation Graph</NavButton>
             <NavButton href="/fragment_graph/">Fragment Graph</NavButton>
-            <NavButton href="/relation_graph/">Relation Graph</NavButton>
           </Section>
           <Section>
             <NavTitle>Batch</NavTitle>
