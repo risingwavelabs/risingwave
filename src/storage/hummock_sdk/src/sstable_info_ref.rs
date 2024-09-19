@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Weak};
 
 use risingwave_pb::hummock::{PbBloomFilterType, PbHummockVersion, PbSstableInfo};
+use tokio::task_local;
 
 use crate::change_log::EpochNewChangeLogCommon;
 use crate::key_range::KeyRange;
 use crate::sstable_info::SstableInfo;
 use crate::version::{HummockVersion, HummockVersionCommon, HummockVersionDeltaCommon};
+use crate::HummockSstableId;
 
 pub type SstableInfoType = SstableInfoRef;
 pub type EpochNewChangeLogType = EpochNewChangeLogCommon<SstableInfoType>;
@@ -49,6 +52,10 @@ pub trait SstableInfoWriter {
     fn set_table_ids(&mut self, v: Vec<u32>);
 }
 
+task_local! {
+    pub static SSTABLE_INFO_CACHE: *mut SstableInfoCache;
+}
+
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct SstableInfoRef {
     sstable_info: Arc<SstableInfo>,
@@ -56,10 +63,26 @@ pub struct SstableInfoRef {
 
 impl From<&PbSstableInfo> for SstableInfoRef {
     fn from(pb: &PbSstableInfo) -> Self {
-        // TODO: get arc from global manager
-        Self {
-            sstable_info: Arc::new(SstableInfo::from(pb)),
-        }
+        let sstable_info = SSTABLE_INFO_CACHE
+            .try_with(|ptr| unsafe {
+                // SAFETY:
+                // SSTABLE_INFO_CACHE is present only in 2 methods:
+                // - HummockObserverNode::handle_initialization_notification
+                // - HummockObserverNode::handle_notification
+                // In these 2 aforementioned methods, access to the SstableInfoCache is limited exclusively to this particular method.
+                // So concurrent access to ptr is impossible.
+                if let Some(v) = (**ptr).cache.get(&pb.sst_id)
+                    && let Some(r) = v.upgrade()
+                {
+                    return r;
+                }
+                let r = Arc::new(SstableInfo::from(pb));
+                (**ptr).cache.insert(pb.sst_id, Arc::downgrade(&r));
+                (**ptr).may_remove_stale_cache();
+                r
+            })
+            .unwrap_or_else(|_| Arc::new(SstableInfo::from(pb)));
+        Self { sstable_info }
     }
 }
 
@@ -168,10 +191,34 @@ impl SstableInfoWriter for SstableInfoRef {
     }
 }
 
+#[cfg(any(test, feature = "test"))]
 impl From<SstableInfo> for SstableInfoRef {
     fn from(sst: SstableInfo) -> Self {
         Self {
             sstable_info: Arc::new(sst),
         }
+    }
+}
+
+pub struct SstableInfoCache {
+    cache: HashMap<HummockSstableId, Weak<SstableInfo>>,
+    gc_counter: u32,
+}
+
+impl SstableInfoCache {
+    pub fn new() -> Self {
+        Self {
+            cache: Default::default(),
+            gc_counter: 0,
+        }
+    }
+
+    /// Removes stale weak ref entry, periodically.
+    fn may_remove_stale_cache(&mut self) {
+        const GC_INTERVAL: u32 = 10000;
+        if self.gc_counter + 1 == GC_INTERVAL {
+            self.cache.retain(|_, w| w.strong_count() == 0)
+        }
+        self.gc_counter = (self.gc_counter + 1) % GC_INTERVAL;
     }
 }

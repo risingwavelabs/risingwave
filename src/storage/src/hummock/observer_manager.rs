@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common_service::ObserverState;
-use risingwave_hummock_sdk::sstable_info_ref::{HummockVersionDeltaType, HummockVersionType};
+use risingwave_hummock_sdk::sstable_info_ref::{
+    HummockVersionDeltaType, HummockVersionType, SstableInfoCache, SSTABLE_INFO_CACHE,
+};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::relation::RelationInfo;
@@ -35,6 +37,7 @@ pub struct HummockObserverNode {
     write_limiter: WriteLimiterRef,
     version_update_sender: UnboundedSender<HummockVersionUpdate>,
     version: u64,
+    sstable_info_cache: SstableInfoCache,
 }
 
 impl ObserverState for HummockObserverNode {
@@ -71,15 +74,16 @@ impl ObserverState for HummockObserverNode {
                 }
             }
             Info::HummockVersionDeltas(hummock_version_deltas) => {
+                let deltas = SSTABLE_INFO_CACHE.sync_scope(&mut self.sstable_info_cache, || {
+                    hummock_version_deltas
+                        .version_deltas
+                        .iter()
+                        .map(HummockVersionDeltaType::from_rpc_protobuf)
+                        .collect()
+                });
                 let _ = self
                     .version_update_sender
-                    .send(HummockVersionUpdate::VersionDeltas(
-                        hummock_version_deltas
-                            .version_deltas
-                            .iter()
-                            .map(HummockVersionDeltaType::from_rpc_protobuf)
-                            .collect(),
-                    ))
+                    .send(HummockVersionUpdate::VersionDeltas(deltas))
                     .inspect_err(|e| {
                         tracing::error!(event = ?e.0, "unable to send version delta");
                     });
@@ -121,15 +125,16 @@ impl ObserverState for HummockObserverNode {
                 .expect("should get hummock_write_limits")
                 .write_limits,
         );
+        let version = SSTABLE_INFO_CACHE.sync_scope(&mut self.sstable_info_cache, || {
+            HummockVersionType::from_rpc_protobuf(
+                &snapshot
+                    .hummock_version
+                    .expect("should get hummock version"),
+            )
+        });
         let _ = self
             .version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(Box::new(
-                HummockVersionType::from_rpc_protobuf(
-                    &snapshot
-                        .hummock_version
-                        .expect("should get hummock version"),
-                ),
-            )))
+            .send(HummockVersionUpdate::PinnedVersion(Box::new(version)))
             .inspect_err(|e| {
                 tracing::error!(event = ?e.0, "unable to send full version");
             });
@@ -151,6 +156,7 @@ impl HummockObserverNode {
             version_update_sender,
             version: 0,
             write_limiter,
+            sstable_info_cache: SstableInfoCache::new(),
         }
     }
 
