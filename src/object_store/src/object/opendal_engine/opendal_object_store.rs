@@ -378,20 +378,6 @@ impl OpendalStreamingUploader {
             if self.abort_on_err {
                 self.writer.abort().await?;
             }
-            match self.op.stat(&self.path).await {
-                Ok(metadata) => {
-                    tracing::info!(
-                        "The file {:?} can be stated, but fail when writer write. Metadata: {:?}",
-                        self.path,
-                        metadata,
-                    );
-                }
-                Err(e) => tracing::info!(
-                    path = ?self.path,
-                    error = %e.as_report(),
-                    "File can not be stated, and fail when writer write.",
-                ),
-            };
             return Err(err.into());
         }
         self.not_uploaded_len = 0;
@@ -426,19 +412,6 @@ impl StreamingUploader for OpendalStreamingUploader {
                 if self.abort_on_err {
                     self.writer.abort().await?;
                 }
-                match self.op.stat(&self.path).await {
-                    Ok(metadata) => {
-                        tracing::info!(
-                            "The file {:?} can be stated, but fail when close writer. Metadata: {:?}",
-                            self.path, metadata,
-                        );
-                    }
-                    Err(e) => tracing::info!(
-                        path = ?self.path,
-                        error = %e.as_report(),
-                        "File can not be stated, and fail when close writer.",
-                    ),
-                };
                 return Err(err.into());
             }
         };
