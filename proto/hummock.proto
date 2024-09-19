@@ -87,30 +87,23 @@ message GroupConstruct {
   CompatibilityVersion version = 6;
 }
 
-message GroupMetaChange {
-  option deprecated = true;
-  repeated uint32 table_ids_add = 1 [deprecated = true];
-  repeated uint32 table_ids_remove = 2 [deprecated = true];
-}
-
-message GroupTableChange {
-  option deprecated = true;
-  repeated uint32 table_ids = 1 [deprecated = true];
-  uint64 target_group_id = 2;
-  uint64 origin_group_id = 3;
-  uint64 new_sst_start_id = 4;
-  CompatibilityVersion version = 5;
-}
-
 message GroupDestroy {}
 
+message GroupMerge {
+  uint64 left_group_id = 1;
+  uint64 right_group_id = 2;
+}
+
 message GroupDelta {
+  reserved 4;
+  reserved "group_meta_change";
+  reserved 5;
+  reserved "group_table_change";
   oneof delta_type {
     IntraLevelDelta intra_level = 1;
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
-    GroupMetaChange group_meta_change = 4 [deprecated = true];
-    GroupTableChange group_table_change = 5 [deprecated = true];
+    GroupMerge group_merge = 6;
   }
 }
 
@@ -239,7 +232,8 @@ message HummockSnapshot {
   // Epoch with checkpoint, we will read durable data with it.
   uint64 committed_epoch = 1;
   // Epoch without checkpoint, we will read real-time data with it. But it may be rolled back.
-  uint64 current_epoch = 2;
+  reserved 2;
+  reserved "current_epoch";
 }
 
 message VersionUpdatePayload {
@@ -351,6 +345,10 @@ message CompactTask {
     TRACK_SST_OBJECT_ID_FAILED = 12;
     NO_AVAIL_CPU_RESOURCE_CANCELED = 13;
     HEARTBEAT_PROGRESS_CANCELED = 14;
+
+    // for serverless compaction
+    SERVERLESS_SEND_FAIL_CANCELED = 15;
+    SERVERLESS_TABLE_NOT_FOUND_CANCELED = 16;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
@@ -743,6 +741,7 @@ message PinVersionResponse {
 message SplitCompactionGroupRequest {
   uint64 group_id = 1;
   repeated uint32 table_ids = 2;
+  uint32 partition_vnode_count = 3;
 }
 
 message SplitCompactionGroupResponse {
@@ -832,11 +831,19 @@ message CancelCompactTaskResponse {
 
 message GetVersionByEpochRequest {
   uint64 epoch = 1;
+  uint32 table_id = 2;
 }
 
 message GetVersionByEpochResponse {
   HummockVersion version = 1;
 }
+
+message MergeCompactionGroupRequest {
+  uint64 left_group_id = 1;
+  uint64 right_group_id = 2;
+}
+
+message MergeCompactionGroupResponse {}
 
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
@@ -879,6 +886,7 @@ service HummockManagerService {
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
   rpc ListChangeLogEpochs(ListChangeLogEpochsRequest) returns (ListChangeLogEpochsResponse);
   rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
+  rpc MergeCompactionGroup(MergeCompactionGroupRequest) returns (MergeCompactionGroupResponse);
 }
 
 message CompactionConfig {
@@ -922,6 +930,10 @@ message TableStats {
   int64 total_key_size = 1;
   int64 total_value_size = 2;
   int64 total_key_count = 3;
+
+  // `total_compressed_size`` represents the size that the table takes up in the output sst
+  //  and this field is only filled and used by CN flushes, not compactor compaction
+  uint64 total_compressed_size = 4;
 }
 
 message HummockVersionStats {

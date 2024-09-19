@@ -31,7 +31,7 @@ use async_trait::async_trait;
 use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table as TableV2;
-use iceberg::{Catalog as CatalogV2, TableIdent};
+use iceberg::{Catalog as CatalogV2, NamespaceIdent, TableCreation, TableIdent};
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use icelake::catalog::{
     load_catalog, load_iceberg_base_catalog_config, BaseCatalogConfig, CatalogRef, CATALOG_NAME,
@@ -46,7 +46,7 @@ use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
 use itertools::Itertools;
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
@@ -64,10 +64,8 @@ use with_options::WithOptions;
 use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
-use super::catalog::desc::SinkDesc;
 use super::decouple_checkpoint_log_sink::{
     default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
-    DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
 };
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -75,8 +73,11 @@ use super::{
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::SinkWriter;
-use crate::sink::{Result, SinkCommitCoordinator, SinkDecouple, SinkParam};
-use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
+use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
+use crate::{
+    deserialize_bool_from_string, deserialize_optional_bool_from_string,
+    deserialize_optional_string_seq_from_string,
+};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
 pub const ICEBERG_SINK: &str = "iceberg";
@@ -129,9 +130,9 @@ pub struct IcebergConfig {
     #[serde(
         rename = "s3.path.style.access",
         default,
-        deserialize_with = "deserialize_bool_from_string"
+        deserialize_with = "deserialize_optional_bool_from_string"
     )]
-    pub path_style_access: bool,
+    pub path_style_access: Option<bool>,
 
     #[serde(
         rename = "primary_key",
@@ -148,6 +149,9 @@ pub struct IcebergConfig {
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     pub commit_checkpoint_interval: u64,
+
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub create_table_if_not_exists: bool,
 }
 
 impl IcebergConfig {
@@ -281,10 +285,12 @@ impl IcebergConfig {
             "iceberg.table.io.secret_access_key".to_string(),
             self.secret_key.clone().to_string(),
         );
-        iceberg_configs.insert(
-            "iceberg.table.io.enable_virtual_host_style".to_string(),
-            (!self.path_style_access).to_string(),
-        );
+        if let Some(path_style_access) = self.path_style_access {
+            iceberg_configs.insert(
+                "iceberg.table.io.enable_virtual_host_style".to_string(),
+                (!path_style_access).to_string(),
+            );
+        }
 
         let (bucket, root) = {
             let url = Url::parse(&self.path).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
@@ -424,10 +430,13 @@ impl IcebergConfig {
                 "s3.secret-access-key".to_string(),
                 self.secret_key.clone().to_string(),
             );
-            java_catalog_configs.insert(
-                "s3.path-style-access".to_string(),
-                self.path_style_access.to_string(),
-            );
+
+            if let Some(path_style_access) = self.path_style_access {
+                java_catalog_configs.insert(
+                    "s3.path-style-access".to_string(),
+                    path_style_access.to_string(),
+                );
+            }
             if matches!(self.catalog_type.as_deref(), Some("glue")) {
                 java_catalog_configs.insert(
                     "client.credentials-provider".to_string(),
@@ -660,7 +669,7 @@ impl IcebergConfig {
                     .file_io(storage_catalog.file_io().clone())
                     // Only support readonly table for storage catalog now.
                     .readonly(true)
-                    .build())
+                    .build()?)
             }
             _ => self.load_table_v2().await,
         }
@@ -693,6 +702,10 @@ impl Debug for IcebergSink {
 
 impl IcebergSink {
     async fn create_and_validate_table(&self) -> Result<Table> {
+        if self.config.create_table_if_not_exists {
+            self.create_table_if_not_exists().await?;
+        }
+
         let table = self
             .config
             .load_table()
@@ -712,6 +725,69 @@ impl IcebergSink {
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         Ok(table)
+    }
+
+    async fn create_table_if_not_exists(&self) -> Result<()> {
+        let catalog = self.config.create_catalog_v2().await?;
+        let table_id = self
+            .config
+            .full_table_name_v2()
+            .context("Unable to parse table name")?;
+        if !catalog
+            .table_exists(&table_id)
+            .await
+            .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
+        {
+            let namespace = if let Some(database_name) = &self.config.database_name {
+                NamespaceIdent::new(database_name.clone())
+            } else {
+                bail!("database name must be set if you want to create table")
+            };
+
+            let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+            // convert risingwave schema -> arrow schema -> iceberg schema
+            let arrow_fields = self
+                .param
+                .columns
+                .iter()
+                .map(|column| {
+                    Ok(iceberg_create_table_arrow_convert
+                        .to_arrow_field(&column.name, &column.data_type)
+                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                        .context(format!(
+                            "failed to convert {}: {} to arrow type",
+                            &column.name, &column.data_type
+                        ))?)
+                })
+                .collect::<Result<Vec<ArrowField>>>()?;
+            let arrow_schema = arrow_schema_iceberg::Schema::new(arrow_fields);
+            let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&arrow_schema)
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .context("failed to convert arrow schema to iceberg schema")?;
+
+            let location = {
+                let mut names = namespace.clone().inner();
+                names.push(self.config.table_name.to_string());
+                if self.config.path.ends_with('/') {
+                    format!("{}{}", self.config.path, names.join("/"))
+                } else {
+                    format!("{}/{}", self.config.path, names.join("/"))
+                }
+            };
+
+            let table_creation = TableCreation::builder()
+                .name(self.config.table_name.clone())
+                .schema(iceberg_schema)
+                .location(location)
+                .build();
+
+            catalog
+                .create_table(&namespace, table_creation)
+                .await
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .context("failed to create iceberg table")?;
+        }
+        Ok(())
     }
 
     pub fn new(config: IcebergConfig, param: SinkParam) -> Result<Self> {
@@ -753,29 +829,6 @@ impl Sink for IcebergSink {
     type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
-
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let commit_checkpoint_interval =
-            if let Some(interval) = desc.properties.get("commit_checkpoint_interval") {
-                interval
-                    .parse::<u64>()
-                    .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
-            } else {
-                DEFAULT_COMMIT_CHECKPOINT_INTERVAL
-            };
-
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => {
-                if commit_checkpoint_interval > 1 {
-                    return Err(SinkError::Config(anyhow!(
-                        "config conflict: Iceberg config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                    )));
-                }
-                Ok(false)
-            }
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
@@ -1282,15 +1335,23 @@ pub fn try_matches_arrow_schema(
 
         let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
             (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
-            (left, right) => left == right,
+            (ArrowDataType::Binary, ArrowDataType::LargeBinary) => true,
+            (ArrowDataType::LargeBinary, ArrowDataType::Binary) => true,
+            // cases where left != right (metadata, field name mismatch)
+            //
+            // all nested types: in iceberg `field_id` will always be present, but RW doesn't have it:
+            // {"PARQUET:field_id": ".."}
+            //
+            // map: The standard name in arrow is "entries", "key", "value".
+            // in iceberg-rs, it's called "key_value"
+            (left, right) => left.equals_datatype(right),
         };
         if !compatible {
-            bail!("Field {}'s type not compatible, risingwave converted data type {}, iceberg's data type: {}",
+            bail!("field {}'s type is incompatible\nRisingWave converted data type: {}\niceberg's data type: {}",
                     arrow_field.name(), converted_arrow_data_type, arrow_field.data_type()
                 );
         }
     }
-
     Ok(())
 }
 
@@ -1300,7 +1361,7 @@ mod test {
 
     use risingwave_common::catalog::Field;
 
-    use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
+    use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
     use crate::sink::iceberg::IcebergConfig;
     use crate::source::DataType;
 
@@ -1377,13 +1438,14 @@ mod test {
             endpoint: Some("http://127.0.0.1:9301".to_string()),
             access_key: "hummockadmin".to_string(),
             secret_key: "hummockadmin".to_string(),
-            path_style_access: true,
+            path_style_access: Some(true),
             primary_key: Some(vec!["v1".to_string()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
-            commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+            commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+            create_table_if_not_exists: false,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

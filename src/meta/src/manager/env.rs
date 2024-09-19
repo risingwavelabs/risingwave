@@ -227,8 +227,8 @@ pub struct MetaOpts {
     /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule `split_compaction_group` for all compaction groups with this interval.
-    pub periodic_split_compact_group_interval_sec: u64,
+    /// Schedule `periodic_scheduling_compaction_group_interval_sec` for all compaction groups with this interval.
+    pub periodic_scheduling_compaction_group_interval_sec: u64,
 
     /// The size limit to split a large compaction group.
     pub split_group_size_limit: u64,
@@ -248,9 +248,6 @@ pub struct MetaOpts {
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_task_max_progress_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
-
-    /// The size limit to split a state-table to independent sstable.
-    pub cut_table_size_limit: u64,
 
     /// hybird compaction group config
     ///
@@ -294,6 +291,10 @@ pub struct MetaOpts {
     pub temp_secret_file_dir: String,
 
     pub table_info_statistic_history_times: usize,
+
+    // Cluster limits
+    pub actor_cnt_per_worker_parallelism_hard_limit: usize,
+    pub actor_cnt_per_worker_parallelism_soft_limit: usize,
 }
 
 impl MetaOpts {
@@ -330,7 +331,7 @@ impl MetaOpts {
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
-            periodic_split_compact_group_interval_sec: 60,
+            periodic_scheduling_compaction_group_interval_sec: 60,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
@@ -342,7 +343,6 @@ impl MetaOpts {
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_task_max_progress_interval_secs: 1,
             compaction_config: None,
-            cut_table_size_limit: 1024 * 1024 * 1024,
             hybrid_partition_node_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
@@ -358,6 +358,8 @@ impl MetaOpts {
             secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
             temp_secret_file_dir: "./secrets".to_string(),
             table_info_statistic_history_times: 240,
+            actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
+            actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
         }
     }
 }
@@ -408,9 +410,11 @@ impl MetaSrvEnv {
                         (ClusterId::new(), true)
                     };
 
-                // For new clusters, the name of the object store needs to be prefixed according to the object id.
-                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
-
+                // For new clusters:
+                // - the name of the object store needs to be prefixed according to the object id.
+                //
+                // For old clusters
+                // - the prefix is ​​not divided for the sake of compatibility.
                 init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
                 let system_params_manager = Arc::new(
                     SystemParamsManager::new(
@@ -455,7 +459,7 @@ impl MetaSrvEnv {
                 }
             }
             MetaStoreImpl::Sql(sql_meta_store) => {
-                let is_sql_backend_cluster_first_launch =
+                let cluster_first_launch =
                     is_first_launch_for_sql_backend_cluster(sql_meta_store).await?;
                 // Try to upgrade if any new model changes are added.
                 Migrator::up(&sql_meta_store.conn, None)
@@ -469,10 +473,14 @@ impl MetaSrvEnv {
                     .await?
                     .map(|c| c.cluster_id.to_string().into())
                     .unwrap();
-                init_system_params.use_new_object_prefix_strategy =
-                    Some(is_sql_backend_cluster_first_launch);
-                // For new clusters, the name of the object store needs to be prefixed according to the object id.
-                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
+
+                // For new clusters:
+                // - the name of the object store needs to be prefixed according to the object id.
+                //
+                // For old clusters
+                // - the prefix is ​​not divided for the sake of compatibility.
+                init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
+
                 let system_param_controller = Arc::new(
                     SystemParamsController::new(
                         sql_meta_store.clone(),

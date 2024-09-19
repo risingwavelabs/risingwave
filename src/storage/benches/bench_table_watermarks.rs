@@ -166,7 +166,7 @@ fn bench_table_watermarks(c: &mut Criterion) {
                 let mut pinned_version =
                     PinnedVersion::new(versions.pop_front().unwrap(), unbounded_channel().0);
                 while let Some(version) = versions.pop_front() {
-                    pinned_version = pinned_version.new_pin_version(version);
+                    pinned_version = pinned_version.new_pin_version(version).unwrap();
                 }
             },
             BatchSize::SmallInput,

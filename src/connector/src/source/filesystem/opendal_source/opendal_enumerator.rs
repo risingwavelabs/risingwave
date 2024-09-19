@@ -30,7 +30,7 @@ use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 #[derive(Debug, Clone)]
 pub struct OpendalEnumerator<Src: OpendalSource> {
-    pub(crate) op: Operator,
+    pub op: Operator,
     // prefix is used to reduce the number of objects to be listed
     pub(crate) prefix: Option<String>,
     pub(crate) matcher: Option<glob::Pattern>,
@@ -107,6 +107,10 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
 
     pub fn get_matcher(&self) -> &Option<glob::Pattern> {
         &self.matcher
+    }
+
+    pub fn get_prefix(&self) -> &str {
+        self.prefix.as_deref().unwrap_or("/")
     }
 }
 pub type ObjectMetadataIter = BoxStream<'static, ConnectorResult<FsPageItem>>;

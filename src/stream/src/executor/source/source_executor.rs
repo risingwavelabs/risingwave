@@ -45,7 +45,7 @@ use super::{
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::{AddMutation, UpdateMutation};
+use crate::executor::UpdateMutation;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -445,22 +445,9 @@ impl<S: StateStore> SourceExecutor<S> {
         };
 
         let mut boot_state = Vec::default();
-        if let Some(
-            Mutation::Add(AddMutation { splits, .. })
-            | Mutation::Update(UpdateMutation {
-                actor_splits: splits,
-                ..
-            }),
-        ) = barrier.mutation.as_deref()
-        {
-            if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                tracing::debug!(
-                    "source exector: actor {:?} boot with splits: {:?}",
-                    self.actor_ctx.id,
-                    splits
-                );
-                boot_state.clone_from(splits);
-            }
+        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+            tracing::debug!(?splits, "boot with splits");
+            boot_state = splits.to_vec();
         }
 
         core.split_state_store.init_epoch(barrier.epoch);
@@ -889,6 +876,7 @@ mod tests {
 
     use super::*;
     use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
+    use crate::executor::AddMutation;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 

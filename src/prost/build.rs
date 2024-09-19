@@ -80,6 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".stream_plan.SourceBackfillNode",
         ".stream_plan.StreamSource",
         ".batch_plan.SourceNode",
+        ".batch_plan.IcebergScanNode",
     ];
 
     // Build protobuf structs.
@@ -146,6 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "plan_common.AdditionalColumnPartition",
             "#[derive(Eq, Hash)]",
         )
+        .type_attribute("plan_common.AdditionalColumnPayload", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalColumnTimestamp",
             "#[derive(Eq, Hash)]",
@@ -178,6 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.GroupDestroy", "#[derive(Eq)]")
         .type_attribute("hummock.GroupMetaChange", "#[derive(Eq)]")
         .type_attribute("hummock.GroupTableChange", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupMerge", "#[derive(Eq)]")
         .type_attribute("hummock.GroupDelta", "#[derive(Eq)]")
         .type_attribute("hummock.LevelHandler.RunningCompactTask", "#[derive(Eq)]")
         .type_attribute("hummock.LevelHandler", "#[derive(Eq)]")
@@ -194,8 +197,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // If any configuration for `prost_build` is not exposed by `tonic_build`, specify it here.
     let mut prost_config = prost_build::Config::new();
-    prost_config.skip_debug(["meta.SystemParams"]);
-
+    prost_config.skip_debug([
+        "meta.SystemParams",
+        "plan_common.ColumnDesc",
+        "data.DataType",
+        // TODO:
+        //"stream_plan.StreamNode"
+    ]);
     // Compile the proto files.
     tonic_config
         .out_dir(out_dir.as_path())

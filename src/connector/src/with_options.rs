@@ -20,7 +20,8 @@ use crate::sink::catalog::SinkFormatDesc;
 use crate::source::cdc::external::CdcTableType;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
-    GCS_CONNECTOR, KAFKA_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, UPSTREAM_SOURCE_KEY,
+    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    UPSTREAM_SOURCE_KEY,
 };
 
 /// Marker trait for `WITH` options. Only for `#[derive(WithOptions)]`, should not be used manually.
@@ -125,6 +126,10 @@ pub trait WithPropertiesExt: Get + Sized {
         CdcTableType::from_properties(self).enable_transaction_metadata()
     }
 
+    fn is_shareable_non_cdc_connector(&self) -> bool {
+        self.is_kafka_connector()
+    }
+
     #[inline(always)]
     fn is_iceberg_connector(&self) -> bool {
         let Some(connector) = self.get_connector() else {
@@ -144,6 +149,7 @@ pub trait WithPropertiesExt: Get + Sized {
                 s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
                     || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
                     || s.eq_ignore_ascii_case(GCS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
             })
             .unwrap_or(false)
     }

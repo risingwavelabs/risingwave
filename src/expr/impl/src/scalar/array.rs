@@ -15,7 +15,7 @@
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::row::Row;
 use risingwave_common::types::{
-    DataType, ListRef, MapRef, MapType, MapValue, ScalarRefImpl, ToOwnedDatum,
+    DataType, ListRef, MapRef, MapType, MapValue, ScalarRef, ScalarRefImpl, ToOwnedDatum,
 };
 use risingwave_expr::expr::Context;
 use risingwave_expr::{function, ExprError};
@@ -153,10 +153,7 @@ fn map_contains(map: MapRef<'_>, key: ScalarRefImpl<'_>) -> Result<bool, ExprErr
 /// ```
 #[function("map_length(anymap) -> int4")]
 fn map_length<T: TryFrom<usize>>(map: MapRef<'_>) -> Result<T, ExprError> {
-    map.inner()
-        .len()
-        .try_into()
-        .map_err(|_| ExprError::NumericOverflow)
+    map.len().try_into().map_err(|_| ExprError::NumericOverflow)
 }
 
 /// If both `m1` and `m2` have a value with the same key, then the output map contains the value from `m2`.
@@ -239,6 +236,60 @@ fn map_delete(map: MapRef<'_>, key: Option<ScalarRefImpl<'_>>) -> MapValue {
         return map.to_owned();
     };
     MapValue::delete(map, key)
+}
+
+/// # Example
+///
+/// ```slt
+/// query T
+/// select map_keys(map{'a':1, 'b':2, 'c':3});
+/// ----
+/// {a,b,c}
+/// ```
+#[function(
+    "map_keys(anymap) -> anyarray",
+    type_infer = "|args|{
+        Ok(DataType::List(Box::new(args[0].as_map().key().clone())))
+    }"
+)]
+fn map_keys(map: MapRef<'_>) -> ListValue {
+    map.into_kv().0.to_owned_scalar()
+}
+
+/// # Example
+///
+/// ```slt
+/// query T
+/// select map_values(map{'a':1, 'b':2, 'c':3});
+/// ----
+/// {1,2,3}
+/// ```
+#[function(
+    "map_values(anymap) -> anyarray",
+    type_infer = "|args|{
+        Ok(DataType::List(Box::new(args[0].as_map().value().clone())))
+    }"
+)]
+fn map_values(map: MapRef<'_>) -> ListValue {
+    map.into_kv().1.to_owned_scalar()
+}
+
+/// # Example
+///
+/// ```slt
+/// query T
+/// select map_entries(map{'a':1, 'b':2, 'c':3});
+/// ----
+/// {"(a,1)","(b,2)","(c,3)"}
+/// ```
+#[function(
+    "map_entries(anymap) -> anyarray",
+    type_infer = "|args|{
+        Ok(args[0].as_map().clone().into_list())
+    }"
+)]
+fn map_entries(map: MapRef<'_>) -> ListValue {
+    map.into_inner().to_owned()
 }
 
 #[cfg(test)]

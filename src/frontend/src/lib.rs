@@ -23,7 +23,6 @@
 #![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(assert_matches)]
-#![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(macro_metavar_expr)]
 #![feature(min_specialization)]
@@ -142,8 +141,9 @@ pub struct FrontendOpts {
     pub config_path: String,
 
     /// Used for control the metrics level, similar to log level.
-    /// 0 = disable metrics
-    /// >0 = enable metrics
+    ///
+    /// level = 0: disable metrics
+    /// level > 0: enable metrics
     #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,

@@ -56,10 +56,5 @@ name = "compaction-test"
 path = "src/bin/compaction.rs"
 test = false
 
-[[bin]]
-name = "delete-range-test"
-path = "src/bin/delete_range.rs"
-test = false
-
 [lints]
 workspace = true

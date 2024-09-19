@@ -28,7 +28,7 @@ pub struct BarrierManagerState {
     /// Inflight running actors info.
     pub(crate) inflight_graph_info: InflightGraphInfo,
 
-    inflight_subscription_info: InflightSubscriptionInfo,
+    pub(crate) inflight_subscription_info: InflightSubscriptionInfo,
 
     /// Whether the cluster is paused and the reason.
     paused_reason: Option<PausedReason>,

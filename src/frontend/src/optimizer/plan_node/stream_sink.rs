@@ -212,7 +212,7 @@ impl StreamSink {
         partition_info: Option<PartitionComputeInfo>,
     ) -> Result<Self> {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
-        let (input, sink) = Self::derive_sink_desc(
+        let (input, mut sink) = Self::derive_sink_desc(
             input,
             user_distributed_by,
             name,
@@ -241,8 +241,11 @@ impl StreamSink {
                         if connector == TABLE_SINK && sink.target_table.is_none() {
                             unsupported_sink(TABLE_SINK)
                         } else {
+                            SinkType::set_default_commit_checkpoint_interval(
+                                &mut sink,
+                                &input.ctx().session_ctx().config().sink_decouple(),
+                            )?;
                             SinkType::is_sink_decouple(
-                                &sink,
                                 &input.ctx().session_ctx().config().sink_decouple(),
                             )
                         }

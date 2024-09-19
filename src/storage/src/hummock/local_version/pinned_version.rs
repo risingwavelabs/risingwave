@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::iter::empty;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -74,7 +74,6 @@ impl Drop for PinnedVersionGuard {
 #[derive(Clone)]
 pub struct PinnedVersion {
     version: Arc<HummockVersion>,
-    compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     guard: Arc<PinnedVersionGuard>,
 }
 
@@ -84,11 +83,8 @@ impl PinnedVersion {
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
-        let compaction_group_index = version.state_table_info.build_table_compaction_group_id();
-
         PinnedVersion {
             version: Arc::new(version),
-            compaction_group_index: Arc::new(compaction_group_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
@@ -96,28 +92,25 @@ impl PinnedVersion {
         }
     }
 
-    pub(crate) fn compaction_group_index(&self) -> Arc<HashMap<TableId, CompactionGroupId>> {
-        self.compaction_group_index.clone()
-    }
-
-    pub fn new_pin_version(&self, version: HummockVersion) -> Self {
+    pub fn new_pin_version(&self, version: HummockVersion) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
             version.id,
             self.version.id
         );
+        if version.id == self.version.id {
+            return None;
+        }
         let version_id = version.id;
-        let compaction_group_index = version.state_table_info.build_table_compaction_group_id();
 
-        PinnedVersion {
+        Some(PinnedVersion {
             version: Arc::new(version),
-            compaction_group_index: Arc::new(compaction_group_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-        }
+        })
     }
 
     pub fn id(&self) -> HummockVersionId {

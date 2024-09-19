@@ -421,7 +421,7 @@ fn encode_field<D: MaybeData>(
             return no_match_err();
         }
         DataType::Map(_) => {
-            // TODO:
+            // TODO(map): support map
             return no_match_err();
         }
     };
@@ -440,10 +440,10 @@ mod tests {
     #[test]
     fn test_encode_proto_ok() {
         let pool_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/test_data/proto_recursive/recursive.pb");
+            .join("codec/tests/test_data/all-types.pb");
         let pool_bytes = std::fs::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
-        let descriptor = pool.get_message_by_name("recursive.AllTypes").unwrap();
+        let descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
         let schema = Schema::new(vec![
             Field::with_name(DataType::Boolean, "bool_field"),
             Field::with_name(DataType::Varchar, "string_field"),
@@ -495,7 +495,7 @@ mod tests {
             // Hint: write the binary output to a file `test.binpb`, and view it with `protoc`:
             // ```
             // protoc --decode_raw < test.binpb
-            // protoc --decode=recursive.AllTypes recursive.proto < test.binpb
+            // protoc --decode=all_types.AllTypes all-types.proto < test.binpb
             // ```
             [
                 9, 0, 0, 0, 0, 0, 0, 17, 64, 21, 0, 0, 96, 64, 24, 22, 32, 23, 56, 48, 93, 26, 0,
@@ -509,10 +509,10 @@ mod tests {
     #[test]
     fn test_encode_proto_repeated() {
         let pool_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/test_data/proto_recursive/recursive.pb");
-        let pool_bytes = std::fs::read(pool_path).unwrap();
+            .join("codec/tests/test_data/all-types.pb");
+        let pool_bytes = fs_err::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
-        let message_descriptor = pool.get_message_by_name("recursive.AllTypes").unwrap();
+        let message_descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
 
         let schema = Schema::new(vec![Field::with_name(
             DataType::List(DataType::List(DataType::Int32.into()).into()),
@@ -529,7 +529,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "encode repeated_int_field error: cannot encode integer[] column as int32 field"
+            "encode 'repeated_int_field' error: cannot encode integer[] column as int32 field"
         );
 
         let schema = Schema::new(vec![Field::with_name(
@@ -554,17 +554,17 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "encode repeated_int_field error: array containing null not allowed as repeated field"
+            "encode 'repeated_int_field' error: array containing null not allowed as repeated field"
         );
     }
 
     #[test]
     fn test_encode_proto_err() {
         let pool_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/test_data/proto_recursive/recursive.pb");
+            .join("codec/tests/test_data/all-types.pb");
         let pool_bytes = std::fs::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
-        let message_descriptor = pool.get_message_by_name("recursive.AllTypes").unwrap();
+        let message_descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
 
         let err = validate_fields(
             std::iter::once(("not_exists", &DataType::Int16)),
@@ -573,7 +573,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "encode not_exists error: field not in proto"
+            "encode 'not_exists' error: field not in proto"
         );
 
         let err = validate_fields(
@@ -583,7 +583,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "encode map_field error: field not in proto"
+            "encode 'map_field' error: field not in proto"
         );
     }
 }

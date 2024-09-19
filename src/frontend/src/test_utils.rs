@@ -30,6 +30,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -938,24 +939,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
 
     async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+        Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
     async fn get_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+        Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
     async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+        Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
     async fn wait(&self) -> RpcResult<()> {
@@ -1021,7 +1013,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok("".to_string())
     }
 
-    async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
+    async fn get_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
         Ok(vec![])
     }
 
@@ -1074,7 +1066,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_all_nodes(&self) -> RpcResult<Vec<WorkerNode>> {
-        unimplemented!()
+        Ok(vec![])
     }
 
     async fn list_compact_task_progress(&self) -> RpcResult<Vec<CompactTaskProgress>> {
@@ -1105,6 +1097,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _max_count: u32,
     ) -> RpcResult<Vec<u64>> {
         unimplemented!()
+    }
+
+    async fn get_cluster_limits(&self) -> RpcResult<Vec<ClusterLimit>> {
+        Ok(vec![])
     }
 }
 

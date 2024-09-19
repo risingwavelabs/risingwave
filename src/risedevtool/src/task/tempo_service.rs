@@ -19,6 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
+use crate::util::stylized_risedev_subcmd;
 use crate::{TempoConfig, TempoGen};
 
 pub struct TempoService {
@@ -63,7 +64,11 @@ impl Task for TempoService {
 
         let path = self.tempo_path()?;
         if !path.exists() {
-            return Err(anyhow!("tempo binary not found in {:?}\nDid you enable tracing feature in `./risedev configure`?", path));
+            return Err(anyhow!(
+                "tempo binary not found in {:?}\nDid you enable tracing feature in `{}`?",
+                path,
+                stylized_risedev_subcmd("configure")
+            ));
         }
 
         let prefix_config = env::var("PREFIX_CONFIG")?;

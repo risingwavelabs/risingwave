@@ -19,7 +19,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(lint_reasons)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
@@ -123,6 +122,28 @@ where
             de::Unexpected::Str(&s),
             &"true or false",
         )),
+    }
+}
+
+pub(crate) fn deserialize_optional_bool_from_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<bool>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let s = s.to_ascii_lowercase();
+        match s.as_str() {
+            "true" => Ok(Some(true)),
+            "false" => Ok(Some(false)),
+            _ => Err(de::Error::invalid_value(
+                de::Unexpected::Str(&s),
+                &"true or false",
+            )),
+        }
+    } else {
+        Ok(None)
     }
 }
 

@@ -22,6 +22,7 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use cluster_limit_service_client::ClusterLimitServiceClient;
 use either::Either;
 use futures::stream::BoxStream;
 use lru::LruCache;
@@ -1245,10 +1246,12 @@ impl MetaClient {
         &self,
         group_id: CompactionGroupId,
         table_ids_to_new_group: &[StateTableId],
+        partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         let req = SplitCompactionGroupRequest {
             group_id,
             table_ids: table_ids_to_new_group.to_vec(),
+            partition_vnode_count,
         };
         let resp = self.inner.split_compaction_group(req).await?;
         Ok(resp.new_group_id)
@@ -1431,10 +1434,35 @@ impl MetaClient {
         Ok(resp.ret)
     }
 
-    pub async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
-        let req = GetVersionByEpochRequest { epoch };
+    pub async fn get_version_by_epoch(
+        &self,
+        epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<PbHummockVersion> {
+        let req = GetVersionByEpochRequest { epoch, table_id };
         let resp = self.inner.get_version_by_epoch(req).await?;
         Ok(resp.version.unwrap())
+    }
+
+    pub async fn get_cluster_limits(
+        &self,
+    ) -> Result<Vec<risingwave_common::util::cluster_limit::ClusterLimit>> {
+        let req = GetClusterLimitsRequest {};
+        let resp = self.inner.get_cluster_limits(req).await?;
+        Ok(resp.active_limits.into_iter().map(|l| l.into()).collect())
+    }
+
+    pub async fn merge_compaction_group(
+        &self,
+        left_group_id: CompactionGroupId,
+        right_group_id: CompactionGroupId,
+    ) -> Result<()> {
+        let req = MergeCompactionGroupRequest {
+            left_group_id,
+            right_group_id,
+        };
+        self.inner.merge_compaction_group(req).await?;
+        Ok(())
     }
 }
 
@@ -1489,7 +1517,6 @@ impl HummockMetaClient for MetaClient {
             // For unpin_snapshot_before, we do not care about snapshots list but only min epoch.
             min_snapshot: Some(HummockSnapshot {
                 committed_epoch: pinned_epochs,
-                current_epoch: pinned_epochs,
             }),
         };
         self.inner.unpin_snapshot_before(req).await?;
@@ -1504,12 +1531,13 @@ impl HummockMetaClient for MetaClient {
         Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch, _sync_result: SyncResult) -> Result<()> {
+    async fn commit_epoch(
+        &self,
+        _epoch: HummockEpoch,
+        _sync_result: SyncResult,
+        _is_log_store: bool,
+    ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
-    }
-
-    async fn update_current_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
-        panic!("Only meta service can update_current_epoch in production.")
     }
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
@@ -1603,8 +1631,12 @@ impl HummockMetaClient for MetaClient {
         Ok((request_sender, Box::pin(stream)))
     }
 
-    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
-        self.get_version_by_epoch(epoch).await
+    async fn get_version_by_epoch(
+        &self,
+        epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<PbHummockVersion> {
+        self.get_version_by_epoch(epoch, table_id).await
     }
 }
 
@@ -1641,6 +1673,7 @@ struct GrpcMetaClientCore {
     cloud_client: CloudServiceClient<Channel>,
     sink_coordinate_client: SinkCoordinationRpcClient,
     event_log_client: EventLogServiceClient<Channel>,
+    cluster_limit_client: ClusterLimitServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1667,7 +1700,8 @@ impl GrpcMetaClientCore {
         let serving_client = ServingServiceClient::new(channel.clone());
         let cloud_client = CloudServiceClient::new(channel.clone());
         let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
-        let event_log_client = EventLogServiceClient::new(channel);
+        let event_log_client = EventLogServiceClient::new(channel.clone());
+        let cluster_limit_client = ClusterLimitServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1687,6 +1721,7 @@ impl GrpcMetaClientCore {
             cloud_client,
             sink_coordinate_client,
             event_log_client,
+            cluster_limit_client,
         }
     }
 }
@@ -2110,6 +2145,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
             ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
+            ,{ hummock_client, merge_compaction_group, MergeCompactionGroupRequest, MergeCompactionGroupResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
@@ -2131,6 +2167,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
             ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }
             ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }
+            ,{ cluster_limit_client, get_cluster_limits, GetClusterLimitsRequest, GetClusterLimitsResponse }
         }
     };
 }

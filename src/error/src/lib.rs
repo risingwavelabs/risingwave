@@ -21,7 +21,6 @@
 //! access if `risingwave_common` is already a dependency.
 
 #![feature(error_generic_member_access)]
-#![feature(lint_reasons)]
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![feature(trait_alias)]
