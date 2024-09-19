@@ -28,7 +28,7 @@ import {
 import _ from "lodash"
 import Head from "next/head"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import DdlGraph from "../components/DdlGraph"
+import RelationGraph from "../components/RelationGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
@@ -44,19 +44,19 @@ import {
   getSchemas,
   getStreamingJobs, getRelationDependencies,
 } from "../lib/api/streaming"
-import { DdlBox } from "../lib/layout"
+import { RelationBox } from "../lib/layout"
 import { BackPressureInfo } from "../proto/gen/monitor_service"
 
 // Refresh interval (ms) for back pressure stats
 const INTERVAL_MS = 5000
 
-function buildDdlDependencyAsEdges(relations: StreamingJob[], relationDeps: Map<number, number[]>): DdlBox[] {
+function buildRelationDependencyAsEdges(relations: StreamingJob[], relationDeps: Map<number, number[]>): RelationBox[] {
   // Filter out non-streaming relations, e.g. source, views.
   let relationIds = new Set<number>()
   for (const relation of relations) {
     relationIds.add(relation.id)
   }
-  const nodes: DdlBox[] = []
+  const nodes: RelationBox[] = []
   for (const relation of relations) {
     let parentIds = relationDeps.get(relation.id)
     nodes.push({
@@ -69,7 +69,7 @@ function buildDdlDependencyAsEdges(relations: StreamingJob[], relationDeps: Map<
               .filter((x) => relationIds.has(x))
               .map((x) => x.toString())
           : [],
-      ddlName: relation.name,
+      relationName: relation.name,
       schemaName: relation.schemaName ? relation.schemaName : "",
     })
   }
@@ -107,7 +107,7 @@ export default function Streaming() {
     )
   }
 
-  const ddlDependencyCallback = useCallback(() => {
+  const relationDependencyCallback = useCallback(() => {
     if (relationList) {
       if (relationDeps) {
         if (schemas) {
@@ -117,16 +117,14 @@ export default function Streaming() {
             )?.name
             return { ...relation, schemaName }
           })
-          const ddlDep = buildDdlDependencyAsEdges(relationListWithSchemaName, relationDeps)
-          return {
-            ddlDep,
-          }
+          const relationDep = buildRelationDependencyAsEdges(relationListWithSchemaName, relationDeps)
+          return relationDep
         }
       }
     }
   }, [relationList, relationDeps, schemas])
 
-  const ddlDependency = ddlDependencyCallback()?.ddlDep
+  const relationDependency = relationDependencyCallback()
 
   const [backPressureDataSource, setBackPressureDataSource] =
     useState<BackPressureDataSource>("Embedded")
@@ -241,7 +239,7 @@ export default function Streaming() {
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
-      <Title>Ddl Graph</Title>
+      <Title>Relation Graph</Title>
       <Flex flexDirection="row" height="full" width="full">
         <VStack
           mr={3}
@@ -281,10 +279,10 @@ export default function Streaming() {
           overflowX="scroll"
           overflowY="scroll"
         >
-          <Text fontWeight="semibold">Ddl Graph</Text>
-          {ddlDependency && (
-            <DdlGraph
-              ddlDependency={ddlDependency}
+          <Text fontWeight="semibold">Relation Graph</Text>
+          {relationDependency && (
+            <RelationGraph
+              relationDependency={relationDependency}
               backPressures={backPressures}
             />
           )}
@@ -296,7 +294,7 @@ export default function Streaming() {
   return (
     <Fragment>
       <Head>
-        <title>Ddl Graph</title>
+        <title>Relation Graph</title>
       </Head>
       {retVal}
     </Fragment>

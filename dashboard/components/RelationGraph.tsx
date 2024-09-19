@@ -4,86 +4,86 @@ import * as d3 from "d3"
 import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef } from "react"
 import {
-  DdlBox,
+  RelationBox,
   Edge,
   Enter,
   Position,
-  generateDdlEdges,
+  generateRelationBackPressureEdges,
   layoutItem,
 } from "../lib/layout"
 
 const nodeRadius = 12
-const ddlLayoutX = nodeRadius * 8
-const ddlLayoutY = nodeRadius * 8
-const ddlNameX = nodeRadius * 4
-const ddlNameY = nodeRadius * 7
-const ddlMarginX = nodeRadius * 2
-const ddlMarginY = nodeRadius * 2
+const relationLayoutX = nodeRadius * 8
+const relationLayoutY = nodeRadius * 8
+const relationNameX = nodeRadius * 4
+const relationNameY = nodeRadius * 7
+const relationMarginX = nodeRadius * 2
+const relationMarginY = nodeRadius * 2
 
-export default function DdlGraph({
-  ddlDependency,
+export default function RelationGraph({
+  relationDependency,
   backPressures,
 }: {
-  ddlDependency: DdlBox[] // Ddl adjacency list, metadata
+  relationDependency: RelationBox[] // Relation adjacency list, metadata
   backPressures?: Map<string, number> // relationId-relationId->back_pressure_rate
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
 
-  const ddlDependencyDagCallback = useCallback(() => {
-    const ddlDependencyDag = cloneDeep(ddlDependency)
+  const relationDependencyDagCallback = useCallback(() => {
+    const relationDependencyDag = cloneDeep(relationDependency)
 
-    const layoutDdlResult = new Map<string, any>()
-    const includedDdlIds = new Set<string>()
-    for (const ddlBox of ddlDependencyDag) {
-      let ddlId = ddlBox.id
-      layoutDdlResult.set(ddlId, {
-        ddlName: ddlBox.ddlName,
-        schemaName: ddlBox.schemaName,
+    const layoutRelationResult = new Map<string, any>()
+    const includedRelationIds = new Set<string>()
+    for (const relationBox of relationDependencyDag) {
+      let relationId = relationBox.id
+       layoutRelationResult.set(relationId, {
+        relationName: relationBox.relationName,
+        schemaName: relationBox.schemaName,
       })
-      includedDdlIds.add(ddlId)
+      includedRelationIds.add(relationId)
     }
 
-    const ddlLayout = layoutItem(
-      ddlDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
-        return { width: ddlLayoutX, height: ddlLayoutY, id, ...data }
+    const relationLayout = layoutItem(
+      relationDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
+        return { width: relationLayoutX, height: relationLayoutY, id, ...data }
       }),
-      ddlMarginX,
-      ddlMarginY
+      relationMarginX,
+      relationMarginY
     )
 
     let svgWidth = 0
     let svgHeight = 0
-    ddlLayout.forEach(({ x, y }) => {
-      svgHeight = Math.max(svgHeight, y + ddlLayoutX)
-      svgWidth = Math.max(svgWidth, x + ddlLayoutY)
+    relationLayout.forEach(({ x, y }) => {
+      svgHeight = Math.max(svgHeight, y + relationLayoutX)
+      svgWidth = Math.max(svgWidth, x + relationLayoutY)
     })
-    const edges = generateDdlEdges(ddlLayout)
+    const edges = generateRelationBackPressureEdges(relationLayout)
 
     return {
-      layoutResult: ddlLayout,
+      layoutResult: relationLayout,
       svgWidth,
       svgHeight,
       edges,
     }
-  }, [ddlDependency])
+  }, [relationDependency])
 
   const {
     svgWidth,
     svgHeight,
-    edges: ddlEdgeLayout,
-    layoutResult: ddlLayout,
-  } = ddlDependencyDagCallback()
+    edges: relationEdgeLayout,
+    layoutResult: relationLayout,
+  } = relationDependencyDagCallback()
 
   useEffect(() => {
-    if (ddlLayout) {
+    if (relationLayout) {
       const svgNode = svgRef.current
       const svgSelection = d3.select(svgNode)
 
-      // Ddls
-      const applyDdl = (gSel: DdlSelection) => {
+      // Relations
+      const applyRelation = (gSel: RelationSelection) => {
         gSel.attr("transform", ({ x, y }) => `translate(${x}, ${y})`)
 
-        // Render ddl name
+        // Render relation name
         {
           let text = gSel.select<SVGTextElement>(".text-frag-id")
           if (text.empty()) {
@@ -92,16 +92,16 @@ export default function DdlGraph({
 
           text
             .attr("fill", "black")
-            .text(({ ddlName, schemaName }) => `${schemaName}.${ddlName}`)
+            .text(({ relationName, schemaName }) => `${schemaName}.${relationName}`)
             .attr("font-family", "inherit")
             .attr("text-anchor", "middle")
-            .attr("dx", ddlNameX)
-            .attr("dy", ddlNameY)
+            .attr("dx", relationNameX)
+            .attr("dy", relationNameY)
             .attr("fill", "black")
             .attr("font-size", 12)
         }
 
-        // Render ddl node
+        // Render relation node
         {
           let circle = gSel.select<SVGCircleElement>("circle")
           if (circle.empty()) {
@@ -114,33 +114,33 @@ export default function DdlGraph({
           })
 
           circle
-            .attr("cx", ddlLayoutX / 2)
-            .attr("cy", ddlLayoutY / 2)
+            .attr("cx", relationLayoutX / 2)
+            .attr("cy", relationLayoutY / 2)
             .attr("fill", "white")
             .attr("stroke-width", 1)
             .attr("stroke", theme.colors.gray[500])
         }
       }
 
-      const createDdl = (sel: Enter<DdlSelection>) =>
-        sel.append("g").attr("class", "ddl").call(applyDdl)
+      const createRelation = (sel: Enter<RelationSelection>) =>
+        sel.append("g").attr("class", "relation").call(applyRelation)
 
-      const ddlSelection = svgSelection
-        .select<SVGGElement>(".ddls")
-        .selectAll<SVGGElement, null>(".ddl")
-        .data(ddlLayout)
-      type DdlSelection = typeof ddlSelection
+      const relationSelection = svgSelection
+        .select<SVGGElement>(".relations")
+        .selectAll<SVGGElement, null>(".relation")
+        .data(relationLayout)
+      type RelationSelection = typeof relationSelection
 
-      ddlSelection.enter().call(createDdl)
+      relationSelection.enter().call(createRelation)
       // TODO(kwannoel): Is this even needed? I commented it out.
-      // ddlSelection.call(applyDdl)
-      ddlSelection.exit().remove()
+      // relationSelection.call(applyRelation)
+      relationSelection.exit().remove()
 
-      // Ddl Edges
+      // Relation Edges
       const edgeSelection = svgSelection
-        .select<SVGGElement>(".ddl-edges")
-        .selectAll<SVGGElement, null>(".ddl-edge")
-        .data(ddlEdgeLayout)
+        .select<SVGGElement>(".relation-edges")
+        .selectAll<SVGGElement, null>(".relation-edge")
+        .data(relationEdgeLayout)
       type EdgeSelection = typeof edgeSelection
 
       const curveStyle = d3.curveMonotoneX
@@ -208,19 +208,19 @@ export default function DdlGraph({
         return gSel
       }
       const createEdge = (sel: Enter<EdgeSelection>) =>
-        sel.append("g").attr("class", "ddl-edge").call(applyEdge)
+        sel.append("g").attr("class", "relation-edge").call(applyEdge)
 
       edgeSelection.enter().call(createEdge)
       edgeSelection.call(applyEdge)
       edgeSelection.exit().remove()
     }
-  }, [ddlLayout, ddlEdgeLayout, backPressures])
+  }, [relationLayout, relationEdgeLayout, backPressures])
 
   return (
     <Fragment>
       <svg ref={svgRef} width={`${svgWidth}px`} height={`${svgHeight}px`}>
-        <g className="ddl-edges" />
-        <g className="ddls" />
+        <g className="relation-edges" />
+        <g className="relations" />
       </svg>
     </Fragment>
   )

@@ -293,8 +293,8 @@ export type FragmentBox = LayoutItemBase & {
   fragment: TableFragments_Fragment
 }
 
-export type DdlBox = LayoutItemBase & {
-  ddlName: string
+export type RelationBox = LayoutItemBase & {
+  relationName: string
   schemaName: string
 }
 
@@ -310,7 +310,7 @@ export interface Position {
 
 export type FragmentBoxPosition = FragmentBox & Position
 export type RelationPointPosition = RelationPoint & Position
-export type DdlBoxPosition = DdlBox & Position
+export type RelationBoxPosition = RelationBox & Position
 
 export interface Edge {
   points: Array<Position>
@@ -517,27 +517,27 @@ export function generateFragmentEdges(
   return links
 }
 
-export function generateDdlEdges(layoutMap: DdlBoxPosition[]): Edge[] {
+export function generateRelationBackPressureEdges(layoutMap: RelationBoxPosition[]): Edge[] {
   const links = []
-  const ddlMap = new Map<string, DdlBoxPosition>()
+  const relationMap = new Map<string, RelationBoxPosition>()
   for (const x of layoutMap) {
-    ddlMap.set(x.id, x)
+    relationMap.set(x.id, x)
   }
-  for (const ddl of layoutMap) {
-    for (const parentId of ddl.parentIds) {
-      const parentDdl = ddlMap.get(parentId)!
+  for (const relation of layoutMap) {
+    for (const parentId of relation.parentIds) {
+      const parentRelation = relationMap.get(parentId)!
       links.push({
         points: [
           {
-            x: ddl.x + ddl.width / 2,
-            y: ddl.y + ddl.height / 2,
+            x: relation.x + relation.width / 2,
+            y: relation.y + relation.height / 2,
           },
           {
-            x: parentDdl.x + parentDdl.width / 2,
-            y: parentDdl.y + parentDdl.height / 2,
+            x: parentRelation.x + parentRelation.width / 2,
+            y: parentRelation.y + parentRelation.height / 2,
           },
         ],
-        source: ddl.id,
+        source: relation.id,
         target: parentId,
       })
     }
