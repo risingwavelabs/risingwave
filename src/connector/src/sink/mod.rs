@@ -644,7 +644,7 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
-    #[error("Internal error: {0}")]
+    #[error(transparent)]
     Internal(
         #[from]
         #[backtrace]

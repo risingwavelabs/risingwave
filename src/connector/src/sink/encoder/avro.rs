@@ -652,7 +652,7 @@ mod tests {
                     }
                 ]
             }"#,
-            "encode q error: avro name ref unsupported yet",
+            "encode 'q' error: avro name ref unsupported yet",
         );
 
         test_err(
@@ -663,7 +663,7 @@ mod tests {
                 i64::MAX,
             ))),
             r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
-            "encode  error: -1 mons -1 days +2562047788:00:54.775807 overflows avro duration",
+            "encode '' error: -1 mons -1 days +2562047788:00:54.775807 overflows avro duration",
         );
 
         let avro_schema = AvroSchema::parse_str(
@@ -738,7 +738,7 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            "Encode error: encode req error: field not present but required"
+            "Encode error: encode 'req' error: field not present but required"
         );
 
         let schema = Schema::new(vec![
@@ -751,7 +751,7 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            "Encode error: encode extra error: field not in avro"
+            "Encode error: encode 'extra' error: field not in avro"
         );
 
         let avro_schema = AvroSchema::parse_str(r#"["null", "long"]"#).unwrap();
@@ -761,14 +761,14 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            r#"Encode error: encode  error: expect avro record but got ["null","long"]"#
+            r#"Encode error: encode '' error: expect avro record but got ["null","long"]"#
         );
 
         test_err(
             &DataType::Struct(StructType::new(vec![("f0", DataType::Boolean)])),
             (),
             r#"{"type": "record", "name": "T", "fields": [{"name": "f0", "type": "int"}]}"#,
-            "encode f0 error: cannot encode boolean column as \"int\" field",
+            "encode 'f0' error: cannot encode boolean column as \"int\" field",
         );
     }
 
@@ -790,7 +790,7 @@ mod tests {
             &DataType::List(DataType::Int32.into()),
             Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))).to_datum_ref(),
             avro_schema,
-            "encode  error: found null but required",
+            "encode '' error: found null but required",
         );
 
         test_ok(
@@ -829,7 +829,7 @@ mod tests {
             &DataType::List(DataType::Boolean.into()),
             (),
             r#"{"type": "array", "items": "int"}"#,
-            "encode  error: cannot encode boolean column as \"int\" field",
+            "encode '' error: cannot encode boolean column as \"int\" field",
         );
     }
 
@@ -863,14 +863,14 @@ mod tests {
             t,
             datum.to_datum_ref(),
             both,
-            r#"encode  error: cannot encode timestamp with time zone column as [{"type":"long","logicalType":"timestamp-millis"},{"type":"long","logicalType":"timestamp-micros"}] field"#,
+            r#"encode '' error: cannot encode timestamp with time zone column as [{"type":"long","logicalType":"timestamp-millis"},{"type":"long","logicalType":"timestamp-micros"}] field"#,
         );
 
         test_err(
             t,
             datum.to_datum_ref(),
             empty,
-            "encode  error: cannot encode timestamp with time zone column as [] field",
+            "encode '' error: cannot encode timestamp with time zone column as [] field",
         );
 
         test_ok(
@@ -879,7 +879,7 @@ mod tests {
             one,
             Value::Union(0, Value::TimestampMillis(1).into()),
         );
-        test_err(t, None, one, "encode  error: found null but required");
+        test_err(t, None, one, "encode '' error: found null but required");
 
         test_ok(
             t,
