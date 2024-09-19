@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use risingwave_common::array::arrow::arrow_array_udf::ArrayRef;
 use risingwave_common::array::arrow::arrow_schema_udf::{Field, Fields, Schema, SchemaRef};
-use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
+use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::expr::PbUserDefinedFunctionMetadata;

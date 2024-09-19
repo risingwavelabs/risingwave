@@ -19,12 +19,10 @@ use std::sync::Arc;
 
 use arrow_array::ArrayRef;
 use num_traits::abs;
-pub use {
-    arrow_52_array as arrow_array, arrow_52_buffer as arrow_buffer, arrow_52_cast as arrow_cast,
-    arrow_52_schema as arrow_schema,
-};
 
-pub use super::arrow_52::{FromArrow, ToArrow};
+pub use super::arrow_52::{
+    arrow_array, arrow_buffer, arrow_cast, arrow_schema, FromArrow, ToArrow,
+};
 use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
 use crate::types::StructType;
 
@@ -232,9 +230,8 @@ mod test {
     use std::sync::Arc;
 
     use super::arrow_array::{ArrayRef, Decimal128Array};
-    use super::arrow_impl::ToArrow;
     use super::arrow_schema::DataType;
-    use super::IcebergArrowConvert;
+    use super::*;
     use crate::array::{Decimal, DecimalArray};
 
     #[test]

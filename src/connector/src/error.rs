@@ -64,8 +64,6 @@ def_anyhow_newtype! {
     icelake::Error => "Iceberg error",
     iceberg::Error => "IcebergV2 error",
     redis::RedisError => "Redis error",
-    // currently, the following two are the same type
-    // risingwave_common::array::arrow::arrow_schema_udf::ArrowError => "Arrow error",
     risingwave_common::array::arrow::arrow_schema_iceberg::ArrowError => "Arrow error",
     google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
     rumqttc::tokio_rustls::rustls::Error => "TLS error",
