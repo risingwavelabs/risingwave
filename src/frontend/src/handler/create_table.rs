@@ -41,7 +41,6 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType,
@@ -772,6 +771,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     // append additional columns to the end
     handle_addition_columns(
+        None,
         &connect_properties,
         include_column_options,
         &mut columns,
@@ -1235,6 +1235,8 @@ pub async fn handle_create_table(
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
     }
 
+    session.check_cluster_limits().await?;
+
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
         StatementType::CREATE_TABLE,
@@ -1261,14 +1263,8 @@ pub async fn handle_create_table(
         )
         .await?;
 
-        let mut graph = build_graph(plan)?;
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
+        let graph = build_graph(plan)?;
+
         (graph, source, table, job_type)
     };
 
@@ -1313,7 +1309,7 @@ pub fn check_create_table_with_source(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn generate_stream_graph_for_table(
-    session: &Arc<SessionImpl>,
+    _session: &Arc<SessionImpl>,
     table_name: ObjectName,
     original_catalog: &Arc<TableCatalog>,
     source_schema: Option<ConnectorSchema>,
@@ -1428,15 +1424,7 @@ pub async fn generate_stream_graph_for_table(
         ))?
     }
 
-    let graph = StreamFragmentGraph {
-        parallelism: session
-            .config()
-            .streaming_parallelism()
-            .map(|parallelism| Parallelism {
-                parallelism: parallelism.get(),
-            }),
-        ..build_graph(plan)?
-    };
+    let graph = build_graph(plan)?;
 
     // Fill the original table ID.
     let table = Table {

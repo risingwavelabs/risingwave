@@ -57,6 +57,7 @@ pub mod monitor;
 
 pub mod agg_common;
 pub mod aggregation;
+pub mod asof_join;
 mod backfill;
 mod barrier_recv;
 mod batch_query;
@@ -133,10 +134,11 @@ pub use filter::FilterExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
-pub use join::JoinType;
+pub use join::{AsOfDesc, AsOfJoinType, JoinType};
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
+pub(crate) use merge::{MergeExecutorInput, MergeExecutorUpstream};
 pub use mview::*;
 pub use no_op::NoOpExecutor;
 pub use now::*;
@@ -164,13 +166,17 @@ pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
 
-pub type MessageStreamItem = StreamExecutorResult<Message>;
+pub type MessageStreamItemInner<M> = StreamExecutorResult<MessageInner<M>>;
+pub type MessageStreamItem = MessageStreamItemInner<BarrierMutationType>;
+pub type DispatcherMessageStreamItem = MessageStreamItemInner<()>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
-pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
+pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
+pub trait MessageStream = Stream<Item = MessageStreamItem> + Send;
+pub trait DispatcherMessageStream = Stream<Item = DispatcherMessageStreamItem> + Send;
 
 /// Static information of an executor.
 #[derive(Debug, Default, Clone)]
@@ -913,6 +919,16 @@ impl<M> BarrierInner<M> {
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
         })
     }
+
+    pub fn map_mutation<M2>(self, f: impl FnOnce(M) -> M2) -> BarrierInner<M2> {
+        BarrierInner {
+            epoch: self.epoch,
+            mutation: f(self.mutation),
+            kind: self.kind,
+            tracing_context: self.tracing_context,
+            passed_actors: self.passed_actors,
+        }
+    }
 }
 
 impl DispatcherBarrier {
@@ -1017,6 +1033,16 @@ pub enum MessageInner<M> {
     Watermark(Watermark),
 }
 
+impl<M> MessageInner<M> {
+    pub fn map_mutation<M2>(self, f: impl FnOnce(M) -> M2) -> MessageInner<M2> {
+        match self {
+            MessageInner::Chunk(chunk) => MessageInner::Chunk(chunk),
+            MessageInner::Barrier(barrier) => MessageInner::Barrier(barrier.map_mutation(f)),
+            MessageInner::Watermark(watermark) => MessageInner::Watermark(watermark),
+        }
+    }
+}
+
 pub type Message = MessageInner<BarrierMutationType>;
 pub type DispatcherMessage = MessageInner<()>;
 
@@ -1102,9 +1128,9 @@ pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
-pub async fn expect_first_barrier(
-    stream: &mut (impl MessageStream + Unpin),
-) -> StreamExecutorResult<Barrier> {
+pub async fn expect_first_barrier<M: Debug>(
+    stream: &mut (impl MessageStreamInner<M> + Unpin),
+) -> StreamExecutorResult<BarrierInner<M>> {
     let message = stream
         .next()
         .instrument_await("expect_first_barrier")

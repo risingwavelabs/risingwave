@@ -52,6 +52,7 @@ pub struct RowIdGenerator {
 
 pub type RowId = i64;
 
+// TODO(var-vnode): how should we handle this for different virtual node counts?
 #[inline]
 pub fn extract_vnode_id_from_row_id(id: RowId) -> VirtualNode {
     let vnode_id = ((id >> VNODE_ID_SHIFT_BITS) & (VNODE_ID_UPPER_BOUND as i64 - 1)) as u32;

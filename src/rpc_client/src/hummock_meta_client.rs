@@ -38,7 +38,12 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn get_snapshot(&self) -> Result<HummockSnapshot>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
     // We keep `commit_epoch` only for test/benchmark.
-    async fn commit_epoch(&self, epoch: HummockEpoch, sync_result: SyncResult) -> Result<()>;
+    async fn commit_epoch(
+        &self,
+        epoch: HummockEpoch,
+        sync_result: SyncResult,
+        is_log_store: bool,
+    ) -> Result<()>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn trigger_manual_compaction(
         &self,
@@ -66,5 +71,9 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         BoxStream<'static, CompactionEventItem>,
     )>;
 
-    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion>;
+    async fn get_version_by_epoch(
+        &self,
+        epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<PbHummockVersion>;
 }

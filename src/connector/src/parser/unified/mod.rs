@@ -17,13 +17,11 @@
 use auto_impl::auto_impl;
 use risingwave_common::types::{DataType, DatumCow};
 use risingwave_connector_codec::decoder::avro::AvroAccess;
-pub use risingwave_connector_codec::decoder::{
-    bail_uncategorized, uncategorized, Access, AccessError, AccessResult,
-};
+use risingwave_connector_codec::decoder::protobuf::ProtobufAccess;
+pub use risingwave_connector_codec::decoder::{Access, AccessError, AccessResult};
 
 use self::bytes::BytesAccess;
 use self::json::JsonAccess;
-use self::protobuf::ProtobufAccess;
 use crate::parser::unified::debezium::MongoJsonAccess;
 use crate::source::SourceColumnDesc;
 
@@ -32,7 +30,6 @@ pub mod debezium;
 pub mod json;
 pub mod kv_event;
 pub mod maxwell;
-pub mod protobuf;
 pub mod util;
 
 pub enum AccessImpl<'a> {

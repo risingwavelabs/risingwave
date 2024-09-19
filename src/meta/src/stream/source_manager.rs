@@ -188,10 +188,9 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
         let source_is_up = |res: i64| {
             self.source_is_up.set(res);
         };
-        let splits = self.enumerator.list_splits().await.map_err(|e| {
+        let splits = self.enumerator.list_splits().await.inspect_err(|_| {
             source_is_up(0);
             self.fail_cnt += 1;
-            e
         })?;
         source_is_up(1);
         self.fail_cnt = 0;
@@ -231,7 +230,8 @@ pub struct SourceManagerCore {
     /// `source_id` -> `(fragment_id, upstream_fragment_id)`
     backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
 
-    /// Splits assigned per actor
+    /// Splits assigned per actor,
+    /// incl. both `Source` and `SourceBackfill`.
     actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
@@ -468,13 +468,13 @@ impl Default for SplitDiffOptions {
 }
 
 /// Reassigns splits if there are new splits or dropped splits,
-/// i.e., `actor_splits` and `discovered_splits` differ.
+/// i.e., `actor_splits` and `discovered_splits` differ, or actors are rescheduled.
 ///
 /// The existing splits will remain unmoved in their currently assigned actor.
 ///
 /// If an actor has an upstream actor, it should be a backfill executor,
-/// and its splits should be aligned with the upstream actor. `reassign_splits` should not be used in this case.
-/// Use `align_backfill_splits` instead.
+/// and its splits should be aligned with the upstream actor. **`reassign_splits` should not be used in this case.
+/// Use `align_backfill_splits` instead.**
 ///
 /// - `fragment_id`: just for logging
 ///
@@ -586,32 +586,6 @@ where
             .map(|ActorSplitsAssignment { actor_id, splits }| (actor_id, splits))
             .collect(),
     )
-}
-
-pub fn validate_assignment(assignment: &mut HashMap<ActorId, Vec<SplitImpl>>) {
-    // check if one split is assign to multiple actors
-    let mut split_to_actor = HashMap::new();
-    for (actor_id, splits) in &mut *assignment {
-        let _ = splits.iter().map(|split| {
-            split_to_actor
-                .entry(split.id())
-                .or_insert_with(Vec::new)
-                .push(*actor_id)
-        });
-    }
-
-    for (split_id, actor_ids) in &mut split_to_actor {
-        if actor_ids.len() > 1 {
-            tracing::warn!(split_id = ?split_id, actor_ids = ?actor_ids, "split is assigned to multiple actors");
-        }
-        // keep the first actor and remove the rest from the assignment
-        for actor_id in actor_ids.iter().skip(1) {
-            assignment
-                .get_mut(actor_id)
-                .unwrap()
-                .retain(|split| split.id() != *split_id);
-        }
-    }
 }
 
 fn align_backfill_splits(
@@ -790,11 +764,10 @@ impl SourceManager {
 
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
     ///
-    /// Very occasionally split removal may happen
-    /// during scaling, in which case we need to use the old splits for reallocation instead of the
-    /// latest splits (which may be missing), so that we can resolve the split removal in the next
-    /// command.
-    pub async fn migrate_splits(
+    /// Very occasionally split removal may happen during scaling, in which case we need to
+    /// use the old splits for reallocation instead of the latest splits (which may be missing),
+    /// so that we can resolve the split removal in the next command.
+    pub async fn migrate_splits_for_source_actors(
         &self,
         fragment_id: FragmentId,
         prev_actor_ids: &[ActorId],
@@ -817,12 +790,49 @@ impl SourceManager {
             fragment_id,
             empty_actor_splits,
             &prev_splits,
-            // pre-allocate splits is the first time getting splits and it does not have scale in scene
+            // pre-allocate splits is the first time getting splits and it does not have scale-in scene
             SplitDiffOptions::default(),
         )
         .unwrap_or_default();
 
         Ok(diff)
+    }
+
+    /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
+    pub fn migrate_splits_for_backfill_actors(
+        &self,
+        fragment_id: FragmentId,
+        upstream_fragment_ids: &Vec<FragmentId>,
+        curr_actor_ids: &[ActorId],
+        fragment_actor_splits: &HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>,
+        no_shuffle_upstream_actor_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
+    ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
+        // align splits for backfill fragments with its upstream source fragment
+        debug_assert!(upstream_fragment_ids.len() == 1);
+        let upstream_fragment_id = upstream_fragment_ids[0];
+        let actors = no_shuffle_upstream_actor_map
+            .iter()
+            .filter(|(id, _)| curr_actor_ids.contains(id))
+            .map(|(id, upstream_fragment_actors)| {
+                debug_assert!(upstream_fragment_actors.len() == 1);
+                (
+                    *id,
+                    vec![*upstream_fragment_actors.get(&upstream_fragment_id).unwrap()],
+                )
+            });
+        let upstream_assignment = fragment_actor_splits.get(&upstream_fragment_id).unwrap();
+        tracing::info!(
+            fragment_id,
+            upstream_fragment_id,
+            ?upstream_assignment,
+            "migrate_splits_for_backfill_actors"
+        );
+        Ok(align_backfill_splits(
+            actors,
+            upstream_assignment,
+            fragment_id,
+            upstream_fragment_id,
+        )?)
     }
 
     /// Allocates splits to actors for a newly created source executor.
@@ -1169,14 +1179,11 @@ mod tests {
 
     use risingwave_common::types::JsonbVal;
     use risingwave_connector::error::ConnectorResult;
-    use risingwave_connector::source::test_source::TestSourceSplit;
-    use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+    use risingwave_connector::source::{SplitId, SplitMetaData};
     use serde::{Deserialize, Serialize};
 
-    use super::validate_assignment;
     use crate::model::{ActorId, FragmentId};
     use crate::stream::source_manager::{reassign_splits, SplitDiffOptions};
-    use crate::stream::SplitAssignment;
 
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
     struct TestSplit {
@@ -1295,49 +1302,6 @@ mod tests {
         .unwrap();
 
         assert!(!diff.is_empty())
-    }
-
-    #[test]
-    fn test_validate_assignment() {
-        let mut fragment_assignment: SplitAssignment;
-        let test_assignment: HashMap<ActorId, Vec<SplitImpl>> = maplit::hashmap! {
-            0 => vec![SplitImpl::Test(
-                TestSourceSplit {id: "1".into(), properties: Default::default(), offset: Default::default()}
-            ), SplitImpl::Test(
-                TestSourceSplit {id: "2".into(), properties: Default::default(), offset: Default::default()}
-            )],
-            1 => vec![SplitImpl::Test(
-                TestSourceSplit {id: "3".into(), properties: Default::default(), offset: Default::default()}
-            )],
-            2 => vec![SplitImpl::Test(
-                TestSourceSplit {id: "1".into(), properties: Default::default(), offset: Default::default()}
-            )],
-        };
-        fragment_assignment = maplit::hashmap! {
-            1 => test_assignment,
-        };
-
-        fragment_assignment.iter_mut().for_each(|(_, assignment)| {
-            validate_assignment(assignment);
-        });
-
-        {
-            let mut split_to_actor = HashMap::new();
-            for actor_to_splits in fragment_assignment.values() {
-                for (actor_id, splits) in actor_to_splits {
-                    let _ = splits.iter().map(|split| {
-                        split_to_actor
-                            .entry(split.id())
-                            .or_insert_with(Vec::new)
-                            .push(*actor_id)
-                    });
-                }
-            }
-
-            for actor_ids in split_to_actor.values() {
-                assert_eq!(actor_ids.len(), 1);
-            }
-        }
     }
 
     #[test]

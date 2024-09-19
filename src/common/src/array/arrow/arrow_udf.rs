@@ -125,6 +125,7 @@ impl FromArrow for UdfArrowConvert {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::array::*;
 
@@ -204,5 +205,121 @@ mod tests {
             .from_list_array(arrow.as_any().downcast_ref().unwrap())
             .unwrap();
         assert_eq!(rw_array.as_list(), &array);
+    }
+
+    #[test]
+    fn map() {
+        let map_type = MapType::from_kv(DataType::Varchar, DataType::Int32);
+        let rw_map_type = DataType::Map(map_type.clone());
+        let mut builder = MapArrayBuilder::with_type(3, rw_map_type.clone());
+        builder.append_owned(Some(
+            MapValue::try_from_kv(
+                ListValue::from_str("{a,b,c}", &DataType::List(Box::new(DataType::Varchar)))
+                    .unwrap(),
+                ListValue::from_str("{1,2,3}", &DataType::List(Box::new(DataType::Int32))).unwrap(),
+            )
+            .unwrap(),
+        ));
+        builder.append_owned(None);
+        builder.append_owned(Some(
+            MapValue::try_from_kv(
+                ListValue::from_str("{a,c}", &DataType::List(Box::new(DataType::Varchar))).unwrap(),
+                ListValue::from_str("{1,3}", &DataType::List(Box::new(DataType::Int32))).unwrap(),
+            )
+            .unwrap(),
+        ));
+        let rw_array = builder.finish();
+
+        let arrow_map_type = UdfArrowConvert::default()
+            .map_type_to_arrow(&map_type)
+            .unwrap();
+        expect_test::expect![[r#"
+            Map(
+                Field {
+                    name: "entries",
+                    data_type: Struct(
+                        [
+                            Field {
+                                name: "key",
+                                data_type: Utf8,
+                                nullable: false,
+                                dict_id: 0,
+                                dict_is_ordered: false,
+                                metadata: {},
+                            },
+                            Field {
+                                name: "value",
+                                data_type: Int32,
+                                nullable: true,
+                                dict_id: 0,
+                                dict_is_ordered: false,
+                                metadata: {},
+                            },
+                        ],
+                    ),
+                    nullable: false,
+                    dict_id: 0,
+                    dict_is_ordered: false,
+                    metadata: {},
+                },
+                false,
+            )
+        "#]]
+        .assert_debug_eq(&arrow_map_type);
+        let rw_map_type_new = UdfArrowConvert::default()
+            .from_field(&arrow_schema::Field::new(
+                "map",
+                arrow_map_type.clone(),
+                true,
+            ))
+            .unwrap();
+        assert_eq!(rw_map_type, rw_map_type_new);
+        let arrow = UdfArrowConvert::default()
+            .map_to_arrow(&arrow_map_type, &rw_array)
+            .unwrap();
+        expect_test::expect![[r#"
+            MapArray
+            [
+              StructArray
+            [
+            -- child 0: "key" (Utf8)
+            StringArray
+            [
+              "a",
+              "b",
+              "c",
+            ]
+            -- child 1: "value" (Int32)
+            PrimitiveArray<Int32>
+            [
+              1,
+              2,
+              3,
+            ]
+            ],
+              null,
+              StructArray
+            [
+            -- child 0: "key" (Utf8)
+            StringArray
+            [
+              "a",
+              "c",
+            ]
+            -- child 1: "value" (Int32)
+            PrimitiveArray<Int32>
+            [
+              1,
+              3,
+            ]
+            ],
+            ]
+        "#]]
+        .assert_debug_eq(&arrow);
+
+        let rw_array_new = UdfArrowConvert::default()
+            .from_map_array(arrow.as_any().downcast_ref().unwrap())
+            .unwrap();
+        assert_eq!(&rw_array, rw_array_new.as_map());
     }
 }

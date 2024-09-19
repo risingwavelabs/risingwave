@@ -1,0 +1,113 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM s1;
+
+statement ok
+CREATE SINK sink1 AS select * from mv1 WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    database.name = 'demo_db',
+    table.name = 't1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    primary_key = 'i1,i2',
+);
+
+statement ok
+insert into s1 values(1,'2','3');
+
+statement ok
+insert into s1 values(7,'8','9');
+
+statement ok
+insert into s1 values(4,'5','6');
+
+statement ok
+flush;
+
+statement ok
+delete from s1 where i1 = 7;
+
+statement ok
+flush;
+
+sleep 5s
+
+statement ok
+CREATE SOURCE iceberg_t1_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 't1',
+);
+
+query I
+select * from iceberg_t1_source order by i1;
+----
+1 2 3
+4 5 6
+
+query I
+select i1,i2,i3 from iceberg_t1_source order by i1;
+----
+1 2 3
+4 5 6
+
+query I
+select i3,i2 from iceberg_t1_source order by i2;
+----
+3 2
+6 5
+
+query I
+select i2,i1 from iceberg_t1_source order by i1;
+----
+2 1
+5 4
+
+query I
+select i1 from iceberg_t1_source order by i1;
+----
+1
+4
+
+query I
+select i2 from iceberg_t1_source order by i2;
+----
+2
+5
+
+query I
+select i3 from iceberg_t1_source order by i3;
+----
+3
+6
+
+statement ok
+DROP SINK sink1;
+
+statement ok
+DROP SOURCE iceberg_t1_source;
+
+statement ok
+DROP TABLE s1 cascade;

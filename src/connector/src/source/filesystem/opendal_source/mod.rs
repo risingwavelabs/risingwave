@@ -48,7 +48,6 @@ pub struct FsSourceCommon {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub refresh_interval_sec: Option<u64>,
 }
-
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]

@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use futures::{Stream, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::coordinate_request::{
-    CommitRequest, StartCoordinationRequest,
+    CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
 };
 use risingwave_pb::connector_service::{
     coordinate_request, coordinate_response, CoordinateRequest, CoordinateResponse, PbSinkParam,
@@ -98,5 +98,25 @@ impl CoordinatorStreamHandle {
             } => Ok(()),
             msg => Err(anyhow!("should get commit response but get {:?}", msg)),
         }
+    }
+
+    pub async fn update_vnode_bitmap(&mut self, vnode_bitmap: &Bitmap) -> anyhow::Result<()> {
+        self.send_request(CoordinateRequest {
+            msg: Some(coordinate_request::Msg::UpdateVnodeRequest(
+                UpdateVnodeBitmapRequest {
+                    vnode_bitmap: Some(vnode_bitmap.to_protobuf()),
+                },
+            )),
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub async fn stop(&mut self) -> anyhow::Result<()> {
+        self.send_request(CoordinateRequest {
+            msg: Some(coordinate_request::Msg::Stop(true)),
+        })
+        .await?;
+        Ok(())
     }
 }
