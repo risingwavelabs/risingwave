@@ -346,6 +346,10 @@ message CompactTask {
     TRACK_SST_OBJECT_ID_FAILED = 12;
     NO_AVAIL_CPU_RESOURCE_CANCELED = 13;
     HEARTBEAT_PROGRESS_CANCELED = 14;
+
+    // for serverless compaction
+    SERVERLESS_SEND_FAIL_CANCELED = 15;
+    SERVERLESS_TABLE_NOT_FOUND_CANCELED = 16;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
