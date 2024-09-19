@@ -141,7 +141,7 @@ export default function RelationDependencyGraph({
         return 2
       }
 
-      return sel
+      sel
         .attr("d", ({ points }) => line(points))
         .attr("fill", "none")
         .attr("stroke-width", width)
@@ -149,6 +149,27 @@ export default function RelationDependencyGraph({
         .attr("opacity", (d) =>
           isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
         )
+
+      // Tooltip for back pressure rate
+      let title = sel.select<SVGTitleElement>("title")
+      if (title.empty()) {
+        title = sel.append<SVGTitleElement>("title")
+      }
+
+      const text = (d: Edge) => {
+        if (backPressures) {
+          let value = backPressures.get(`${d.target}_${d.source}`)
+          if (value) {
+            return `${value.toFixed(2)}%`
+          }
+        }
+
+        return ""
+      }
+
+      title.text(text)
+
+      return sel
     }
 
     const createEdge = (sel: Enter<EdgeSelection>) =>

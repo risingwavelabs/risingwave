@@ -320,7 +320,7 @@ export default function StreamingGraph() {
   return (
     <Fragment>
       <Head>
-        <title>Streaming Graph</title>
+        <title>Relation Graph</title>
       </Head>
       {retVal}
     </Fragment>
