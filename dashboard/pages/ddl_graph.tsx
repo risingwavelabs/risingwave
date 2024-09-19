@@ -42,7 +42,7 @@ import {
   StreamingJob,
   getFragmentVertexToRelationMap,
   getSchemas,
-  getStreamingJobs,
+  getStreamingJobs, getRelationDependencies,
 } from "../lib/api/streaming"
 import { DdlBox } from "../lib/layout"
 import { BackPressureInfo } from "../proto/gen/monitor_service"
@@ -50,7 +50,7 @@ import { BackPressureInfo } from "../proto/gen/monitor_service"
 // Refresh interval (ms) for back pressure stats
 const INTERVAL_MS = 5000
 
-function buildDdlDependencyAsEdges(relations: StreamingJob[]): DdlBox[] {
+function buildDdlDependencyAsEdges(relations: StreamingJob[], relationDeps: Map<number, number[]>): DdlBox[] {
   // Filter out non-streaming relations, e.g. source, views.
   let relationIds = new Set<number>()
   for (const relation of relations) {
@@ -58,15 +58,17 @@ function buildDdlDependencyAsEdges(relations: StreamingJob[]): DdlBox[] {
   }
   const nodes: DdlBox[] = []
   for (const relation of relations) {
-    let parentIds = relation.dependentRelations
+    let parentIds = relationDeps.get(relation.id)
     nodes.push({
       id: relation.id.toString(),
       order: relation.id,
       width: 0,
       height: 0,
       parentIds: parentIds
-        .filter((x) => relationIds.has(x))
-        .map((x) => x.toString()),
+          ? parentIds
+              .filter((x) => relationIds.has(x))
+              .map((x) => x.toString())
+          : [],
       ddlName: relation.name,
       schemaName: relation.schemaName ? relation.schemaName : "",
     })
@@ -89,6 +91,7 @@ interface EmbeddedBackPressureInfo {
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
+  const { response: relationDeps } = useFetch(getRelationDependencies)
   const { response: fragmentVertexToRelationMap } = useFetch(
     getFragmentVertexToRelationMap
   )
@@ -106,20 +109,22 @@ export default function Streaming() {
 
   const ddlDependencyCallback = useCallback(() => {
     if (relationList) {
-      if (schemas) {
-        let relationListWithSchemaName = relationList.map((relation) => {
-          let schemaName = schemas.find(
-            (schema) => schema.id === relation.schemaId
-          )?.name
-          return { ...relation, schemaName }
-        })
-        const ddlDep = buildDdlDependencyAsEdges(relationListWithSchemaName)
-        return {
-          ddlDep,
+      if (relationDeps) {
+        if (schemas) {
+          let relationListWithSchemaName = relationList.map((relation) => {
+            let schemaName = schemas.find(
+                (schema) => schema.id === relation.schemaId
+            )?.name
+            return { ...relation, schemaName }
+          })
+          const ddlDep = buildDdlDependencyAsEdges(relationListWithSchemaName, relationDeps)
+          return {
+            ddlDep,
+          }
         }
       }
     }
-  }, [relationList, schemas])
+  }, [relationList, relationDeps, schemas])
 
   const ddlDependency = ddlDependencyCallback()?.ddlDep
 
