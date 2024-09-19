@@ -38,6 +38,20 @@ mysql --protocol=tcp -u root mytest -e "
     );
     INSERT INTO mysql_types_test VALUES ( False, 0, null, null, -8388608, -2147483647, 9223372036854775806, -10.0, -9999.999999, -10000.0, 'c', 'd', '', '', '1001-01-01', '-838:59:59.000000', '2000-01-01 00:00:00.000000', null, 'happy', '[1,2]');
     INSERT INTO mysql_types_test VALUES ( True, 1, -128, -32767, -8388608, -2147483647, -9223372036854775807, -10.0, -9999.999999, -10000.0, 'a', 'b', '', '', '1001-01-01', '00:00:00', '1998-01-01 00:00:00.000000', '1970-01-01 00:00:01', 'sad', '[3,4]');
+    CREATE TABLE IF NOT EXISTS test_default(
+        id int,
+        name varchar(255) DEFAULT 'default_name',
+        age int DEFAULT 18,
+        v1 real DEFAULT 1.1,
+        v2 double precision DEFAULT 2.2,
+        v3 decimal(5,2) DEFAULT 3.3,
+        v4 boolean DEFAULT false,
+        v5 date DEFAULT '2020-01-01',
+        v6 time DEFAULT '12:34:56',
+        v7 timestamp DEFAULT '2020-01-01 12:34:56',
+        v8 datetime DEFAULT '2020-01-01 12:34:56'
+    );
+    INSERT INTO test_default(id) VALUES (1),(2);
     "
 
 statement ok
@@ -69,6 +83,17 @@ HINT: Please define the schema manually
 
 statement ok
 ALTER SYSTEM SET license_key TO DEFAULT;
+
+statement ok
+create table test_default (*) from mysql_source table 'mytest.test_default';
+sleep 3s
+
+query TTTTTTTTTTTTT
+SELECT * FROM test_default order by id;
+----
+1 default_name 18 1.1 2.2 3.30 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00
+2 default_name 18 1.1 2.2 3.30 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00
+
 
 statement ok
 create table rw_customers (*) from mysql_source table 'mytest.customers';
