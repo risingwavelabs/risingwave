@@ -1,6 +1,5 @@
 import { theme } from "@chakra-ui/react"
 import { tinycolor } from "@ctrl/tinycolor"
-import loadable from "@loadable/component"
 import * as d3 from "d3"
 import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef } from "react"
@@ -13,8 +12,6 @@ import {
   generateDdlEdges,
   layoutItem,
 } from "../lib/layout"
-
-const ReactJson = loadable(() => import("react-json-view"))
 
 type DdlLayout = {
   id: string
@@ -33,8 +30,8 @@ export default function DdlGraph({
   ddlDependency,
   backPressures,
 }: {
-  ddlDependency: DdlBox[] // This is just the layout info.
-  backPressures?: Map<string, number> // relation_id -> relation_id: back pressure rate
+  ddlDependency: DdlBox[] // Ddl adjacency list, metadata
+  backPressures?: Map<string, number> // relation_id_relation_id ->back_pressure_rate
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -45,11 +42,7 @@ export default function DdlGraph({
     const includedDdlIds = new Set<string>()
     for (const ddlBox of ddlDependencyDag) {
       let ddlId = ddlBox.id
-      let width = 100
-      let height = 100
       layoutDdlResult.set(ddlId, {
-        width,
-        height,
         ddl_name: ddlBox.ddl_name,
         schema_name: ddlBox.schema_name,
       })
@@ -63,22 +56,16 @@ export default function DdlGraph({
       ddlDistanceX,
       ddlDistanceY
     )
-    const ddlLayoutPosition = new Map<string, Position>()
-    ddlLayout.forEach(({ id, x, y }: DdlBoxPosition) => {
-      ddlLayoutPosition.set(id, { x: x + 50, y: y + 50 })
-    })
 
-    const layoutResult: DdlLayout[] = []
-    for (const [ddlId, result] of layoutDdlResult) {
-      const { x, y } = ddlLayoutPosition.get(ddlId)!
-      layoutResult.push({ id: ddlId, x, y, ...result })
-    }
+    const layoutResult = ddlLayout.map(({ x, y, ...data }) => {
+        return { x: x + 50, y: y + 50, ...data, }
+    })
 
     let svgWidth = 0
     let svgHeight = 0
-    layoutResult.forEach(({ x, y, width, height }) => {
-      svgHeight = Math.max(svgHeight, y + height + 50)
-      svgWidth = Math.max(svgWidth, x + width)
+    ddlLayout.forEach(({ x, y }) => {
+      svgHeight = Math.max(svgHeight, y + 100)
+      svgWidth = Math.max(svgWidth, x + 100)
     })
     const edges = generateDdlEdges(ddlLayout)
 
@@ -117,7 +104,7 @@ export default function DdlGraph({
           .text(({ ddl_name, schema_name }) => `${schema_name}.${ddl_name}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "middle")
-          .attr("dy", ({ height }) => ddlMarginY)
+          .attr("dy", ddlMarginY)
           .attr("fill", "black")
           .attr("font-size", 12)
 
@@ -133,10 +120,8 @@ export default function DdlGraph({
         })
 
         circle
-          .attr("dy", 24)
           .attr("fill", "white")
           .attr("stroke-width", 1)
-          .attr("rx", 5)
           .attr("stroke", theme.colors.gray[500])
       }
 
