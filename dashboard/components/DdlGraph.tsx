@@ -5,7 +5,6 @@ import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef } from "react"
 import {
   DdlBox,
-  DdlBoxPosition,
   Edge,
   Enter,
   Position,
@@ -13,16 +12,10 @@ import {
   layoutItem,
 } from "../lib/layout"
 
-type DdlLayout = {
-  id: string
-  width: number
-  height: number
-  ddl_name: string
-  schema_name: string
-} & Position
-
 const nodeRadius = 12
-const ddlMarginY = nodeRadius * 3
+const ddlNameMargin = nodeRadius * 3
+const ddlMarginX = nodeRadius * 8
+const ddlMarginY = nodeRadius * 8
 const ddlDistanceX = nodeRadius * 2
 const ddlDistanceY = nodeRadius * 2
 
@@ -51,21 +44,21 @@ export default function DdlGraph({
 
     const ddlLayout = layoutItem(
       ddlDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
-        return { width: 100, height: 100, id, ...data }
+        return { width: ddlMarginX, height: ddlMarginY, id, ...data }
       }),
       ddlDistanceX,
       ddlDistanceY
     )
 
     const layoutResult = ddlLayout.map(({ x, y, ...data }) => {
-        return { x: x + 50, y: y + 50, ...data, }
+      return { x: x + ddlMarginX / 2, y: y + ddlMarginY / 2, ...data }
     })
 
     let svgWidth = 0
     let svgHeight = 0
     ddlLayout.forEach(({ x, y }) => {
-      svgHeight = Math.max(svgHeight, y + 100)
-      svgWidth = Math.max(svgWidth, x + 100)
+      svgHeight = Math.max(svgHeight, y + ddlMarginX)
+      svgWidth = Math.max(svgWidth, x + ddlMarginY)
     })
     const edges = generateDdlEdges(ddlLayout)
 
@@ -104,7 +97,7 @@ export default function DdlGraph({
           .text(({ ddl_name, schema_name }) => `${schema_name}.${ddl_name}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "middle")
-          .attr("dy", ddlMarginY)
+          .attr("dy", ddlNameMargin)
           .attr("fill", "black")
           .attr("font-size", 12)
 

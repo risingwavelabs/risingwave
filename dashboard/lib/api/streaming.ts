@@ -135,7 +135,6 @@ export async function getFragmentVertexToRelationMap() {
   let res = await api.get("/fragment_vertex_to_relation_id_map")
   let fragmentVertexToRelationMap: FragmentVertexToRelationMap =
     FragmentVertexToRelationMap.fromJSON(res)
-  console.log("fetch result", fragmentVertexToRelationMap)
   return fragmentVertexToRelationMap
 }
 
