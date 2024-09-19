@@ -613,7 +613,7 @@ impl HummockManagerService for HummockServiceImpl {
             periodic_space_reclaim_compaction_interval_sec,
             periodic_ttl_reclaim_compaction_interval_sec,
             periodic_tombstone_reclaim_compaction_interval_sec,
-            periodic_split_compact_group_interval_sec,
+            periodic_scheduling_compaction_group_interval_sec,
             split_group_size_limit,
             min_table_split_size,
             do_not_config_object_storage_lifecycle,

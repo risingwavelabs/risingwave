@@ -3254,12 +3254,17 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                     ],
                 ),
                 panels.timeseries_count(
-                    "Move State Table Count",
-                    "The times of split_compaction_group occurs",
+                    "Compaction Group Schedule",
+                    "The times of move_state_table occurs",
                     [
                         panels.target(
                             f"sum({table_metric('storage_split_compaction_group_count')}) by (group)",
                             "split compaction group cg{{group}}",
+                        ),
+
+                        panels.target(
+                            f"sum({table_metric('storage_merge_compaction_group_count')}) by (group)",
+                            "merge compaction group cg{{group}}",
                         ),
                     ],
                 ),
