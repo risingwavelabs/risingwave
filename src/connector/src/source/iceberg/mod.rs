@@ -29,6 +29,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::deserialize_optional_bool_from_string;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::sink::iceberg::IcebergConfig;
@@ -36,7 +37,6 @@ use crate::source::{
     BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
 };
-
 pub const ICEBERG_CONNECTOR: &str = "iceberg";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
@@ -69,6 +69,13 @@ pub struct IcebergProperties {
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
 
+    #[serde(
+        rename = "enable_config_load",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub enable_config_load: Option<bool>,
+
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
@@ -82,7 +89,7 @@ impl IcebergProperties {
         if let Some(jdbc_password) = self.jdbc_password.clone() {
             java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
         }
-        IcebergConfig {
+        let mut config = IcebergConfig {
             catalog_name: self.catalog_name.clone(),
             database_name: self.database_name.clone(),
             table_name: self.table_name.clone(),
@@ -94,8 +101,11 @@ impl IcebergProperties {
             secret_key: self.s3_secret.clone(),
             region: self.region.clone(),
             java_catalog_props,
+            enable_config_load: self.enable_config_load.unwrap_or(false),
             ..Default::default()
-        }
+        };
+        config = config.fill_for_config_load().unwrap();
+        config
     }
 }
 

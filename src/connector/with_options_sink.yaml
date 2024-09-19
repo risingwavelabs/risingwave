@@ -344,6 +344,11 @@ IcebergConfig:
     field_type: bool
     required: false
     default: Default::default
+  - name: enable_config_load
+    field_type: bool
+    comments: enable config load currently is used by nimtable, so it only support jdbc catalog.
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server
