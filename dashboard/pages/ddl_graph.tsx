@@ -20,14 +20,12 @@ import {
   Flex,
   FormControl,
   FormLabel,
-  Input,
   Select,
   Text,
   VStack,
 } from "@chakra-ui/react"
 import _ from "lodash"
 import Head from "next/head"
-import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import DdlGraph from "../components/DdlGraph"
 import Title from "../components/Title"
@@ -42,13 +40,11 @@ import {
 import {
   StreamingJob,
   getFragmentVertexToRelationMap,
-  getRelationDependencies,
-  getStreamingJobs, getSchemas,
+  getSchemas,
+  getStreamingJobs,
 } from "../lib/api/streaming"
-import { DdlBox, FragmentBox } from "../lib/layout"
-import { TableFragments } from "../proto/gen/meta"
+import { DdlBox } from "../lib/layout"
 import { BackPressureInfo } from "../proto/gen/monitor_service"
-import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 // Refresh interval (ms) for back pressure stats
 const INTERVAL_MS = 5000
@@ -99,22 +95,6 @@ const SampleDdlBackpressures: Map<string, number> = new Map([
   ["3_4", 0.4],
 ])
 
-function findMergeNodes(root: StreamNode): MergeNode[] {
-  let mergeNodes = new Set<MergeNode>()
-
-  const findMergeNodesRecursive = (node: StreamNode) => {
-    if (node.nodeBody?.$case === "merge") {
-      mergeNodes.add(node.nodeBody.merge)
-    }
-    for (const child of node.input || []) {
-      findMergeNodesRecursive(child)
-    }
-  }
-
-  findMergeNodesRecursive(root)
-  return Array.from(mergeNodes)
-}
-
 function buildDdlDependencyAsEdges(relations: StreamingJob[]): DdlBox[] {
   // Filter out non-streaming relations, e.g. source, views.
   let relation_ids = new Set<number>()
@@ -135,7 +115,7 @@ function buildDdlDependencyAsEdges(relations: StreamingJob[]): DdlBox[] {
         .filter((x) => relation_ids.has(x))
         .map((x) => x.toString()),
       ddl_name: relation.name,
-      schema_name: relation.schemaName,
+      schema_name: relation.schemaName ? relation.schemaName : "",
     })
   }
   return nodes
@@ -160,7 +140,9 @@ interface EmbeddedBackPressureInfo {
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
-  const { response: fragmentVertexToRelationMap } = useFetch(getFragmentVertexToRelationMap)
+  const { response: fragmentVertexToRelationMap } = useFetch(
+    getFragmentVertexToRelationMap
+  )
   const { response: schemas } = useFetch(getSchemas)
 
   const toast = useErrorToast()
@@ -169,10 +151,10 @@ export default function Streaming() {
     if (relationList) {
       if (schemas) {
         let relationListWithSchemaName = relationList.map((relation) => {
-            let schemaName = schemas.find(
-                (schema) => schema.id === relation.schemaId
-            )?.name
-            return { ...relation, schemaName }
+          let schemaName = schemas.find(
+            (schema) => schema.id === relation.schemaId
+          )?.name
+          return { ...relation, schemaName }
         })
         const ddlDep = buildDdlDependencyAsEdges(relationListWithSchemaName)
         return {
@@ -253,8 +235,8 @@ export default function Streaming() {
           embeddedBackPressureInfo.totalDurationNs
         )
         for (const m of metrics.outputBufferBlockingDuration) {
-          let output = m.metric.fragmentId
-          let input = m.metric.downstreamFragmentId
+          let output = Number(m.metric.fragmentId)
+          let input = Number(m.metric.downstreamFragmentId)
           if (outMap[output] && inMap[input]) {
             output = outMap[output]
             input = inMap[input]
@@ -272,8 +254,8 @@ export default function Streaming() {
             // possible that an old version of meta service returns a range-query result.
             // So we take the one with the latest timestamp here.
             const value = _(m.sample).maxBy((s) => s.timestamp)!.value * 100
-            let output = m.metric.fragment_id
-            let input = m.metric.downstream_fragment_id
+            let output = Number(m.metric.fragment_id)
+            let input = Number(m.metric.downstream_fragment_id)
             if (outMap[output] && inMap[input]) {
               output = outMap[output]
               input = inMap[input]

@@ -1,20 +1,9 @@
-import {
-  Button,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
-  theme,
-  useDisclosure,
-} from "@chakra-ui/react"
+import { theme } from "@chakra-ui/react"
 import { tinycolor } from "@ctrl/tinycolor"
 import loadable from "@loadable/component"
 import * as d3 from "d3"
 import { cloneDeep } from "lodash"
-import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useRef } from "react"
 import {
   DdlBox,
   DdlBoxPosition,
@@ -24,8 +13,6 @@ import {
   generateDdlEdges,
   layoutItem,
 } from "../lib/layout"
-import { PlanNodeDatum } from "../pages/fragment_graph"
-import {relationIsStreamingJob} from "../lib/api/streaming";
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -33,13 +20,12 @@ type DdlLayout = {
   id: string
   width: number
   height: number
-  ddl_name: string,
-  schema_name: string,
+  ddl_name: string
+  schema_name: string
 } & Position
 
 const nodeRadius = 12
-const ddlMarginX = nodeRadius * 2
-const ddlMarginY = nodeRadius * 2
+const ddlMarginY = nodeRadius * 3
 const ddlDistanceX = nodeRadius * 2
 const ddlDistanceY = nodeRadius * 2
 
@@ -51,9 +37,6 @@ export default function DdlGraph({
   backPressures?: Map<string, number> // relation_id -> relation_id: back pressure rate
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
-
-  const { isOpen, onOpen, onClose } = useDisclosure()
-  const [currentStreamNode, setCurrentStreamNode] = useState<PlanNodeDatum>()
 
   const ddlDependencyDagCallback = useCallback(() => {
     const ddlDependencyDag = cloneDeep(ddlDependency)
@@ -131,10 +114,10 @@ export default function DdlGraph({
 
         text
           .attr("fill", "black")
-          .text(({ ddl_name, schema_name  }) => `${schema_name}.${ddl_name}`)
+          .text(({ ddl_name, schema_name }) => `${schema_name}.${ddl_name}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "middle")
-          .attr("dy", ({ height }) => ddlMarginY + 10)
+          .attr("dy", ({ height }) => ddlMarginY)
           .attr("fill", "black")
           .attr("font-size", 12)
 
