@@ -46,6 +46,9 @@ profile:
       # - use: kafka
       #   persist-data: true
 
+      # To enable Confluent schema registry, uncomment the following line
+      # - use: schema-registry
+
   default-v6:
     steps:
       - use: meta-node

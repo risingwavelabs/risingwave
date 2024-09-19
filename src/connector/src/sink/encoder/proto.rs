@@ -529,7 +529,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "encode repeated_int_field error: cannot encode integer[] column as int32 field"
+            "encode 'repeated_int_field' error: cannot encode integer[] column as int32 field"
         );
 
         let schema = Schema::new(vec![Field::with_name(
@@ -554,7 +554,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "encode repeated_int_field error: array containing null not allowed as repeated field"
+            "encode 'repeated_int_field' error: array containing null not allowed as repeated field"
         );
     }
 
@@ -573,7 +573,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "encode not_exists error: field not in proto"
+            "encode 'not_exists' error: field not in proto"
         );
 
         let err = validate_fields(
@@ -583,7 +583,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "encode map_field error: field not in proto"
+            "encode 'map_field' error: field not in proto"
         );
     }
 }
