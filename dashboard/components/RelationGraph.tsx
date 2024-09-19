@@ -4,10 +4,10 @@ import * as d3 from "d3"
 import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef } from "react"
 import {
-  RelationBox,
   Edge,
   Enter,
   Position,
+  RelationBox,
   generateRelationBackPressureEdges,
   layoutItem,
 } from "../lib/layout"
@@ -36,7 +36,7 @@ export default function RelationGraph({
     const includedRelationIds = new Set<string>()
     for (const relationBox of relationDependencyDag) {
       let relationId = relationBox.id
-       layoutRelationResult.set(relationId, {
+      layoutRelationResult.set(relationId, {
         relationName: relationBox.relationName,
         schemaName: relationBox.schemaName,
       })
@@ -92,7 +92,9 @@ export default function RelationGraph({
 
           text
             .attr("fill", "black")
-            .text(({ relationName, schemaName }) => `${schemaName}.${relationName}`)
+            .text(
+              ({ relationName, schemaName }) => `${schemaName}.${relationName}`
+            )
             .attr("font-family", "inherit")
             .attr("text-anchor", "middle")
             .attr("dx", relationNameX)

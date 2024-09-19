@@ -517,7 +517,9 @@ export function generateFragmentEdges(
   return links
 }
 
-export function generateRelationBackPressureEdges(layoutMap: RelationBoxPosition[]): Edge[] {
+export function generateRelationBackPressureEdges(
+  layoutMap: RelationBoxPosition[]
+): Edge[] {
   const links = []
   const relationMap = new Map<string, RelationBoxPosition>()
   for (const x of layoutMap) {

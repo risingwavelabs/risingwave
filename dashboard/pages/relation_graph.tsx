@@ -41,8 +41,9 @@ import {
 import {
   StreamingJob,
   getFragmentVertexToRelationMap,
+  getRelationDependencies,
   getSchemas,
-  getStreamingJobs, getRelationDependencies,
+  getStreamingJobs,
 } from "../lib/api/streaming"
 import { RelationBox } from "../lib/layout"
 import { BackPressureInfo } from "../proto/gen/monitor_service"
@@ -50,7 +51,10 @@ import { BackPressureInfo } from "../proto/gen/monitor_service"
 // Refresh interval (ms) for back pressure stats
 const INTERVAL_MS = 5000
 
-function buildRelationDependencyAsEdges(relations: StreamingJob[], relationDeps: Map<number, number[]>): RelationBox[] {
+function buildRelationDependencyAsEdges(
+  relations: StreamingJob[],
+  relationDeps: Map<number, number[]>
+): RelationBox[] {
   // Filter out non-streaming relations, e.g. source, views.
   let relationIds = new Set<number>()
   for (const relation of relations) {
@@ -65,10 +69,8 @@ function buildRelationDependencyAsEdges(relations: StreamingJob[], relationDeps:
       width: 0,
       height: 0,
       parentIds: parentIds
-          ? parentIds
-              .filter((x) => relationIds.has(x))
-              .map((x) => x.toString())
-          : [],
+        ? parentIds.filter((x) => relationIds.has(x)).map((x) => x.toString())
+        : [],
       relationName: relation.name,
       schemaName: relation.schemaName ? relation.schemaName : "",
     })
@@ -113,11 +115,14 @@ export default function Streaming() {
         if (schemas) {
           let relationListWithSchemaName = relationList.map((relation) => {
             let schemaName = schemas.find(
-                (schema) => schema.id === relation.schemaId
+              (schema) => schema.id === relation.schemaId
             )?.name
             return { ...relation, schemaName }
           })
-          const relationDep = buildRelationDependencyAsEdges(relationListWithSchemaName, relationDeps)
+          const relationDep = buildRelationDependencyAsEdges(
+            relationListWithSchemaName,
+            relationDeps
+          )
           return relationDep
         }
       }
