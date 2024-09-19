@@ -674,6 +674,28 @@ impl CatalogController {
             })
             .collect_vec();
 
+        let view_dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
+            .select_only()
+            .columns([
+                object_dependency::Column::Oid,
+                object_dependency::Column::UsedBy,
+            ])
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join(JoinType::InnerJoin, object::Relation::View.def())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        obj_dependencies.extend(view_dependencies.into_iter().map(|(view_id, table_id)| {
+            PbObjectDependencies {
+                object_id: table_id as _,
+                referenced_object_id: view_id as _,
+            }
+        }));
+
         let sink_dependencies: Vec<(SinkId, TableId)> = Sink::find()
             .select_only()
             .columns([sink::Column::SinkId, sink::Column::TargetTable])
