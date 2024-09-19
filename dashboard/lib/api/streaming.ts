@@ -209,7 +209,7 @@ export async function getSchemas() {
 }
 
 // Returns a map of object id to a list of object ids that it depends on
-export async function getObjectDependencies(): Map<number, number[]> {
+export async function getObjectDependencies() {
   let objDependencies: ObjectDependencies[] = (
     await api.get("/object_dependencies")
   ).map(ObjectDependencies.fromJSON)
