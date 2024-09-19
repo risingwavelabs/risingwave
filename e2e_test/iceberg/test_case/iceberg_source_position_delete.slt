@@ -1,3 +1,4 @@
+# Deletions in a single commit are posistion delete, deletions across multiple commits are equail delete. sink_decouple = default(true), so we'll commit every 10s.
 statement ok
 set streaming_parallelism=4;
 
