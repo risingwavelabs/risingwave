@@ -240,15 +240,13 @@ impl HummockManager {
             .into_iter()
             .for_each(|task_assignment| {
                 if let Some(task) = task_assignment.compact_task.as_ref() {
-                    let need_cancel = task.compaction_group_id == right_group_id;
-                    if need_cancel {
-                        canceled_tasks.push(ReportTask {
-                            task_id: task.task_id,
-                            task_status: TaskStatus::ManualCanceled,
-                            table_stats_change: HashMap::default(),
-                            sorted_output_ssts: vec![],
-                        });
-                    }
+                    assert_eq!(task.compaction_group_id, right_group_id);
+                    canceled_tasks.push(ReportTask {
+                        task_id: task.task_id,
+                        task_status: TaskStatus::ManualCanceled,
+                        table_stats_change: HashMap::default(),
+                        sorted_output_ssts: vec![],
+                    });
                 }
             });
 
@@ -363,36 +361,24 @@ impl HummockManager {
 }
 
 impl HummockManager {
-    /// Split `table_ids` to a dedicated compaction group.
-    /// Returns the compaction group id containing the `table_ids`.
-    pub async fn split_compaction_group(
-        &self,
-        parent_group_id: CompactionGroupId,
-        table_ids: &[StateTableId],
-        partition_vnode_count: u32,
-    ) -> Result<CompactionGroupId> {
-        let (target_compaction_group_id, _) = self
-            .move_state_tables_to_dedicated_compaction_group(
-                parent_group_id,
-                table_ids,
-                partition_vnode_count,
-            )
-            .await?;
-
-        Ok(target_compaction_group_id)
-    }
-
     /// Split `table_ids` to a dedicated compaction group.(will be split by the `table_id` and `vnode`.)
     /// Returns the compaction group id containing the `table_ids` and the mapping of compaction group id to table ids.
     /// The split will follow the following rules
     /// 1. ssts with `key_range.left` greater than `split_key` will be split to the right group
     /// 2. the sst containing `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.left`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`]
     /// 3. currently only `vnode` 0 and `vnode` max is supported. (Due to the above rule, vnode max will be rewritten as `table_id` + 1, `vnode` 0)
+    ///     `parent_group_id`: the `group_id` to split
+    ///     `split_table_ids`: the `table_ids` to split, now we still support to split multiple tables to one group at once, pass `split_table_ids` for per `split` operation for checking
+    ///     `table_id_to_split`: the `table_id` to split
+    ///     `vnode_to_split`: the `vnode` to split
+    ///     `partition_vnode_count`: the partition count for the single table group if need
     async fn split_compaction_group_impl(
         &self,
         parent_group_id: CompactionGroupId,
-        table_id: StateTableId,
-        vnode: VirtualNode,
+        split_table_ids: &[StateTableId],
+        table_id_to_split: StateTableId,
+        vnode_to_split: VirtualNode,
+        partition_vnode_count: u32,
     ) -> Result<Vec<(CompactionGroupId, Vec<StateTableId>)>> {
         let mut result = vec![];
         let compaction_guard = self.compaction.write().await;
@@ -415,14 +401,14 @@ impl HummockManager {
             .state_table_info
             .compaction_group_member_table_ids(parent_group_id);
 
-        if !member_table_ids.contains(&TableId::new(table_id)) {
+        if !member_table_ids.contains(&TableId::new(table_id_to_split)) {
             return Err(Error::CompactionGroup(format!(
                 "table {} doesn't in group {}",
-                table_id, parent_group_id
+                table_id_to_split, parent_group_id
             )));
         }
 
-        let split_full_key = group_split::build_split_full_key(table_id, vnode);
+        let split_full_key = group_split::build_split_full_key(table_id_to_split, vnode_to_split);
 
         // change to vec for partition
         let table_ids = member_table_ids
@@ -517,11 +503,33 @@ impl HummockManager {
                     .is_none());
             }
         });
+
+        result.push((new_compaction_group_id, table_ids_right));
+
         {
             let mut compaction_group_manager = self.compaction_group_manager.write().await;
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
             compaction_groups_txn
                 .create_compaction_groups(new_compaction_group_id, Arc::new(config));
+
+            // check if need to update the compaction config for the single table group and guarantee the operation atomicity
+            // `partition_vnode_count` only works inside a table, to avoid a lot of slicing sst, we only enable it in groups with high throughput and only one table.
+            // The target `table_ids` might be split to an existing group, so we need to try to update its config
+            for (cg_id, table_ids) in &result {
+                // check the split_tables had been place to the dedicated compaction group
+                if table_ids.len() == 1 && table_ids == split_table_ids {
+                    if let Err(err) = compaction_groups_txn.update_compaction_config(
+                        &[*cg_id],
+                        &[MutableConfig::SplitWeightByVnode(partition_vnode_count)],
+                    ) {
+                        tracing::error!(
+                            error = %err.as_report(),
+                            "failed to update compaction config for group-{}",
+                            cg_id
+                        );
+                    }
+                }
+            }
 
             new_version_delta.pre_apply();
             commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
@@ -558,8 +566,6 @@ impl HummockManager {
             .split_compaction_group_count
             .with_label_values(&[&parent_group_id.to_string()])
             .inc();
-
-        result.push((new_compaction_group_id, table_ids_right));
 
         Ok(result)
     }
@@ -605,6 +611,32 @@ impl HummockManager {
             )));
         }
 
+        fn check_table_ids_valid(cg_id_to_table_ids: &BTreeMap<u64, Vec<u32>>) {
+            // 1. table_ids in different cg are sorted.
+            {
+                cg_id_to_table_ids
+                    .iter()
+                    .for_each(|(_cg_id, table_ids)| assert!(table_ids.is_sorted()));
+            }
+
+            // 2.table_ids in different cg are non-overlapping
+            {
+                let mut table_table_ids_vec = cg_id_to_table_ids.values().cloned().collect_vec();
+                table_table_ids_vec.sort_by(|a, b| a[0].cmp(&b[0]));
+                assert!(table_table_ids_vec.concat().is_sorted());
+            }
+
+            // 3.table_ids belong to one and only one cg.
+            {
+                let mut all_table_ids = HashSet::new();
+                for table_ids in cg_id_to_table_ids.values() {
+                    for table_id in table_ids {
+                        assert!(all_table_ids.insert(*table_id));
+                    }
+                }
+            }
+        }
+
         // move [3,4,5,6]
         // [1,2,3,4,5,6,7,8,9,10] -> [1,2] [3,4,5,6] [7,8,9,10]
         // split key
@@ -613,74 +645,48 @@ impl HummockManager {
 
         // The new compaction group id is always generate on the right side
         // Hence, we return the first compaction group id as the result
-
         // split 1
         let mut cg_id_to_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
+        let table_id_to_split = *table_ids.first().unwrap();
+        let mut target_compaction_group_id = 0;
         let result_vec = self
             .split_compaction_group_impl(
                 parent_group_id,
-                *table_ids.first().unwrap(),
+                table_ids,
+                table_id_to_split,
                 VirtualNode::ZERO,
+                partition_vnode_count,
             )
             .await?;
         assert!(result_vec.len() <= 2);
-
-        let target_compaction_group_id = {
-            if result_vec[0].1.contains(&table_ids[0]) {
-                result_vec[0].0
-            } else {
-                result_vec[1].0
-            }
-        };
         for (cg_id, table_ids) in result_vec {
+            if table_ids.contains(&table_id_to_split) {
+                target_compaction_group_id = cg_id;
+            }
             cg_id_to_table_ids.insert(cg_id, table_ids);
         }
+        check_table_ids_valid(&cg_id_to_table_ids);
 
         // split 2
-        // See the example in L603 and the split rule in `split_compaction_group_impl`.
+        // See the example above and the split rule in `split_compaction_group_impl`.
+        let table_id_to_split = *table_ids.last().unwrap();
         let result_vec = self
             .split_compaction_group_impl(
                 target_compaction_group_id,
-                *table_ids.last().unwrap(),
+                table_ids,
+                table_id_to_split,
                 VirtualNode::MAX,
+                partition_vnode_count,
             )
             .await?;
         assert!(result_vec.len() <= 2);
-        let target_compaction_group_id = {
-            if result_vec[0].1.contains(&table_ids[0]) {
-                result_vec[0].0
-            } else {
-                result_vec[1].0
-            }
-        };
         for (cg_id, table_ids) in result_vec {
+            if table_ids.contains(&table_id_to_split) {
+                target_compaction_group_id = cg_id;
+            }
             cg_id_to_table_ids.insert(cg_id, table_ids);
         }
-
-        // `partition_vnode_count` only works inside a table, to avoid a lot of slicing sst, we only enable it in groups with high throughput and only one table.
-        // The target `table_ids` might be split to an existing group, so we need to try to update its config
-        if table_ids.len() == 1 {
-            // update compaction config for target_compaction_group_id
-            let mut compaction_group_manager = self.compaction_group_manager.write().await;
-            let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
-            if let Err(err) = compaction_groups_txn.update_compaction_config(
-                &[target_compaction_group_id],
-                &[MutableConfig::SplitWeightByVnode(partition_vnode_count)],
-            ) {
-                tracing::error!(
-                    error = %err.as_report(),
-                    "failed to update compaction config for group-{}",
-                    target_compaction_group_id
-                );
-            }
-            if let Err(err) = commit_multi_var!(self.meta_store_ref(), compaction_groups_txn) {
-                tracing::error!(
-                    error = %err.as_report(),
-                    "failed to update compaction config for group-{}",
-                    target_compaction_group_id
-                );
-            }
-        }
+        check_table_ids_valid(&cg_id_to_table_ids);
 
         Ok((target_compaction_group_id, cg_id_to_table_ids))
     }

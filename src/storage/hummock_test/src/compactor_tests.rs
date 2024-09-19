@@ -2216,9 +2216,10 @@ pub(crate) mod tests {
         }
 
         let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
             .await
-            .unwrap();
+            .unwrap()
+            .0;
 
         write_data(
             &storage,
@@ -2262,9 +2263,10 @@ pub(crate) mod tests {
             .unwrap();
 
         let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
             .await
-            .unwrap();
+            .unwrap()
+            .0;
 
         compact_once(
             parent_group_id,
@@ -2322,9 +2324,10 @@ pub(crate) mod tests {
 
         // try split
         let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
             .await
-            .unwrap();
+            .unwrap()
+            .0;
 
         // write right
         write_data(
@@ -2442,9 +2445,10 @@ pub(crate) mod tests {
 
         // try split
         let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
             .await
-            .unwrap();
+            .unwrap()
+            .0;
 
         // write left and write
         write_data(

@@ -1437,7 +1437,7 @@ async fn test_version_stats() {
 }
 
 #[tokio::test]
-async fn test_split_compaction_group_on_commit() {
+async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
@@ -1508,7 +1508,7 @@ async fn test_split_compaction_group_on_commit() {
 }
 
 #[tokio::test]
-async fn test_split_compaction_group_on_demand_basic() {
+async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
@@ -1525,13 +1525,13 @@ async fn test_split_compaction_group_on_demand_basic() {
     assert_eq!(original_groups, vec![2, 3]);
 
     let err = hummock_manager
-        .split_compaction_group(100, &[0], 0)
+        .move_state_tables_to_dedicated_compaction_group(100, &[0], 0)
         .await
         .unwrap_err();
     assert_eq!("compaction group error: invalid group 100", err.to_string());
 
     let err = hummock_manager
-        .split_compaction_group(2, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(2, &[100], 0)
         .await
         .unwrap_err();
     assert_eq!(
@@ -1565,7 +1565,7 @@ async fn test_split_compaction_group_on_demand_basic() {
 
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let err = hummock_manager
-        .split_compaction_group(compaction_group_id, &[100, 101], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100, 101], 0)
         .await
         .unwrap_err();
     assert_eq!(
@@ -1581,7 +1581,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         .unwrap();
 
     hummock_manager
-        .split_compaction_group(compaction_group_id, &[100, 101], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100, 101], 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1621,7 +1621,7 @@ async fn test_split_compaction_group_on_demand_basic() {
 }
 
 #[tokio::test]
-async fn test_split_compaction_group_on_demand_non_trivial() {
+async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_trivial() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
@@ -1649,7 +1649,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
 
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     hummock_manager
-        .split_compaction_group(compaction_group_id, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
         .await
         .unwrap();
 
@@ -1688,7 +1688,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
 }
 
 #[tokio::test]
-async fn test_split_compaction_group_trivial_expired() {
+async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
@@ -1749,7 +1749,7 @@ async fn test_split_compaction_group_trivial_expired() {
         .unwrap();
 
     hummock_manager
-        .split_compaction_group(compaction_group_id, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
         .await
         .unwrap();
 
@@ -1831,7 +1831,7 @@ async fn get_manual_compact_task(
 }
 
 #[tokio::test]
-async fn test_split_compaction_group_on_demand_bottom_levels() {
+async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_levels() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
@@ -1911,7 +1911,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     let base_level: usize = 6;
 
     hummock_manager
-        .split_compaction_group(2, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(2, &[100], 0)
         .await
         .unwrap();
 
@@ -2010,7 +2010,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         get_manual_compact_task(hummock_manager.clone(), compaction_group_id, 0).await;
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
     hummock_manager
-        .split_compaction_group(compaction_group_id, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
         .await
         .unwrap();
 
@@ -2093,7 +2093,7 @@ async fn test_move_tables_between_compaction_group() {
     assert!(sst_ids.contains(&14));
 
     hummock_manager
-        .split_compaction_group(2, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     let compaction_group_id =
@@ -2229,7 +2229,11 @@ async fn test_partition_level() {
 
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     hummock_manager
-        .split_compaction_group(compaction_group_id, &[100], env.opts.partition_vnode_count)
+        .move_state_tables_to_dedicated_compaction_group(
+            compaction_group_id,
+            &[100],
+            env.opts.partition_vnode_count,
+        )
         .await
         .unwrap();
     let new_compaction_group_id =
@@ -2341,9 +2345,10 @@ async fn test_unregister_moved_table() {
 
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let new_compaction_group_id = hummock_manager
-        .split_compaction_group(compaction_group_id, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
         .await
-        .unwrap();
+        .unwrap()
+        .0;
 
     let current_version = hummock_manager.get_current_version().await;
     let left_compaction_group_id =
