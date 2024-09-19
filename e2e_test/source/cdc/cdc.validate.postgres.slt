@@ -258,6 +258,6 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
  table.name = 'partitioned_timestamp_table',
- publication.name = 'rw_publication_pubviaroot_false'
+ publication.name = 'rw_publication_pubviaroot_false',
  slot.name = 'my_slot_partition'
 );

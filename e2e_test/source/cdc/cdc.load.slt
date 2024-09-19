@@ -273,7 +273,7 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
  table.name = 'partitioned_timestamp_table',
- publication.name = 'rw_publication'
+ publication.name = 'rw_publication',
  slot.name = 'my_slot_partition'
 );
 
@@ -292,6 +292,6 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
  table.name = 'partitioned_timestamp_table_2023',
- publication.name = 'rw_publication'
+ publication.name = 'rw_publication',
  slot.name = 'my_slot_partition_2'
 );
