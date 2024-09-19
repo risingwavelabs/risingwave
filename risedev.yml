@@ -1144,7 +1144,7 @@ compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
   minio: "quay.io/minio/minio:latest"
-  redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
+  redpanda: "redpandadata/redpanda:latest"
   grafana: "grafana/grafana-oss:latest"
   etcd: "quay.io/coreos/etcd:latest"
   tempo: "grafana/tempo:latest"
