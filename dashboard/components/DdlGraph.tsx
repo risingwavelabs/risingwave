@@ -83,39 +83,43 @@ export default function DdlGraph({
       const applyDdl = (gSel: DdlSelection) => {
         gSel.attr("transform", ({ x, y }) => `translate(${x}, ${y})`)
 
-        // Ddl text line 1 (ddl id)
-        let text = gSel.select<SVGTextElement>(".text-frag-id")
-        if (text.empty()) {
-          text = gSel.append("text").attr("class", "text-frag-id")
+        // Render ddl name
+        {
+          let text = gSel.select<SVGTextElement>(".text-frag-id")
+          if (text.empty()) {
+            text = gSel.append("text").attr("class", "text-frag-id")
+          }
+
+          text
+              .attr("fill", "black")
+              .text(({ ddl_name, schema_name }) => `${schema_name}.${ddl_name}`)
+              .attr("font-family", "inherit")
+              .attr("text-anchor", "middle")
+              .attr("dx", ddlNameMarginX)
+              .attr("dy", ddlNameMarginY)
+              .attr("fill", "black")
+              .attr("font-size", 12)
         }
 
-        text
-          .attr("fill", "black")
-          .text(({ ddl_name, schema_name }) => `${schema_name}.${ddl_name}`)
-          .attr("font-family", "inherit")
-          .attr("text-anchor", "middle")
-          .attr("dx", ddlNameMarginX)
-          .attr("dy", ddlNameMarginY)
-          .attr("fill", "black")
-          .attr("font-size", 12)
+        // Render ddl node
+        {
+          let circle = gSel.select<SVGCircleElement>("circle")
+          if (circle.empty()) {
+            circle = gSel.append("circle")
+          }
 
-        // Ddl bounding box
-        let circle = gSel.select<SVGCircleElement>("circle")
-        if (circle.empty()) {
-          circle = gSel.append("circle")
+          circle.attr("r", 20).attr("fill", (_) => {
+            const weight = "500"
+            return theme.colors.gray[weight]
+          })
+
+          circle
+              .attr("cx", ddlMarginX / 2)
+              .attr("cy", ddlMarginY / 2)
+              .attr("fill", "white")
+              .attr("stroke-width", 1)
+              .attr("stroke", theme.colors.gray[500])
         }
-
-        circle.attr("r", 20).attr("fill", (_) => {
-          const weight = "500"
-          return theme.colors.gray[weight]
-        })
-
-        circle
-          .attr("cx", ddlMarginX / 2)
-          .attr("cy", ddlMarginY / 2)
-          .attr("fill", "white")
-          .attr("stroke-width", 1)
-          .attr("stroke", theme.colors.gray[500])
       }
 
       const createDdl = (sel: Enter<DdlSelection>) =>
@@ -128,7 +132,8 @@ export default function DdlGraph({
       type DdlSelection = typeof ddlSelection
 
       ddlSelection.enter().call(createDdl)
-      ddlSelection.call(applyDdl)
+      // TODO(kwannoel): Is this even needed? I commented it out.
+      // ddlSelection.call(applyDdl)
       ddlSelection.exit().remove()
 
       // Ddl Edges
@@ -206,7 +211,8 @@ export default function DdlGraph({
         sel.append("g").attr("class", "ddl-edge").call(applyEdge)
 
       edgeSelection.enter().call(createEdge)
-      edgeSelection.call(applyEdge)
+      // TODO(kwannoel): createEdge already calls applyEdge, is this still needed?
+      // edgeSelection.call(applyEdge)
       edgeSelection.exit().remove()
     }
   }, [ddlLayout, ddlEdgeLayout, backPressures])
