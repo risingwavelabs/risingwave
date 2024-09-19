@@ -49,7 +49,8 @@ mysql --protocol=tcp -u root mytest -e "
         v5 date DEFAULT '2020-01-01',
         v6 time DEFAULT '12:34:56',
         v7 timestamp DEFAULT '2020-01-01 12:34:56',
-        v8 datetime DEFAULT '2020-01-01 12:34:56'
+        v8 datetime DEFAULT '2020-01-01 12:34:56',
+        PRIMARY KEY (id)
     );
     INSERT INTO test_default(id) VALUES (1),(2);
     "
