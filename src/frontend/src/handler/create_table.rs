@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::str::ParseBoolError;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -1315,12 +1316,14 @@ pub async fn handle_create_table(
             let nimtable_enable_config_load = if let Ok(nimtable_enable_config_load) =
                 std::env::var("NIMTABLE_ENABLE_CONFIG_LOAD")
             {
-                nimtable_enable_config_load.parse().map_err(|e| {
-                    RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "NIMTABLE_ENABLE_CONFIG_LOAD must be a boolean value, got {}",
-                        e
-                    )))
-                })?
+                nimtable_enable_config_load
+                    .parse()
+                    .map_err(|e: ParseBoolError| {
+                        RwError::from(ErrorCode::InvalidParameterValue(format!(
+                            "NIMTABLE_ENABLE_CONFIG_LOAD must be a boolean value, got {}",
+                            e.as_report()
+                        )))
+                    })?
             } else {
                 true
             };
