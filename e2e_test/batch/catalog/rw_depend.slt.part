@@ -17,6 +17,9 @@ statement ok
 create materialized view mv2 as select * from mv1;
 
 statement ok
+create view v as select * from mv1;
+
+statement ok
 create sink sink1 from mv2 with (connector='blackhole');
 
 statement ok
@@ -37,12 +40,16 @@ mv2   mv1
 sink1 mv2
 sink2 t1
 t2    sink2
+v     mv1
 
 statement ok
 drop sink sink1;
 
 statement ok
 drop table t2 cascade;
+
+statement ok
+drop view v;
 
 statement ok
 drop materialized view mv2;
