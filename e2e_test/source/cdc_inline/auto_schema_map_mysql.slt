@@ -86,6 +86,7 @@ ALTER SYSTEM SET license_key TO DEFAULT;
 
 statement ok
 create table test_default (*) from mysql_source table 'mytest.test_default';
+
 sleep 3s
 
 query TTTTTTTTTTTTT

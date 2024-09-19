@@ -78,6 +78,7 @@ create source pg_source with (
 
 statement ok
 create table test_default (*) from pg_source table 'public.test_default';
+
 sleep 3s
 
 statement ok
