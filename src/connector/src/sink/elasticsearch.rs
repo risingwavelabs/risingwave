@@ -28,6 +28,7 @@ use super::remote::{ElasticSearchSink, OpenSearchSink};
 use crate::sink::{Result, Sink};
 pub const ES_OPTION_DELIMITER: &str = "delimiter";
 pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
+pub const ES_OPTION_ROUTING_COLUMN: &str = "routing_column";
 
 pub enum StreamChunkConverter {
     Es(EsStreamChunkConverter),
@@ -52,11 +53,23 @@ impl StreamChunkConverter {
                         .ok_or_else(|| anyhow!("Cannot find {}", ES_OPTION_INDEX_COLUMN))
                 })
                 .transpose()?;
+            let routing_column = properties
+                .get(ES_OPTION_ROUTING_COLUMN)
+                .cloned()
+                .map(|n| {
+                    schema
+                        .fields()
+                        .iter()
+                        .position(|s| s.name == n)
+                        .ok_or_else(|| anyhow!("Cannot find {}", ES_OPTION_ROUTING_COLUMN))
+                })
+                .transpose()?;
             Ok(StreamChunkConverter::Es(EsStreamChunkConverter::new(
                 schema,
                 pk_indices.clone(),
                 properties.get(ES_OPTION_DELIMITER).cloned(),
                 index_column,
+                routing_column,
             )?))
         } else {
             Ok(StreamChunkConverter::Other)
@@ -74,6 +87,7 @@ pub struct EsStreamChunkConverter {
     json_encoder: JsonEncoder,
     fn_build_id: Box<dyn Fn(RowRef<'_>) -> Result<String> + Send>,
     index_column: Option<usize>,
+    routing_column: Option<usize>,
 }
 impl EsStreamChunkConverter {
     fn new(
@@ -81,6 +95,7 @@ impl EsStreamChunkConverter {
         pk_indices: Vec<usize>,
         delimiter: Option<String>,
         index_column: Option<usize>,
+        routing_column: Option<usize>,
     ) -> Result<Self> {
         let fn_build_id: Box<dyn Fn(RowRef<'_>) -> Result<String> + Send> = if pk_indices.is_empty()
         {
@@ -127,6 +142,7 @@ impl EsStreamChunkConverter {
             json_encoder,
             fn_build_id,
             index_column,
+            routing_column,
         })
     }
 
@@ -137,6 +153,8 @@ impl EsStreamChunkConverter {
         let mut json_builder =
             <JsonbArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         let mut index_builder =
+            <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
+        let mut routing_builder =
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         for (op, row) in chunk.rows() {
             ops.push(op);
@@ -150,18 +168,29 @@ impl EsStreamChunkConverter {
             } else {
                 index_builder.append_null();
             }
+            if let Some(index) = self.routing_column {
+                routing_builder.append(Some(
+                    row.datum_at(index)
+                        .ok_or_else(|| anyhow!("No value found in row, index is {}", index))?
+                        .into_utf8(),
+                ));
+            } else {
+                index_builder.append_null();
+            }
             let json = JsonbVal::from(Value::Object(self.json_encoder.encode(row)?));
             json_builder.append(Some(json.as_scalar_ref()));
         }
         let json_array = risingwave_common::array::ArrayBuilder::finish(json_builder);
         let id_string_array = risingwave_common::array::ArrayBuilder::finish(id_string_builder);
         let index_string_array = risingwave_common::array::ArrayBuilder::finish(index_builder);
+        let routing_string_array = risingwave_common::array::ArrayBuilder::finish(routing_builder);
         Ok(StreamChunk::new(
             ops,
             vec![
                 std::sync::Arc::new(ArrayImpl::Utf8(index_string_array)),
                 std::sync::Arc::new(ArrayImpl::Utf8(id_string_array)),
                 std::sync::Arc::new(ArrayImpl::Jsonb(json_array)),
+                std::sync::Arc::new(ArrayImpl::Utf8(routing_string_array)),
             ],
         ))
     }
