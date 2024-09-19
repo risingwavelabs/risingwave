@@ -918,12 +918,17 @@ impl ScalarImpl {
             DataType::Time => Time::from_str(s)?.into(),
             DataType::Interval => Interval::from_str(s)?.into(),
             DataType::List(_) => ListValue::from_str(s, data_type)?.into(),
-            DataType::Struct(_) => StructValue::from_str(s, data_type)?.into(),
+            DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
-            DataType::Map(_) => {
-                todo!()
-            }
+            DataType::Map(_m) => return Err("map from text is not supported".into()),
+        })
+    }
+
+    pub fn from_text_for_test(s: &str, data_type: &DataType) -> Result<Self, BoxedError> {
+        Ok(match data_type {
+            DataType::Map(map_type) => MapValue::from_str_for_test(s, map_type)?.into(),
+            _ => ScalarImpl::from_text(s, data_type)?,
         })
     }
 }
