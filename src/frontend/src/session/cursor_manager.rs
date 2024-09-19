@@ -112,12 +112,10 @@ impl Cursor {
         formats: &Vec<Format>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         match self {
-            Cursor::Subscription(cursor) => {
-                cursor.next(count, handle_args, formats).await.map_err(|e| {
-                    cursor.cursor_metrics.subscription_cursor_error_count.inc();
-                    e
-                })
-            }
+            Cursor::Subscription(cursor) => cursor
+                .next(count, handle_args, formats)
+                .await
+                .inspect_err(|_| cursor.cursor_metrics.subscription_cursor_error_count.inc()),
             Cursor::Query(cursor) => cursor.next(count, formats, handle_args).await,
         }
     }
