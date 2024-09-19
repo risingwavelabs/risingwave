@@ -194,8 +194,10 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// - Full Outer: both side
     /// - Left Outer/Semi/Anti: left side
     /// - Right Outer/Semi/Anti: right side
-    /// - Inner: None.
-    degree_state: TableInner<S>,
+    /// - Inner: neither side.
+    ///
+    /// Should be set to `None` if `need_degree_table` was set to `false`.
+    degree_state: Option<TableInner<S>>,
     /// If degree table is need
     need_degree_table: bool,
     /// Pk is part of the join key.
@@ -206,20 +208,27 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     metrics: JoinHashMapMetrics,
 }
 
-struct TableInner<S: StateStore> {
+pub struct TableInner<S: StateStore> {
     /// Indices of the (cache) pk in a state row
     pk_indices: Vec<usize>,
     /// Indices of the join key in a state row
     join_key_indices: Vec<usize>,
     // This should be identical to the pk in state table.
     order_key_indices: Vec<usize>,
-    // This should be identical to the data types in table schema.
-    #[expect(dead_code)]
-    all_data_types: Vec<DataType>,
     pub(crate) table: StateTable<S>,
 }
 
 impl<S: StateStore> TableInner<S> {
+    pub fn new(pk_indices: Vec<usize>, join_key_indices: Vec<usize>, table: StateTable<S>) -> Self {
+        let order_key_indices = table.pk_indices().to_vec();
+        Self {
+            pk_indices,
+            join_key_indices,
+            order_key_indices,
+            table,
+        }
+    }
+
     fn error_context(&self, row: &impl Row) -> String {
         let pk = row.project(&self.pk_indices);
         let jk = row.project(&self.join_key_indices);
@@ -243,12 +252,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         state_all_data_types: Vec<DataType>,
         state_table: StateTable<S>,
         state_pk_indices: Vec<usize>,
-        degree_join_key_indices: Vec<usize>,
-        degree_all_data_types: Vec<DataType>,
-        degree_table: StateTable<S>,
-        degree_pk_indices: Vec<usize>,
+        degree_state: Option<TableInner<S>>,
         null_matched: K::Bitmap,
-        need_degree_table: bool,
         pk_contained_in_jk: bool,
         inequality_key_idx: Option<usize>,
         metrics: Arc<StreamingMetrics>,
@@ -280,17 +285,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             pk_indices: state_pk_indices,
             join_key_indices: state_join_key_indices,
             order_key_indices: state_table.pk_indices().to_vec(),
-            all_data_types: state_all_data_types,
             table: state_table,
         };
 
-        let degree_state = TableInner {
-            pk_indices: degree_pk_indices,
-            join_key_indices: degree_join_key_indices,
-            order_key_indices: degree_table.pk_indices().to_vec(),
-            all_data_types: degree_all_data_types,
-            table: degree_table,
-        };
+        let need_degree_table = degree_state.is_some();
 
         let metrics_info = MetricsInfo::new(
             metrics.clone(),
@@ -322,14 +320,19 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     pub fn init(&mut self, epoch: EpochPair) {
         self.state.table.init_epoch(epoch);
-        self.degree_state.table.init_epoch(epoch);
+        if let Some(degree_state) = &mut self.degree_state {
+            degree_state.table.init_epoch(epoch);
+        }
     }
 
     /// Update the vnode bitmap and manipulate the cache if necessary.
     pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> bool {
         let (_previous_vnode_bitmap, cache_may_stale) =
             self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
-        let _ = self.degree_state.table.update_vnode_bitmap(vnode_bitmap);
+        let _ = self
+            .degree_state
+            .as_mut()
+            .map(|degree_state| degree_state.table.update_vnode_bitmap(vnode_bitmap.clone()));
 
         if cache_may_stale {
             self.inner.clear();
@@ -341,7 +344,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         // TODO: remove data in cache.
         self.state.table.update_watermark(watermark.clone());
-        self.degree_state.table.update_watermark(watermark);
+        if let Some(degree_state) = &mut self.degree_state {
+            degree_state.table.update_watermark(watermark);
+        }
     }
 
     /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
@@ -380,11 +385,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 self.state
                     .table
                     .iter_with_prefix(&key, sub_range, PrefetchOptions::default());
-            let degree_table_iter_fut = self.degree_state.table.iter_with_prefix(
-                &key,
-                sub_range,
-                PrefetchOptions::default(),
-            );
+            let degree_state = self.degree_state.as_ref().unwrap();
+            let degree_table_iter_fut =
+                degree_state
+                    .table
+                    .iter_with_prefix(&key, sub_range, PrefetchOptions::default());
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
@@ -542,19 +547,22 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.metrics.flush();
         self.state.table.commit(epoch).await?;
-        self.degree_state.table.commit(epoch).await?;
+        if let Some(degree_state) = &mut self.degree_state {
+            degree_state.table.commit(epoch).await?;
+        }
         Ok(())
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
         self.state.table.try_flush().await?;
-        self.degree_state.table.try_flush().await?;
+        if let Some(degree_state) = &mut self.degree_state {
+            degree_state.table.try_flush().await?;
+        }
         Ok(())
     }
 
     /// Insert a join row
-    #[allow(clippy::unused_async)]
-    pub async fn insert(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
         let pk = self.serialize_pk_from_row(&value.row);
 
         let inequality_key = self
@@ -581,42 +589,21 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
 
         // Update the flush buffer.
-        let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
-        self.state.table.insert(row);
-        self.degree_state.table.insert(degree);
+        if let Some(degree_state) = self.degree_state.as_mut() {
+            let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
+            self.state.table.insert(row);
+            degree_state.table.insert(degree);
+        } else {
+            self.state.table.insert(value.row);
+        }
         Ok(())
     }
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
-    #[allow(clippy::unused_async)]
-    pub async fn insert_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
+    pub fn insert_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
         let join_row = JoinRow::new(&value, 0);
-        let pk = self.serialize_pk_from_row(&value);
-        let inequality_key = self
-            .inequality_key_desc
-            .as_ref()
-            .map(|desc| desc.serialize_inequal_key_from_row(&value));
-        // TODO(yuhao): avoid this `contains`.
-        // https://github.com/risingwavelabs/risingwave/issues/9233
-        if self.inner.contains(key) {
-            // Update cache
-            let mut entry = self.inner.get_mut(key).unwrap();
-            entry
-                .insert(pk, join_row.encode(), inequality_key)
-                .with_context(|| self.state.error_context(&value))?;
-        } else if self.pk_contained_in_jk {
-            // Refill cache when the join key exist in neither cache or storage.
-            self.metrics.insert_cache_miss_count += 1;
-            let mut state = JoinEntryState::default();
-            state
-                .insert(pk, join_row.encode(), inequality_key)
-                .with_context(|| self.state.error_context(&value))?;
-            self.update_state(key, state.into());
-        }
-
-        // Update the flush buffer.
-        self.state.table.insert(value);
+        self.insert(key, join_row)?;
         Ok(())
     }
 
@@ -638,7 +625,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         // If no cache maintained, only update the state table.
         let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
         self.state.table.delete(row);
-        self.degree_state.table.delete(degree);
+        let degree_state = self.degree_state.as_mut().unwrap();
+        degree_state.table.delete(degree);
         Ok(())
     }
 
@@ -687,8 +675,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         action(&mut join_row.degree);
 
         let new_degree = join_row.to_table_rows(&self.state.order_key_indices).1;
-
-        self.degree_state.table.update(old_degree, new_degree);
+        let degree_state = self.degree_state.as_mut().unwrap();
+        degree_state.table.update(old_degree, new_degree);
     }
 
     /// Increment the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
