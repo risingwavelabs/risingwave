@@ -1045,17 +1045,10 @@ impl GlobalBarrierManager {
 
         let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
 
-        let mut actors_to_pre_sync_barrier: HashMap<_, Vec<_>> = HashMap::new();
         let mut jobs_to_wait = HashSet::new();
 
         for (table_id, creating_job) in &mut self.checkpoint_control.creating_streaming_job_controls
         {
-            for (worker_id, actors) in creating_job.actors_to_pre_sync_barrier() {
-                actors_to_pre_sync_barrier
-                    .entry(*worker_id)
-                    .or_default()
-                    .extend(actors.iter().cloned())
-            }
             if let Some(wait_job) =
                 creating_job.on_new_command(&mut self.control_stream_manager, &command_ctx)?
             {
@@ -1070,7 +1063,6 @@ impl GlobalBarrierManager {
             &command_ctx,
             &pre_applied_graph_info,
             Some(&self.state.inflight_graph_info),
-            actors_to_pre_sync_barrier,
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {

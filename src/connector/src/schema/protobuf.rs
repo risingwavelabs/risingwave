@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
+use anyhow::Context as _;
 use prost_reflect::{DescriptorPool, FileDescriptor, MessageDescriptor};
+use prost_types::FileDescriptorSet;
 use risingwave_connector_codec::common::protobuf::compile_pb;
 
 use super::loader::{LoadedSchema, SchemaLoader};
@@ -99,29 +100,34 @@ pub async fn fetch_from_registry(
 impl LoadedSchema for FileDescriptor {
     fn compile(primary: Subject, references: Vec<Subject>) -> Result<Self, SchemaFetchError> {
         let primary_name = primary.name.clone();
-        let compiled_pb = compile_pb_subject(primary, references)?;
-        let pool = DescriptorPool::decode(compiled_pb.as_slice())
-            .map_err(|e| SchemaFetchError::SchemaCompile(e.into()))?;
-        pool.get_file_by_name(&primary_name).ok_or_else(|| {
-            SchemaFetchError::SchemaCompile(
-                anyhow::anyhow!("{primary_name} lost after compilation").into(),
-            )
-        })
+
+        match compile_pb_subject(primary, references)
+            .context("failed to compile protobuf schema into fd set")
+        {
+            Err(e) => Err(SchemaFetchError::SchemaCompile(e.into())),
+            Ok(fd_set) => DescriptorPool::from_file_descriptor_set(fd_set)
+                .context("failed to convert fd set to descriptor pool")
+                .and_then(|pool| {
+                    pool.get_file_by_name(&primary_name)
+                        .context("file lost after compilation")
+                })
+                .map_err(|e| SchemaFetchError::SchemaCompile(e.into())),
+        }
     }
 }
 
 fn compile_pb_subject(
     primary_subject: Subject,
     dependency_subjects: Vec<Subject>,
-) -> Result<Vec<u8>, SchemaFetchError> {
+) -> Result<FileDescriptorSet, SchemaFetchError> {
     compile_pb(
         (
-            PathBuf::from(&primary_subject.name),
-            primary_subject.schema.content.as_bytes().to_vec(),
+            primary_subject.name.clone(),
+            primary_subject.schema.content.clone(),
         ),
         dependency_subjects
             .into_iter()
-            .map(|s| (PathBuf::from(&s.name), s.schema.content.as_bytes().to_vec())),
+            .map(|s| (s.name.clone(), s.schema.content.clone())),
     )
     .map_err(|e| SchemaFetchError::SchemaCompile(e.into()))
 }
