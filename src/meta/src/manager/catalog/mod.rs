@@ -4224,6 +4224,14 @@ impl CatalogManager {
                 }
             }
         }
+        for view in core.views.values() {
+            for referenced in &view.dependent_relations {
+                dependencies.push(PbObjectDependencies {
+                    object_id: view.id,
+                    referenced_object_id: *referenced,
+                });
+            }
+        }
         for sink in core.sinks.values() {
             for referenced in &sink.dependent_relations {
                 dependencies.push(PbObjectDependencies {
