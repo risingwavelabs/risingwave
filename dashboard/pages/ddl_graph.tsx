@@ -291,7 +291,7 @@ export default function Streaming() {
   return (
     <Fragment>
       <Head>
-        <title>Streaming Fragments</title>
+        <title>Ddl Graph</title>
       </Head>
       {retVal}
     </Fragment>
