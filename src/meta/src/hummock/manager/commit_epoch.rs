@@ -70,37 +70,6 @@ pub struct CommitEpochInfo {
 }
 
 impl HummockManager {
-    #[cfg(any(test, feature = "test"))]
-    pub async fn commit_epoch_for_test(
-        &self,
-        epoch: u64,
-        sstables: Vec<impl Into<LocalSstableInfo>>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-    ) -> Result<()> {
-        let tables = self
-            .versioning
-            .read()
-            .await
-            .current_version
-            .state_table_info
-            .info()
-            .keys()
-            .cloned()
-            .collect();
-        let info = CommitEpochInfo {
-            sstables: sstables.into_iter().map(Into::into).collect(),
-            new_table_watermarks: HashMap::new(),
-            sst_to_context,
-            new_table_fragment_info: NewTableFragmentInfo::None,
-            change_log_delta: HashMap::new(),
-            committed_epoch: epoch,
-            tables_to_commit: tables,
-            is_visible_table_committed_epoch: true,
-        };
-        self.commit_epoch(info).await?;
-        Ok(())
-    }
-
     /// Caller should ensure `epoch` > `max_committed_epoch`
     pub async fn commit_epoch(
         &self,

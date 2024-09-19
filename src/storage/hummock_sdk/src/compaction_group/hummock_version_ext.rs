@@ -22,14 +22,13 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupMerge, GroupMetaChange,
-    GroupTableChange, PbLevelType,
+    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupMerge, PbLevelType,
 };
 use tracing::warn;
 
 use super::group_split::get_sub_level_insert_hint;
 use super::{group_split, StateTableId};
-use crate::change_log::TableChangeLog;
+use crate::change_log::TableChangeLogCommon;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, Levels, OverlappingLevel};
@@ -49,8 +48,6 @@ pub struct GroupDeltasSummary {
     pub insert_table_infos: Vec<SstableInfo>,
     pub group_construct: Option<GroupConstruct>,
     pub group_destroy: Option<CompactionGroupId>,
-    pub group_meta_changes: Vec<GroupMetaChange>,
-    pub group_table_change: Option<GroupTableChange>,
     pub new_vnode_partition_count: u32,
     pub group_merge: Option<GroupMerge>,
 }
@@ -66,8 +63,6 @@ pub fn summarize_group_deltas(
     let mut insert_table_infos = vec![];
     let mut group_construct = None;
     let mut group_destroy = None;
-    let mut group_meta_changes = vec![];
-    let mut group_table_change = None;
     let mut new_vnode_partition_count = 0;
     let mut group_merge = None;
 
@@ -93,12 +88,6 @@ pub fn summarize_group_deltas(
                 assert!(group_destroy.is_none());
                 group_destroy = Some(compaction_group_id);
             }
-            GroupDelta::GroupMetaChange(meta_delta) => {
-                group_meta_changes.push(meta_delta.clone());
-            }
-            GroupDelta::GroupTableChange(meta_delta) => {
-                group_table_change = Some(meta_delta.clone());
-            }
             GroupDelta::GroupMerge(merge_delta) => {
                 assert!(group_merge.is_none());
                 group_merge = Some(*merge_delta);
@@ -118,8 +107,6 @@ pub fn summarize_group_deltas(
         insert_table_infos,
         group_construct,
         group_destroy,
-        group_meta_changes,
-        group_table_change,
         new_vnode_partition_count,
         group_merge,
     }
@@ -404,8 +391,7 @@ impl HummockVersion {
                 }
             }
             return;
-        }
-        if !self.levels.contains_key(&parent_group_id) {
+        } else if !self.levels.contains_key(&parent_group_id) {
             warn!(parent_group_id, "non-existing parent group id to init from");
             return;
         }
@@ -617,38 +603,6 @@ impl HummockVersion {
                     member_table_ids,
                     group_construct.get_new_sst_start_id(),
                 );
-            } else if let Some(group_change) = &summary.group_table_change {
-                // TODO: may deprecate this branch? This enum variant is not created anywhere
-                assert!(
-                    group_change.version <= CompatibilityVersion::NoTrivialSplit as _,
-                    "DeltaType::GroupTableChange is not used anymore after CompatibilityVersion::NoMemberTableIds is added"
-                );
-                #[expect(deprecated)]
-                // for backward-compatibility of previous hummock version delta
-                self.init_with_parent_group(
-                    group_change.origin_group_id,
-                    group_change.target_group_id,
-                    BTreeSet::from_iter(group_change.table_ids.clone()),
-                    group_change.new_sst_start_id,
-                );
-
-                let levels = self
-                    .levels
-                    .get_mut(&group_change.origin_group_id)
-                    .expect("compaction group should exist");
-                #[expect(deprecated)]
-                // for backward-compatibility of previous hummock version delta
-                let mut moving_tables = levels
-                    .member_table_ids
-                    .extract_if(|t| group_change.table_ids.contains(t))
-                    .collect_vec();
-                #[expect(deprecated)]
-                // for backward-compatibility of previous hummock version delta
-                self.levels
-                    .get_mut(compaction_group_id)
-                    .expect("compaction group should exist")
-                    .member_table_ids
-                    .append(&mut moving_tables);
             } else if let Some(group_merge) = &summary.group_merge {
                 tracing::info!(
                     "group_merge left {:?} right {:?}",
@@ -662,16 +616,6 @@ impl HummockVersion {
             let levels = self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
                 panic!("compaction group {} does not exist", compaction_group_id)
             });
-            #[expect(deprecated)] // for backward-compatibility of previous hummock version delta
-            for group_meta_delta in &summary.group_meta_changes {
-                levels
-                    .member_table_ids
-                    .extend(group_meta_delta.table_ids_add.clone());
-                levels
-                    .member_table_ids
-                    .retain(|t| !group_meta_delta.table_ids_remove.contains(t));
-                levels.member_table_ids.sort();
-            }
 
             assert!(
                 visible_table_committed_epoch <= version_delta.visible_table_committed_epoch(),
@@ -795,7 +739,7 @@ impl HummockVersion {
                     change_log.0.push(new_change_log.clone());
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(TableChangeLog(vec![new_change_log.clone()]));
+                    entry.insert(TableChangeLogCommon(vec![new_change_log.clone()]));
                 }
             };
         }
@@ -1458,20 +1402,22 @@ mod tests {
 
     #[test]
     fn test_get_sst_object_ids() {
-        let mut version = HummockVersion::default();
-        version.id = HummockVersionId::new(0);
-        version.levels = HashMap::from_iter([(
-            0,
-            Levels {
-                levels: vec![],
-                l0: OverlappingLevel {
-                    sub_levels: vec![],
-                    total_file_size: 0,
-                    uncompressed_file_size: 0,
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from_iter([(
+                0,
+                Levels {
+                    levels: vec![],
+                    l0: OverlappingLevel {
+                        sub_levels: vec![],
+                        total_file_size: 0,
+                        uncompressed_file_size: 0,
+                    },
+                    ..Default::default()
                 },
-                ..Default::default()
-            },
-        )]);
+            )]),
+            ..Default::default()
+        };
         assert_eq!(version.get_object_ids().len(), 0);
 
         // Add to sub level
@@ -1505,68 +1451,72 @@ mod tests {
 
     #[test]
     fn test_apply_version_delta() {
-        let mut version = HummockVersion::default();
-        version.id = HummockVersionId::new(0);
-        version.levels = HashMap::from_iter([
-            (
-                0,
-                build_initial_compaction_group_levels(
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from_iter([
+                (
                     0,
-                    &CompactionConfig {
-                        max_level: 6,
-                        ..Default::default()
-                    },
-                ),
-            ),
-            (
-                1,
-                build_initial_compaction_group_levels(
-                    1,
-                    &CompactionConfig {
-                        max_level: 6,
-                        ..Default::default()
-                    },
-                ),
-            ),
-        ]);
-        let mut version_delta = HummockVersionDelta::default();
-        version_delta.id = HummockVersionId::new(1);
-        version_delta.group_deltas = HashMap::from_iter([
-            (
-                2,
-                GroupDeltas {
-                    group_deltas: vec![GroupDelta::GroupConstruct(GroupConstruct {
-                        group_config: Some(CompactionConfig {
+                    build_initial_compaction_group_levels(
+                        0,
+                        &CompactionConfig {
                             max_level: 6,
                             ..Default::default()
-                        }),
-                        ..Default::default()
-                    })],
-                },
-            ),
-            (
-                0,
-                GroupDeltas {
-                    group_deltas: vec![GroupDelta::GroupDestroy(GroupDestroy {})],
-                },
-            ),
-            (
-                1,
-                GroupDeltas {
-                    group_deltas: vec![GroupDelta::IntraLevel(IntraLevelDelta::new(
+                        },
+                    ),
+                ),
+                (
+                    1,
+                    build_initial_compaction_group_levels(
                         1,
-                        0,
-                        vec![],
-                        vec![SstableInfo {
-                            object_id: 1,
-                            sst_id: 1,
+                        &CompactionConfig {
+                            max_level: 6,
                             ..Default::default()
-                        }],
-                        0,
-                    ))],
-                },
-            ),
-        ]);
+                        },
+                    ),
+                ),
+            ]),
+            ..Default::default()
+        };
+        let version_delta = HummockVersionDelta {
+            id: HummockVersionId::new(1),
+            group_deltas: HashMap::from_iter([
+                (
+                    2,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta::GroupConstruct(GroupConstruct {
+                            group_config: Some(CompactionConfig {
+                                max_level: 6,
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        })],
+                    },
+                ),
+                (
+                    0,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta::GroupDestroy(GroupDestroy {})],
+                    },
+                ),
+                (
+                    1,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta::IntraLevel(IntraLevelDelta::new(
+                            1,
+                            0,
+                            vec![],
+                            vec![SstableInfo {
+                                object_id: 1,
+                                sst_id: 1,
+                                ..Default::default()
+                            }],
+                            0,
+                        ))],
+                    },
+                ),
+            ]),
+            ..Default::default()
+        };
         let version_delta = version_delta;
 
         version.apply_version_delta(&version_delta);
@@ -1587,24 +1537,26 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(version, {
-            let mut version = HummockVersion::default();
-            version.id = HummockVersionId::new(1);
-            version.levels = HashMap::from_iter([
-                (
-                    2,
-                    build_initial_compaction_group_levels(
+        assert_eq!(
+            version,
+            HummockVersion {
+                id: HummockVersionId::new(1),
+                levels: HashMap::from_iter([
+                    (
                         2,
-                        &CompactionConfig {
-                            max_level: 6,
-                            ..Default::default()
-                        },
+                        build_initial_compaction_group_levels(
+                            2,
+                            &CompactionConfig {
+                                max_level: 6,
+                                ..Default::default()
+                            },
+                        ),
                     ),
-                ),
-                (1, cg1),
-            ]);
-            version
-        });
+                    (1, cg1),
+                ]),
+                ..Default::default()
+            }
+        );
     }
 
     fn gen_sst_info(object_id: u64, table_ids: Vec<u32>, left: Bytes, right: Bytes) -> SstableInfo {

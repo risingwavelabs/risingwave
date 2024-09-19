@@ -1064,6 +1064,7 @@ impl ScaleController {
 
             let upstream_fragment = ctx.fragment_map.get(upstream_fragment_id).unwrap();
 
+            // build actor group map
             for upstream_actor in &upstream_fragment.actors {
                 for dispatcher in &upstream_actor.dispatcher {
                     if let DispatcherType::NoShuffle = dispatcher.get_type().unwrap() {
@@ -1098,6 +1099,14 @@ impl ScaleController {
                 .get(upstream_fragment_id)
                 .cloned()
                 .unwrap_or_default();
+
+            // Question: Is it possible to have Hash Distribution Fragment but the Actor's bitmap remains unchanged?
+            if upstream_fragment.distribution_type() == FragmentDistributionType::Single {
+                assert!(
+                    upstream_fragment_bitmap.is_empty(),
+                    "single fragment should have no bitmap updates"
+                );
+            }
 
             let upstream_fragment_actor_map = fragment_actors_after_reschedule
                 .get(upstream_fragment_id)
@@ -1159,19 +1168,26 @@ impl ScaleController {
                     .get(&worker_id)
                     .unwrap()
                     .clone();
+
                 assert_eq!(actor_ids.len(), upstream_actor_ids.len());
 
                 for (actor_id, upstream_actor_id) in actor_ids
                     .into_iter()
                     .zip_eq_debug(upstream_actor_ids.into_iter())
                 {
-                    let bitmap = upstream_fragment_bitmap
-                        .get(&upstream_actor_id)
-                        .cloned()
-                        .unwrap();
-
-                    // Copy the bitmap
-                    fragment_bitmap.insert(actor_id, bitmap);
+                    match upstream_fragment_bitmap.get(&upstream_actor_id).cloned() {
+                        None => {
+                            // single fragment should have no bitmap updates (same as upstream)
+                            assert_eq!(
+                                upstream_fragment.distribution_type(),
+                                FragmentDistributionType::Single
+                            );
+                        }
+                        Some(bitmap) => {
+                            // Copy the bitmap
+                            fragment_bitmap.insert(actor_id, bitmap);
+                        }
+                    }
 
                     no_shuffle_upstream_actor_map
                         .entry(actor_id as ActorId)
@@ -1587,7 +1603,9 @@ impl ScaleController {
 
             for (worker_id, n) in decreased_actor_count {
                 if let Some(actor_ids) = worker_to_actors.get(worker_id) {
-                    assert!(actor_ids.len() >= n);
+                    if actor_ids.len() < n {
+                        bail!("plan illegal, for fragment {}, worker {} only has {} actors, but needs to reduce {}",fragment_id, worker_id, actor_ids.len(), n);
+                    }
 
                     let removed_actors: Vec<_> = actor_ids
                         .iter()

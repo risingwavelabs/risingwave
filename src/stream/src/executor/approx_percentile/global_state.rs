@@ -299,7 +299,7 @@ impl BucketTableCache {
     }
 
     pub fn get_output(&self, row_count: i64, quantile: f64, base: f64) -> Datum {
-        let quantile_count = (row_count as f64 * quantile).floor() as i64;
+        let quantile_count = ((row_count - 1) as f64 * quantile).floor() as i64;
         let mut acc_count = 0;
         for (bucket_id, count) in self.neg_buckets.iter().rev() {
             acc_count += count;

@@ -1101,3 +1101,21 @@
     - logical_plan
     - batch_plan
     - stream_plan
+- name: test approx percentile with invalid relative_error
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.0) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - binder_error
+- name: test approx percentile with invalid relative_error 0.0
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.0) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - binder_error
+- name: test approx percentile with invalid relative_error 1.0 with group by.
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT approx_percentile(0.0, 1.0) WITHIN GROUP (order by v1) from t group by v2;
+  expected_outputs:
+    - binder_error

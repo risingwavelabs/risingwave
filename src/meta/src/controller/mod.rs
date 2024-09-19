@@ -150,7 +150,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             cleaned_by_watermark: value.0.cleaned_by_watermark,
-            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            stream_job_status: PbStreamJobStatus::Created as _,
             create_type: PbCreateType::Foreground as _,
             version: value.0.version.map(|v| v.to_protobuf()),
             optional_associated_source_id: value
@@ -236,7 +236,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             ),
             db_name: value.0.db_name,
             sink_from_name: value.0.sink_from_name,
-            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            stream_job_status: PbStreamJobStatus::Created as _,
             format_desc: value.0.sink_format_desc.map(|desc| desc.to_protobuf()),
             target_table: value.0.target_table.map(|id| id as _),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
@@ -299,7 +299,7 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             created_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
-            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            stream_job_status: PbStreamJobStatus::Created as _,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
         }

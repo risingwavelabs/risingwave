@@ -66,13 +66,13 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 }
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
-    pub async fn list(&self, recursive_scan: bool) -> ConnectorResult<ObjectMetadataIter> {
+    pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
         let prefix = self.prefix.as_deref().unwrap_or("/");
 
         let object_lister = self
             .op
             .lister_with(prefix)
-            .recursive(recursive_scan)
+            .recursive(true)
             .metakey(Metakey::ContentLength | Metakey::LastModified)
             .await?;
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
@@ -107,6 +107,10 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
 
     pub fn get_matcher(&self) -> &Option<glob::Pattern> {
         &self.matcher
+    }
+
+    pub fn get_prefix(&self) -> &str {
+        self.prefix.as_deref().unwrap_or("/")
     }
 }
 pub type ObjectMetadataIter = BoxStream<'static, ConnectorResult<FsPageItem>>;

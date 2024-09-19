@@ -337,6 +337,14 @@ mod scalar {
         pub fn to_owned(self) -> MapValue {
             MapValue(self.0.to_owned())
         }
+
+        pub fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.0.is_empty()
+        }
     }
 
     impl Scalar for MapValue {
