@@ -42,7 +42,6 @@ use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
     CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY,
     CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR,
@@ -1351,14 +1350,7 @@ pub async fn extract_iceberg_columns(
 ) -> anyhow::Result<Vec<ColumnCatalog>> {
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
-        let iceberg_config: IcebergConfig = properties.to_iceberg_config();
-        let table = iceberg_config
-            .common
-            .load_table_v2(
-                &iceberg_config.path_style_access,
-                &iceberg_config.java_catalog_props,
-            )
-            .await?;
+        let table = properties.load_table_v2().await?;
         let iceberg_schema: arrow_schema_iceberg::Schema =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
@@ -1400,8 +1392,6 @@ pub async fn check_iceberg_source(
         )));
     };
 
-    let iceberg_config = properties.to_iceberg_config();
-
     let schema = Schema {
         fields: columns
             .iter()
@@ -1410,13 +1400,7 @@ pub async fn check_iceberg_source(
             .collect(),
     };
 
-    let table = iceberg_config
-        .common
-        .load_table_v2(
-            &iceberg_config.path_style_access,
-            &iceberg_config.java_catalog_props,
-        )
-        .await?;
+    let table = properties.load_table_v2().await?;
 
     let iceberg_schema = iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 

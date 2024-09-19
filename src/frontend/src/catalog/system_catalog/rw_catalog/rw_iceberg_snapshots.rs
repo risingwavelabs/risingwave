@@ -18,7 +18,6 @@ use iceberg::table::Table;
 use jsonbb::{Value, ValueRef};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_connector::error::ConnectorResult;
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_frontend_macro::system_catalog;
@@ -60,14 +59,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
     for (schema_name, source) in iceberg_sources {
         let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
         if let ConnectorProperties::Iceberg(iceberg_properties) = config {
-            let iceberg_config: IcebergConfig = iceberg_properties.to_iceberg_config();
-            let table: Table = iceberg_config
-                .common
-                .load_table_v2(
-                    &iceberg_config.path_style_access,
-                    &iceberg_config.java_catalog_props,
-                )
-                .await?;
+            let table: Table = iceberg_properties.load_table_v2().await?;
 
             let snapshots: ConnectorResult<Vec<RwIcebergSnapshots>> = table
                 .metadata()

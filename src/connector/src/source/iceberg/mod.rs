@@ -32,7 +32,6 @@ use serde::{Deserialize, Serialize};
 use crate::connector_common::IcebergCommon;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
-use crate::sink::iceberg::IcebergConfig;
 use crate::source::{
     BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
@@ -55,8 +54,10 @@ pub struct IcebergProperties {
     pub unknown_fields: HashMap<String, String>,
 }
 
+use iceberg::table::Table as TableV2;
+
 impl IcebergProperties {
-    pub fn to_iceberg_config(&self) -> IcebergConfig {
+    pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
             java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
@@ -64,17 +65,25 @@ impl IcebergProperties {
         if let Some(jdbc_password) = self.jdbc_password.clone() {
             java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
         }
-        IcebergConfig {
-            common: self.common.clone(),
-            java_catalog_props,
-            // default values
-            r#type: "".to_string(),
-            force_append_only: false,
-            path_style_access: None,
-            primary_key: None,
-            commit_checkpoint_interval: 0,
-            create_table_if_not_exists: false,
+        // TODO: support path_style_access and java_catalog_props for iceberg source
+        self.common.load_table_v2(&None, &java_catalog_props).await
+    }
+
+    pub async fn load_table_v2_with_metadata(
+        &self,
+        table_meta: TableMetadata,
+    ) -> ConnectorResult<TableV2> {
+        let mut java_catalog_props = HashMap::new();
+        if let Some(jdbc_user) = self.jdbc_user.clone() {
+            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
         }
+        if let Some(jdbc_password) = self.jdbc_password.clone() {
+            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+        }
+        // TODO: support path_style_access and java_catalog_props for iceberg source
+        self.common
+            .load_table_v2_with_metadata(table_meta, &None, &java_catalog_props)
+            .await
     }
 }
 
@@ -147,7 +156,7 @@ impl SplitMetaData for IcebergSplit {
 
 #[derive(Debug, Clone)]
 pub struct IcebergSplitEnumerator {
-    config: IcebergConfig,
+    config: IcebergProperties,
 }
 
 #[async_trait]
@@ -159,10 +168,7 @@ impl SplitEnumerator for IcebergSplitEnumerator {
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<Self> {
-        let iceberg_config = properties.to_iceberg_config();
-        Ok(Self {
-            config: iceberg_config,
-        })
+        Ok(Self { config: properties })
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
@@ -186,14 +192,8 @@ impl IcebergSplitEnumerator {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
-        let table = self
-            .config
-            .common
-            .load_table_v2(
-                &self.config.path_style_access,
-                &self.config.java_catalog_props,
-            )
-            .await?;
+
+        let table = self.config.load_table_v2().await?;
 
         let current_snapshot = table.metadata().current_snapshot();
         if current_snapshot.is_none() {

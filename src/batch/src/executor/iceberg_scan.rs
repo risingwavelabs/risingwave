@@ -26,7 +26,6 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_connector::WithOptionsSecResolved;
@@ -38,7 +37,7 @@ use crate::executor::{DataChunk, Executor};
 use crate::task::BatchTaskContext;
 
 pub struct IcebergScanExecutor {
-    iceberg_config: IcebergConfig,
+    iceberg_config: IcebergProperties,
     #[allow(dead_code)]
     snapshot_id: Option<i64>,
     table_meta: TableMetadata,
@@ -65,7 +64,7 @@ impl Executor for IcebergScanExecutor {
 
 impl IcebergScanExecutor {
     pub fn new(
-        iceberg_config: IcebergConfig,
+        iceberg_config: IcebergProperties,
         snapshot_id: Option<i64>,
         table_meta: TableMetadata,
         data_file_scan_tasks: Vec<FileScanTask>,
@@ -90,12 +89,7 @@ impl IcebergScanExecutor {
     async fn do_execute(mut self: Box<Self>) {
         let table = self
             .iceberg_config
-            .common
-            .load_table_v2_with_metadata(
-                self.table_meta,
-                &self.iceberg_config.path_style_access,
-                &self.iceberg_config.java_catalog_props,
-            )
+            .load_table_v2_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
         let executor_schema_names = self.schema.names();
@@ -282,7 +276,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             let iceberg_properties: IcebergProperties = *iceberg_properties;
             let split: IcebergSplit = split.clone();
             Ok(Box::new(IcebergScanExecutor::new(
-                iceberg_properties.to_iceberg_config(),
+                iceberg_properties,
                 Some(split.snapshot_id),
                 split.table_meta.deserialize(),
                 split.files.into_iter().map(|x| x.deserialize()).collect(),
