@@ -128,6 +128,34 @@ profile:
       - use: kafka
         persist-data: true
 
+  nimtable:
+     env:
+        NIMTABLE_ENABLE_CONFIG_LOAD: "false"
+        AWS_ENDPOINT_URL: "http://127.0.0.1:9301"
+        AWS_REGION: "ap-southeast-2"
+        AWS_S3_BUCKET: "hummock001"
+        RW_DATA_DIRECTORY: "data-dir"
+        AWS_ACCESS_KEY_ID: "hummockadmin"
+        AWS_SECRET_ACCESS_KEY: "hummockadmin"
+        RW_BACKEND: "sqlite"
+        RW_SQL_USERNAME: "xxx"
+        RW_SQL_PASSWORD: "xxx"
+        RW_SQL_ENDPOINT: "sqlite won't be used"
+        RW_SQL_DATABASE: "/tmp/sqlite/iceberg.db"
+        CONNECTOR_LIBS_PATH: ".risingwave/bin/connector-node/libs"
+     steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+      - use: kafka
+        persist-data: true
+
   standalone-full-peripherals:
     steps:
       - use: minio

@@ -127,6 +127,10 @@ IcebergProperties:
   - name: catalog.jdbc.password
     field_type: String
     required: false
+  - name: enable_config_load
+    field_type: bool
+    required: false
+    default: Default::default
 KafkaProperties:
   fields:
   - name: bytes.per.second
