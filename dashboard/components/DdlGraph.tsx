@@ -13,12 +13,12 @@ import {
 } from "../lib/layout"
 
 const nodeRadius = 12
-const ddlMarginX = nodeRadius * 8
-const ddlMarginY = nodeRadius * 8
-const ddlNameMarginX = ddlMarginX / 2
-const ddlNameMarginY = nodeRadius * 7
-const ddlDistanceX = nodeRadius * 2
-const ddlDistanceY = nodeRadius * 2
+const ddlLayoutX = nodeRadius * 8
+const ddlLayoutY = nodeRadius * 8
+const ddlNameX = nodeRadius * 4
+const ddlNameY = nodeRadius * 7
+const ddlMarginX = nodeRadius * 2
+const ddlMarginY = nodeRadius * 2
 
 export default function DdlGraph({
   ddlDependency,
@@ -45,17 +45,17 @@ export default function DdlGraph({
 
     const ddlLayout = layoutItem(
       ddlDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
-        return { width: ddlMarginX, height: ddlMarginY, id, ...data }
+        return { width: ddlLayoutX, height: ddlLayoutY, id, ...data }
       }),
-      ddlDistanceX,
-      ddlDistanceY
+      ddlMarginX,
+      ddlMarginY
     )
 
     let svgWidth = 0
     let svgHeight = 0
     ddlLayout.forEach(({ x, y }) => {
-      svgHeight = Math.max(svgHeight, y + ddlMarginX)
-      svgWidth = Math.max(svgWidth, x + ddlMarginY)
+      svgHeight = Math.max(svgHeight, y + ddlLayoutX)
+      svgWidth = Math.max(svgWidth, x + ddlLayoutY)
     })
     const edges = generateDdlEdges(ddlLayout)
 
@@ -95,8 +95,8 @@ export default function DdlGraph({
             .text(({ ddl_name, schema_name }) => `${schema_name}.${ddl_name}`)
             .attr("font-family", "inherit")
             .attr("text-anchor", "middle")
-            .attr("dx", ddlNameMarginX)
-            .attr("dy", ddlNameMarginY)
+            .attr("dx", ddlNameX)
+            .attr("dy", ddlNameY)
             .attr("fill", "black")
             .attr("font-size", 12)
         }
@@ -114,8 +114,8 @@ export default function DdlGraph({
           })
 
           circle
-            .attr("cx", ddlMarginX / 2)
-            .attr("cy", ddlMarginY / 2)
+            .attr("cx", ddlLayoutX / 2)
+            .attr("cy", ddlLayoutY / 2)
             .attr("fill", "white")
             .attr("stroke-width", 1)
             .attr("stroke", theme.colors.gray[500])
@@ -211,8 +211,7 @@ export default function DdlGraph({
         sel.append("g").attr("class", "ddl-edge").call(applyEdge)
 
       edgeSelection.enter().call(createEdge)
-      // TODO(kwannoel): createEdge already calls applyEdge, is this still needed?
-      // edgeSelection.call(applyEdge)
+      edgeSelection.call(applyEdge)
       edgeSelection.exit().remove()
     }
   }, [ddlLayout, ddlEdgeLayout, backPressures])
