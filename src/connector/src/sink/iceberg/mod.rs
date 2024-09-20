@@ -22,10 +22,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
-use clap::ValueEnum;
-use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
-use iceberg::spec::TableMetadata;
-use iceberg::table::Table as TableV2;
 use iceberg::{Catalog as CatalogV2, NamespaceIdent, TableCreation, TableIdent};
 use icelake::catalog::CatalogRef;
 use icelake::io_v2::input_wrapper::{DeltaWriter, RecordBatchWriter};
@@ -45,7 +41,6 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::config::MetaBackend;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
@@ -102,10 +97,6 @@ pub struct IcebergConfig {
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
-
-    /// enable config load currently is used by nimtable, so it only support jdbc catalog.
-    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
-    pub enable_config_load: bool,
 }
 
 impl IcebergConfig {
@@ -164,80 +155,8 @@ impl IcebergConfig {
                 "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
-        config = config.fill_for_config_load()?;
 
         Ok(config)
-    }
-
-    pub fn fill_for_config_load(mut self) -> Result<Self> {
-        if self.enable_config_load {
-            if self.catalog_type.as_deref() != Some("jdbc") {
-                return Err(SinkError::Config(anyhow!(
-                    "enable_config_load only support jdbc catalog right now"
-                )));
-            }
-
-            let Ok(s3_region) = std::env::var("AWS_REGION") else {
-                bail!("To create an iceberg engine table, AWS_REGION needed to be set");
-            };
-            self.region = Some(s3_region);
-
-            let Ok(s3_bucket) = std::env::var("AWS_S3_BUCKET") else {
-                bail!("To create an iceberg engine table, AWS_S3_BUCKET needed to be set");
-            };
-
-            let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
-                bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
-            };
-            self.path = format!("s3://{}/{}/nimtable", s3_bucket, data_directory);
-
-            let Ok(meta_store_endpoint) = std::env::var("RW_SQL_ENDPOINT") else {
-                bail!("To create an iceberg engine table, RW_SQL_ENDPOINT needed to be set");
-            };
-
-            let Ok(meta_store_database) = std::env::var("RW_SQL_DATABASE") else {
-                bail!("To create an iceberg engine table, RW_SQL_DATABASE needed to be set");
-            };
-
-            let Ok(meta_store_backend) = std::env::var("RW_BACKEND") else {
-                bail!("To create an iceberg engine table, RW_BACKEND needed to be set");
-            };
-            let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
-                bail!("failed to parse meta backend: {}", meta_store_backend);
-            };
-
-            self.uri = match meta_backend {
-                MetaBackend::Postgres => Some(format!(
-                    "jdbc:postgresql://{}/{}",
-                    meta_store_endpoint.clone(),
-                    meta_store_database.clone()
-                )),
-                MetaBackend::Mysql => Some(format!(
-                    "jdbc:mysql://{}/{}",
-                    meta_store_endpoint.clone(),
-                    meta_store_database.clone()
-                )),
-                MetaBackend::Sqlite | MetaBackend::Etcd | MetaBackend::Sql | MetaBackend::Mem => {
-                    bail!(
-                        "Unsupported meta backend for iceberg engine table: {}",
-                        meta_store_backend
-                    );
-                }
-            };
-
-            let Ok(meta_store_user) = std::env::var("RW_SQL_USERNAME") else {
-                bail!("To create an iceberg engine table, RW_SQL_USERNAME needed to be set");
-            };
-
-            let Ok(meta_store_password) = std::env::var("RW_SQL_PASSWORD") else {
-                bail!("To create an iceberg engine table, RW_SQL_PASSWORD needed to be set");
-            };
-
-            let java_catalog_props = &mut self.java_catalog_props;
-            java_catalog_props.insert("jdbc.user".to_string(), meta_store_user);
-            java_catalog_props.insert("jdbc.password".to_string(), meta_store_password);
-        }
-        Ok(self)
     }
 
     pub fn catalog_type(&self) -> &str {
@@ -1098,6 +1017,7 @@ mod test {
                 database_name: Some("demo_db".to_string()),
                 table_name: "demo_table".to_string(),
                 path_style_access: Some(true),
+                enable_config_load: None,
             },
             r#type: "upsert".to_string(),
             force_append_only: false,
@@ -1108,7 +1028,6 @@ mod test {
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
             create_table_if_not_exists: false,
-            enable_config_load: false,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

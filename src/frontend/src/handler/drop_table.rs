@@ -15,6 +15,7 @@
 use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::Engine;
+use risingwave_common::util::tokio_util::either::Either;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
@@ -67,7 +68,7 @@ pub async fn handle_drop_table(
 
     match engine {
         Engine::Iceberg => {
-            let iceberg_config = if let Ok(source) = session
+            let either = if let Ok(source) = session
                 .env()
                 .catalog_reader()
                 .read_guard()
@@ -80,7 +81,7 @@ pub async fn handle_drop_table(
             {
                 let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
                 if let ConnectorProperties::Iceberg(iceberg_properties) = config {
-                    Some(iceberg_properties.to_iceberg_config())
+                    Some(Either::Left(iceberg_properties))
                 } else {
                     unreachable!("must be iceberg source");
                 }
@@ -96,7 +97,8 @@ pub async fn handle_drop_table(
                 .map(|(sink, _)| sink.clone())
             {
                 // If iceberg source does not exist, use iceberg sink to load iceberg table
-                Some(IcebergConfig::from_btreemap(sink.properties.clone())?)
+                let iceberg_config = IcebergConfig::from_btreemap(sink.properties.clone())?;
+                Some(Either::Right(iceberg_config))
             } else {
                 None
             };
@@ -123,14 +125,25 @@ pub async fn handle_drop_table(
             )
             .await?;
 
-            if let Some(iceberg_config) = iceberg_config {
-                let iceberg_catalog = iceberg_config
-                    .create_catalog_v2()
-                    .await
-                    .context("Unable to load iceberg catalog")?;
-                let table_id = iceberg_config
-                    .full_table_name_v2()
-                    .context("Unable to parse table name")?;
+            if let Some(either) = either {
+                let (iceberg_catalog, table_id) = match either {
+                    Either::Left(iceberg_properties) => {
+                        let catalog = iceberg_properties.create_catalog_v2().await?;
+                        let table_id = iceberg_properties
+                            .common
+                            .full_table_name_v2()
+                            .context("Unable to parse table name")?;
+                        (catalog, table_id)
+                    }
+                    Either::Right(iceberg_config) => {
+                        let catalog = iceberg_config.create_catalog_v2().await?;
+                        let table_id = iceberg_config
+                            .full_table_name_v2()
+                            .context("Unable to parse table name")?;
+                        (catalog, table_id)
+                    }
+                };
+
                 if let Ok(table) = iceberg_catalog
                     .load_table(&table_id)
                     .await
