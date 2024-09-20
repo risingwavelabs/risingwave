@@ -27,7 +27,7 @@ use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
-    StateStoreRead, WriteOptions,
+    StateStoreRead, TryWaitEpochOptions, WriteOptions,
 };
 use risingwave_storage::StateStore;
 
@@ -149,7 +149,10 @@ async fn test_snapshot_inner(
                 .await
                 .unwrap();
             hummock_storage
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
+                .try_wait_epoch(
+                    HummockReadEpoch::Committed(epoch1),
+                    TryWaitEpochOptions::for_test(Default::default()),
+                )
                 .await
                 .unwrap();
         }
@@ -193,7 +196,10 @@ async fn test_snapshot_inner(
                 .await
                 .unwrap();
             hummock_storage
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+                .try_wait_epoch(
+                    HummockReadEpoch::Committed(epoch2),
+                    TryWaitEpochOptions::for_test(Default::default()),
+                )
                 .await
                 .unwrap();
         }
@@ -236,7 +242,10 @@ async fn test_snapshot_inner(
                 .await
                 .unwrap();
             hummock_storage
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch3))
+                .try_wait_epoch(
+                    HummockReadEpoch::Committed(epoch3),
+                    TryWaitEpochOptions::for_test(Default::default()),
+                )
                 .await
                 .unwrap();
         }
@@ -298,7 +307,10 @@ async fn test_snapshot_range_scan_inner(
                 .await
                 .unwrap();
             hummock_storage
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .try_wait_epoch(
+                    HummockReadEpoch::Committed(epoch),
+                    TryWaitEpochOptions::for_test(local.table_id()),
+                )
                 .await
                 .unwrap();
         }

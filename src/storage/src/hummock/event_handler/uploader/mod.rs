@@ -1195,10 +1195,7 @@ impl HummockUploader {
                         self.context
                             .pinned_version
                             .version()
-                            .state_table_info
-                            .info()
-                            .get(table_id)
-                            .map(|info| info.committed_epoch),
+                            .table_committed_epoch(*table_id),
                     )
                 });
             table_data.new_epoch(epoch);

@@ -568,7 +568,7 @@ async fn test_state_store_sync() {
         .commit_epoch(epoch1, res, false)
         .await
         .unwrap();
-    test_env.storage.try_wait_epoch_for_test(epoch1).await;
+    test_env.wait_sync_committed_version().await;
     {
         // after sync 1 epoch
         let read_version = hummock_storage.read_version();
@@ -614,7 +614,7 @@ async fn test_state_store_sync() {
         .commit_epoch(epoch2, res, false)
         .await
         .unwrap();
-    test_env.storage.try_wait_epoch_for_test(epoch2).await;
+    test_env.wait_sync_committed_version().await;
     {
         // after sync all epoch
         let read_version = hummock_storage.read_version();
@@ -910,7 +910,7 @@ async fn test_delete_get() {
         .commit_epoch(epoch2, res, false)
         .await
         .unwrap();
-    test_env.storage.try_wait_epoch_for_test(epoch2).await;
+    test_env.wait_sync_committed_version().await;
     assert!(test_env
         .storage
         .get(
@@ -1096,7 +1096,7 @@ async fn test_multiple_epoch_sync() {
         .commit_epoch(epoch3, sync_result3, false)
         .await
         .unwrap();
-    test_env.storage.try_wait_epoch_for_test(epoch3).await;
+    test_env.wait_sync_committed_version().await;
     test_get().await;
 }
 
@@ -1270,7 +1270,7 @@ async fn test_iter_with_min_epoch() {
             .commit_epoch(epoch2, sync_result2, false)
             .await
             .unwrap();
-        test_env.storage.try_wait_epoch_for_test(epoch2).await;
+        test_env.wait_sync_committed_version().await;
 
         {
             let iter = test_env
@@ -1561,7 +1561,7 @@ async fn test_hummock_version_reader() {
                 .commit_epoch(epoch1, sync_result1, false)
                 .await
                 .unwrap();
-            test_env.storage.try_wait_epoch_for_test(epoch1).await;
+            test_env.wait_sync_committed_version().await;
 
             let sync_result2 = test_env
                 .storage
@@ -1573,7 +1573,7 @@ async fn test_hummock_version_reader() {
                 .commit_epoch(epoch2, sync_result2, false)
                 .await
                 .unwrap();
-            test_env.storage.try_wait_epoch_for_test(epoch2).await;
+            test_env.wait_sync_committed_version().await;
 
             let sync_result3 = test_env
                 .storage
@@ -1585,7 +1585,7 @@ async fn test_hummock_version_reader() {
                 .commit_epoch(epoch3, sync_result3, false)
                 .await
                 .unwrap();
-            test_env.storage.try_wait_epoch_for_test(epoch3).await;
+            test_env.wait_sync_committed_version().await;
             {
                 let (_, read_snapshot) = read_filter_for_version(
                     epoch1,
@@ -1979,7 +1979,7 @@ async fn test_get_with_min_epoch() {
         .await
         .unwrap();
 
-    test_env.storage.try_wait_epoch_for_test(epoch2).await;
+    test_env.wait_sync_committed_version().await;
     let k = gen_key(0);
     let prefix_hint = {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
@@ -2409,7 +2409,7 @@ async fn test_table_watermark() {
     };
 
     test_env.commit_epoch(epoch1).await;
-    test_env.storage.try_wait_epoch_for_test(epoch1).await;
+    test_env.wait_sync_committed_version().await;
 
     let (local1, local2) = test_after_epoch2(local1, local2).await;
 
@@ -2498,7 +2498,7 @@ async fn test_table_watermark() {
     let (local1, local2) = test_after_epoch2(local1, local2).await;
 
     test_env.commit_epoch(epoch2).await;
-    test_env.storage.try_wait_epoch_for_test(epoch2).await;
+    test_env.wait_sync_committed_version().await;
 
     test_global_read(test_env.storage.clone(), epoch2).await;
 
@@ -2533,7 +2533,7 @@ async fn test_table_watermark() {
     let (local1, local2) = test_after_epoch2(local1, local2).await;
 
     test_env.commit_epoch(epoch3).await;
-    test_env.storage.try_wait_epoch_for_test(epoch3).await;
+    test_env.wait_sync_committed_version().await;
 
     check_version_table_watermark(test_env.storage.get_pinned_version());
 

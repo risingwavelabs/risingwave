@@ -49,6 +49,7 @@ message BarrierCompleteResponse {
 
 message WaitEpochCommitRequest {
   uint64 epoch = 1;
+  uint32 table_id = 2;
 }
 
 message WaitEpochCommitResponse {

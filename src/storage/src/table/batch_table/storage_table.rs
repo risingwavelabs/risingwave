@@ -49,6 +49,7 @@ use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{
     PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter, StateStoreIterExt,
+    TryWaitEpochOptions,
 };
 use crate::table::merge_sort::merge_sort;
 use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
@@ -365,7 +366,14 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             wait_epoch,
             HummockReadEpoch::TimeTravel(_) | HummockReadEpoch::Committed(_)
         );
-        self.store.try_wait_epoch(wait_epoch).await?;
+        self.store
+            .try_wait_epoch(
+                wait_epoch,
+                TryWaitEpochOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await?;
         let serialized_pk = serialize_pk_with_vnode(
             &pk,
             &self.pk_serializer,
@@ -872,7 +880,14 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         epoch: HummockReadEpoch,
     ) -> StorageResult<Self> {
         let raw_epoch = epoch.get_epoch();
-        store.try_wait_epoch(epoch).await?;
+        store
+            .try_wait_epoch(
+                epoch,
+                TryWaitEpochOptions {
+                    table_id: read_options.table_id,
+                },
+            )
+            .await?;
         let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
         let iter = Self {
             iter,
@@ -975,7 +990,12 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
         end_epoch: u64,
     ) -> StorageResult<Self> {
         store
-            .try_wait_epoch(HummockReadEpoch::Committed(end_epoch))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(end_epoch),
+                TryWaitEpochOptions {
+                    table_id: read_options.table_id,
+                },
+            )
             .await?;
         let iter = store
             .iter_log((start_epoch, end_epoch), table_key_range, read_options)

@@ -96,7 +96,7 @@ pub struct HummockStorage {
 
     buffer_tracker: BufferTracker,
 
-    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
 
     recent_versions: Arc<ArcSwap<RecentVersions>>,
 
@@ -626,7 +626,11 @@ impl StateStore for HummockStorage {
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
     /// we will only check whether it is le `sealed_epoch` and won't wait.
-    async fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> StorageResult<()> {
+    async fn try_wait_epoch(
+        &self,
+        wait_epoch: HummockReadEpoch,
+        options: TryWaitEpochOptions,
+    ) -> StorageResult<()> {
         let wait_epoch = match wait_epoch {
             HummockReadEpoch::Committed(epoch) => {
                 assert!(!is_max_epoch(epoch), "epoch should not be MAX EPOCH");
@@ -634,7 +638,7 @@ impl StateStore for HummockStorage {
             }
             _ => return Ok(()),
         };
-        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
+        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch, options).await
     }
 
     fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
@@ -696,13 +700,6 @@ impl HummockStorage {
 
     pub fn get_shared_buffer_size(&self) -> usize {
         self.buffer_tracker.get_buffer_size()
-    }
-
-    pub async fn try_wait_epoch_for_test(&self, wait_epoch: u64) {
-        let mut rx = self.version_update_notifier_tx.subscribe();
-        while *(rx.borrow_and_update()) < wait_epoch {
-            rx.changed().await.unwrap();
-        }
     }
 
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.

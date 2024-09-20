@@ -385,7 +385,10 @@ async fn test_basic_v2() {
         .await
         .unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(epoch1),
+            TryWaitEpochOptions::for_test(local.table_id()),
+        )
         .await
         .unwrap();
     let value = hummock_storage
@@ -1102,7 +1105,10 @@ async fn test_delete_get_v2() {
         .await
         .unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(epoch2),
+            TryWaitEpochOptions::for_test(local.table_id()),
+        )
         .await
         .unwrap();
     assert!(hummock_storage
@@ -1263,7 +1269,10 @@ async fn test_multiple_epoch_sync_v2() {
         .await
         .unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(epoch3))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(epoch3),
+            TryWaitEpochOptions::for_test(local.table_id()),
+        )
         .await
         .unwrap();
     test_get().await;
@@ -1365,7 +1374,10 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .await
         .unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(epoch1),
+            TryWaitEpochOptions::for_test(local_hummock_storage.table_id()),
+        )
         .await
         .unwrap();
 
@@ -1639,8 +1651,12 @@ async fn test_iter_log() {
     }
 
     hummock_storage
-        .try_wait_epoch_for_test(test_log_data.last().unwrap().0)
-        .await;
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(test_log_data.last().unwrap().0),
+            TryWaitEpochOptions { table_id },
+        )
+        .await
+        .unwrap();
 
     let verify_state_store = VerifyStateStore {
         actual: hummock_storage,

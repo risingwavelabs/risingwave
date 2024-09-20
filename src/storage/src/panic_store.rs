@@ -173,7 +173,11 @@ impl StateStore for PanicStateStore {
     type Local = Self;
 
     #[allow(clippy::unused_async)]
-    async fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+    async fn try_wait_epoch(
+        &self,
+        _epoch: HummockReadEpoch,
+        _options: TryWaitEpochOptions,
+    ) -> StorageResult<()> {
         panic!("should not wait epoch from the panic state store!");
     }
 

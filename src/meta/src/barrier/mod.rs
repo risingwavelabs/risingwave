@@ -1029,11 +1029,14 @@ impl GlobalBarrierManager {
         });
         span.record("epoch", curr_epoch.value().0);
 
+        let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
+
         let command_ctx = Arc::new(CommandContext::new(
             self.active_streaming_nodes.current().clone(),
             pre_applied_subscription_info,
             prev_epoch.clone(),
             curr_epoch.clone(),
+            table_ids_to_commit.clone(),
             self.state.paused_reason(),
             command,
             kind,
@@ -1042,8 +1045,6 @@ impl GlobalBarrierManager {
         ));
 
         send_latency_timer.observe_duration();
-
-        let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
 
         let mut jobs_to_wait = HashSet::new();
 
