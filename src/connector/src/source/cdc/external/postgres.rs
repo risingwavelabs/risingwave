@@ -131,12 +131,7 @@ impl PostgresExternalTable {
                     .split("::")
                     .map(|s| s.trim_matches('\''))
                     .next()
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "invalid postgres default value expression for column={}",
-                            col.name
-                        )
-                    })?;
+                    .expect("default value expression");
 
                 match ScalarImpl::from_text(val_text, &data_type) {
                     Ok(scalar) => ColumnDesc::named_with_default_value(
