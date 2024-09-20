@@ -86,13 +86,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates aggregate expressions. For internal / unsupported aggregators, we return `None`.
     fn make_agg_expr(
         &mut self,
-        func: PbAggKind,
+        func: PbAggType,
         exprs: &[Expr],
         distinct: bool,
         filter: Option<Box<Expr>>,
         order_by: Vec<OrderByExpr>,
     ) -> Option<Expr> {
-        use PbAggKind as A;
+        use PbAggType as A;
         match func {
             kind @ (A::FirstValue | A::LastValue) => {
                 if order_by.is_empty() {
