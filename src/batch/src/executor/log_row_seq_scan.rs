@@ -156,6 +156,7 @@ impl<S: StateStore> Executor for LogRowSeqScanExecutor<S> {
 }
 
 impl<S: StateStore> LogRowSeqScanExecutor<S> {
+    #[allow(unused_variables)]
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let Self {
@@ -170,12 +171,9 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         let table = std::sync::Arc::new(table);
 
         // Create collector.
-        let histogram = metrics.as_ref().map(|metrics| {
-            metrics
-                .executor_metrics()
-                .row_seq_scan_next_duration
-                .with_guarded_label_values(&metrics.executor_labels(&identity))
-        });
+        let histogram = metrics
+            .as_ref()
+            .map(|metrics| &metrics.executor_metrics().row_seq_scan_next_duration);
         // Range Scan
         // WARN: DO NOT use `select` to execute range scans concurrently
         //       it can consume too much memory if there're too many ranges.
@@ -184,7 +182,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             old_epoch,
             new_epoch,
             chunk_size,
-            histogram.clone(),
+            histogram,
             Arc::new(schema.clone()),
         );
         #[for_await]

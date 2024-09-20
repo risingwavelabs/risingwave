@@ -312,12 +312,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             .unwrap_or_else(|| epoch);
 
         // Create collector.
-        let histogram = metrics.as_ref().map(|metrics| {
-            metrics
-                .executor_metrics()
-                .row_seq_scan_next_duration
-                .with_guarded_label_values(&metrics.executor_labels(&identity))
-        });
+        let histogram = metrics
+            .as_ref()
+            .map(|metrics| &metrics.executor_metrics().row_seq_scan_next_duration);
 
         if ordered {
             // Currently we execute range-scans concurrently so the order is not guaranteed if
@@ -342,7 +339,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         for point_get in point_gets {
             let table = table.clone();
             if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch, histogram.clone()).await?
+                Self::execute_point_get(table, point_get, query_epoch, histogram).await?
             {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     returned += chunk.cardinality() as u64;
@@ -376,7 +373,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 query_epoch,
                 chunk_size,
                 limit,
-                histogram.clone(),
+                histogram,
             );
             #[for_await]
             for chunk in stream {

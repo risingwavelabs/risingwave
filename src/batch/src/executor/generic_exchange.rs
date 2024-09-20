@@ -238,24 +238,15 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
         source_creator: CS,
         context: C,
         metrics: Option<BatchMetricsWithTaskLabels>,
-        identity: String,
+        _identity: String,
     ) {
         let mut source = source_creator
             .create_source(context.clone(), &prost_source)
             .await?;
         // create the collector
-        let source_id = source.get_task_id();
-        let counter = metrics.as_ref().map(|metrics| {
-            metrics
-                .executor_metrics()
-                .exchange_recv_row_number
-                .with_guarded_label_values(&[
-                    source_id.query_id.as_str(),
-                    format!("{}", source_id.stage_id).as_str(),
-                    format!("{}", source_id.task_id).as_str(),
-                    identity.as_str(),
-                ])
-        });
+        let counter = metrics
+            .as_ref()
+            .map(|metrics| &metrics.executor_metrics().exchange_recv_row_number);
 
         loop {
             if let Some(res) = source.take_data().await? {
