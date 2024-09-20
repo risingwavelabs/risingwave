@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::{
     HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::change_log::test_utils::{
     apply_test_log_data, gen_test_data,
@@ -1420,7 +1421,31 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 async fn test_replicated_local_hummock_storage() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
-    let (hummock_storage, _meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+
+    let epoch0 = meta_client
+        .hummock_manager_ref()
+        .on_current_version(|version| version.visible_table_committed_epoch())
+        .await;
+
+    let epoch0 = epoch0.next_epoch();
+
+    meta_client
+        .hummock_manager_ref()
+        .commit_epoch(CommitEpochInfo {
+            sstables: vec![],
+            new_table_watermarks: Default::default(),
+            sst_to_context: Default::default(),
+            new_table_fragment_info: NewTableFragmentInfo::NewCompactionGroup {
+                table_ids: HashSet::from_iter([TEST_TABLE_ID]),
+            },
+            change_log_delta: Default::default(),
+            committed_epoch: epoch0,
+            tables_to_commit: Default::default(),
+            is_visible_table_committed_epoch: true,
+        })
+        .await
+        .unwrap();
 
     let read_options = ReadOptions {
         table_id: TableId {
@@ -1440,12 +1465,6 @@ async fn test_replicated_local_hummock_storage() {
             Arc::new(Bitmap::ones(VirtualNode::COUNT)),
         ))
         .await;
-
-    let epoch0 = local_hummock_storage
-        .read_version()
-        .read()
-        .committed()
-        .max_committed_epoch();
 
     let epoch1 = epoch0.next_epoch();
 
@@ -1496,13 +1515,13 @@ async fn test_replicated_local_hummock_storage() {
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 65536, epoch_with_gap: 65536, spill_offset: 0},
+                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 131072, epoch_with_gap: 131072, spill_offset: 0},
                         b"1111",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 65536, epoch_with_gap: 65536, spill_offset: 0},
+                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 131072, epoch_with_gap: 131072, spill_offset: 0},
                         b"2222",
                     ),
                 ),
@@ -1564,13 +1583,13 @@ async fn test_replicated_local_hummock_storage() {
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 131072, epoch_with_gap: 131072, spill_offset: 0},
+                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 196608, epoch_with_gap: 196608, spill_offset: 0},
                         b"3333",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 131072, epoch_with_gap: 131072, spill_offset: 0},
+                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 196608, epoch_with_gap: 196608, spill_offset: 0},
                         b"4444",
                     ),
                 ),

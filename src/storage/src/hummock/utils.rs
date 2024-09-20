@@ -32,7 +32,6 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
-use tracing::warn;
 
 use super::{HummockError, SstableStoreRef};
 use crate::error::StorageResult;
@@ -582,23 +581,19 @@ pub(crate) async fn wait_for_epoch(
     options: TryWaitEpochOptions,
 ) -> StorageResult<()> {
     let mut receiver = notifier.subscribe();
-    {
+    let mut committed_epoch = {
         // avoid unnecessary check in the loop if the value does not change
         let committed_epoch = receiver
             .borrow_and_update()
             .version()
             .table_committed_epoch(options.table_id);
-        if let Some(committed_epoch) = committed_epoch {
-            if committed_epoch >= wait_epoch {
-                return Ok(());
-            }
-        } else {
-            warn!(
-                table_id = options.table_id.table_id,
-                "table id not exist yet. wait for table creation"
-            );
+        if let Some(committed_epoch) = committed_epoch
+            && committed_epoch >= wait_epoch
+        {
+            return Ok(());
         }
-    }
+        committed_epoch
+    };
     let start_time = Instant::now();
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
@@ -614,6 +609,8 @@ pub(crate) async fn wait_for_epoch(
                 // See #3845 for more details.
                 tracing::warn!(
                     epoch = wait_epoch,
+                    ?committed_epoch,
+                    table_id = options.table_id.table_id,
                     elapsed = ?start_time.elapsed(),
                     "wait_epoch timeout when waiting for version update",
                 );
@@ -624,21 +621,16 @@ pub(crate) async fn wait_for_epoch(
             }
             Ok(Ok(_)) => {
                 // TODO: should handle the corner case of drop table
-                let committed_epoch = receiver
+                let new_committed_epoch = receiver
                     .borrow()
                     .version()
                     .table_committed_epoch(options.table_id);
-                if let Some(committed_epoch) = committed_epoch {
-                    if committed_epoch >= wait_epoch {
-                        return Ok(());
-                    }
-                } else {
-                    warn!(
-                        table_id = options.table_id.table_id,
-                        elapsed = ?start_time.elapsed(),
-                        "table id not exist yet. wait for table creation"
-                    );
+                if let Some(committed_epoch) = new_committed_epoch
+                    && committed_epoch >= wait_epoch
+                {
+                    return Ok(());
                 }
+                committed_epoch = new_committed_epoch;
             }
         }
     }
