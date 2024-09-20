@@ -67,7 +67,6 @@ impl FrontendHummockVersion {
             id: self.id.0,
             levels: Default::default(),
             max_committed_epoch: self.max_committed_epoch,
-            safe_epoch: 0,
             table_watermarks: Default::default(),
             table_change_logs: self
                 .table_change_log
@@ -185,7 +184,6 @@ impl FrontendHummockVersionDelta {
             prev_id: self.prev_id.to_u64(),
             group_deltas: Default::default(),
             max_committed_epoch: self.max_committed_epoch,
-            safe_epoch: 0,
             trivial_move: false,
             new_table_watermarks: Default::default(),
             removed_table_ids: self
