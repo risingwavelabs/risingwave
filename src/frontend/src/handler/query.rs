@@ -527,7 +527,7 @@ pub async fn local_execute(
 
     // TODO: Passing sql here
     let execution =
-        LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session, timeout);
+        LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session, timeout)?;
 
     Ok(execution.stream_rows())
 }

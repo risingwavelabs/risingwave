@@ -143,7 +143,7 @@ impl PinnedSnapshot {
                     }
                 })
             })?
-            .unwrap_or_else(Epoch::now); // When no table is involved, use current timestamp as epoch
+            .unwrap_or(Epoch(self.value.max_committed_epoch));
         Ok(epoch)
     }
 
