@@ -25,7 +25,7 @@ use mysql_common::value::Value;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, OFFSET_COLUMN_NAME};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, Decimal, ScalarImpl, F32};
 use risingwave_common::util::iter_util::ZipEqFast;
 use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
@@ -116,11 +116,24 @@ impl MySqlExternalTable {
             let column_desc = if let Some(default) = col.default {
                 let snapshot_value = match default {
                     ColumnDefault::Null => None,
-                    ColumnDefault::Int(val) => Some(ScalarImpl::Int64(val)),
-                    ColumnDefault::Real(val) => Some(ScalarImpl::Float64(val.into())),
-                    ColumnDefault::String(val) => Some(ScalarImpl::Utf8(val.into())),
-                    ColumnDefault::CustomExpr(expr_str) => {
-                        match ScalarImpl::from_text(expr_str.as_str(), &data_type) {
+                    ColumnDefault::Int(val) => match data_type {
+                        DataType::Int16 => Some(ScalarImpl::Int16(val as _)),
+                        DataType::Int32 => Some(ScalarImpl::Int32(val as _)),
+                        DataType::Int64 => Some(ScalarImpl::Int64(val)),
+                        _ => {
+                            unreachable!("unexpected default value type for integer column")
+                        }
+                    },
+                    ColumnDefault::Real(val) => match data_type {
+                        DataType::Float32 => Some(ScalarImpl::Float32(F32::from(val as f32))),
+                        DataType::Float64 => Some(ScalarImpl::Float64(val.into())),
+                        DataType::Decimal => Some(ScalarImpl::Decimal(Decimal::try_from(val)?)),
+                        _ => {
+                            unreachable!("unexpected default value type for float column")
+                        }
+                    },
+                    ColumnDefault::String(val) | ColumnDefault::CustomExpr(val) => {
+                        match ScalarImpl::from_text(val.as_str(), &data_type) {
                             Ok(scalar) => Some(scalar),
                             Err(err) => {
                                 tracing::warn!(error=%err.as_report(), "failed to parse mysql default value expression, only constant is supported");
