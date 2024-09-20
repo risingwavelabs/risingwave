@@ -15,6 +15,7 @@
 pub mod parquet_file_reader;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -30,7 +31,6 @@ use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
 use crate::connector_common::IcebergCommon;
-use crate::deserialize_optional_bool_from_string;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::source::{
@@ -50,20 +50,28 @@ pub struct IcebergProperties {
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
 
-    #[serde(
-        rename = "enable_config_load",
-        default,
-        deserialize_with = "deserialize_optional_bool_from_string"
-    )]
-    pub enable_config_load: Option<bool>,
-
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
 
 use iceberg::table::Table as TableV2;
+use iceberg::Catalog as CatalogV2;
 
 impl IcebergProperties {
+    pub async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
+        let mut java_catalog_props = HashMap::new();
+        if let Some(jdbc_user) = self.jdbc_user.clone() {
+            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
+        }
+        if let Some(jdbc_password) = self.jdbc_password.clone() {
+            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+        }
+        // TODO: support path_style_access and java_catalog_props for iceberg source
+        self.common
+            .create_catalog_v2(&None, &java_catalog_props)
+            .await
+    }
+
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
