@@ -141,4 +141,5 @@ INSERT INTO partitioned_timestamp_table (c_int, c_boolean, c_timestamp) VALUES
 (8, false, '2025-01-08 18:30:00'),
 (9, false, '2025-07-09 07:10:00');
 
+-- Here we create this publication without `WITH ( publish_via_partition_root = true )` only for tests. Normally, it should be added.
 create publication rw_publication_pubviaroot_false for TABLE partitioned_timestamp_table;
