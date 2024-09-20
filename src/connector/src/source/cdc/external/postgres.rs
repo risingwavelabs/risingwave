@@ -124,7 +124,21 @@ impl PostgresExternalTable {
         for col in &table_schema.columns {
             let data_type = type_to_rw_type(&col.col_type)?;
             let column_desc = if let Some(ref default_expr) = col.default {
-                match ScalarImpl::from_text(default_expr.0.as_str(), &data_type) {
+                // parse the value of "column_default" field in information_schema.columns,
+                // non number data type will be stored as "'value'::type"
+                let val_text = default_expr
+                    .0
+                    .split("::")
+                    .map(|s| s.trim_matches('\''))
+                    .next()
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "invalid postgres default value expression for column={}",
+                            col.name
+                        )
+                    })?;
+
+                match ScalarImpl::from_text(val_text, &data_type) {
                     Ok(scalar) => ColumnDesc::named_with_default_value(
                         col.name.clone(),
                         ColumnId::placeholder(),
