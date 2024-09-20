@@ -16,7 +16,6 @@
  */
 
 import { theme } from "@chakra-ui/react"
-import { tinycolor } from "@ctrl/tinycolor"
 import * as d3 from "d3"
 import { useCallback, useEffect, useRef } from "react"
 import {
@@ -35,6 +34,7 @@ import {
   generateRelationEdges,
 } from "../lib/layout"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
+import { backPressureColor, backPressureWidth } from "./utils/backPressure"
 
 function boundBox(
   relationPosition: RelationPointPosition[],
@@ -134,7 +134,7 @@ export default function RelationDependencyGraph({
         if (backPressures) {
           let value = backPressures.get(`${d.target}_${d.source}`)
           if (value) {
-            return backPressureWidth(value)
+            return backPressureWidth(value, 15)
           }
         }
 
@@ -276,45 +276,4 @@ export default function RelationDependencyGraph({
       <CatalogModal modalData={modalData} onClose={() => setModalId(null)} />
     </>
   )
-}
-
-/**
- * The color for the edge with given back pressure value.
- *
- * @param value The back pressure rate, between 0 and 100.
- */
-function backPressureColor(value: number) {
-  const colorRange = [
-    theme.colors.green["100"],
-    theme.colors.green["300"],
-    theme.colors.yellow["400"],
-    theme.colors.orange["500"],
-    theme.colors.red["700"],
-  ].map((c) => tinycolor(c))
-
-  value = Math.max(value, 0)
-  value = Math.min(value, 100)
-
-  const step = colorRange.length - 1
-  const pos = (value / 100) * step
-  const floor = Math.floor(pos)
-  const ceil = Math.ceil(pos)
-
-  const color = tinycolor(colorRange[floor])
-    .mix(tinycolor(colorRange[ceil]), (pos - floor) * 100)
-    .toHexString()
-
-  return color
-}
-
-/**
- * The width for the edge with given back pressure value.
- *
- * @param value The back pressure rate, between 0 and 100.
- */
-function backPressureWidth(value: number) {
-  value = Math.max(value, 0)
-  value = Math.min(value, 100)
-
-  return 15 * (value / 100) + 2
 }
