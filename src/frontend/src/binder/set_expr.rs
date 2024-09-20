@@ -144,20 +144,20 @@ impl BoundSetExpr {
         }
     }
 
-    pub fn visit_all_scan_table_id(&self, visiter: &mut impl FnMut(TableId)) {
+    pub fn visit_all_scan_table_id(&self, visitor: &mut impl FnMut(TableId)) {
         match self {
             BoundSetExpr::Select(select) => {
                 if let Some(relation) = &select.from {
-                    relation.visit_all_scan_table(visiter);
+                    relation.visit_all_scan_table(visitor);
                 }
             }
             BoundSetExpr::Query(query) => {
-                query.body.visit_all_scan_table_id(visiter);
+                query.body.visit_all_scan_table_id(visitor);
             }
             BoundSetExpr::Values(_) => {}
             BoundSetExpr::SetOperation { left, right, .. } => {
-                left.visit_all_scan_table_id(visiter);
-                right.visit_all_scan_table_id(visiter);
+                left.visit_all_scan_table_id(visitor);
+                right.visit_all_scan_table_id(visitor);
             }
         }
     }
