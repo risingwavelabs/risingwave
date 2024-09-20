@@ -30,6 +30,8 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
+///
+/// For supported batch connectors, see [`crate::scheduler::plan_fragmenter::SourceScanInfo`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
     pub base: PlanBase<Batch>,

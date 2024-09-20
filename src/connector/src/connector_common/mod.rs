@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod mqtt_common;
+//! Common parameters and utilities for both source and sink.
+
+mod mqtt_common;
 pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
 
-pub mod common;
+mod common;
 pub use common::{
     AwsAuthProps, AwsPrivateLinkItem, KafkaCommon, KafkaPrivateLinkCommon, KinesisCommon,
     MongodbCommon, NatsCommon, PulsarCommon, PulsarOauthCommon, RdKafkaPropertiesCommon,
     PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
 };
+
+mod iceberg;
+pub use iceberg::IcebergCommon;

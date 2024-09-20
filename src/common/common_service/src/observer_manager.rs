@@ -117,7 +117,6 @@ where
             Info::HummockVersionDeltas(version_delta) => {
                 version_delta.version_deltas[0].id > info.hummock_version.as_ref().unwrap().id
             }
-            Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
             Info::SystemParams(_) | Info::SessionParam(_) => true,
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
