@@ -3,6 +3,7 @@ import sys
 import random
 import psycopg2
 import json
+import time
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pandas as pd
@@ -10,7 +11,6 @@ from datetime import datetime, timezone
 from time import sleep
 from minio import Minio
 from random import uniform
-
 
 def do_test(config, file_num, item_num_per_file, prefix):
     conn = psycopg2.connect(
@@ -27,6 +27,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
     # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE t (v1 int, v2 int);''')
 
+    print('create sink')
     cur.execute(f'''CREATE sink test_file_sink_batching as select
         v1, v2 from t WITH (
         connector = 's3',
@@ -38,7 +39,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
         s3.path = 'test_sink/',
         s3.file_type = 'parquet',
         type = 'append-only',
-        rollover_seconds = '10',
+        rollover_seconds = '5',
         max_row_count = '5',
         force_append_only='true'
     ) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');''')
@@ -49,7 +50,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
     ) WITH (
         connector = 's3',
         match_pattern = 'test_sink/*.parquet',
-        refresh_interval_sec = '1',
+        refresh.interval.sec = 1,
         s3.region_name = 'custom',
         s3.bucket_name = 'hummock001',
         s3.credentials.access = 'hummockadmin',
@@ -57,21 +58,65 @@ def do_test(config, file_num, item_num_per_file, prefix):
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
     ) FORMAT PLAIN ENCODE PARQUET;''')
     
+    cur.execute(f'''ALTER SINK test_file_sink_batching SET PARALLELISM = 2;''')
+    
     cur.execute(f'''INSERT INTO t VALUES (10, 10);''')
+    
+    
     cur.execute(f'select count(*) from test_sink_table')
-    # no item will be selected
+    # no item will be selectedpsq
     result = cur.fetchone()
     
     def _assert_eq(field, got, expect):
         assert got == expect, f'{field} assertion failed: got {got}, expect {expect}.'
+    def _assert_greater(field, got, expect):
+        assert got > expect, f'{field} assertion failed: got {got}, expect {expect}.'
         
     _assert_eq('count(*)', result[0], 0)
+    print('the rollover_seconds has not reached, count(*) = 0')
+    
+    
     time.sleep(10)
     
+    cur.execute(f'select count(*) from test_sink_table')
+    result = cur.fetchone()
     _assert_eq('count(*)', result[0], 1)
+    print('the rollover_seconds has reached, count(*) = 1')
 
     
 
+
+    cur.execute(f'''
+    INSERT INTO t VALUES (20, 20);
+    INSERT INTO t VALUES (30, 30);
+    INSERT INTO t VALUES (40, 40);
+    INSERT INTO t VALUES (50, 10);
+    ''')
+    
+    cur.execute(f'select count(*) from test_sink_table')
+    # count(*) = 1 
+    result = cur.fetchone()
+    _assert_eq('count(*)', result[0], 1)
+    print('the max row count has not reached, count(*) = 1')
+
+
+    cur.execute(f'''
+    INSERT INTO t VALUES (60, 20);
+    INSERT INTO t VALUES (70, 30);
+    INSERT INTO t VALUES (80, 10);
+    INSERT INTO t VALUES (90, 20);
+    INSERT INTO t VALUES (100, 30);
+    INSERT INTO t VALUES (100, 10);
+    ''')
+    
+    time.sleep(3)
+    
+    cur.execute(f'select count(*) from test_sink_table')
+    result = cur.fetchone()
+    _assert_greater('count(*)', result[0], 1)
+    print('the rollover_seconds has reached, count(*) = ', result[0])
+
+    
     cur.close()
     conn.close()
 
@@ -95,9 +140,9 @@ if __name__ == "__main__":
     # do test
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
 
-    # clean up s3 files
-    for idx, _ in enumerate(data):
-       client.remove_object("hummock001", _s3(idx))
+    # # clean up s3 files
+    # for idx, _ in enumerate(data):
+    #    client.remove_object("hummock001", _s3(idx))
 
 
 
