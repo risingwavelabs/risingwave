@@ -1,6 +1,4 @@
-statement ok
-set sink_decouple = false;
-
+# Deletions in a single commit are posistion delete, deletions across multiple commits are equail delete. sink_decouple = default(true), so we'll commit every 10s.
 statement ok
 set streaming_parallelism=4;
 
@@ -15,7 +13,7 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     connector = 'iceberg',
     type = 'upsert',
     database.name = 'demo_db',
-    table.name = 't1',
+    table.name = 'test_position_delete',
     catalog.name = 'demo',
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
@@ -24,28 +22,25 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 5,
     primary_key = 'i1,i2',
 );
 
 statement ok
-insert into s1 values(1,'2','3');
+INSERT INTO s1 (i1, i2, i3)
+SELECT s, s::text, s::text FROM generate_series(1, 10000) s;
 
 statement ok
-insert into s1 values(7,'8','9');
+flush
 
 statement ok
-insert into s1 values(4,'5','6');
+DELETE FROM s1
+WHERE i1 IN (
+    SELECT s
+    FROM generate_series(1, 10000, 2) s
+);
 
-statement ok
-flush;
-
-statement ok
-delete from s1 where i1 = 7;
-
-statement ok
-flush;
-
-sleep 5s
+sleep 15s
 
 statement ok
 CREATE SOURCE iceberg_t1_source
@@ -58,50 +53,31 @@ WITH (
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
     database.name = 'demo_db',
-    table.name = 't1',
+    table.name = 'test_position_delete',
 );
 
 query I
-select * from iceberg_t1_source order by i1;
+select * from iceberg_t1_source order by i1 limit 5;
 ----
-1 2 3
-4 5 6
+2 2 2
+4 4 4
+6 6 6
+8 8 8
+10 10 10
 
 query I
-select i1,i2,i3 from iceberg_t1_source order by i1;
+select * from iceberg_t1_source order by i1 desc limit 5;
 ----
-1 2 3
-4 5 6
+10000 10000 10000
+9998 9998 9998
+9996 9996 9996
+9994 9994 9994
+9992 9992 9992
 
 query I
-select i3,i2 from iceberg_t1_source order by i2;
+select count(*) from iceberg_t1_source
 ----
-3 2
-6 5
-
-query I
-select i2,i1 from iceberg_t1_source order by i1;
-----
-2 1
-5 4
-
-query I
-select i1 from iceberg_t1_source order by i1;
-----
-1
-4
-
-query I
-select i2 from iceberg_t1_source order by i2;
-----
-2
-5
-
-query I
-select i3 from iceberg_t1_source order by i3;
-----
-3
-6
+5000
 
 statement ok
 DROP SINK sink1;
