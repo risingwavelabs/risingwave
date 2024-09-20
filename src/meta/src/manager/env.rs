@@ -227,8 +227,8 @@ pub struct MetaOpts {
     /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule `split_compaction_group` for all compaction groups with this interval.
-    pub periodic_split_compact_group_interval_sec: u64,
+    /// Schedule `periodic_scheduling_compaction_group_interval_sec` for all compaction groups with this interval.
+    pub periodic_scheduling_compaction_group_interval_sec: u64,
 
     /// The size limit to split a large compaction group.
     pub split_group_size_limit: u64,
@@ -248,9 +248,6 @@ pub struct MetaOpts {
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_task_max_progress_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
-
-    /// The size limit to split a state-table to independent sstable.
-    pub cut_table_size_limit: u64,
 
     /// hybird compaction group config
     ///
@@ -334,7 +331,7 @@ impl MetaOpts {
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
-            periodic_split_compact_group_interval_sec: 60,
+            periodic_scheduling_compaction_group_interval_sec: 60,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
@@ -346,7 +343,6 @@ impl MetaOpts {
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_task_max_progress_interval_secs: 1,
             compaction_config: None,
-            cut_table_size_limit: 1024 * 1024 * 1024,
             hybrid_partition_node_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,

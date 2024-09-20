@@ -22,8 +22,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupMerge, GroupMetaChange,
-    GroupTableChange, PbLevelType, StateTableInfo, StateTableInfoDelta,
+    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupMerge, PbLevelType,
+    StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
@@ -49,8 +49,6 @@ pub struct GroupDeltasSummary {
     pub insert_table_infos: Vec<SstableInfo>,
     pub group_construct: Option<GroupConstruct>,
     pub group_destroy: Option<CompactionGroupId>,
-    pub group_meta_changes: Vec<GroupMetaChange>,
-    pub group_table_change: Option<GroupTableChange>,
     pub new_vnode_partition_count: u32,
     pub group_merge: Option<GroupMerge>,
 }
@@ -66,8 +64,6 @@ pub fn summarize_group_deltas(
     let mut insert_table_infos = vec![];
     let mut group_construct = None;
     let mut group_destroy = None;
-    let mut group_meta_changes = vec![];
-    let mut group_table_change = None;
     let mut new_vnode_partition_count = 0;
     let mut group_merge = None;
 
@@ -93,12 +89,6 @@ pub fn summarize_group_deltas(
                 assert!(group_destroy.is_none());
                 group_destroy = Some(compaction_group_id);
             }
-            GroupDelta::GroupMetaChange(meta_delta) => {
-                group_meta_changes.push(meta_delta.clone());
-            }
-            GroupDelta::GroupTableChange(meta_delta) => {
-                group_table_change = Some(meta_delta.clone());
-            }
             GroupDelta::GroupMerge(merge_delta) => {
                 assert!(group_merge.is_none());
                 group_merge = Some(*merge_delta);
@@ -118,8 +108,6 @@ pub fn summarize_group_deltas(
         insert_table_infos,
         group_construct,
         group_destroy,
-        group_meta_changes,
-        group_table_change,
         new_vnode_partition_count,
         group_merge,
     }
@@ -404,8 +392,7 @@ impl HummockVersion {
                 }
             }
             return;
-        }
-        if !self.levels.contains_key(&parent_group_id) {
+        } else if !self.levels.contains_key(&parent_group_id) {
             warn!(parent_group_id, "non-existing parent group id to init from");
             return;
         }
@@ -617,38 +604,6 @@ impl HummockVersion {
                     member_table_ids,
                     group_construct.get_new_sst_start_id(),
                 );
-            } else if let Some(group_change) = &summary.group_table_change {
-                // TODO: may deprecate this branch? This enum variant is not created anywhere
-                assert!(
-                    group_change.version <= CompatibilityVersion::NoTrivialSplit as _,
-                    "DeltaType::GroupTableChange is not used anymore after CompatibilityVersion::NoMemberTableIds is added"
-                );
-                #[expect(deprecated)]
-                // for backward-compatibility of previous hummock version delta
-                self.init_with_parent_group(
-                    group_change.origin_group_id,
-                    group_change.target_group_id,
-                    BTreeSet::from_iter(group_change.table_ids.clone()),
-                    group_change.new_sst_start_id,
-                );
-
-                let levels = self
-                    .levels
-                    .get_mut(&group_change.origin_group_id)
-                    .expect("compaction group should exist");
-                #[expect(deprecated)]
-                // for backward-compatibility of previous hummock version delta
-                let mut moving_tables = levels
-                    .member_table_ids
-                    .extract_if(|t| group_change.table_ids.contains(t))
-                    .collect_vec();
-                #[expect(deprecated)]
-                // for backward-compatibility of previous hummock version delta
-                self.levels
-                    .get_mut(compaction_group_id)
-                    .expect("compaction group should exist")
-                    .member_table_ids
-                    .append(&mut moving_tables);
             } else if let Some(group_merge) = &summary.group_merge {
                 tracing::info!(
                     "group_merge left {:?} right {:?}",
@@ -662,16 +617,6 @@ impl HummockVersion {
             let levels = self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
                 panic!("compaction group {} does not exist", compaction_group_id)
             });
-            #[expect(deprecated)] // for backward-compatibility of previous hummock version delta
-            for group_meta_delta in &summary.group_meta_changes {
-                levels
-                    .member_table_ids
-                    .extend(group_meta_delta.table_ids_add.clone());
-                levels
-                    .member_table_ids
-                    .retain(|t| !group_meta_delta.table_ids_remove.contains(t));
-                levels.member_table_ids.sort();
-            }
 
             assert!(
                 visible_table_committed_epoch <= version_delta.visible_table_committed_epoch(),

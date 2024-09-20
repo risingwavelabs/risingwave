@@ -44,10 +44,7 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
         let table_l = node.get_left_table()?;
-        let degree_table_l = node.get_left_degree_table()?;
-
         let table_r = node.get_right_table()?;
-        let degree_table_r = node.get_right_degree_table()?;
 
         let params_l = JoinParams::new(
             node.get_left_key()
@@ -84,14 +81,9 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
 
         let state_table_l =
             StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone())).await;
-        let degree_state_table_l =
-            StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()))
-                .await;
 
         let state_table_r =
             StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone())).await;
-        let degree_state_table_r =
-            StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
 
         let join_type_proto = node.get_join_type()?;
         let as_of_desc_proto = node.get_asof_desc()?;
@@ -107,9 +99,7 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
             null_safe,
             output_indices,
             state_table_l,
-            degree_state_table_l,
             state_table_r,
-            degree_state_table_r,
             lru_manager: params.watermark_epoch,
             metrics: params.executor_stats,
             join_type_proto,
@@ -138,9 +128,7 @@ struct AsOfJoinExecutorDispatcherArgs<S: StateStore> {
     null_safe: Vec<bool>,
     output_indices: Vec<usize>,
     state_table_l: StateTable<S>,
-    degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
-    degree_state_table_r: StateTable<S>,
     lru_manager: AtomicU64Ref,
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
@@ -167,9 +155,7 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
                     self.null_safe,
                     self.output_indices,
                     self.state_table_l,
-                    self.degree_state_table_l,
                     self.state_table_r,
-                    self.degree_state_table_r,
                     self.lru_manager,
                     self.metrics,
                     self.chunk_size,
