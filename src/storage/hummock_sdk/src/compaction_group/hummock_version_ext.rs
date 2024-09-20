@@ -23,12 +23,13 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupMerge, PbLevelType,
+    StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
 use super::group_split::get_sub_level_insert_hint;
 use super::{group_split, StateTableId};
-use crate::change_log::TableChangeLogCommon;
+use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, Levels, OverlappingLevel};
@@ -725,9 +726,25 @@ impl HummockVersion {
         }
 
         // apply to table change log
-        for (table_id, change_log_delta) in &version_delta.change_log_delta {
+        Self::apply_change_log_delta(
+            &mut self.table_change_log,
+            &version_delta.change_log_delta,
+            &version_delta.removed_table_ids,
+            &version_delta.state_table_info_delta,
+            &changed_table_info,
+        );
+    }
+
+    pub fn apply_change_log_delta<T: Clone>(
+        table_change_log: &mut HashMap<TableId, TableChangeLogCommon<T>>,
+        change_log_delta: &HashMap<TableId, ChangeLogDeltaCommon<T>>,
+        removed_table_ids: &HashSet<TableId>,
+        state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
+        changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
+    ) {
+        for (table_id, change_log_delta) in change_log_delta {
             let new_change_log = change_log_delta.new_log.as_ref().unwrap();
-            match self.table_change_log.entry(*table_id) {
+            match table_change_log.entry(*table_id) {
                 Entry::Occupied(entry) => {
                     let change_log = entry.into_mut();
                     if let Some(prev_log) = change_log.0.last() {
@@ -747,22 +764,21 @@ impl HummockVersion {
         // If a table has no new change log entry (even an empty one), it means we have stopped maintained
         // the change log for the table, and then we will remove the table change log.
         // The table change log will also be removed when the table id is removed.
-        self.table_change_log.retain(|table_id, _| {
-            if version_delta.removed_table_ids.contains(table_id) {
+        table_change_log.retain(|table_id, _| {
+            if removed_table_ids.contains(table_id) {
                 return false;
             }
-            if let Some(table_info_delta) = version_delta.state_table_info_delta.get(table_id)
+            if let Some(table_info_delta) = state_table_info_delta.get(table_id)
                 && let Some(Some(prev_table_info)) = changed_table_info.get(table_id) && table_info_delta.committed_epoch > prev_table_info.committed_epoch {
                 // the table exists previously, and its committed epoch has progressed.
             } else {
                 // otherwise, the table change log should be kept anyway
                 return true;
             }
-            let contains = version_delta.change_log_delta.contains_key(table_id);
+            let contains = change_log_delta.contains_key(table_id);
             if !contains {
                 warn!(
                         ?table_id,
-                        max_committed_epoch = version_delta.visible_table_committed_epoch(),
                         "table change log dropped due to no further change log at newly committed epoch",
                     );
             }
@@ -770,8 +786,8 @@ impl HummockVersion {
         });
 
         // truncate the remaining table change log
-        for (table_id, change_log_delta) in &version_delta.change_log_delta {
-            if let Some(change_log) = self.table_change_log.get_mut(table_id) {
+        for (table_id, change_log_delta) in change_log_delta {
+            if let Some(change_log) = table_change_log.get_mut(table_id) {
                 change_log.truncate(change_log_delta.truncate_epoch);
             }
         }

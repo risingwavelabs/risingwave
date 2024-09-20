@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::time::Duration;
@@ -38,8 +37,6 @@ use crate::deserialize_duration_from_string;
 use crate::error::ConnectorResult;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
-// The file describes the common abstractions for each connector and can be used in both source and
-// sink.
 
 pub const PRIVATE_LINK_BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
@@ -562,13 +559,6 @@ impl KinesisCommon {
         }
         Ok(KinesisClient::from_conf(builder.build()))
     }
-}
-#[derive(Debug, Deserialize)]
-pub struct UpsertMessage<'a> {
-    #[serde(borrow)]
-    pub primary_key: Cow<'a, [u8]>,
-    #[serde(borrow)]
-    pub record: Cow<'a, [u8]>,
 }
 
 #[serde_as]

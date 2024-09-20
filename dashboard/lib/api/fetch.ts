@@ -33,7 +33,6 @@ export default function useFetch<T>(
   const [response, setResponse] = useState<T>()
   const toast = useErrorToast()
 
-  // NOTE(eric): Don't put `fetchFn` in the dependency array. It might be a lambda function
   useEffect(() => {
     const fetchData = async () => {
       if (when) {
@@ -53,6 +52,10 @@ export default function useFetch<T>(
 
     const timer = setInterval(fetchData, intervalMs)
     return () => clearInterval(timer)
+    // NOTE(eric): Don't put `fetchFn` in the dependency array. Otherwise, it can cause an infinite loop.
+    // This is because `fetchFn` can be recreated every render, then it will trigger a dependency change,
+    // which triggers a re-render, and so on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast, intervalMs, when])
 
   return { response }
