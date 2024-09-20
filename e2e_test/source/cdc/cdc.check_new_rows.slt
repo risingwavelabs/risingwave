@@ -323,7 +323,7 @@ NULL                          NULL                                        NULL
 {NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} NULL
 
 query TTT
-SELECT * FROM postgres_timestamptz_types ORDER BY c_boolean, c_int;
+SELECT * FROM partitioned_timestamp_table ORDER BY c_boolean, c_int;
 ----
 1 f 2023-02-01 10:30:00
 2 f 2023-05-15 11:45:00
@@ -345,7 +345,7 @@ SELECT * FROM postgres_timestamptz_types ORDER BY c_boolean, c_int;
 19 t 2025-07-09 07:10:00
 
 query TTT
-SELECT * FROM postgres_timestamptz_types_2023 ORDER BY c_boolean, c_int;
+SELECT * FROM partitioned_timestamp_table_2023 ORDER BY c_boolean, c_int;
 ----
 1 f 2023-02-01 10:30:00
 2 f 2023-05-15 11:45:00
