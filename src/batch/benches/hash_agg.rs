@@ -25,7 +25,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc, hash};
-use risingwave_expr::aggregate::{AggCall, AggKind, PbAggKind};
+use risingwave_expr::aggregate::{AggCall, AggKind, PbAggType};
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
@@ -39,7 +39,7 @@ fn create_agg_call(
     return_type: DataType,
 ) -> PbAggCall {
     PbAggCall {
-        r#type: agg_kind.to_protobuf() as i32,
+        r#type: agg_kind.to_protobuf_simple() as i32,
         args: args
             .into_iter()
             .map(|col_idx| PbInputRef {
@@ -120,15 +120,15 @@ fn bench_hash_agg(c: &mut Criterion) {
 
     let bench_variants = [
         // (group by, agg, args, return type)
-        (vec![0], PbAggKind::Sum, vec![1], DataType::Int64),
-        (vec![0], PbAggKind::Count, vec![], DataType::Int64),
-        (vec![0], PbAggKind::Count, vec![2], DataType::Int64),
-        (vec![0], PbAggKind::Min, vec![1], DataType::Int64),
-        (vec![0], PbAggKind::StringAgg, vec![2], DataType::Varchar),
-        (vec![0, 2], PbAggKind::Sum, vec![1], DataType::Int64),
-        (vec![0, 2], PbAggKind::Count, vec![], DataType::Int64),
-        (vec![0, 2], PbAggKind::Count, vec![2], DataType::Int64),
-        (vec![0, 2], PbAggKind::Min, vec![1], DataType::Int64),
+        (vec![0], PbAggType::Sum, vec![1], DataType::Int64),
+        (vec![0], PbAggType::Count, vec![], DataType::Int64),
+        (vec![0], PbAggType::Count, vec![2], DataType::Int64),
+        (vec![0], PbAggType::Min, vec![1], DataType::Int64),
+        (vec![0], PbAggType::StringAgg, vec![2], DataType::Varchar),
+        (vec![0, 2], PbAggType::Sum, vec![1], DataType::Int64),
+        (vec![0, 2], PbAggType::Count, vec![], DataType::Int64),
+        (vec![0, 2], PbAggType::Count, vec![2], DataType::Int64),
+        (vec![0, 2], PbAggType::Min, vec![1], DataType::Int64),
     ];
 
     for (group_key_columns, agg_kind, arg_columns, return_type) in bench_variants {

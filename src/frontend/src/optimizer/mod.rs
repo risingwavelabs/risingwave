@@ -229,7 +229,7 @@ impl PlanRoot {
         use generic::Agg;
         use plan_node::PlanAggCall;
         use risingwave_common::types::ListValue;
-        use risingwave_expr::aggregate::PbAggKind;
+        use risingwave_expr::aggregate::PbAggType;
 
         use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
         use crate::utils::{Condition, IndexSet};
@@ -243,7 +243,7 @@ impl PlanRoot {
         let return_type = DataType::List(input_column_type.clone().into());
         let agg = Agg::new(
             vec![PlanAggCall {
-                agg_kind: PbAggKind::ArrayAgg.into(),
+                agg_kind: PbAggType::ArrayAgg.into(),
                 return_type: return_type.clone(),
                 inputs: vec![InputRef::new(select_idx, input_column_type.clone())],
                 distinct: false,

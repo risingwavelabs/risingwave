@@ -18,7 +18,7 @@ use std::mem;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggType};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};
@@ -60,7 +60,7 @@ impl Rule for DistinctAggRule {
             let order_ok = matches!(
                 c.agg_kind,
                 agg_kinds::result_unaffected_by_order_by!()
-                    | AggKind::Builtin(PbAggKind::ApproxPercentile)
+                    | AggKind::Builtin(PbAggType::ApproxPercentile)
             ) || c.order_by.is_empty();
             agg_kind_ok && order_ok
         }) {

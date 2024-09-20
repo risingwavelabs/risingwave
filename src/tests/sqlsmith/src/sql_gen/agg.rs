@@ -15,7 +15,7 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::PbAggKind;
+use risingwave_expr::aggregate::PbAggType;
 use risingwave_expr::sig::SigDataType;
 use risingwave_sqlparser::ast::{
     Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, ObjectName, OrderByExpr,
@@ -31,7 +31,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             Some(funcs) => funcs,
         };
         let func = funcs.choose(&mut self.rng).unwrap();
-        if matches!(func.name.as_aggregate(), PbAggKind::Min | PbAggKind::Max)
+        if matches!(func.name.as_aggregate(), PbAggType::Min | PbAggType::Max)
             && matches!(
                 func.ret_type,
                 SigDataType::Exact(DataType::Boolean | DataType::Jsonb)
@@ -51,7 +51,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // DISTINCT now only works with agg kinds except `ApproxCountDistinct`, and with at least
         // one argument and only the first being non-constant. See `Binder::bind_normal_agg`
         // for more details.
-        let distinct_allowed = func.name.as_aggregate() != PbAggKind::ApproxCountDistinct
+        let distinct_allowed = func.name.as_aggregate() != PbAggType::ApproxCountDistinct
             && !exprs.is_empty()
             && exprs.iter().skip(1).all(|e| matches!(e, Expr::Value(_)));
         let distinct = distinct_allowed && self.flip_coin();

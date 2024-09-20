@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::{AggKind, PbAggKind};
+use risingwave_expr::aggregate::{AggKind, PbAggType};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
@@ -109,11 +109,11 @@ impl<'a> LogicalOverWindowBuilder<'a> {
             && matches!(
                 agg_kind,
                 AggKind::Builtin(
-                    PbAggKind::Avg
-                        | PbAggKind::StddevPop
-                        | PbAggKind::StddevSamp
-                        | PbAggKind::VarPop
-                        | PbAggKind::VarSamp
+                    PbAggType::Avg
+                        | PbAggType::StddevPop
+                        | PbAggType::StddevSamp
+                        | PbAggType::VarPop
+                        | PbAggType::VarSamp
                 )
             ) {
             let agg_call = AggCall::new(
@@ -192,10 +192,10 @@ impl<'a> OverWindowProjectBuilder<'a> {
             && matches!(
                 agg_kind,
                 AggKind::Builtin(
-                    PbAggKind::StddevPop
-                        | PbAggKind::StddevSamp
-                        | PbAggKind::VarPop
-                        | PbAggKind::VarSamp
+                    PbAggType::StddevPop
+                        | PbAggType::StddevSamp
+                        | PbAggType::VarPop
+                        | PbAggType::VarSamp
                 )
             )
         {
@@ -379,7 +379,7 @@ impl LogicalOverWindow {
                 };
 
                 (
-                    WindowFuncKind::Aggregate(AggKind::Builtin(PbAggKind::FirstValue)),
+                    WindowFuncKind::Aggregate(AggKind::Builtin(PbAggType::FirstValue)),
                     frame,
                 )
             }

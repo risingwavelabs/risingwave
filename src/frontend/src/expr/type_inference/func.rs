@@ -18,8 +18,8 @@ use risingwave_common::bail_no_function;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::aggregate::PbAggType;
 pub use risingwave_expr::sig::*;
-use risingwave_pb::expr::agg_call::PbType as PbAggKind;
 use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 
 use super::{align_types, cast_ok_base, CastContext};
@@ -51,7 +51,7 @@ pub fn infer_type_with_sigmap(
             }
         }
         FuncName::Aggregate(agg_kind) => {
-            if *agg_kind == PbAggKind::Grouping {
+            if *agg_kind == PbAggType::Grouping {
                 return Ok(DataType::Int32);
             }
         }

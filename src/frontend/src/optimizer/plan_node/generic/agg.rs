@@ -23,7 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
-use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggType};
 use risingwave_expr::sig::{FuncBuilder, FUNCTION_REGISTRY};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as PbAggCallState};
@@ -108,7 +108,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
                 let order_ok = matches!(
                     call.agg_kind,
                     agg_kinds::result_unaffected_by_order_by!()
-                        | AggKind::Builtin(PbAggKind::ApproxPercentile)
+                        | AggKind::Builtin(PbAggType::ApproxPercentile)
                 ) || call.order_by.is_empty();
                 let distinct_ok =
                     matches!(call.agg_kind, agg_kinds::result_unaffected_by_distinct!())
@@ -422,18 +422,18 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     // columns with order requirement in state table
                     let sort_keys = {
                         match agg_call.agg_kind {
-                            AggKind::Builtin(PbAggKind::Min) => {
+                            AggKind::Builtin(PbAggType::Min) => {
                                 vec![(OrderType::ascending(), agg_call.inputs[0].index)]
                             }
-                            AggKind::Builtin(PbAggKind::Max) => {
+                            AggKind::Builtin(PbAggType::Max) => {
                                 vec![(OrderType::descending(), agg_call.inputs[0].index)]
                             }
                             AggKind::Builtin(
-                                PbAggKind::FirstValue
-                                | PbAggKind::LastValue
-                                | PbAggKind::StringAgg
-                                | PbAggKind::ArrayAgg
-                                | PbAggKind::JsonbAgg,
+                                PbAggType::FirstValue
+                                | PbAggType::LastValue
+                                | PbAggType::StringAgg
+                                | PbAggType::ArrayAgg
+                                | PbAggType::JsonbAgg,
                             )
                             | AggKind::WrapScalar(_) => {
                                 if agg_call.order_by.is_empty() {
@@ -449,7 +449,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                         (
                                             if matches!(
                                                 agg_call.agg_kind,
-                                                AggKind::Builtin(PbAggKind::LastValue)
+                                                AggKind::Builtin(PbAggType::LastValue)
                                             ) {
                                                 o.order_type.reverse()
                                             } else {
@@ -460,7 +460,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                     })
                                     .collect()
                             }
-                            AggKind::Builtin(PbAggKind::JsonbObjectAgg) => agg_call
+                            AggKind::Builtin(PbAggType::JsonbObjectAgg) => agg_call
                                 .order_by
                                 .iter()
                                 .map(|o| (o.order_type, o.column_index))
@@ -483,12 +483,12 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     let include_keys = match agg_call.agg_kind {
                         // `agg_kinds::materialized_input_state` except for `min`/`max`
                         AggKind::Builtin(
-                            PbAggKind::FirstValue
-                            | PbAggKind::LastValue
-                            | PbAggKind::StringAgg
-                            | PbAggKind::ArrayAgg
-                            | PbAggKind::JsonbAgg
-                            | PbAggKind::JsonbObjectAgg,
+                            PbAggType::FirstValue
+                            | PbAggType::LastValue
+                            | PbAggType::StringAgg
+                            | PbAggType::ArrayAgg
+                            | PbAggType::JsonbAgg
+                            | PbAggType::JsonbObjectAgg,
                         )
                         | AggKind::WrapScalar(_) => {
                             agg_call.inputs.iter().map(|i| i.index).collect()
@@ -506,7 +506,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     unreachable!("should have been banned")
                 }
                 AggKind::Builtin(
-                    PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar,
+                    PbAggType::Unspecified | PbAggType::UserDefined | PbAggType::WrapScalar,
                 ) => {
                     unreachable!("invalid agg kind")
                 }
@@ -780,12 +780,7 @@ impl PlanAggCall {
 
     pub fn to_protobuf(&self) -> PbAggCall {
         PbAggCall {
-            r#type: match &self.agg_kind {
-                AggKind::Builtin(kind) => *kind,
-                AggKind::UserDefined(_) => PbAggKind::UserDefined,
-                AggKind::WrapScalar(_) => PbAggKind::WrapScalar,
-            }
-            .into(),
+            r#type: self.agg_kind.to_protobuf_simple().into(),
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
@@ -826,7 +821,7 @@ impl PlanAggCall {
 
     pub fn count_star() -> Self {
         PlanAggCall {
-            agg_kind: PbAggKind::Count.into(),
+            agg_kind: PbAggType::Count.into(),
             return_type: DataType::Int64,
             inputs: vec![],
             distinct: false,

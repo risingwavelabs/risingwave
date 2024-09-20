@@ -24,7 +24,7 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction, PbAggKind};
+use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction, PbAggType};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -126,16 +126,16 @@ impl MaterializedInputState {
 
         let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
             AggKind::Builtin(
-                PbAggKind::Min | PbAggKind::Max | PbAggKind::FirstValue | PbAggKind::LastValue,
+                PbAggType::Min | PbAggType::Max | PbAggType::FirstValue | PbAggType::LastValue,
             ) => Box::new(GenericAggStateCache::new(
                 TopNStateCache::new(extreme_cache_size),
                 agg_call.args.arg_types(),
             )),
             AggKind::Builtin(
-                PbAggKind::StringAgg
-                | PbAggKind::ArrayAgg
-                | PbAggKind::JsonbAgg
-                | PbAggKind::JsonbObjectAgg,
+                PbAggType::StringAgg
+                | PbAggType::ArrayAgg
+                | PbAggType::JsonbAgg
+                | PbAggType::JsonbObjectAgg,
             )
             | AggKind::WrapScalar(_) => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
@@ -149,7 +149,7 @@ impl MaterializedInputState {
         let output_first_value = matches!(
             agg_call.kind,
             AggKind::Builtin(
-                PbAggKind::Min | PbAggKind::Max | PbAggKind::FirstValue | PbAggKind::LastValue
+                PbAggType::Min | PbAggType::Max | PbAggType::FirstValue | PbAggType::LastValue
             )
         );
 
@@ -246,11 +246,11 @@ fn generate_order_columns_before_version_issue_13465(
 ) -> (Vec<usize>, Vec<OrderType>) {
     let (mut order_col_indices, mut order_types) = if matches!(
         agg_call.kind,
-        AggKind::Builtin(PbAggKind::Min | PbAggKind::Max)
+        AggKind::Builtin(PbAggType::Min | PbAggType::Max)
     ) {
         // `min`/`max` need not to order by any other columns, but have to
         // order by the agg value implicitly.
-        let order_type = if matches!(agg_call.kind, AggKind::Builtin(PbAggKind::Min)) {
+        let order_type = if matches!(agg_call.kind, AggKind::Builtin(PbAggType::Min)) {
             OrderType::ascending()
         } else {
             OrderType::descending()
@@ -263,7 +263,7 @@ fn generate_order_columns_before_version_issue_13465(
             .map(|p| {
                 (
                     p.column_index,
-                    if matches!(agg_call.kind, AggKind::Builtin(PbAggKind::LastValue)) {
+                    if matches!(agg_call.kind, AggKind::Builtin(PbAggType::LastValue)) {
                         p.order_type.reverse()
                     } else {
                         p.order_type

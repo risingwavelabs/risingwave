@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggType};
 use risingwave_sqlparser::ast::{self, FunctionArgExpr};
 
 use crate::binder::Clause;
@@ -138,10 +138,10 @@ impl Binder {
 
         // check signature and do implicit cast
         match (kind, direct_args.len(), args.as_mut_slice()) {
-            (AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc), 1, [arg]) => {
+            (AggKind::Builtin(PbAggType::PercentileCont | PbAggType::PercentileDisc), 1, [arg]) => {
                 let fraction = &mut direct_args[0];
                 decimal_to_float64(fraction, kind)?;
-                if matches!(&kind, AggKind::Builtin(PbAggKind::PercentileCont)) {
+                if matches!(&kind, AggKind::Builtin(PbAggType::PercentileCont)) {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
                         ErrorCode::InvalidInputSyntax(format!(
                             "arg in `{}` must be castable to float64",
@@ -150,8 +150,8 @@ impl Binder {
                     })?;
                 }
             }
-            (AggKind::Builtin(PbAggKind::Mode), 0, [_arg]) => {}
-            (AggKind::Builtin(PbAggKind::ApproxPercentile), 1..=2, [_percentile_col]) => {
+            (AggKind::Builtin(PbAggType::Mode), 0, [_arg]) => {}
+            (AggKind::Builtin(PbAggType::ApproxPercentile), 1..=2, [_percentile_col]) => {
                 let percentile = &mut direct_args[0];
                 decimal_to_float64(percentile, kind)?;
                 match direct_args.len() {
@@ -242,8 +242,8 @@ impl Binder {
         if distinct {
             if matches!(
                 kind,
-                AggKind::Builtin(PbAggKind::ApproxCountDistinct)
-                    | AggKind::Builtin(PbAggKind::ApproxPercentile)
+                AggKind::Builtin(PbAggType::ApproxCountDistinct)
+                    | AggKind::Builtin(PbAggType::ApproxPercentile)
             ) {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "DISTINCT is not allowed for approximate aggregation `{}`",

@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
-use risingwave_expr::aggregate::PbAggKind;
+use risingwave_expr::aggregate::PbAggType;
 use risingwave_expr::sig::{FuncSign, FUNCTION_REGISTRY};
 use risingwave_frontend::expr::{cast_sigs, CastContext, CastSig as RwCastSig, ExprType};
 use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, StructField};
@@ -177,19 +177,19 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                     && func.ret_type.is_exact()
                     // Ignored functions
                     && ![
-                        PbAggKind::InternalLastSeenValue, // Use internally
-                        PbAggKind::Sum0, // Used internally
-                        PbAggKind::BitAnd,
-                        PbAggKind::BitOr,
-                        PbAggKind::BoolAnd,
-                        PbAggKind::BoolOr,
-                        PbAggKind::PercentileCont,
-                        PbAggKind::PercentileDisc,
-                        PbAggKind::Mode,
-                        PbAggKind::ApproxPercentile, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
-                        PbAggKind::JsonbObjectAgg, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
-                        PbAggKind::StddevSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
-                        PbAggKind::VarSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+                        PbAggType::InternalLastSeenValue, // Use internally
+                        PbAggType::Sum0, // Used internally
+                        PbAggType::BitAnd,
+                        PbAggType::BitOr,
+                        PbAggType::BoolAnd,
+                        PbAggType::BoolOr,
+                        PbAggType::PercentileCont,
+                        PbAggType::PercentileDisc,
+                        PbAggType::Mode,
+                        PbAggType::ApproxPercentile, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+                        PbAggType::JsonbObjectAgg, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+                        PbAggType::StddevSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+                        PbAggType::VarSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                     ]
                     .contains(&func.name.as_aggregate())
                     // Exclude 2 phase agg global sum.
@@ -197,7 +197,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                     // Otherwise it conflicts with normal aggregation:
                     // Sum(Int64) -> Decimal.
                     // And sqlsmith will generate expressions with wrong types.
-                    && if func.name.as_aggregate() == PbAggKind::Sum {
+                    && if func.name.as_aggregate() == PbAggType::Sum {
                        !(func.inputs_type[0].as_exact() == &DataType::Int64 && func.ret_type.as_exact() == &DataType::Int64)
                     } else {
                        true

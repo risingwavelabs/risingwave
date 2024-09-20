@@ -23,7 +23,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::aggregate::{AggKind, PbAggKind};
+use risingwave_expr::aggregate::{AggKind, PbAggType};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
@@ -51,7 +51,7 @@ impl Rule for MinMaxOnIndexRule {
 
         if matches!(
             first_call.agg_kind,
-            AggKind::Builtin(PbAggKind::Min | PbAggKind::Max)
+            AggKind::Builtin(PbAggType::Min | PbAggType::Max)
         ) && !first_call.distinct
             && first_call.filter.always_true()
             && first_call.order_by.is_empty()
@@ -64,7 +64,7 @@ impl Rule for MinMaxOnIndexRule {
             let order = Order {
                 column_orders: vec![ColumnOrder::new(
                     calls.first()?.inputs.first()?.index(),
-                    if matches!(kind, AggKind::Builtin(PbAggKind::Min)) {
+                    if matches!(kind, AggKind::Builtin(PbAggType::Min)) {
                         OrderType::ascending()
                     } else {
                         OrderType::descending()
