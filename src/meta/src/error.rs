@@ -16,11 +16,11 @@ use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 
 use crate::hummock::error::Error as HummockError;
-use crate::manager::WorkerId;
 use crate::model::MetadataModelError;
 use crate::storage::MetaStoreError;
 
@@ -146,12 +146,6 @@ impl MetaError {
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
         MetaErrorInner::Duplicated(relation, name.into()).into()
-    }
-}
-
-impl From<etcd_client::Error> for MetaError {
-    fn from(e: etcd_client::Error) -> Self {
-        MetaErrorInner::Election(e.into()).into()
     }
 }
 

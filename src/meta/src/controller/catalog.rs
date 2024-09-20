@@ -74,11 +74,25 @@ use crate::controller::utils::{
     resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
 use crate::stream::SourceManagerRef;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
+
+pub type Catalog = (
+    Vec<PbDatabase>,
+    Vec<PbSchema>,
+    Vec<PbTable>,
+    Vec<PbSource>,
+    Vec<PbSink>,
+    Vec<PbSubscription>,
+    Vec<PbIndex>,
+    Vec<PbView>,
+    Vec<PbFunction>,
+    Vec<PbConnection>,
+    Vec<PbSecret>,
+);
 
 pub type CatalogControllerRef = Arc<CatalogController>;
 
@@ -108,7 +122,7 @@ pub struct ReleaseContext {
 
 impl CatalogController {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env.meta_store().as_sql().clone();
+        let meta_store = env.meta_store();
         let catalog_controller = Self {
             env,
             inner: RwLock::new(CatalogControllerInner {

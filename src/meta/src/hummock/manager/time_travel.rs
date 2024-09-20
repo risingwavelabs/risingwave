@@ -44,34 +44,23 @@ use sea_orm::{
 use crate::controller::SqlMetaStore;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::HummockManager;
-use crate::manager::MetaStoreImpl;
 
 /// Time travel.
 impl HummockManager {
-    pub(crate) fn sql_store(&self) -> Option<SqlMetaStore> {
-        match self.env.meta_store() {
-            MetaStoreImpl::Sql(sql_store) => Some(sql_store),
-            _ => None,
-        }
-    }
-
     pub(crate) async fn time_travel_enabled(&self) -> bool {
         self.env
             .system_params_reader()
             .await
             .time_travel_retention_ms()
             > 0
-            && self.sql_store().is_some()
     }
 
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
-        let Some(sql_store) = self.sql_store() else {
-            return Ok(());
-        };
-        let mut gurad = self.versioning.write().await;
-        gurad.mark_next_time_travel_version_snapshot();
+        let sql_store = self.env.meta_store_ref();
+        let mut guard = self.versioning.write().await;
+        guard.mark_next_time_travel_version_snapshot();
 
-        gurad.last_time_travel_snapshot_sst_ids = HashSet::new();
+        guard.last_time_travel_snapshot_sst_ids = HashSet::new();
         let Some(version) = hummock_time_travel_version::Entity::find()
             .order_by_desc(hummock_time_travel_version::Column::VersionId)
             .one(&sql_store.conn)
@@ -80,7 +69,7 @@ impl HummockManager {
         else {
             return Ok(());
         };
-        gurad.last_time_travel_snapshot_sst_ids = version.get_sst_ids();
+        guard.last_time_travel_snapshot_sst_ids = version.get_sst_ids();
         Ok(())
     }
 
@@ -88,12 +77,7 @@ impl HummockManager {
         &self,
         epoch_watermark: HummockEpoch,
     ) -> Result<()> {
-        let sql_store = match self.sql_store() {
-            Some(sql_store) => sql_store,
-            None => {
-                return Ok(());
-            }
-        };
+        let sql_store = self.env.meta_store_ref();
         let txn = sql_store.conn.begin().await?;
 
         let version_watermark = hummock_epoch_to_version::Entity::find()
@@ -252,19 +236,12 @@ impl HummockManager {
         &self,
     ) -> Result<impl Iterator<Item = HummockSstableId>> {
         let object_ids: Vec<risingwave_meta_model_v2::HummockSstableObjectId> =
-            match self.sql_store() {
-                Some(sql_store) => {
-                    hummock_sstable_info::Entity::find()
-                        .select_only()
-                        .column(hummock_sstable_info::Column::ObjectId)
-                        .into_tuple()
-                        .all(&sql_store.conn)
-                        .await?
-                }
-                None => {
-                    vec![]
-                }
-            };
+            hummock_sstable_info::Entity::find()
+                .select_only()
+                .column(hummock_sstable_info::Column::ObjectId)
+                .into_tuple()
+                .all(&self.env.meta_store_ref().conn)
+                .await?;
         let object_ids = object_ids
             .into_iter()
             .unique()
@@ -282,7 +259,7 @@ impl HummockManager {
         query_epoch: HummockEpoch,
         table_id: u32,
     ) -> Result<HummockVersion> {
-        let sql_store = self.sql_store().ok_or_else(require_sql_meta_store_err)?;
+        let sql_store = self.env.meta_store_ref();
         let epoch_to_version = hummock_epoch_to_version::Entity::find()
             .filter(
                 Condition::any()

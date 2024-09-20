@@ -492,7 +492,6 @@ category = "Misc"
 description = "Download all available components at once"
 dependencies = [
     "download-maven",
-    "download-etcd",
     "download-grafana",
     "download-tempo",
     "download-mcli",
@@ -548,7 +547,6 @@ description = "Download necessary tools to deploy a benchmark env"
 dependencies = [
     "download-minio",
     "download-mcli",
-    "download-etcd",
     "download-grafana",
     "download-prometheus",
     "download-tempo",
@@ -661,7 +659,7 @@ target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave standalone $@
 '''
 
 # TODO(kwannoel): Support `tasks.standalone-dev` as well.
-# Then we can reuse risedev to start peripheral services, e.g. compactor, etcd, kafka, etc...
+# Then we can reuse risedev to start peripheral services, e.g. compactor, kafka, etc...
 [tasks.standalone-demo-dev]
 category = "RiseDev - Start/Stop"
 description = "🌟 Start a RisingWave standalone demo."

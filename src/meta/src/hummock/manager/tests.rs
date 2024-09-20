@@ -34,18 +34,19 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
     LocalSstableInfo, FIRST_VERSION_ID,
 };
+use risingwave_meta_model_v2::hummock_pinned_snapshot;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot};
 use risingwave_pb::meta::add_worker_node_request::Property;
+use sea_orm::EntityTrait;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{default_compaction_selector, ManualCompactionOption};
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{HummockManager, HummockManagerRef};
-use crate::manager::{MetaSrvEnv, MetaStoreImpl, WorkerId};
-use crate::model::MetadataModel;
+use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
@@ -93,37 +94,25 @@ fn get_compaction_group_object_ids(
 }
 
 async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
-    match env.meta_store_ref() {
-        MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store).await.unwrap(),
-        MetaStoreImpl::Sql(sql_meta_store) => {
-            use risingwave_meta_model_v2::hummock_pinned_snapshot;
-            use sea_orm::EntityTrait;
-            hummock_pinned_snapshot::Entity::find()
-                .all(&sql_meta_store.conn)
-                .await
-                .unwrap()
-                .into_iter()
-                .map(Into::into)
-                .collect()
-        }
-    }
+    hummock_pinned_snapshot::Entity::find()
+        .all(&env.meta_store_ref().conn)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(Into::into)
+        .collect()
 }
 
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
-    match env.meta_store_ref() {
-        MetaStoreImpl::Kv(meta_store) => HummockPinnedVersion::list(meta_store).await.unwrap(),
-        MetaStoreImpl::Sql(sql_meta_store) => {
-            use risingwave_meta_model_v2::hummock_pinned_version;
-            use sea_orm::EntityTrait;
-            hummock_pinned_version::Entity::find()
-                .all(&sql_meta_store.conn)
-                .await
-                .unwrap()
-                .into_iter()
-                .map(Into::into)
-                .collect()
-        }
-    }
+    use risingwave_meta_model_v2::hummock_pinned_version;
+    use sea_orm::EntityTrait;
+    hummock_pinned_version::Entity::find()
+        .all(&env.meta_store_ref().conn)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(Into::into)
+        .collect()
 }
 
 #[tokio::test]

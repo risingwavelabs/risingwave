@@ -220,11 +220,11 @@ pub(crate) mod tests {
             .level0_max_compact_file_number(130)
             .level0_overlapping_sub_level_compact_level_count(1)
             .build();
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) =
             setup_compute_env_with_config(8080, config).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
 
         // 1. add sstables
@@ -233,7 +233,13 @@ pub(crate) mod tests {
         key.put_slice(b"same_key");
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
             &hummock_manager_ref,
             &[0],
         )
@@ -267,7 +273,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let _snapshot = hummock_manager_ref
-            .pin_snapshot(worker_node_id2)
+            .pin_snapshot(worker_node_id2 as _)
             .await
             .unwrap();
         let key = key.freeze();
@@ -329,7 +335,7 @@ pub(crate) mod tests {
         val.extend_from_slice(&(TEST_WATERMARK * 1000).to_be_bytes());
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        let _recv = compactor_manager.add_compactor(worker_node.id);
+        let _recv = compactor_manager.add_compactor(worker_id as _);
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
@@ -394,16 +400,21 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_compaction_same_key_not_split() {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
             &hummock_manager_ref,
             &[0],
         )
@@ -591,17 +602,22 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_compaction_drop_all_key() {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
 
         let existing_table_id: u32 = 1;
         let storage_existing_table_id = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
             &hummock_manager_ref,
             &[existing_table_id],
         )
@@ -657,16 +673,21 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_compaction_drop_key_by_existing_table_id() {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
 
         let global_storage = get_global_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
         )
         .await;
 
@@ -872,17 +893,22 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_compaction_drop_key_by_retention_seconds() {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
 
         let existing_table_id = 2;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
             &hummock_manager_ref,
             &[existing_table_id],
         )
@@ -1073,11 +1099,10 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_compaction_with_filter_key_extractor() {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
 
         let existing_table_id = 2;
@@ -1087,7 +1112,13 @@ pub(crate) mod tests {
         let key_prefix = key.freeze();
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
             &hummock_manager_ref,
             &[existing_table_id],
         )
@@ -1278,16 +1309,21 @@ pub(crate) mod tests {
     // This PR will support
     #[tokio::test]
     async fn test_compaction_delete_range() {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
         let existing_table_id: u32 = 1;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
             &hummock_manager_ref,
             &[existing_table_id],
         )
@@ -1493,16 +1529,21 @@ pub(crate) mod tests {
     }
 
     async fn test_fast_compact_impl(data: Vec<Vec<KeyValue>>) {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
         let existing_table_id: u32 = 1;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
             &hummock_manager_ref,
             &[existing_table_id],
         )
@@ -1668,16 +1709,21 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_tombstone_recycle() {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
         let existing_table_id: u32 = 1;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
             &hummock_manager_ref,
             &[existing_table_id],
         )
@@ -1786,16 +1832,21 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_skip_watermark() {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
         let existing_table_id: u32 = 1;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
             &hummock_manager_ref,
             &[existing_table_id],
         )
@@ -1982,11 +2033,10 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_split_and_merge() {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
 
         let table_id_1 = TableId::from(1);
@@ -1994,7 +2044,13 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
             &hummock_manager_ref,
             &[table_id_1.table_id(), table_id_2.table_id()],
         )

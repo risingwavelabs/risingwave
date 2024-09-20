@@ -21,6 +21,7 @@ use risingwave_common_service::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 pub use risingwave_hummock_sdk::key::{gen_key_from_bytes, gen_key_from_str};
+use risingwave_meta::controller::cluster::ClusterControllerRef;
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
 };
@@ -51,15 +52,20 @@ use crate::mock_notification_client::get_notification_client_for_test;
 pub async fn prepare_first_valid_version(
     env: MetaSrvEnv,
     hummock_manager_ref: HummockManagerRef,
-    worker_node: WorkerNode,
+    cluster_controller_ref: ClusterControllerRef,
+    worker_id: i32,
 ) -> (
     PinnedVersion,
     UnboundedSender<HummockVersionUpdate>,
     UnboundedReceiver<HummockVersionUpdate>,
 ) {
     let (tx, mut rx) = unbounded_channel();
-    let notification_client =
-        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
+    let notification_client = get_notification_client_for_test(
+        env,
+        hummock_manager_ref.clone(),
+        cluster_controller_ref,
+        worker_id,
+    );
     let backup_manager = BackupReader::unused().await;
     let write_limiter = WriteLimiter::unused();
     let observer_manager = ObserverManager::new(

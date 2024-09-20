@@ -621,10 +621,11 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<RisectlListStateTablesRequest>,
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
-        let tables = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_tables().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_all_state_tables().await?,
-        };
+        let tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_all_state_tables()
+            .await?;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 
@@ -652,30 +653,11 @@ impl DdlService for DdlServiceImpl {
         request: Request<GetTableRequest>,
     ) -> Result<Response<GetTableResponse>, Status> {
         let req = request.into_inner();
-        let table = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let database = mgr
-                    .catalog_manager
-                    .list_databases()
-                    .await
-                    .into_iter()
-                    .find(|db| db.name == req.database_name);
-                if let Some(db) = database {
-                    mgr.catalog_manager
-                        .list_tables()
-                        .await
-                        .into_iter()
-                        .find(|t| t.name == req.table_name && t.database_id == db.id)
-                } else {
-                    None
-                }
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .get_table_by_name(&req.database_name, &req.table_name)
-                    .await?
-            }
-        };
+        let table = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_by_name(&req.database_name, &req.table_name)
+            .await?;
 
         Ok(Response::new(GetTableResponse { table }))
     }
@@ -825,10 +807,11 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<ListConnectionsRequest>,
     ) -> Result<Response<ListConnectionsResponse>, Status> {
-        let conns = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_connections().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_connections().await?,
-        };
+        let conns = self
+            .metadata_manager
+            .catalog_controller
+            .list_connections()
+            .await?;
 
         Ok(Response::new(ListConnectionsResponse {
             connections: conns,
@@ -881,25 +864,18 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<GetTablesRequest>,
     ) -> Result<Response<GetTablesResponse>, Status> {
-        let ret = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                mgr.catalog_manager
-                    .get_tables(&request.into_inner().table_ids)
-                    .await
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .get_table_by_ids(
-                        request
-                            .into_inner()
-                            .table_ids
-                            .into_iter()
-                            .map(|id| id as _)
-                            .collect(),
-                    )
-                    .await?
-            }
-        };
+        let ret = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_by_ids(
+                request
+                    .into_inner()
+                    .table_ids
+                    .into_iter()
+                    .map(|id| id as _)
+                    .collect(),
+            )
+            .await?;
 
         let mut tables = HashMap::default();
         for table in ret {
@@ -1110,18 +1086,11 @@ impl DdlService for DdlServiceImpl {
 
 impl DdlServiceImpl {
     async fn validate_connection(&self, connection_id: ConnectionId) -> MetaResult<()> {
-        let connection = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                mgr.catalog_manager
-                    .get_connection_by_id(connection_id)
-                    .await?
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .get_connection_by_id(connection_id as _)
-                    .await?
-            }
-        };
+        let connection = self
+            .metadata_manager
+            .catalog_controller
+            .get_connection_by_id(connection_id as _)
+            .await?;
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info {
             // skip all checks for mock connection
             if svc.get_provider()? == PrivateLinkProvider::Mock {

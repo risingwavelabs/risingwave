@@ -12,14 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod compact_task_assignment;
 mod compaction_group_config;
 mod compaction_status;
 pub mod ext;
-mod pinned_snapshot;
-mod pinned_version;
-mod version_delta;
-mod version_stats;
 
 pub use compaction_group_config::CompactionGroup;
 

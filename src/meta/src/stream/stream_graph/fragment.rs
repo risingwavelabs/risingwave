@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -40,7 +41,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::barrier::SnapshotBackfillInfo;
-use crate::manager::{DdlType, IdGenManagerImpl, MetaSrvEnv, StreamingJob, WorkerId};
+use crate::manager::{DdlType, MetaSrvEnv, StreamingJob};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
@@ -100,7 +101,7 @@ impl BuildingFragment {
         tables
     }
 
-    /// Fill the information of the internal tables in the fragment.
+    /// Fill the information with the internal tables in the fragment.
     fn fill_internal_tables(
         fragment: &mut StreamFragment,
         job: &StreamingJob,
@@ -122,7 +123,7 @@ impl BuildingFragment {
         });
     }
 
-    /// Fill the information of the job in the fragment.
+    /// Fill the information with the job in the fragment.
     fn fill_job(fragment: &mut StreamFragment, job: &StreamingJob) -> bool {
         let table_id = job.id();
         let fragment_id = fragment.fragment_id;
@@ -329,16 +330,9 @@ impl StreamFragmentGraph {
         proto: StreamFragmentGraphProto,
         job: &StreamingJob,
     ) -> MetaResult<Self> {
-        let (fragment_id_gen, table_id_gen) = match env.id_gen_manager() {
-            IdGenManagerImpl::Kv(mgr) => (
-                GlobalFragmentIdGen::new(mgr, proto.fragments.len() as u64).await?,
-                GlobalTableIdGen::new(mgr, proto.table_ids_cnt as u64).await?,
-            ),
-            IdGenManagerImpl::Sql(mgr) => (
-                GlobalFragmentIdGen::new_v2(mgr, proto.fragments.len() as u64),
-                GlobalTableIdGen::new_v2(mgr, proto.table_ids_cnt as u64),
-            ),
-        };
+        let fragment_id_gen =
+            GlobalFragmentIdGen::new(env.id_gen_manager(), proto.fragments.len() as u64);
+        let table_id_gen = GlobalTableIdGen::new(env.id_gen_manager(), proto.table_ids_cnt as u64);
 
         // Create nodes.
         let fragments: HashMap<_, _> = proto

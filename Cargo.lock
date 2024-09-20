@@ -10747,7 +10747,6 @@ dependencies = [
  "hex",
  "inquire",
  "itertools 0.12.1",
- "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",

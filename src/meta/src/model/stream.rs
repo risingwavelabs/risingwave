@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_connector::source::SplitImpl;
+use risingwave_meta_model_v2::{SourceId, WorkerId};
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -34,8 +35,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::{ActorId, FragmentId};
-use crate::manager::{SourceId, WorkerId};
-use crate::model::{MetadataModel, MetadataModelResult};
+use crate::model::MetadataModelResult;
 use crate::stream::{build_actor_connector_splits, build_actor_split_impls, SplitAssignment};
 
 /// Column family name for table fragments.
@@ -148,16 +148,9 @@ impl StreamContext {
     }
 }
 
-impl MetadataModel for TableFragments {
-    type KeyType = u32;
-    type PbType = PbTableFragments;
-
-    fn cf_name() -> String {
-        TABLE_FRAGMENTS_CF_NAME.to_string()
-    }
-
-    fn to_protobuf(&self) -> Self::PbType {
-        Self::PbType {
+impl TableFragments {
+    pub fn to_protobuf(&self) -> PbTableFragments {
+        PbTableFragments {
             table_id: self.table_id.table_id(),
             state: self.state as _,
             fragments: self.fragments.clone().into_iter().collect(),
@@ -170,7 +163,7 @@ impl MetadataModel for TableFragments {
         }
     }
 
-    fn from_protobuf(prost: Self::PbType) -> Self {
+    pub fn from_protobuf(prost: PbTableFragments) -> Self {
         let ctx = StreamContext::from_protobuf(prost.get_ctx().unwrap());
 
         let default_parallelism = PbTableParallelism {
@@ -188,10 +181,6 @@ impl MetadataModel for TableFragments {
             ctx,
             assigned_parallelism: prost.parallelism.unwrap_or(default_parallelism).into(),
         }
-    }
-
-    fn key(&self) -> MetadataModelResult<Self::KeyType> {
-        Ok(self.table_id.table_id())
     }
 }
 

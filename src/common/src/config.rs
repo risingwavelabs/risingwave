@@ -173,7 +173,6 @@ serde_with::with_prefix!(batch_prefix "batch_");
 pub enum MetaBackend {
     #[default]
     Mem,
-    Etcd,
     Sql, // keep for backward compatibility
     Sqlite,
     Postgres,

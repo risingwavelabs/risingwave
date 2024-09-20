@@ -130,36 +130,24 @@ pub async fn on_meta_start(
 async fn fetch_serving_infos(
     metadata_manager: &MetadataManager,
 ) -> (Vec<WorkerNode>, HashMap<FragmentId, usize>) {
-    match metadata_manager {
-        MetadataManager::V1(mgr) => (
-            mgr.cluster_manager
-                .list_active_serving_compute_nodes()
-                .await,
-            mgr.fragment_manager
-                .running_fragment_parallelisms(None)
-                .await,
-        ),
-        MetadataManager::V2(mgr) => {
-            // TODO: need another mechanism to refresh serving info instead of panic.
-            let parallelisms = mgr
-                .catalog_controller
-                .running_fragment_parallelisms(None)
-                .await
-                .expect("fail to fetch running parallelisms");
-            let serving_compute_nodes = mgr
-                .cluster_controller
-                .list_active_serving_workers()
-                .await
-                .expect("fail to list serving compute nodes");
-            (
-                serving_compute_nodes,
-                parallelisms
-                    .into_iter()
-                    .map(|(fragment_id, cnt)| (fragment_id as FragmentId, cnt))
-                    .collect(),
-            )
-        }
-    }
+    // TODO: need another mechanism to refresh serving info instead of panic.
+    let parallelisms = metadata_manager
+        .catalog_controller
+        .running_fragment_parallelisms(None)
+        .await
+        .expect("fail to fetch running parallelisms");
+    let serving_compute_nodes = metadata_manager
+        .cluster_controller
+        .list_active_serving_workers()
+        .await
+        .expect("fail to list serving compute nodes");
+    (
+        serving_compute_nodes,
+        parallelisms
+            .into_iter()
+            .map(|(fragment_id, cnt)| (fragment_id as FragmentId, cnt))
+            .collect(),
+    )
 }
 
 pub async fn start_serving_vnode_mapping_worker(

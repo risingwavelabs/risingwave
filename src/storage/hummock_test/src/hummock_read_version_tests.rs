@@ -42,11 +42,10 @@ use crate::test_utils::prepare_first_valid_version;
 
 #[tokio::test]
 async fn test_read_version_basic() {
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
 
     let (pinned_version, _, _) =
-        prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
+        prepare_first_valid_version(env, hummock_manager_ref, cluster_ctl_ref, worker_id).await;
 
     let mut epoch = test_epoch(1);
     let table_id = 0;
@@ -270,11 +269,10 @@ async fn test_read_version_basic() {
 
 #[tokio::test]
 async fn test_read_filter_basic() {
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
 
     let (pinned_version, _, _) =
-        prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
+        prepare_first_valid_version(env, hummock_manager_ref, cluster_ctl_ref, worker_id).await;
 
     let epoch = test_epoch(1);
     let table_id = 0;

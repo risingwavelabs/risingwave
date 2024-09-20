@@ -71,7 +71,7 @@ pub enum TelemetryNodeType {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TelemetryReportBase {
-    /// `tracking_id` is persistent in etcd
+    /// `tracking_id` is persistent in metastore
     pub tracking_id: String,
     /// `session_id` is reset every time node restarts
     pub session_id: String,

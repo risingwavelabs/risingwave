@@ -873,21 +873,7 @@ impl HummockManager {
 
                     if self.env.opts.enable_dropped_column_reclaim {
                         // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
-                        compact_task.table_schemas = match self.metadata_manager() {
-                            MetadataManager::V1(mgr) => mgr
-                                .catalog_manager
-                                .get_versioned_table_schemas(&compact_task.existing_table_ids)
-                                .await
-                                .into_iter()
-                                .map(|(table_id, column_ids)| {
-                                    (table_id, TableSchema { column_ids })
-                                })
-                                .collect(),
-                            MetadataManager::V2(_) => {
-                                // TODO #13952: support V2
-                                BTreeMap::default()
-                            }
-                        };
+                        compact_task.table_schemas = BTreeMap::default();
                     }
 
                     compact_task_assignment.insert(

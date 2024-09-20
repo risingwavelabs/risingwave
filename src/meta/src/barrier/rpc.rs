@@ -47,7 +47,6 @@ use uuid::Uuid;
 use super::command::CommandContext;
 use super::{BarrierKind, GlobalBarrierManagerContext, TracedEpoch};
 use crate::barrier::info::InflightGraphInfo;
-use crate::manager::WorkerId;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -63,9 +62,9 @@ mod response_stream_future {
     use anyhow::anyhow;
     use futures::stream::BoxStream;
     use futures::{FutureExt, StreamExt};
+    use risingwave_meta_model_v2::WorkerId;
     use risingwave_pb::stream_service::StreamingControlStreamResponse;
 
-    use crate::manager::WorkerId;
     use crate::MetaResult;
 
     pub(super) fn into_future(
@@ -98,6 +97,7 @@ mod response_stream_future {
 }
 
 use response_stream_future::*;
+use risingwave_meta_model_v2::WorkerId;
 
 pub(super) struct ControlStreamManager {
     context: GlobalBarrierManagerContext,

@@ -533,8 +533,7 @@ async fn test_state_store_sync_v2() {
 async fn test_reload_storage() {
     let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     let anchor = gen_key_from_str(VirtualNode::ZERO, "aa");
 
@@ -584,7 +583,7 @@ async fn test_reload_storage() {
         hummock_options,
         sstable_store.clone(),
         meta_client.clone(),
-        get_notification_client_for_test(env, hummock_manager_ref, worker_node),
+        get_notification_client_for_test(env, hummock_manager_ref, cluster_ctl_ref, worker_id),
     )
     .await
     .unwrap();

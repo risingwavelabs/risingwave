@@ -60,6 +60,8 @@ pub struct SqlMetaStore {
     pub conn: DatabaseConnection,
 }
 
+pub const IN_MEMORY_STORE: &str = "sqlite::memory:";
+
 impl SqlMetaStore {
     pub fn new(conn: DatabaseConnection) -> Self {
         Self { conn }
@@ -69,7 +71,7 @@ impl SqlMetaStore {
     #[cfg(not(madsim))]
     pub async fn for_test() -> Self {
         use risingwave_meta_model_migration::{Migrator, MigratorTrait};
-        let conn = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
         Migrator::up(&conn, None).await.unwrap();
         Self { conn }
     }

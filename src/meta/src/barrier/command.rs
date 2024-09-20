@@ -23,6 +23,7 @@ use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
@@ -38,13 +39,13 @@ use risingwave_pb::stream_plan::{
     StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
-use thiserror_ext::AsReport;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightGraphInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
-use crate::manager::{DdlType, InflightFragmentInfo, MetadataManager, StreamingJob, WorkerId};
+use crate::controller::fragment::InflightFragmentInfo;
+use crate::manager::{DdlType, MetadataManager, StreamingJob};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{
     build_actor_connector_splits, validate_assignment, SplitAssignment, ThrottleConfig,
@@ -870,7 +871,7 @@ impl Command {
                     .values()
                     .flat_map(|reschedule| reschedule.newly_created_actors.iter())
                 {
-                    let worker_id = status.location.as_ref().unwrap().worker_node_id;
+                    let worker_id = status.location.as_ref().unwrap().worker_node_id as _;
                     map.entry(worker_id).or_default().push(actor.clone());
                 }
                 Some(map)
@@ -1035,51 +1036,14 @@ impl CommandContext {
                     .unregister_table_ids(table_fragments.all_table_ids().map(TableId::new))
                     .await?;
 
-                match &self.barrier_manager_context.metadata_manager {
-                    MetadataManager::V1(mgr) => {
-                        // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
-                        // We need to cleanup the table state. So we can do it here.
-                        // The logic is the same as above, for hummock_manager.unregister_table_ids.
-                        if let Err(e) = mgr
-                            .catalog_manager
-                            .cancel_create_materialized_view_procedure(
-                                table_fragments.table_id().table_id,
-                                table_fragments.internal_table_ids(),
-                            )
-                            .await
-                        {
-                            let table_id = table_fragments.table_id().table_id;
-                            tracing::warn!(
-                                table_id,
-                                error = %e.as_report(),
-                                "cancel_create_table_procedure failed for CancelStreamingJob",
-                            );
-                            // If failed, check that table is not in meta store.
-                            // If any table is, just panic, let meta do bootstrap recovery.
-                            // Otherwise our persisted state is dirty.
-                            let mut table_ids = table_fragments.internal_table_ids();
-                            table_ids.push(table_id);
-                            mgr.catalog_manager.assert_tables_deleted(table_ids).await;
-                        }
-
-                        // We need to drop table fragments here,
-                        // since this is not done in stream manager (foreground ddl)
-                        // OR barrier manager (background ddl)
-                        mgr.fragment_manager
-                            .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
-                                table_fragments.table_id(),
-                            )))
-                            .await?;
-                    }
-                    MetadataManager::V2(mgr) => {
-                        mgr.catalog_controller
-                            .try_abort_creating_streaming_job(
-                                table_fragments.table_id().table_id as _,
-                                true,
-                            )
-                            .await?;
-                    }
-                }
+                self.barrier_manager_context
+                    .metadata_manager
+                    .catalog_controller
+                    .try_abort_creating_streaming_job(
+                        table_fragments.table_id().table_id as _,
+                        true,
+                    )
+                    .await?;
             }
 
             Command::CreateStreamingJob { info, job_type } => {
@@ -1090,74 +1054,34 @@ impl CommandContext {
                     init_split_assignment,
                     ..
                 } = info;
-                match &self.barrier_manager_context.metadata_manager {
-                    MetadataManager::V1(mgr) => {
-                        let mut dependent_table_actors =
-                            Vec::with_capacity(upstream_root_actors.len());
-                        for (table_id, actors) in upstream_root_actors {
-                            let downstream_actors = dispatchers
-                                .iter()
-                                .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                                .map(|(&k, v)| (k, v.clone()))
-                                .collect();
-                            dependent_table_actors.push((*table_id, downstream_actors));
-                        }
-                        mgr.fragment_manager
-                            .post_create_table_fragments(
-                                &table_fragments.table_id(),
-                                dependent_table_actors,
-                                init_split_assignment.clone(),
-                            )
-                            .await?;
+                self.barrier_manager_context
+                    .metadata_manager
+                    .catalog_controller
+                    .post_collect_table_fragments(
+                        table_fragments.table_id().table_id as _,
+                        table_fragments.actor_ids(),
+                        dispatchers.clone(),
+                        init_split_assignment,
+                    )
+                    .await?;
 
-                        if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
-                            old_table_fragments,
-                            new_table_fragments,
-                            merge_updates,
-                            dispatchers,
+                if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
+                    new_table_fragments,
+                    dispatchers,
+                    init_split_assignment,
+                    ..
+                }) = job_type
+                {
+                    self.barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .post_collect_table_fragments(
+                            new_table_fragments.table_id().table_id as _,
+                            new_table_fragments.actor_ids(),
+                            dispatchers.clone(),
                             init_split_assignment,
-                            ..
-                        }) = job_type
-                        {
-                            // Drop fragment info in meta store.
-                            mgr.fragment_manager
-                                .post_replace_table(
-                                    old_table_fragments,
-                                    new_table_fragments,
-                                    merge_updates,
-                                    dispatchers,
-                                    init_split_assignment.clone(),
-                                )
-                                .await?;
-                        }
-                    }
-                    MetadataManager::V2(mgr) => {
-                        mgr.catalog_controller
-                            .post_collect_table_fragments(
-                                table_fragments.table_id().table_id as _,
-                                table_fragments.actor_ids(),
-                                dispatchers.clone(),
-                                init_split_assignment,
-                            )
-                            .await?;
-
-                        if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
-                            new_table_fragments,
-                            dispatchers,
-                            init_split_assignment,
-                            ..
-                        }) = job_type
-                        {
-                            mgr.catalog_controller
-                                .post_collect_table_fragments(
-                                    new_table_fragments.table_id().table_id as _,
-                                    new_table_fragments.actor_ids(),
-                                    dispatchers.clone(),
-                                    init_split_assignment,
-                                )
-                                .await?;
-                        }
-                    }
+                        )
+                        .await?;
                 }
 
                 // Extract the fragments that include source operators.
@@ -1187,36 +1111,21 @@ impl CommandContext {
             Command::ReplaceTable(ReplaceTablePlan {
                 old_table_fragments,
                 new_table_fragments,
-                merge_updates,
                 dispatchers,
                 init_split_assignment,
                 ..
             }) => {
-                match &self.barrier_manager_context.metadata_manager {
-                    MetadataManager::V1(mgr) => {
-                        // Drop fragment info in meta store.
-                        mgr.fragment_manager
-                            .post_replace_table(
-                                old_table_fragments,
-                                new_table_fragments,
-                                merge_updates,
-                                dispatchers,
-                                init_split_assignment.clone(),
-                            )
-                            .await?;
-                    }
-                    MetadataManager::V2(mgr) => {
-                        // Update actors and actor_dispatchers for new table fragments.
-                        mgr.catalog_controller
-                            .post_collect_table_fragments(
-                                new_table_fragments.table_id().table_id as _,
-                                new_table_fragments.actor_ids(),
-                                dispatchers.clone(),
-                                init_split_assignment,
-                            )
-                            .await?;
-                    }
-                }
+                // Update actors and actor_dispatchers for new table fragments.
+                self.barrier_manager_context
+                    .metadata_manager
+                    .catalog_controller
+                    .post_collect_table_fragments(
+                        new_table_fragments.table_id().table_id as _,
+                        new_table_fragments.actor_ids(),
+                        dispatchers.clone(),
+                        init_split_assignment,
+                    )
+                    .await?;
 
                 // Apply the split changes in source manager.
                 self.barrier_manager_context
@@ -1239,18 +1148,13 @@ impl CommandContext {
 
             Command::CreateSubscription {
                 subscription_id, ..
-            } => match &self.barrier_manager_context.metadata_manager {
-                MetadataManager::V1(mgr) => {
-                    mgr.catalog_manager
-                        .finish_create_subscription_procedure(*subscription_id)
-                        .await?;
-                }
-                MetadataManager::V2(mgr) => {
-                    mgr.catalog_controller
-                        .finish_create_subscription_catalog(*subscription_id)
-                        .await?;
-                }
-            },
+            } => {
+                self.barrier_manager_context
+                    .metadata_manager
+                    .catalog_controller
+                    .finish_create_subscription_catalog(*subscription_id)
+                    .await?
+            }
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
         }

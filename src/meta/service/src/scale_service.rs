@@ -58,12 +58,9 @@ impl ScaleServiceImpl {
         }
     }
 
+    // TODO: deprecate it.
     async fn get_revision(&self) -> TableRevision {
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.fragment_manager.get_revision().await,
-            // todo, support table revision in meta model v2
-            MetadataManager::V2(_) => Default::default(),
-        }
+        Default::default()
     }
 }
 
@@ -76,23 +73,14 @@ impl ScaleService for ScaleServiceImpl {
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
-        let table_fragments = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr
-                .fragment_manager
-                .get_fragment_read_guard()
-                .await
-                .table_fragments()
-                .values()
-                .map(|tf| tf.to_protobuf())
-                .collect(),
-            MetadataManager::V2(mgr) => mgr
-                .catalog_controller
-                .table_fragments()
-                .await?
-                .values()
-                .cloned()
-                .collect(),
-        };
+        let table_fragments = self
+            .metadata_manager
+            .catalog_controller
+            .table_fragments()
+            .await?
+            .values()
+            .cloned()
+            .collect();
 
         let worker_nodes = self
             .metadata_manager
@@ -152,41 +140,21 @@ impl ScaleService for ScaleServiceImpl {
             }));
         }
 
-        let table_parallelisms = {
-            match &self.metadata_manager {
-                MetadataManager::V1(mgr) => {
-                    let guard = mgr.fragment_manager.get_fragment_read_guard().await;
+        let streaming_job_ids = self
+            .metadata_manager
+            .catalog_controller
+            .get_fragment_job_id(
+                worker_reschedules
+                    .keys()
+                    .map(|id| *id as FragmentId)
+                    .collect(),
+            )
+            .await?;
 
-                    let mut table_parallelisms = HashMap::new();
-                    for (table_id, table) in guard.table_fragments() {
-                        if table
-                            .fragment_ids()
-                            .any(|fragment_id| worker_reschedules.contains_key(&fragment_id))
-                        {
-                            table_parallelisms.insert(*table_id, TableParallelism::Custom);
-                        }
-                    }
-
-                    table_parallelisms
-                }
-                MetadataManager::V2(mgr) => {
-                    let streaming_job_ids = mgr
-                        .catalog_controller
-                        .get_fragment_job_id(
-                            worker_reschedules
-                                .keys()
-                                .map(|id| *id as FragmentId)
-                                .collect(),
-                        )
-                        .await?;
-
-                    streaming_job_ids
-                        .into_iter()
-                        .map(|id| (TableId::new(id as _), TableParallelism::Custom))
-                        .collect()
-                }
-            }
-        };
+        let table_parallelisms = streaming_job_ids
+            .into_iter()
+            .map(|id| (TableId::new(id as _), TableParallelism::Custom))
+            .collect();
 
         self.stream_manager
             .reschedule_actors(

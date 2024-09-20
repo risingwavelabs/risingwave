@@ -48,9 +48,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
-use crate::manager::{
-    LocalNotification, MetaSrvEnv, StreamingClusterInfo, WorkerKey, META_NODE_ID,
-};
+use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey, META_NODE_ID};
 use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
 
@@ -98,7 +96,7 @@ impl From<WorkerInfo> for PbWorkerNode {
 impl ClusterController {
     pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
         let inner = ClusterControllerInner::new(
-            env.meta_store().as_sql().conn.clone(),
+            env.meta_store_ref().conn.clone(),
             env.opts.disable_automatic_parallelism_control,
         )
         .await?;
@@ -387,6 +385,26 @@ impl ClusterController {
     }
 }
 
+/// The cluster info used for scheduling a streaming job.
+#[derive(Debug, Clone)]
+pub struct StreamingClusterInfo {
+    /// All **active** compute nodes in the cluster.
+    pub worker_nodes: HashMap<u32, WorkerNode>,
+
+    /// All unschedulable compute nodes in the cluster.
+    pub unschedulable_workers: HashSet<u32>,
+}
+
+// Encapsulating the use of parallelism
+impl StreamingClusterInfo {
+    pub fn parallelism(&self) -> usize {
+        self.worker_nodes
+            .values()
+            .map(|worker| worker.parallelism as usize)
+            .sum()
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct WorkerExtraInfo {
     // Volatile values updated by meta node as follows.
@@ -426,19 +444,6 @@ impl WorkerExtraInfo {
                     self.hummock_gc_watermark = Some(watermark);
                 }
             }
-        }
-    }
-}
-
-// TODO: remove this when we deprecate model v1.
-impl From<crate::model::Worker> for WorkerExtraInfo {
-    fn from(worker: crate::model::Worker) -> Self {
-        Self {
-            expire_at: Some(worker.expire_at),
-            started_at: worker.started_at,
-            info_version_id: worker.info_version_id,
-            hummock_gc_watermark: worker.hummock_gc_watermark,
-            resource: worker.resource,
         }
     }
 }

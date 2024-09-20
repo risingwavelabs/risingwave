@@ -63,8 +63,8 @@ where
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         // fetch telemetry tracking_id from the meta node only at the beginning
-        // There is only one case tracking_id updated at the runtime ---- etcd data has been
-        // cleaned. There is no way that etcd has been cleaned but nodes are still running
+        // There is only one case tracking_id updated at the runtime ---- metastore data has been
+        // cleaned. There is no way that metastore has been cleaned but nodes are still running
         let tracking_id = match info_fetcher.fetch_telemetry_info().await {
             Ok(Some(id)) => id,
             Ok(None) => {

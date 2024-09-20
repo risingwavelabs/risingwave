@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
@@ -56,10 +57,27 @@ use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
-use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
+use crate::manager::LocalNotification;
 use crate::model::{TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
+
+#[derive(Clone, Debug)]
+pub struct InflightFragmentInfo {
+    pub actors: HashMap<ActorId, WorkerNodeId>,
+    pub state_table_ids: HashSet<TableId>,
+    pub is_injectable: bool,
+}
+
+pub struct ActorInfos {
+    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+}
+
+impl ActorInfos {
+    pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
+        Self { fragment_infos }
+    }
+}
 
 impl CatalogControllerInner {
     /// List all fragment vnode mapping info for all CREATED streaming jobs.

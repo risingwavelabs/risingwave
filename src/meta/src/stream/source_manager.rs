@@ -29,6 +29,7 @@ use risingwave_connector::source::{
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
+use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
@@ -40,7 +41,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{MetadataManager, SourceId};
+use crate::manager::MetadataManager;
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
@@ -659,67 +660,50 @@ impl SourceManager {
         let mut source_fragments = HashMap::new();
         let mut backfill_fragments = HashMap::new();
 
-        match &metadata_manager {
-            MetadataManager::V1(mgr) => {
-                for table_fragments in mgr
-                    .fragment_manager
-                    .get_fragment_read_guard()
-                    .await
-                    .table_fragments()
-                    .values()
-                {
-                    source_fragments.extend(table_fragments.stream_source_fragments());
-                    backfill_fragments.extend(table_fragments.source_backfill_fragments()?);
-                    actor_splits.extend(table_fragments.actor_splits.clone());
-                }
-            }
-            MetadataManager::V2(mgr) => {
-                source_fragments = mgr
-                    .catalog_controller
-                    .load_source_fragment_ids()
-                    .await?
-                    .into_iter()
-                    .map(|(source_id, fragment_ids)| {
-                        (
-                            source_id as SourceId,
-                            fragment_ids.into_iter().map(|id| id as _).collect(),
-                        )
-                    })
-                    .collect();
-                backfill_fragments = mgr
-                    .catalog_controller
-                    .load_backfill_fragment_ids()
-                    .await?
-                    .into_iter()
-                    .map(|(source_id, fragment_ids)| {
-                        (
-                            source_id as SourceId,
-                            fragment_ids
-                                .into_iter()
-                                .map(|(id, up_id)| (id as _, up_id as _))
-                                .collect(),
-                        )
-                    })
-                    .collect();
-                actor_splits = mgr
-                    .catalog_controller
-                    .load_actor_splits()
-                    .await?
-                    .into_iter()
-                    .map(|(actor_id, splits)| {
-                        (
-                            actor_id as ActorId,
-                            splits
-                                .to_protobuf()
-                                .splits
-                                .iter()
-                                .map(|split| SplitImpl::try_from(split).unwrap())
-                                .collect(),
-                        )
-                    })
-                    .collect();
-            }
-        }
+        source_fragments = metadata_manager
+            .catalog_controller
+            .load_source_fragment_ids()
+            .await?
+            .into_iter()
+            .map(|(source_id, fragment_ids)| {
+                (
+                    source_id as SourceId,
+                    fragment_ids.into_iter().map(|id| id as _).collect(),
+                )
+            })
+            .collect();
+        backfill_fragments = metadata_manager
+            .catalog_controller
+            .load_backfill_fragment_ids()
+            .await?
+            .into_iter()
+            .map(|(source_id, fragment_ids)| {
+                (
+                    source_id as SourceId,
+                    fragment_ids
+                        .into_iter()
+                        .map(|(id, up_id)| (id as _, up_id as _))
+                        .collect(),
+                )
+            })
+            .collect();
+        actor_splits = metadata_manager
+            .catalog_controller
+            .load_actor_splits()
+            .await?
+            .into_iter()
+            .map(|(actor_id, splits)| {
+                (
+                    actor_id as ActorId,
+                    splits
+                        .to_protobuf()
+                        .splits
+                        .iter()
+                        .map(|split| SplitImpl::try_from(split).unwrap())
+                        .collect(),
+                )
+            })
+            .collect();
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,

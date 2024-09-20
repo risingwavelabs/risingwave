@@ -38,6 +38,7 @@ use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -64,7 +65,7 @@ use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
-    MetadataManager, SystemParamsManagerImpl, WorkerId,
+    MetadataManager,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
@@ -668,16 +669,10 @@ impl GlobalBarrierManager {
                  To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
                 PAUSE_ON_NEXT_BOOTSTRAP_KEY
             );
-            match self.env.system_params_manager_impl_ref() {
-                SystemParamsManagerImpl::Kv(mgr) => {
-                    mgr.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
-                        .await?;
-                }
-                SystemParamsManagerImpl::Sql(mgr) => {
-                    mgr.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
-                        .await?;
-                }
-            };
+            self.env
+                .system_params_manager_impl_ref()
+                .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                .await?;
         }
         Ok(paused)
     }
@@ -697,14 +692,13 @@ impl GlobalBarrierManager {
         );
 
         if !self.enable_recovery {
-            let job_exist = match &self.context.metadata_manager {
-                MetadataManager::V1(mgr) => mgr.fragment_manager.has_any_table_fragments().await,
-                MetadataManager::V2(mgr) => mgr
-                    .catalog_controller
-                    .has_any_streaming_jobs()
-                    .await
-                    .unwrap(),
-            };
+            let job_exist = self
+                .context
+                .metadata_manager
+                .catalog_controller
+                .has_any_streaming_jobs()
+                .await
+                .unwrap();
             if job_exist {
                 panic!(
                     "Some streaming jobs already exist in meta, please start with recovery enabled \
@@ -1620,20 +1614,13 @@ impl GlobalBarrierManagerContext {
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
     async fn resolve_graph_info(&self) -> MetaResult<InflightGraphInfo> {
-        let info = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
+        let all_actor_infos = self
+            .metadata_manager
+            .catalog_controller
+            .load_all_actors()
+            .await?;
 
-                InflightGraphInfo::new(all_actor_infos.fragment_infos)
-            }
-            MetadataManager::V2(mgr) => {
-                let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
-
-                InflightGraphInfo::new(all_actor_infos.fragment_infos)
-            }
-        };
-
-        Ok(info)
+        Ok(InflightGraphInfo::new(all_actor_infos.fragment_infos))
     }
 
     /// Serving `SHOW JOBS / SELECT * FROM rw_ddl_progress`
@@ -1647,36 +1634,19 @@ impl GlobalBarrierManagerContext {
         };
         // If not in tracker, means the first barrier not collected yet.
         // In that case just return progress 0.
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                for table in mgr.catalog_manager.list_persisted_creating_tables().await {
-                    if table.table_type != TableType::MaterializedView as i32 {
-                        continue;
-                    }
-                    if let Entry::Vacant(e) = ddl_progress.entry(table.id) {
-                        e.insert(DdlProgress {
-                            id: table.id as u64,
-                            statement: table.definition,
-                            progress: "0.0%".into(),
-                        });
-                    }
-                }
-            }
-            MetadataManager::V2(mgr) => {
-                let mviews = mgr
-                    .catalog_controller
-                    .list_background_creating_mviews(true)
-                    .await
-                    .unwrap();
-                for mview in mviews {
-                    if let Entry::Vacant(e) = ddl_progress.entry(mview.table_id as _) {
-                        e.insert(DdlProgress {
-                            id: mview.table_id as u64,
-                            statement: mview.definition,
-                            progress: "0.0%".into(),
-                        });
-                    }
-                }
+        let mviews = self
+            .metadata_manager
+            .catalog_controller
+            .list_background_creating_mviews(true)
+            .await
+            .unwrap();
+        for mview in mviews {
+            if let Entry::Vacant(e) = ddl_progress.entry(mview.table_id as _) {
+                e.insert(DdlProgress {
+                    id: mview.table_id as u64,
+                    statement: mview.definition,
+                    progress: "0.0%".into(),
+                });
             }
         }
 

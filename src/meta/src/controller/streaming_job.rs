@@ -29,7 +29,7 @@ use risingwave_meta_model_v2::prelude::{
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
     streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType, DatabaseId,
-    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId,
+    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SinkId, SourceId,
     StreamNode, StreamingParallelism, TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
@@ -67,7 +67,7 @@ use crate::controller::utils::{
     rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{NotificationVersion, SinkId, StreamingJob};
+use crate::manager::{NotificationVersion, StreamingJob};
 use crate::model::{StreamContext, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};

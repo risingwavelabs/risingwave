@@ -114,11 +114,11 @@ async fn compaction_test(
     test_count: u64,
     test_delete_ratio: u32,
 ) -> anyhow::Result<()> {
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) =
         setup_compute_env_with_config(8080, compaction_config.clone()).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
 
     let delete_key_table = PbTable {
@@ -237,7 +237,12 @@ async fn compaction_test(
         storage_opts.clone(),
         sstable_store.clone(),
         meta_client.clone(),
-        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
+        get_notification_client_for_test(
+            env,
+            hummock_manager_ref.clone(),
+            cluster_ctl_ref,
+            worker_id,
+        ),
         Arc::new(RpcFilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         compactor_metrics.clone(),

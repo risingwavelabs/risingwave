@@ -28,9 +28,9 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::Mutex;
 use tonic::Status;
 
-use crate::manager::cluster::WorkerKey;
+use crate::controller::SqlMetaStore;
 use crate::manager::notification_version::NotificationVersionGenerator;
-use crate::manager::MetaStoreImpl;
+use crate::manager::WorkerKey;
 use crate::model::FragmentId;
 
 pub type MessageStatus = Status;
@@ -84,7 +84,7 @@ pub struct NotificationManager {
 }
 
 impl NotificationManager {
-    pub async fn new(meta_store_impl: MetaStoreImpl) -> Self {
+    pub async fn new(meta_store_impl: SqlMetaStore) -> Self {
         // notification waiting queue.
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
         let core = Arc::new(Mutex::new(NotificationManagerCore::new()));
@@ -413,11 +413,12 @@ mod tests {
     use risingwave_pb::common::HostAddress;
 
     use super::*;
+    use crate::manager::WorkerKey;
     use crate::storage::{MemStore, MetaStoreBoxExt};
 
     #[tokio::test]
     async fn test_multiple_subscribers_one_worker() {
-        let mgr = NotificationManager::new(MetaStoreImpl::Kv(MemStore::new().into_ref())).await;
+        let mgr = NotificationManager::new(SqlMetaStore::for_test()).await;
         let worker_key1 = WorkerKey(HostAddress {
             host: "a".to_string(),
             port: 1,

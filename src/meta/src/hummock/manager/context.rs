@@ -27,6 +27,7 @@ use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, ValidationTask,
 };
 
+use crate::controller::SqlMetaStore;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
@@ -34,7 +35,7 @@ use crate::hummock::metrics_utils::{
     trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
 };
 use crate::hummock::HummockManager;
-use crate::manager::{MetaStoreImpl, MetadataManager, META_NODE_ID};
+use crate::manager::{MetadataManager, META_NODE_ID};
 use crate::model::BTreeMapTransaction;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -72,7 +73,7 @@ impl ContextInfo {
     async fn release_contexts(
         &mut self,
         context_ids: impl AsRef<[HummockContextId]>,
-        meta_store_ref: MetaStoreImpl,
+        meta_store_ref: SqlMetaStore,
     ) -> Result<()> {
         fail_point!("release_contexts_metastore_err", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")

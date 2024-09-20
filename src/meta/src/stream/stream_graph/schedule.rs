@@ -27,13 +27,13 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorMapping, VirtualNode, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::{bail, hash};
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
-use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::stream::schedule_units_for_slots;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
@@ -342,7 +342,7 @@ pub struct Locations {
     /// actor location map.
     pub actor_locations: BTreeMap<ActorId, WorkerSlotId>,
     /// worker location map.
-    pub worker_locations: WorkerLocations,
+    pub worker_locations: HashMap<WorkerId, WorkerNode>,
 }
 
 impl Locations {
