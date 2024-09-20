@@ -12,75 +12,52 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 
-use itertools::Itertools;
+use prost_types::FileDescriptorSet;
+use protox::file::{ChainFileResolver, File, FileResolver, GoogleFileResolver};
+use protox::Error;
 
-macro_rules! embed_wkts {
-    [$( $path:literal ),+ $(,)?] => {
-        &[$(
-            (
-                concat!("google/protobuf/", $path),
-                include_bytes!(concat!(env!("PROTO_INCLUDE"), "/google/protobuf/", $path)).as_slice(),
-            )
-        ),+]
-    };
-}
-const WELL_KNOWN_TYPES: &[(&str, &[u8])] = embed_wkts![
-    "any.proto",
-    "api.proto",
-    "compiler/plugin.proto",
-    "descriptor.proto",
-    "duration.proto",
-    "empty.proto",
-    "field_mask.proto",
-    "source_context.proto",
-    "struct.proto",
-    "timestamp.proto",
-    "type.proto",
-    "wrappers.proto",
-];
-
-#[derive(Debug, thiserror::Error)]
-pub enum PbCompileError {
-    #[error("build_file_descriptor_set failed\n{}", errs.iter().map(|e| format!("\t{e}")).join("\n"))]
-    Build {
-        errs: Vec<protobuf_native::compiler::FileLoadError>,
-    },
-    #[error("serialize descriptor set failed")]
-    Serialize,
-}
-
+// name -> content
 pub fn compile_pb(
-    main_file: (PathBuf, Vec<u8>),
-    dependencies: impl IntoIterator<Item = (PathBuf, Vec<u8>)>,
-) -> Result<Vec<u8>, PbCompileError> {
-    use protobuf_native::compiler::{
-        SimpleErrorCollector, SourceTreeDescriptorDatabase, VirtualSourceTree,
-    };
-    use protobuf_native::MessageLite;
-
-    let root = main_file.0.clone();
-
-    let mut source_tree = VirtualSourceTree::new();
-    for (path, bytes) in std::iter::once(main_file).chain(dependencies.into_iter()) {
-        source_tree.as_mut().add_file(&path, bytes);
-    }
-    for (path, bytes) in WELL_KNOWN_TYPES {
-        source_tree
-            .as_mut()
-            .add_file(Path::new(path), bytes.to_vec());
+    main_file: (String, String),
+    dependencies: impl IntoIterator<Item = (String, String)>,
+) -> Result<FileDescriptorSet, Error> {
+    struct MyResolver {
+        map: HashMap<String, String>,
     }
 
-    let mut error_collector = SimpleErrorCollector::new();
-    // `db` needs to be dropped before we can iterate on `error_collector`.
-    let fds = {
-        let mut db = SourceTreeDescriptorDatabase::new(source_tree.as_mut());
-        db.as_mut().record_errors_to(error_collector.as_mut());
-        db.as_mut().build_file_descriptor_set(&[root])
+    impl MyResolver {
+        fn new(
+            main_file: (String, String),
+            dependencies: impl IntoIterator<Item = (String, String)>,
+        ) -> Self {
+            let map = std::iter::once(main_file).chain(dependencies).collect();
+
+            Self { map }
+        }
     }
-    .map_err(|_| PbCompileError::Build {
-        errs: error_collector.as_mut().collect(),
-    })?;
-    fds.serialize().map_err(|_| PbCompileError::Serialize)
+
+    impl FileResolver for MyResolver {
+        fn open_file(&self, name: &str) -> Result<File, Error> {
+            if let Some(content) = self.map.get(name) {
+                Ok(File::from_source(name, content)?)
+            } else {
+                Err(Error::file_not_found(name))
+            }
+        }
+    }
+
+    let main_file_name = main_file.0.clone();
+
+    let mut resolver = ChainFileResolver::new();
+    resolver.add(GoogleFileResolver::new());
+    resolver.add(MyResolver::new(main_file, dependencies));
+
+    let fd = protox::Compiler::with_file_resolver(resolver)
+        .include_imports(true)
+        .open_file(&main_file_name)?
+        .file_descriptor_set();
+
+    Ok(fd)
 }

@@ -19,7 +19,6 @@ mod recursive;
 #[allow(clippy::all)]
 mod all_types;
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use anyhow::Context;
 use prost::Message;
@@ -89,14 +88,15 @@ fn load_message_descriptor(
     message_name: &str,
 ) -> anyhow::Result<MessageDescriptor> {
     let location = "tests/test_data/".to_string() + file_name;
-    let file_content = fs_err::read(&location).unwrap();
-    let schema_bytes = if file_name.ends_with(".proto") {
-        compile_pb((PathBuf::from(&location), file_content), [])?
+    let file_content = fs_err::read_to_string(&location).unwrap();
+
+    let pool = if file_name.ends_with(".proto") {
+        let fd_set = compile_pb((location.clone(), file_content), [])?;
+        DescriptorPool::from_file_descriptor_set(fd_set)
     } else {
-        file_content
-    };
-    let pool = DescriptorPool::decode(schema_bytes.as_slice())
-        .with_context(|| format!("cannot build descriptor pool from schema `{location}`"))?;
+        DescriptorPool::decode(file_content.as_bytes())
+    }
+    .with_context(|| format!("cannot build descriptor pool from schema `{location}`"))?;
 
     pool.get_message_by_name(message_name).with_context(|| {
         format!(
