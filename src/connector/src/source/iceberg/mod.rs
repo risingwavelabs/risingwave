@@ -21,6 +21,7 @@ use async_trait::async_trait;
 use futures_async_stream::for_await;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
+use iceberg::table::Table;
 use itertools::Itertools;
 pub use parquet_file_reader::*;
 use risingwave_common::bail;
@@ -28,7 +29,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
-use crate::error::ConnectorResult;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::sink::iceberg::IcebergConfig;
 use crate::source::{
@@ -144,6 +145,8 @@ pub struct IcebergSplit {
     pub snapshot_id: i64,
     pub table_meta: TableMetadataJsonStr,
     pub files: Vec<IcebergFileScanTaskJsonStr>,
+    pub equality_delete_files: Vec<IcebergFileScanTaskJsonStr>,
+    pub position_delete_files: Vec<IcebergFileScanTaskJsonStr>,
 }
 
 impl SplitMetaData for IcebergSplit {
@@ -206,14 +209,17 @@ impl IcebergSplitEnumerator {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
         let table = self.config.load_table_v2().await?;
+
         let current_snapshot = table.metadata().current_snapshot();
         if current_snapshot.is_none() {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
             return Ok(vec![IcebergSplit {
                 split_id: 0,
-                snapshot_id: 0, // unused
+                snapshot_id: 0,
                 table_meta: TableMetadataJsonStr::serialize(table.metadata()),
                 files: vec![],
+                equality_delete_files: vec![],
+                position_delete_files: vec![],
             }]);
         }
 
@@ -228,10 +234,13 @@ impl IcebergSplitEnumerator {
                 let snapshot = table
                     .metadata()
                     .snapshots()
-                    .filter(|snapshot| snapshot.timestamp().timestamp_millis() <= timestamp)
-                    .max_by_key(|snapshot| snapshot.timestamp().timestamp_millis());
+                    .map(|snapshot| snapshot.timestamp().map(|ts| ts.timestamp_millis()))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .filter(|&snapshot_millis| snapshot_millis <= timestamp)
+                    .max_by_key(|&snapshot_millis| snapshot_millis);
                 match snapshot {
-                    Some(snapshot) => snapshot.snapshot_id(),
+                    Some(snapshot) => snapshot,
                     None => {
                         // convert unix time to human readable time
                         let time = chrono::DateTime::from_timestamp_millis(timestamp);
@@ -248,12 +257,16 @@ impl IcebergSplitEnumerator {
                 current_snapshot.unwrap().snapshot_id()
             }
         };
-        let mut files = vec![];
 
+        let require_names = Self::get_require_field_names(&table, snapshot_id, &schema).await?;
+
+        let mut position_delete_files = vec![];
+        let mut data_files = vec![];
+        let mut equality_delete_files = vec![];
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
-            .select(schema.names())
+            .select(require_names)
             .build()
             .map_err(|e| anyhow!(e))?;
 
@@ -261,16 +274,28 @@ impl IcebergSplitEnumerator {
 
         #[for_await]
         for task in file_scan_stream {
-            let task = task.map_err(|e| anyhow!(e))?;
-            files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+            let mut task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            match task.data_file_content {
+                iceberg::spec::DataContentType::Data => {
+                    data_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+                }
+                iceberg::spec::DataContentType::EqualityDeletes => {
+                    task.project_field_ids = task.equality_ids.clone();
+                    equality_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+                }
+                iceberg::spec::DataContentType::PositionDeletes => {
+                    task.project_field_ids = Vec::default();
+                    position_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+                }
+            }
         }
 
         let table_meta = TableMetadataJsonStr::serialize(table.metadata());
 
         let split_num = batch_parallelism;
         // evenly split the files into splits based on the parallelism.
-        let split_size = files.len() / split_num;
-        let remaining = files.len() % split_num;
+        let split_size = data_files.len() / split_num;
+        let remaining = data_files.len() % split_num;
         let mut splits = vec![];
         for i in 0..split_num {
             let start = i * split_size;
@@ -279,19 +304,66 @@ impl IcebergSplitEnumerator {
                 split_id: i as i64,
                 snapshot_id,
                 table_meta: table_meta.clone(),
-                files: files[start..end].to_vec(),
+                files: data_files[start..end].to_vec(),
+                // Todo: Can be divided by position to prevent the delete file from being read multiple times
+                equality_delete_files: equality_delete_files.clone(),
+                position_delete_files: position_delete_files.clone(),
             };
             splits.push(split);
         }
         for i in 0..remaining {
             splits[i]
                 .files
-                .push(files[split_num * split_size + i].clone());
+                .push(data_files[split_num * split_size + i].clone());
         }
         Ok(splits
             .into_iter()
             .filter(|split| !split.files.is_empty())
             .collect_vec())
+    }
+
+    /// The required field names are the intersection of the output shema and the equality delete columns.
+    /// This method will ensure that the order of the columns in the output schema remains unchanged,
+    /// after which there is no need to re order, just delete the equality delete columns.
+    async fn get_require_field_names(
+        table: &Table,
+        snapshot_id: i64,
+        rw_schema: &Schema,
+    ) -> ConnectorResult<Vec<String>> {
+        let scan = table
+            .scan()
+            .snapshot_id(snapshot_id)
+            .build()
+            .map_err(|e| anyhow!(e))?;
+        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
+        let schema = scan.snapshot().schema(table.metadata())?;
+        let mut equality_ids = vec![];
+        #[for_await]
+        for task in file_scan_stream {
+            let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            if task.data_file_content == iceberg::spec::DataContentType::EqualityDeletes {
+                if equality_ids.is_empty() {
+                    equality_ids = task.equality_ids;
+                } else if equality_ids != task.equality_ids {
+                    bail!("The schema of iceberg equality delete file must be consistent");
+                }
+            }
+        }
+        let delete_columns = equality_ids
+            .into_iter()
+            .map(|id| match schema.name_by_field_id(id) {
+                Some(name) => Ok::<std::string::String, ConnectorError>(name.to_string()),
+                None => bail!("Delete field id {} not found in schema", id),
+            })
+            .collect::<ConnectorResult<Vec<_>>>()?;
+        let mut require_field_names: Vec<_> = rw_schema.names().to_vec();
+        // Add the delete columns to the required field names
+        for names in delete_columns {
+            if !require_field_names.contains(&names) {
+                require_field_names.push(names);
+            }
+        }
+        Ok(require_field_names)
     }
 }
 

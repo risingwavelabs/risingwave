@@ -1,0 +1,89 @@
+# Deletions in a single commit are posistion delete, deletions across multiple commits are equail delete. sink_decouple = default(true), so we'll commit every 10s.
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM s1;
+
+statement ok
+CREATE SINK sink1 AS select * from mv1 WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    database.name = 'demo_db',
+    table.name = 'test_position_delete',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 5,
+    primary_key = 'i1,i2',
+);
+
+statement ok
+INSERT INTO s1 (i1, i2, i3)
+SELECT s, s::text, s::text FROM generate_series(1, 10000) s;
+
+statement ok
+flush
+
+statement ok
+DELETE FROM s1
+WHERE i1 IN (
+    SELECT s
+    FROM generate_series(1, 10000, 2) s
+);
+
+sleep 15s
+
+statement ok
+CREATE SOURCE iceberg_t1_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'test_position_delete',
+);
+
+query I
+select * from iceberg_t1_source order by i1 limit 5;
+----
+2 2 2
+4 4 4
+6 6 6
+8 8 8
+10 10 10
+
+query I
+select * from iceberg_t1_source order by i1 desc limit 5;
+----
+10000 10000 10000
+9998 9998 9998
+9996 9996 9996
+9994 9994 9994
+9992 9992 9992
+
+query I
+select count(*) from iceberg_t1_source
+----
+5000
+
+statement ok
+DROP SINK sink1;
+
+statement ok
+DROP SOURCE iceberg_t1_source;
+
+statement ok
+DROP TABLE s1 cascade;

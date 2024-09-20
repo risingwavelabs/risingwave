@@ -663,17 +663,8 @@ impl HummockStorage {
     pub async fn seal_and_sync_epoch(
         &self,
         epoch: u64,
+        table_ids: HashSet<TableId>,
     ) -> StorageResult<risingwave_hummock_sdk::SyncResult> {
-        let table_ids = self
-            .recent_versions
-            .load()
-            .latest_version()
-            .version()
-            .state_table_info
-            .info()
-            .keys()
-            .cloned()
-            .collect();
         self.sync(epoch, table_ids).await
     }
 

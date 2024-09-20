@@ -792,6 +792,12 @@ message RelationIdInfos {
   map<uint32, FragmentIdToActorIdMap> map = 1;
 }
 
+message FragmentVertexToRelationMap {
+  // fragment_id -> relation_id
+  map<uint32, uint32> in_map = 1;
+  map<uint32, uint32> out_map = 2;
+}
+
 message ActorCountPerParallelism {
   message WorkerActorCount {
     uint64 actor_count = 1;

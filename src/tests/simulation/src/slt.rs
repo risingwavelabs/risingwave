@@ -497,8 +497,6 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     let complex_avsc_full_path =
         std::fs::canonicalize("src/connector/src/test_data/complex-schema.avsc")
             .expect("failed to get schema path");
-    let proto_full_path = std::fs::canonicalize("src/connector/src/test_data/complex-schema")
-        .expect("failed to get schema path");
     let json_schema_full_path =
         std::fs::canonicalize("src/connector/src/test_data/complex-schema.json")
             .expect("failed to get schema path");
@@ -512,10 +510,6 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
         .replace(
             "/risingwave/avro-complex-schema.avsc",
             complex_avsc_full_path.to_str().unwrap(),
-        )
-        .replace(
-            "/risingwave/proto-complex-schema",
-            proto_full_path.to_str().unwrap(),
         )
         .replace(
             "/risingwave/json-complex-schema",

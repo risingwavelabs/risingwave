@@ -324,7 +324,7 @@ impl SstableWriter for StreamingUploadWriter {
                     t
                 });
 
-            assert!(!meta.block_metas.is_empty() || !meta.monotonic_tombstone_events.is_empty());
+            assert!(!meta.block_metas.is_empty());
 
             // Upload data to object store.
             self.object_uploader.finish().await?;
@@ -496,6 +496,7 @@ mod tests {
             });
             blocks.push(data.slice((i * 1000) as usize..((i + 1) * 1000) as usize));
         }
+        #[expect(deprecated)]
         let meta = SstableMeta {
             block_metas,
             bloom_filter: vec![],

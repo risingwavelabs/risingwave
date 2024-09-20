@@ -18,13 +18,14 @@ use std::fmt::{self, Debug, Display};
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_error::BoxedError;
 use risingwave_pb::data::{PbArray, PbArrayType};
 use serde::Serializer;
 
 use super::{
     Array, ArrayBuilder, ArrayImpl, ArrayResult, DatumRef, DefaultOrdered, ListArray,
-    ListArrayBuilder, ListRef, ListValue, MapType, ScalarRef, ScalarRefImpl, StructArray,
-    StructRef,
+    ListArrayBuilder, ListRef, ListValue, MapType, ScalarImpl, ScalarRef, ScalarRefImpl,
+    StructArray, StructRef,
 };
 use crate::bitmap::Bitmap;
 use crate::types::{DataType, Scalar, ToText};
@@ -337,6 +338,14 @@ mod scalar {
         pub fn to_owned(self) -> MapValue {
             MapValue(self.0.to_owned())
         }
+
+        pub fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.0.is_empty()
+        }
     }
 
     impl Scalar for MapValue {
@@ -515,5 +524,38 @@ impl ToText for MapRef<'_> {
             DataType::Map { .. } => self.write(f),
             _ => unreachable!(),
         }
+    }
+}
+
+impl MapValue {
+    pub fn from_str_for_test(s: &str, data_type: &MapType) -> Result<Self, BoxedError> {
+        // TODO: this is a quick trivial implementation. Implement the full version later.
+
+        // example: {1:1,2:NULL,3:3}
+
+        if !s.starts_with('{') {
+            return Err(format!("Missing left parenthesis: {}", s).into());
+        }
+        if !s.ends_with('}') {
+            return Err(format!("Missing right parenthesis: {}", s).into());
+        }
+        let mut key_builder = data_type.key().create_array_builder(100);
+        let mut value_builder = data_type.value().create_array_builder(100);
+        for kv in s[1..s.len() - 1].split(',') {
+            let (k, v) = kv.split_once(':').ok_or("Invalid map format")?;
+            key_builder.append(Some(ScalarImpl::from_text(k, data_type.key())?));
+            if v == "NULL" {
+                value_builder.append_null();
+            } else {
+                value_builder.append(Some(ScalarImpl::from_text(v, data_type.value())?));
+            }
+        }
+        let key_array = key_builder.finish();
+        let value_array = value_builder.finish();
+
+        Ok(MapValue::try_from_kv(
+            ListValue::new(key_array),
+            ListValue::new(value_array),
+        )?)
     }
 }

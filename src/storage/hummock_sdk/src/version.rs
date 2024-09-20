@@ -25,8 +25,8 @@ use risingwave_pb::hummock::group_delta::PbDeltaType;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{
     CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMerge,
-    PbGroupMetaChange, PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta,
-    PbIntraLevelDelta, PbSstableInfo, PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
+    PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta, PbSstableInfo, PbStateTableInfo,
+    StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
@@ -894,11 +894,6 @@ pub enum GroupDeltaCommon<T> {
     IntraLevel(IntraLevelDeltaCommon<T>),
     GroupConstruct(PbGroupConstruct),
     GroupDestroy(PbGroupDestroy),
-    GroupMetaChange(PbGroupMetaChange),
-
-    #[allow(dead_code)]
-    GroupTableChange(PbGroupTableChange),
-
     GroupMerge(PbGroupMerge),
 }
 
@@ -918,12 +913,6 @@ where
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(pb_group_destroy)
-            }
-            Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)) => {
-                GroupDeltaCommon::GroupMetaChange(pb_group_meta_change)
-            }
-            Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
-                GroupDeltaCommon::GroupTableChange(pb_group_table_change)
             }
             Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
                 GroupDeltaCommon::GroupMerge(pb_group_merge)
@@ -948,12 +937,6 @@ where
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy)),
             },
-            GroupDeltaCommon::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)),
-            },
-            GroupDeltaCommon::GroupTableChange(pb_group_table_change) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change)),
-            },
             GroupDeltaCommon::GroupMerge(pb_group_merge) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMerge(pb_group_merge)),
             },
@@ -976,12 +959,6 @@ where
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(*pb_group_destroy)),
             },
-            GroupDeltaCommon::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupMetaChange(pb_group_meta_change.clone())),
-            },
-            GroupDeltaCommon::GroupTableChange(pb_group_table_change) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change.clone())),
-            },
             GroupDeltaCommon::GroupMerge(pb_group_merge) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMerge(*pb_group_merge)),
             },
@@ -1003,12 +980,6 @@ where
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(*pb_group_destroy)
-            }
-            Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)) => {
-                GroupDeltaCommon::GroupMetaChange(pb_group_meta_change.clone())
-            }
-            Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
-                GroupDeltaCommon::GroupTableChange(pb_group_table_change.clone())
             }
             Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
                 GroupDeltaCommon::GroupMerge(*pb_group_merge)

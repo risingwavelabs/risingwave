@@ -79,6 +79,8 @@ ENABLE_BUILD_RUST=$ENABLE_BUILD
 
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
+ENABLE_PYTHON_UDF=true
+ENABLE_JS_UDF=true
 EOF
 
 # See https://github.com/risingwavelabs/risingwave/pull/15448
@@ -99,6 +101,10 @@ setup_old_cluster() {
   if [[ "$?" -ne 0 ]]; then
     set -e
     echo "Failed to download ${OLD_VERSION} from github releases, build from source later during \`risedev d\`"
+    configure_rw "$OLD_VERSION" true
+  elif [[ $OLD_VERSION = '1.10.1' || $OLD_VERSION = '1.10.0' ]]; then
+    set -e
+    echo "1.10.x has older openssl version, build from source later during \`risedev d\`"
     configure_rw "$OLD_VERSION" true
   else
     set -e

@@ -296,6 +296,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::common::table::test_utils::gen_pbtable_with_value_indices;
 
     async fn infer_dedup_tables<S: StateStore>(
         agg_calls: &[AggCall],
@@ -338,16 +339,17 @@ mod tests {
                 add_column_desc(DataType::Int64);
             }
 
-            let n_columns = columns.len();
-            let table = StateTable::new_without_distribution_with_value_indices(
-                store.clone(),
+            let pk_indices = (0..(group_key_types.len() + 1)).collect::<Vec<_>>();
+            let value_indices = ((group_key_types.len() + 1)..columns.len()).collect::<Vec<_>>();
+            let table_pb = gen_pbtable_with_value_indices(
                 TableId::new(2333 + distinct_col as u32),
                 columns,
                 order_types,
-                (0..(group_key_types.len() + 1)).collect(),
-                ((group_key_types.len() + 1)..n_columns).collect(),
-            )
-            .await;
+                pk_indices,
+                0,
+                value_indices,
+            );
+            let table = StateTable::from_table_catalog(&table_pb, store.clone(), None).await;
             dedup_tables.insert(distinct_col, table);
         }
 

@@ -145,21 +145,22 @@ impl HummockManager {
                 Box::pin(tombstone_reclaim_trigger),
             ];
 
-            let periodic_check_split_group_interval_sec = hummock_manager
+            let periodic_scheduling_compaction_group_interval_sec = hummock_manager
                 .env
                 .opts
-                .periodic_split_compact_group_interval_sec;
+                .periodic_scheduling_compaction_group_interval_sec;
 
-            if periodic_check_split_group_interval_sec > 0 {
-                let mut split_group_trigger_interval = tokio::time::interval(Duration::from_secs(
-                    periodic_check_split_group_interval_sec,
-                ));
-                split_group_trigger_interval
+            if periodic_scheduling_compaction_group_interval_sec > 0 {
+                let mut scheduling_compaction_group_trigger_interval = tokio::time::interval(
+                    Duration::from_secs(periodic_scheduling_compaction_group_interval_sec),
+                );
+                scheduling_compaction_group_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-                let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
-                    .map(|_| HummockTimerEvent::GroupSchedule);
-                triggers.push(Box::pin(split_group_trigger));
+                let group_scheduling_trigger =
+                    IntervalStream::new(scheduling_compaction_group_trigger_interval)
+                        .map(|_| HummockTimerEvent::GroupSchedule);
+                triggers.push(Box::pin(group_scheduling_trigger));
             }
 
             let event_stream = select_all(triggers);
@@ -169,8 +170,8 @@ impl HummockManager {
             let shutdown_rx_shared = shutdown_rx.shared();
 
             tracing::info!(
-                "Hummock timer task tracing [GroupSplit interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
-                    periodic_check_split_group_interval_sec, CHECK_PENDING_TASK_PERIOD_SEC, STAT_REPORT_PERIOD_SEC, COMPACTION_HEARTBEAT_PERIOD_SEC
+                "Hummock timer task [GroupScheduling interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
+                periodic_scheduling_compaction_group_interval_sec, CHECK_PENDING_TASK_PERIOD_SEC, STAT_REPORT_PERIOD_SEC, COMPACTION_HEARTBEAT_PERIOD_SEC
             );
 
             loop {
