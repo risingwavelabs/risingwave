@@ -26,7 +26,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
@@ -63,8 +62,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 };
 use risingwave_pb::hummock::{
     compact_task, CompactTaskAssignment, CompactionConfig, PbCompactStatus,
-    PbCompactTaskAssignment, StateTableInfoDelta, SubscribeCompactionEventRequest, TableOption,
-    TableSchema,
+    PbCompactTaskAssignment, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -189,38 +187,6 @@ impl<'a> HummockVersionTransaction<'a> {
         ));
 
         group_deltas.push(group_delta);
-        let new_visible_table_safe_epoch = std::cmp::max(
-            version_delta.latest_version().visible_table_safe_epoch(),
-            compact_task.watermark,
-        );
-        version_delta.set_safe_epoch(new_visible_table_safe_epoch);
-        if version_delta.latest_version().visible_table_safe_epoch() < new_visible_table_safe_epoch
-        {
-            version_delta.with_latest_version(|version, version_delta| {
-                for (table_id, info) in version.state_table_info.info() {
-                    let new_safe_epoch = min(new_visible_table_safe_epoch, info.committed_epoch);
-                    if new_safe_epoch > info.safe_epoch {
-                        if new_safe_epoch != version_delta.visible_table_safe_epoch() {
-                            warn!(
-                                new_safe_epoch,
-                                committed_epoch = info.committed_epoch,
-                                global_safe_epoch = new_visible_table_safe_epoch,
-                                table_id = table_id.table_id,
-                                "table has different safe epoch to global"
-                            );
-                        }
-                        version_delta.state_table_info_delta.insert(
-                            *table_id,
-                            StateTableInfoDelta {
-                                committed_epoch: info.committed_epoch,
-                                safe_epoch: new_safe_epoch,
-                                compaction_group_id: info.compaction_group_id,
-                            },
-                        );
-                    }
-                }
-            });
-        }
         version_delta.pre_apply();
     }
 }
@@ -667,16 +633,6 @@ impl HummockManager {
         let _timer = start_measure_real_process_timer!(self, "get_compact_tasks_impl");
 
         let start_time = Instant::now();
-        let max_committed_epoch = versioning.current_version.visible_table_committed_epoch();
-        let watermark = self
-            .context_info
-            .read()
-            .await
-            .pinned_snapshots
-            .values()
-            .map(|v| v.minimal_pinned_snapshot)
-            .fold(max_committed_epoch, std::cmp::min);
-
         let mut compaction_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
 
         let mut compact_task_assignment =
@@ -787,7 +743,6 @@ impl HummockManager {
                 let mut compact_task = CompactTask {
                     input_ssts: compact_task.input.input_levels,
                     splits: vec![KeyRange::inf()],
-                    watermark,
                     sorted_output_ssts: vec![],
                     task_id,
                     target_level: target_level_id,

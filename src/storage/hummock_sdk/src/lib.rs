@@ -47,6 +47,7 @@ pub mod key_range;
 pub mod level;
 pub mod prost_key_range;
 pub mod sstable_info;
+pub mod state_table_info;
 pub mod table_stats;
 pub mod table_watermark;
 pub mod time_travel;

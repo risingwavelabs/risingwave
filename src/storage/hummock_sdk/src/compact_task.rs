@@ -34,8 +34,6 @@ pub struct CompactTask {
     /// In ideal case, the compaction will generate `splits.len()` tables which have key range
     /// corresponding to that in `splits`, respectively
     pub splits: Vec<KeyRange>,
-    /// low watermark in 'ts-aware compaction'
-    pub watermark: u64,
     /// compaction output, which will be added to `target_level` of LSM after compaction
     pub sorted_output_ssts: Vec<SstableInfo>,
     /// task id assigned by hummock storage service
@@ -133,7 +131,6 @@ impl From<PbCompactTask> for CompactTask {
                     right_exclusive: pb_keyrange.right_exclusive,
                 })
                 .collect_vec(),
-            watermark: pb_compact_task.watermark,
             sorted_output_ssts: pb_compact_task
                 .sorted_output_ssts
                 .into_iter()
@@ -187,7 +184,6 @@ impl From<&PbCompactTask> for CompactTask {
                     right_exclusive: pb_keyrange.right_exclusive,
                 })
                 .collect_vec(),
-            watermark: pb_compact_task.watermark,
             sorted_output_ssts: pb_compact_task
                 .sorted_output_ssts
                 .iter()
@@ -241,7 +237,6 @@ impl From<CompactTask> for PbCompactTask {
                     right_exclusive: keyrange.right_exclusive,
                 })
                 .collect_vec(),
-            watermark: compact_task.watermark,
             sorted_output_ssts: compact_task
                 .sorted_output_ssts
                 .into_iter()
@@ -293,7 +288,6 @@ impl From<&CompactTask> for PbCompactTask {
                     right_exclusive: keyrange.right_exclusive,
                 })
                 .collect_vec(),
-            watermark: compact_task.watermark,
             sorted_output_ssts: compact_task
                 .sorted_output_ssts
                 .iter()
