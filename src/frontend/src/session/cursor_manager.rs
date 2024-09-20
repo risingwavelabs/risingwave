@@ -44,6 +44,7 @@ use crate::handler::util::{
     DataChunkToRowSetAdapter, StaticSessionData,
 };
 use crate::handler::HandlerArgs;
+use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
 use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
@@ -111,7 +112,10 @@ impl Cursor {
         formats: &Vec<Format>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         match self {
-            Cursor::Subscription(cursor) => cursor.next(count, handle_args, formats).await,
+            Cursor::Subscription(cursor) => cursor
+                .next(count, handle_args, formats)
+                .await
+                .inspect_err(|_| cursor.cursor_metrics.subscription_cursor_error_count.inc()),
             Cursor::Query(cursor) => cursor.next(count, formats, handle_args).await,
         }
     }
@@ -201,6 +205,8 @@ enum State {
         remaining_rows: VecDeque<Row>,
 
         expected_timestamp: Option<u64>,
+
+        init_query_timer: Instant,
     },
     Invalid,
 }
@@ -214,6 +220,8 @@ pub struct SubscriptionCursor {
     // fields will be set in the table's catalog when the cursor is created,
     // and will be reset each time it is created chunk_stream, this is to avoid changes in the catalog due to alter.
     fields: Vec<Field>,
+    cursor_metrics: Arc<CursorMetrics>,
+    last_fetch: Instant,
 }
 
 impl SubscriptionCursor {
@@ -223,6 +231,7 @@ impl SubscriptionCursor {
         subscription: Arc<SubscriptionCatalog>,
         dependent_table_id: TableId,
         handle_args: &HandlerArgs,
+        cursor_metrics: Arc<CursorMetrics>,
     ) -> Result<Self> {
         let (state, fields) = if let Some(start_timestamp) = start_timestamp {
             let table_catalog = handle_args.session.get_table_by_id(&dependent_table_id)?;
@@ -245,7 +254,7 @@ impl SubscriptionCursor {
             // future fetch on the cursor starts from the snapshot when the cursor is declared.
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
-            let (chunk_stream, fields) =
+            let (chunk_stream, fields, init_query_timer) =
                 Self::initiate_query(None, &dependent_table_id, handle_args.clone()).await?;
             let pinned_epoch = handle_args
                 .session
@@ -269,6 +278,7 @@ impl SubscriptionCursor {
                     chunk_stream,
                     remaining_rows: VecDeque::new(),
                     expected_timestamp: None,
+                    init_query_timer,
                 },
                 fields,
             )
@@ -283,6 +293,8 @@ impl SubscriptionCursor {
             cursor_need_drop_time,
             state,
             fields,
+            cursor_metrics,
+            last_fetch: Instant::now(),
         })
     }
 
@@ -310,12 +322,13 @@ impl SubscriptionCursor {
                     .await
                     {
                         Ok((Some(rw_timestamp), expected_timestamp)) => {
-                            let (mut chunk_stream, fields) = Self::initiate_query(
-                                Some(rw_timestamp),
-                                &self.dependent_table_id,
-                                handle_args.clone(),
-                            )
-                            .await?;
+                            let (mut chunk_stream, fields, init_query_timer) =
+                                Self::initiate_query(
+                                    Some(rw_timestamp),
+                                    &self.dependent_table_id,
+                                    handle_args.clone(),
+                                )
+                                .await?;
                             Self::init_row_stream(
                                 &mut chunk_stream,
                                 formats,
@@ -336,6 +349,7 @@ impl SubscriptionCursor {
                                 chunk_stream,
                                 remaining_rows,
                                 expected_timestamp,
+                                init_query_timer,
                             };
                             if self.fields.ne(&fields) {
                                 self.fields = fields;
@@ -355,6 +369,7 @@ impl SubscriptionCursor {
                     chunk_stream,
                     remaining_rows,
                     expected_timestamp,
+                    init_query_timer,
                 } => {
                     let session_data = StaticSessionData {
                         timezone: handle_args.session.config().timezone(),
@@ -384,6 +399,10 @@ impl SubscriptionCursor {
                             )?)));
                         }
                     } else {
+                        self.cursor_metrics
+                            .subscription_cursor_query_duration
+                            .with_label_values(&[&self.subscription.name])
+                            .observe(init_query_timer.elapsed().as_millis() as _);
                         // 2. Reach EOF for the current query.
                         if let Some(expected_timestamp) = expected_timestamp {
                             self.state = State::InitLogStoreQuery {
@@ -441,7 +460,12 @@ impl SubscriptionCursor {
             );
         }
         while cur < count {
+            let fetch_cursor_timer = Instant::now();
             let row = self.next_row(&handle_args, formats).await?;
+            self.cursor_metrics
+                .subscription_cursor_fetch_duration
+                .with_label_values(&[&self.subscription.name])
+                .observe(fetch_cursor_timer.elapsed().as_millis() as _);
             match row {
                 Some(row) => {
                     cur += 1;
@@ -452,6 +476,7 @@ impl SubscriptionCursor {
                 }
             }
         }
+        self.last_fetch = Instant::now();
 
         Ok((ans, desc))
     }
@@ -493,9 +518,10 @@ impl SubscriptionCursor {
         rw_timestamp: Option<u64>,
         dependent_table_id: &TableId,
         handle_args: HandlerArgs,
-    ) -> Result<(CursorDataChunkStream, Vec<Field>)> {
+    ) -> Result<(CursorDataChunkStream, Vec<Field>, Instant)> {
         let session = handle_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
+        let init_query_timer = Instant::now();
         let (chunk_stream, fields) = if let Some(rw_timestamp) = rw_timestamp {
             let context = OptimizerContext::from_handler_args(handle_args);
             let plan_fragmenter_result = gen_batch_plan_fragmenter(
@@ -520,6 +546,7 @@ impl SubscriptionCursor {
         Ok((
             chunk_stream,
             Self::build_desc(fields, rw_timestamp.is_none()),
+            init_query_timer,
         ))
     }
 
@@ -649,12 +676,19 @@ impl SubscriptionCursor {
     }
 }
 
-#[derive(Default)]
 pub struct CursorManager {
     cursor_map: tokio::sync::Mutex<HashMap<String, Cursor>>,
+    cursor_metrics: Arc<CursorMetrics>,
 }
 
 impl CursorManager {
+    pub fn new(cursor_metrics: Arc<CursorMetrics>) -> Self {
+        Self {
+            cursor_map: tokio::sync::Mutex::new(HashMap::new()),
+            cursor_metrics,
+        }
+    }
+
     pub async fn add_subscription_cursor(
         &self,
         cursor_name: String,
@@ -663,19 +697,28 @@ impl CursorManager {
         subscription: Arc<SubscriptionCatalog>,
         handle_args: &HandlerArgs,
     ) -> Result<()> {
+        let create_cursor_timer = Instant::now();
+        let subscription_name = subscription.name.clone();
         let cursor = SubscriptionCursor::new(
             cursor_name.clone(),
             start_timestamp,
             subscription,
             dependent_table_id,
             handle_args,
+            self.cursor_metrics.clone(),
         )
         .await?;
         let mut cursor_map = self.cursor_map.lock().await;
+        self.cursor_metrics
+            .subscription_cursor_declare_duration
+            .with_label_values(&[&subscription_name])
+            .observe(create_cursor_timer.elapsed().as_millis() as _);
 
         cursor_map.retain(|_, v| {
-            if let Cursor::Subscription(cursor) = v {
-                !matches!(cursor.state, State::Invalid)
+            if let Cursor::Subscription(cursor) = v
+                && matches!(cursor.state, State::Invalid)
+            {
+                false
             } else {
                 true
             }
@@ -748,6 +791,32 @@ impl CursorManager {
             Ok(cursor.get_fields())
         } else {
             Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
+        }
+    }
+
+    pub async fn get_periodic_cursor_metrics(&self) -> PeriodicCursorMetrics {
+        let mut subsription_cursor_nums = 0;
+        let mut invalid_subsription_cursor_nums = 0;
+        let mut subscription_cursor_last_fetch_duration = HashMap::new();
+        for (_, cursor) in self.cursor_map.lock().await.iter() {
+            if let Cursor::Subscription(subscription_cursor) = cursor {
+                subsription_cursor_nums += 1;
+                if matches!(subscription_cursor.state, State::Invalid) {
+                    invalid_subsription_cursor_nums += 1;
+                } else {
+                    let fetch_duration =
+                        subscription_cursor.last_fetch.elapsed().as_millis() as f64;
+                    subscription_cursor_last_fetch_duration.insert(
+                        subscription_cursor.subscription.name.clone(),
+                        fetch_duration,
+                    );
+                }
+            }
+        }
+        PeriodicCursorMetrics {
+            subsription_cursor_nums,
+            invalid_subsription_cursor_nums,
+            subscription_cursor_last_fetch_duration,
         }
     }
 

@@ -106,7 +106,7 @@ use crate::handler::variable::infer_show_variable;
 use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
+use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
 use crate::rpc::FrontendServiceImpl;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
@@ -151,6 +151,8 @@ pub struct FrontendEnv {
 
     pub frontend_metrics: Arc<FrontendMetrics>,
 
+    pub cursor_metrics: Arc<CursorMetrics>,
+
     source_metrics: Arc<SourceMetrics>,
 
     /// Batch spill metrics
@@ -173,7 +175,7 @@ pub struct FrontendEnv {
 }
 
 /// Session map identified by `(process_id, secret_key)`
-type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
+pub type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 /// The proportion of frontend memory used for batch processing.
 const FRONTEND_BATCH_MEMORY_PROPORTION: f64 = 0.5;
@@ -216,6 +218,7 @@ impl FrontendEnv {
                 .build()
                 .unwrap(),
         ));
+        let sessions_map = Arc::new(RwLock::new(HashMap::new()));
         Self {
             meta_client,
             catalog_writer,
@@ -229,8 +232,9 @@ impl FrontendEnv {
             session_params: Default::default(),
             server_addr,
             client_pool,
-            sessions_map: Arc::new(RwLock::new(HashMap::new())),
+            sessions_map: sessions_map.clone(),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
+            cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
@@ -409,6 +413,7 @@ impl FrontendEnv {
         ));
 
         let sessions_map: SessionMapRef = Arc::new(RwLock::new(HashMap::new()));
+        let cursor_metrics = Arc::new(CursorMetrics::init(sessions_map.clone()));
         let sessions = sessions_map.clone();
 
         // Idle transaction background monitor
@@ -460,6 +465,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool: compute_client_pool,
                 frontend_metrics,
+                cursor_metrics,
                 spill_metrics,
                 sessions_map,
                 batch_config: config.batch,
@@ -619,7 +625,6 @@ impl AuthContext {
         }
     }
 }
-
 pub struct SessionImpl {
     env: FrontendEnv,
     auth_context: Arc<AuthContext>,
@@ -681,6 +686,7 @@ impl SessionImpl {
         peer_addr: AddressRef,
         session_config: SessionConfig,
     ) -> Self {
+        let cursor_metrics = env.cursor_metrics.clone();
         Self {
             env,
             auth_context,
@@ -693,12 +699,13 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::default()),
+            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
         }
     }
 
     #[cfg(test)]
     pub fn mock() -> Self {
+        let env = FrontendEnv::mock();
         Self {
             env: FrontendEnv::mock(),
             auth_context: Arc::new(AuthContext::new(
@@ -720,7 +727,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::default()),
+            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
         }
     }
 
