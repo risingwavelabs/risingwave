@@ -24,10 +24,10 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_m
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockVersionId};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, LevelType,
+    CompactionConfig, HummockPinnedVersion, HummockVersionStats, LevelType,
 };
 
 use super::compaction::selector::DynamicLevelSelectorCore;
@@ -398,21 +398,6 @@ pub fn trigger_pin_unpin_version_state(
         metrics
             .min_pinned_version_id
             .set(HummockVersionId::MAX.to_u64() as _);
-    }
-}
-
-pub fn trigger_pin_unpin_snapshot_state(
-    metrics: &MetaMetrics,
-    pinned_snapshots: &BTreeMap<HummockContextId, HummockPinnedSnapshot>,
-) {
-    if let Some(m) = pinned_snapshots
-        .values()
-        .map(|v| v.minimal_pinned_snapshot)
-        .min()
-    {
-        metrics.min_pinned_epoch.set(m as i64);
-    } else {
-        metrics.min_pinned_epoch.set(HummockEpoch::MAX as _);
     }
 }
 

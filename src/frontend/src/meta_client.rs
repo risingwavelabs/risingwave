@@ -47,9 +47,6 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
     async fn try_unregister(&self);
-
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
-
     async fn get_snapshot(&self) -> Result<HummockSnapshot>;
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
@@ -73,10 +70,6 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
-    async fn unpin_snapshot(&self) -> Result<()>;
-
-    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
-
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
 
     async fn get_system_params(&self) -> Result<SystemParamsReader>;
@@ -97,9 +90,6 @@ pub trait FrontendMetaClient: Send + Sync {
 
     /// Returns vector of (worker_id, min_pinned_version_id)
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
-
-    /// Returns vector of (worker_id, min_pinned_snapshot_id)
-    async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
@@ -149,10 +139,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.try_unregister().await;
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.0.pin_snapshot().await
-    }
-
     async fn get_snapshot(&self) -> Result<HummockSnapshot> {
         self.0.get_snapshot().await
     }
@@ -194,14 +180,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
         self.0.list_object_dependencies().await
-    }
-
-    async fn unpin_snapshot(&self) -> Result<()> {
-        self.0.unpin_snapshot().await
-    }
-
-    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()> {
-        self.0.unpin_snapshot_before(epoch).await
     }
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
@@ -253,21 +231,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         let ret = pinned_versions
             .into_iter()
             .map(|v| (v.context_id, v.min_pinned_id))
-            .collect();
-        Ok(ret)
-    }
-
-    async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>> {
-        let pinned_snapshots = self
-            .0
-            .risectl_get_pinned_snapshots_summary()
-            .await?
-            .summary
-            .unwrap()
-            .pinned_snapshots;
-        let ret = pinned_snapshots
-            .into_iter()
-            .map(|s| (s.context_id, s.minimal_pinned_snapshot))
             .collect();
         Ok(ret)
     }

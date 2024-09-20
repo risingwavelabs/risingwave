@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::hummock::{PinnedSnapshotsSummary, PinnedVersionsSummary};
+use risingwave_pb::hummock::PinnedVersionsSummary;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::CtlContext;
@@ -111,38 +111,6 @@ pub async fn list_pinned_versions(context: &CtlContext) -> anyhow::Result<()> {
                     pinned_version.context_id,
                     worker.r#type().as_str_name(),
                     pinned_version.min_pinned_id
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-pub async fn list_pinned_snapshots(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.meta_client().await?;
-    let PinnedSnapshotsSummary {
-        mut pinned_snapshots,
-        workers,
-    } = meta_client
-        .risectl_get_pinned_snapshots_summary()
-        .await?
-        .summary
-        .unwrap();
-    pinned_snapshots.sort_by_key(|s| s.minimal_pinned_snapshot);
-    for pinned_snapshot in pinned_snapshots {
-        match workers.get(&pinned_snapshot.context_id) {
-            None => {
-                println!(
-                    "Worker {} may have been dropped, min_pinned_snapshot {}",
-                    pinned_snapshot.context_id, pinned_snapshot.minimal_pinned_snapshot
-                );
-            }
-            Some(worker) => {
-                println!(
-                    "Worker {} type {} min_pinned_snapshot {}",
-                    pinned_snapshot.context_id,
-                    worker.r#type().as_str_name(),
-                    pinned_snapshot.minimal_pinned_snapshot
                 );
             }
         }
