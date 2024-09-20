@@ -182,7 +182,7 @@ impl TracedNewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
-            vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT)),
+            vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
         }
     }
 }
