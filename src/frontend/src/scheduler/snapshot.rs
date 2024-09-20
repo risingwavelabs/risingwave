@@ -77,7 +77,6 @@ impl ReadSnapshot {
     }
 }
 
-/// A frontend-pinned snapshot that notifies the [`UnpinWorker`] when it's dropped.
 // DO NOT implement `Clone` for `PinnedSnapshot` because it's a "resource" that should always be a
 // singleton for each snapshot. Use `PinnedSnapshotRef` instead.
 pub struct PinnedSnapshot {
