@@ -649,12 +649,12 @@ impl HummockEventHandler {
 
         let max_committed_epoch = new_pinned_version.visible_table_committed_epoch();
 
-        // only notify local_version_manager when MCE change
         self.version_update_notifier_tx.send_if_modified(|state| {
+            assert_eq!(pinned_version.id(), state.id());
             if state.id() == new_pinned_version.id() {
                 return false;
             }
-            assert!(pinned_version.id() > state.id());
+            assert!(new_pinned_version.id() > state.id());
             *state = new_pinned_version.clone();
             true
         });
