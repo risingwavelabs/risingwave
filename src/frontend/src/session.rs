@@ -50,7 +50,6 @@ use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
 use risingwave_common::memory::MemoryContext;
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
@@ -236,7 +235,7 @@ impl FrontendEnv {
             client_pool,
             sessions_map: sessions_map.clone(),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
-            cursor_metrics: Arc::new(CursorMetrics::new(&GLOBAL_METRICS_REGISTRY, sessions_map)),
+            cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
@@ -415,10 +414,7 @@ impl FrontendEnv {
         ));
 
         let sessions_map: SessionMapRef = Arc::new(RwLock::new(HashMap::new()));
-        let cursor_metrics = Arc::new(CursorMetrics::new(
-            &GLOBAL_METRICS_REGISTRY,
-            sessions_map.clone(),
-        ));
+        let cursor_metrics = Arc::new(CursorMetrics::init(sessions_map.clone()));
         let sessions = sessions_map.clone();
 
         // Idle transaction background monitor
