@@ -327,6 +327,11 @@ IcebergConfig:
     field_type: String
     comments: Full name of table, must include schema name.
     required: true
+  - name: enable_config_load
+    field_type: bool
+    comments: enable config load currently is used by nimtable, so it only support jdbc catalog.
+    required: false
+    default: Default::default
   - name: s3.path.style.access
     field_type: bool
     required: false
@@ -345,11 +350,6 @@ IcebergConfig:
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
   - name: create_table_if_not_exists
     field_type: bool
-    required: false
-    default: Default::default
-  - name: enable_config_load
-    field_type: bool
-    comments: enable config load currently is used by nimtable, so it only support jdbc catalog.
     required: false
     default: Default::default
 KafkaConfig:
