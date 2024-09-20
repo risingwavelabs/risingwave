@@ -29,9 +29,9 @@ import _, { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import RelationDependencyGraph, {
+import RelationGraph, {
   nodeRadius,
-} from "../components/RelationDependencyGraph"
+} from "../components/RelationGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
@@ -305,7 +305,7 @@ export default function StreamingGraph() {
         >
           <Text fontWeight="semibold">Relation Graph</Text>
           {relationDependency && (
-            <RelationDependencyGraph
+            <RelationGraph
               nodes={relationDependency}
               selectedId={selectedId?.toString()}
               setSelectedId={(id) => setSelectedId(parseInt(id))}
