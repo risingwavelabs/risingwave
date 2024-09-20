@@ -83,6 +83,9 @@ sleep 3s
 statement ok
 insert into test_default(id) values (4),(5);
 
+statement ok
+FLUSH;
+
 query TTTTTTTTTTTTT
 SELECT * from test_default order by id;
 ----
