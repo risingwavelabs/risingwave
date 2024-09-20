@@ -16,7 +16,7 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     table.name = 'test_all_delete',
     catalog.name = 'demo',
     catalog.type = 'storage',
-    warehouse.path = 's3a://icebergdata/demo',
+    warehouse.path = 's3a://hummock001/iceberg-data',
     s3.endpoint = 'http://127.0.0.1:9301',
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
@@ -40,7 +40,7 @@ WHERE i1 IN (
     FROM generate_series(1, 10000, 2) s
 );
 
-sleep 15s
+sleep 10s
 
 statement ok
 CREATE SOURCE iceberg_t1_source
@@ -51,7 +51,7 @@ WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
     catalog.type = 'storage',
-    warehouse.path = 's3a://icebergdata/demo',
+    warehouse.path = 's3a://hummock001/iceberg-data',
     database.name = 'demo_db',
     table.name = 'test_all_delete',
 );
@@ -62,6 +62,9 @@ WHERE i1 IN (
     SELECT s
     FROM generate_series(1, 10000, 3) s
 );
+
+statement ok
+flush
 
 sleep 15s
 
