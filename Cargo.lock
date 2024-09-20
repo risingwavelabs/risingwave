@@ -4849,8 +4849,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.11.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=474fd2f#474fd2fe7da36e77b859bd59cc5ea60ef1598cef"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9becaef8b57eaf4b229b04d3298b689f93e6e47af8b64a4626c26284698c57cf"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -4866,8 +4867,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.9.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=474fd2f#474fd2fe7da36e77b859bd59cc5ea60ef1598cef"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f9cf220e4a7377ce73058d9a94daa0e3bf5d73381d10271c4ff78ba7854949"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -4885,8 +4887,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.9.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=474fd2f#474fd2fe7da36e77b859bd59cc5ea60ef1598cef"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8dc9a7709b14917fc900fa0a255d7f58987d5f085edef61c5560e97d268450c6"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -4894,8 +4897,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.7.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=474fd2f#474fd2fe7da36e77b859bd59cc5ea60ef1598cef"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e380013e4a5df7019a3c334732789f0affd0eae8fb75fd5d483b1cc76fe1cb4"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -4915,8 +4919,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.10.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=474fd2f#474fd2fe7da36e77b859bd59cc5ea60ef1598cef"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aa77365ba93fea4de7b3fcd510c52ccdcd4ff7b402dde0a0fa0822437b13b01"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
