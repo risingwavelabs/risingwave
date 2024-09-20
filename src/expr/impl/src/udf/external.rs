@@ -18,6 +18,7 @@ use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use anyhow::bail;
+use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_udf_flight::Client;
 use futures_util::{StreamExt, TryStreamExt};
 use ginepro::{LoadBalancedChannel, ResolutionStrategy};
@@ -189,10 +190,9 @@ fn get_or_create_flight_client(link: &str) -> Result<Arc<Client>> {
         let client = Arc::new(tokio::task::block_in_place(|| {
             RUNTIME.block_on(async {
                 let channel = connect_tonic(link).await?;
-                Ok(Client::new(channel)
-                    .await?
-                    .max_decoding_message_size(MAX_DECODING_MESSAGE_SIZE))
-                    as Result<_>
+                let client = FlightServiceClient::new(channel)
+                    .max_decoding_message_size(MAX_DECODING_MESSAGE_SIZE);
+                Ok(Client::with_flight_client(client).await?) as Result<_>
             })
         })?);
         clients.insert(link.to_owned(), Arc::downgrade(&client));
