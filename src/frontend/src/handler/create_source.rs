@@ -1720,12 +1720,10 @@ pub async fn handle_create_source(
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
             build_graph(stream_plan)?
         };
-        catalog_writer
-            .create_source_with_graph(source, graph)
-            .await?;
+        catalog_writer.create_source(source, Some(graph)).await?;
     } else {
         // For other sources we don't create a streaming job
-        catalog_writer.create_source(source).await?;
+        catalog_writer.create_source(source, None).await?;
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
