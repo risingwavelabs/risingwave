@@ -288,8 +288,14 @@ export interface LayoutItemBase {
 
 export type FragmentBox = LayoutItemBase & {
   name: string
+  // Upstream Fragment Ids.
   externalParentIds: string[]
-  fragment?: TableFragments_Fragment
+  fragment: TableFragments_Fragment
+}
+
+export type RelationBox = LayoutItemBase & {
+  relationName: string
+  schemaName: string
 }
 
 export type RelationPoint = LayoutItemBase & {
@@ -304,6 +310,7 @@ export interface Position {
 
 export type FragmentBoxPosition = FragmentBox & Position
 export type RelationPointPosition = RelationPoint & Position
+export type RelationBoxPosition = RelationBox & Position
 
 export interface Edge {
   points: Array<Position>
@@ -489,7 +496,7 @@ export function generateFragmentEdges(
     // Simply draw a horizontal line here.
     // Typically, external parent is only applicable to `StreamScan` fragment,
     // and there'll be only one external parent due to `UpstreamShard` distribution
-    // and plan node sharing. So there's no overlapping issue.
+    // and plan node sharing. So we won't see multiple horizontal lines overlap each other.
     for (const externalParentId of fragment.externalParentIds) {
       links.push({
         points: [
@@ -504,6 +511,36 @@ export function generateFragmentEdges(
         ],
         source: fragment.id,
         target: externalParentId,
+      })
+    }
+  }
+  return links
+}
+
+export function generateRelationBackPressureEdges(
+  layoutMap: RelationBoxPosition[]
+): Edge[] {
+  const links = []
+  const relationMap = new Map<string, RelationBoxPosition>()
+  for (const x of layoutMap) {
+    relationMap.set(x.id, x)
+  }
+  for (const relation of layoutMap) {
+    for (const parentId of relation.parentIds) {
+      const parentRelation = relationMap.get(parentId)!
+      links.push({
+        points: [
+          {
+            x: relation.x + relation.width / 2,
+            y: relation.y + relation.height / 2,
+          },
+          {
+            x: parentRelation.x + parentRelation.width / 2,
+            y: parentRelation.y + parentRelation.height / 2,
+          },
+        ],
+        source: relation.id,
+        target: parentId,
       })
     }
   }

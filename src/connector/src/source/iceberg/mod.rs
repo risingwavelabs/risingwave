@@ -145,7 +145,8 @@ pub struct IcebergSplit {
     pub snapshot_id: i64,
     pub table_meta: TableMetadataJsonStr,
     pub files: Vec<IcebergFileScanTaskJsonStr>,
-    pub eq_delete_files: Vec<IcebergFileScanTaskJsonStr>,
+    pub equality_delete_files: Vec<IcebergFileScanTaskJsonStr>,
+    pub position_delete_files: Vec<IcebergFileScanTaskJsonStr>,
 }
 
 impl SplitMetaData for IcebergSplit {
@@ -214,10 +215,11 @@ impl IcebergSplitEnumerator {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
             return Ok(vec![IcebergSplit {
                 split_id: 0,
-                snapshot_id: 0, // unused
+                snapshot_id: 0,
                 table_meta: TableMetadataJsonStr::serialize(table.metadata()),
                 files: vec![],
-                eq_delete_files: vec![],
+                equality_delete_files: vec![],
+                position_delete_files: vec![],
             }]);
         }
 
@@ -255,11 +257,12 @@ impl IcebergSplitEnumerator {
                 current_snapshot.unwrap().snapshot_id()
             }
         };
-        let require_names = Self::get_require_field_names(&table, snapshot_id, schema).await?;
 
+        let require_names = Self::get_require_field_names(&table, snapshot_id, &schema).await?;
+
+        let mut position_delete_files = vec![];
         let mut data_files = vec![];
-        let mut eq_delete_files = vec![];
-
+        let mut equality_delete_files = vec![];
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
@@ -278,10 +281,11 @@ impl IcebergSplitEnumerator {
                 }
                 iceberg::spec::DataContentType::EqualityDeletes => {
                     task.project_field_ids = task.equality_ids.clone();
-                    eq_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+                    equality_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
                 }
                 iceberg::spec::DataContentType::PositionDeletes => {
-                    bail!("Position delete file is not supported")
+                    task.project_field_ids = Vec::default();
+                    position_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
                 }
             }
         }
@@ -301,7 +305,9 @@ impl IcebergSplitEnumerator {
                 snapshot_id,
                 table_meta: table_meta.clone(),
                 files: data_files[start..end].to_vec(),
-                eq_delete_files: eq_delete_files.clone(),
+                // Todo: Can be divided by position to prevent the delete file from being read multiple times
+                equality_delete_files: equality_delete_files.clone(),
+                position_delete_files: position_delete_files.clone(),
             };
             splits.push(split);
         }
@@ -316,10 +322,13 @@ impl IcebergSplitEnumerator {
             .collect_vec())
     }
 
+    /// The required field names are the intersection of the output shema and the equality delete columns.
+    /// This method will ensure that the order of the columns in the output schema remains unchanged,
+    /// after which there is no need to re order, just delete the equality delete columns.
     async fn get_require_field_names(
         table: &Table,
         snapshot_id: i64,
-        rw_schema: Schema,
+        rw_schema: &Schema,
     ) -> ConnectorResult<Vec<String>> {
         let scan = table
             .scan()
