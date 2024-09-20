@@ -99,7 +99,6 @@ pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
             TEST_TABLE_ID,
             StateTableInfoDelta {
                 committed_epoch: epoch,
-                safe_epoch: epoch,
                 compaction_group_id: StaticCompactionGroupId::StateDefault as _,
             },
         )]),

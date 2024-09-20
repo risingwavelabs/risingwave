@@ -78,7 +78,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.10.4", features = ["nightly", "mtrace"] }
+foyer = { version = "0.11.3", features = ["mtrace", "nightly"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -140,32 +140,18 @@ prost-build = { version = "0.13" }
 icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "3f4724158acee37a4785f56670a1427993a58739", features = [
     "prometheus",
 ] }
-arrow-array-iceberg = { package = "arrow-array", version = "52" }
-arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
-arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
-arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
+
 # branch dev
 iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
 opendal = "0.47"
-arrow-array = "50"
-arrow-arith = "50"
-arrow-cast = "50"
-arrow-schema = "50"
-arrow-buffer = "50"
+# used only by arrow-udf-flight
 arrow-flight = "50"
-arrow-select = "50"
-arrow-ord = "50"
-arrow-row = "50"
 arrow-udf-js = "0.3.1"
 arrow-udf-wasm = { version = "0.2.2", features = ["build"] }
 arrow-udf-python = "0.2"
 arrow-udf-flight = "0.1"
-arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
-arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
-arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
-arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
@@ -183,11 +169,10 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
     "profiling",
     "stats",
 ], rev = "64a2d9" }
-# TODO(http-bump): bump to use tonic 0.12 once minitrace-opentelemetry is updated
-opentelemetry = "0.23"
-opentelemetry-otlp = "0.16"
-opentelemetry_sdk = { version = "0.23", default-features = false }
-opentelemetry-semantic-conventions = "0.15"
+opentelemetry = "0.24"
+opentelemetry-otlp = "0.17"
+opentelemetry_sdk = { version = "0.24", default-features = false }
+opentelemetry-semantic-conventions = "0.16"
 parking_lot = { version = "0.12", features = [
     "arc_lock",
     "deadlock_detection",
@@ -198,10 +183,24 @@ sea-orm = { version = "0.12.14", features = [
     "sqlx-sqlite",
     "runtime-tokio-native-tls",
 ] }
-sqlx = { version = "0.7.3", default-features = false, features = ["bigdecimal", "chrono", "json", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055", features = ["net", "fs"] }
+sqlx = { version = "0.7.3", default-features = false, features = [
+    "bigdecimal",
+    "chrono",
+    "json",
+    "mysql",
+    "postgres",
+    "runtime-tokio-native-tls",
+    "rust_decimal",
+    "sqlite",
+    "time",
+    "uuid",
+] }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055", features = [
+    "net",
+    "fs",
+] }
 tokio-util = "0.7"
-tracing-opentelemetry = "0.24"
+tracing-opentelemetry = "0.25"
 rand = { version = "0.8", features = ["small_rng"] }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }

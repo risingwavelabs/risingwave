@@ -410,24 +410,14 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_source(&self, source: PbSource) -> Result<CatalogVersion> {
-        let request = CreateSourceRequest {
-            source: Some(source),
-            fragment_graph: None,
-        };
-
-        let resp = self.inner.create_source(request).await?;
-        Ok(resp.version)
-    }
-
-    pub async fn create_source_with_graph(
+    pub async fn create_source(
         &self,
         source: PbSource,
-        graph: StreamFragmentGraph,
+        graph: Option<StreamFragmentGraph>,
     ) -> Result<CatalogVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
-            fragment_graph: Some(graph),
+            fragment_graph: graph,
         };
 
         let resp = self.inner.create_source(request).await?;
@@ -509,15 +499,6 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    // only adding columns is supported
-    pub async fn alter_source_column(&self, source: PbSource) -> Result<CatalogVersion> {
-        let request = AlterSourceRequest {
-            source: Some(source),
-        };
-        let resp = self.inner.alter_source(request).await?;
-        Ok(resp.version)
-    }
-
     pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<CatalogVersion> {
         let request = AlterOwnerRequest {
             object: Some(object),
@@ -540,7 +521,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn alter_source_with_sr(&self, source: PbSource) -> Result<CatalogVersion> {
+    pub async fn alter_source(&self, source: PbSource) -> Result<CatalogVersion> {
         let request = AlterSourceRequest {
             source: Some(source),
         };

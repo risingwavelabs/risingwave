@@ -16,8 +16,8 @@
 
 // common imports for submodules
 use anyhow::{Context as _, Result};
-use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use futures_util::stream::BoxStream;
+use risingwave_common::array::arrow::arrow_array_udf::{ArrayRef, BooleanArray, RecordBatch};
 use risingwave_expr::sig::{
     CreateFunctionOptions, CreateFunctionOutput, UdfImpl, UdfImplDescriptor, UDF_IMPLS,
 };

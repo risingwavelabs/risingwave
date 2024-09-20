@@ -2607,10 +2607,7 @@ impl CatalogController {
             .collect())
     }
 
-    pub async fn alter_source_column(
-        &self,
-        pb_source: PbSource,
-    ) -> MetaResult<NotificationVersion> {
+    pub async fn alter_source(&self, pb_source: PbSource) -> MetaResult<NotificationVersion> {
         let source_id = pb_source.id as SourceId;
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;

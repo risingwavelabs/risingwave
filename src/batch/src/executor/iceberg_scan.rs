@@ -28,7 +28,6 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_connector::WithOptionsSecResolved;
@@ -42,7 +41,7 @@ use crate::task::BatchTaskContext;
 static POSITION_DELETE_FILE_FILE_PATH_INDEX: usize = 0;
 static POSITION_DELETE_FILE_POS: usize = 1;
 pub struct IcebergScanExecutor {
-    iceberg_config: IcebergConfig,
+    iceberg_config: IcebergProperties,
     #[allow(dead_code)]
     snapshot_id: Option<i64>,
     table_meta: TableMetadata,
@@ -70,7 +69,7 @@ impl Executor for IcebergScanExecutor {
 
 impl IcebergScanExecutor {
     pub fn new(
-        iceberg_config: IcebergConfig,
+        iceberg_config: IcebergProperties,
         snapshot_id: Option<i64>,
         table_meta: TableMetadata,
         data_file_scan_tasks: Vec<FileScanTask>,
@@ -203,7 +202,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             let iceberg_properties: IcebergProperties = *iceberg_properties;
             let split: IcebergSplit = split.clone();
             Ok(Box::new(IcebergScanExecutor::new(
-                iceberg_properties.to_iceberg_config(),
+                iceberg_properties,
                 Some(split.snapshot_id),
                 split.table_meta.deserialize(),
                 split.files.into_iter().map(|x| x.deserialize()).collect(),

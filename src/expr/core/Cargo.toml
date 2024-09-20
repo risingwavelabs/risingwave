@@ -17,8 +17,6 @@ normal = ["workspace-hack", "ctor"]
 
 [dependencies]
 anyhow = "1"
-arrow-array = { workspace = true }
-arrow-schema = { workspace = true }
 async-trait = "0.1"
 auto_impl = "1"
 await-tree = { workspace = true }

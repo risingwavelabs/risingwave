@@ -15,9 +15,6 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-arrow-array = { workspace = true }
-arrow-array-iceberg = { workspace = true }
-arrow-schema = { workspace = true }
 assert_matches = "1"
 async-recursion = "1"
 async-trait = "0.1"

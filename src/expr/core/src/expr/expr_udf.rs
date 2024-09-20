@@ -16,10 +16,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
-use arrow_schema::{Fields, Schema, SchemaRef};
 use await_tree::InstrumentAwait;
 use prometheus::{exponential_buckets, Registry};
-use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
+use risingwave_common::array::arrow::arrow_schema_udf::{Fields, Schema, SchemaRef};
+use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::array::{Array, ArrayRef, DataChunk};
 use risingwave_common::metrics::*;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
