@@ -17,8 +17,6 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-schema = { workspace = true }
-arrow-schema-iceberg = { workspace = true }
 async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }

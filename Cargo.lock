@@ -10105,9 +10105,6 @@ name = "risingwave_batch"
 version = "2.1.0-alpha"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-array 52.0.0",
- "arrow-schema 50.0.0",
  "assert_matches",
  "async-recursion",
  "async-trait",
@@ -10597,12 +10594,6 @@ version = "2.1.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
- "arrow-array 50.0.0",
- "arrow-array 52.0.0",
- "arrow-row 50.0.0",
- "arrow-schema 50.0.0",
- "arrow-schema 52.0.0",
- "arrow-select 50.0.0",
  "assert_matches",
  "async-compression",
  "async-nats",
@@ -10863,8 +10854,6 @@ name = "risingwave_expr"
 version = "2.1.0-alpha"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-schema 50.0.0",
  "async-trait",
  "auto_impl",
  "await-tree",
@@ -10905,10 +10894,7 @@ version = "2.1.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
- "arrow-array 50.0.0",
  "arrow-flight",
- "arrow-schema 50.0.0",
- "arrow-schema 52.0.0",
  "arrow-udf-flight",
  "arrow-udf-js",
  "arrow-udf-python",
@@ -10973,8 +10959,6 @@ version = "2.1.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
- "arrow-schema 50.0.0",
- "arrow-schema 52.0.0",
  "assert_matches",
  "async-recursion",
  "async-trait",

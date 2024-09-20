@@ -21,9 +21,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-use arrow_schema_iceberg::{
-    DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
-};
 use async_trait::async_trait;
 use iceberg::{Catalog as CatalogV2, NamespaceIdent, TableCreation, TableIdent};
 use icelake::catalog::CatalogRef;
@@ -36,6 +33,9 @@ use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::Table;
 use itertools::Itertools;
+use risingwave_common::array::arrow::arrow_schema_iceberg::{
+    self, DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
+};
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
