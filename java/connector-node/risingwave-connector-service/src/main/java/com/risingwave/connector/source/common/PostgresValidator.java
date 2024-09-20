@@ -394,7 +394,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                             + pubName
                             + "' to be created with `publish_via_partition_root = true`. \nHint: you can run `SELECT pubviaroot from pg_publication WHERE pubname = '"
                             + pubName
-                            + "'` to check.");
+                            + "'` in the upstream Postgres to check.");
         }
 
         // PG 15 and up supports partial publication of table
