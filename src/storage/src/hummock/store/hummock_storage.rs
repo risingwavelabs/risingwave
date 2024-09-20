@@ -406,8 +406,10 @@ impl HummockStorage {
         let ret = if let Some(info) = info
             && epoch <= info.committed_epoch
         {
-            if epoch < info.safe_epoch {
-                return Err(HummockError::expired_epoch(table_id, info.safe_epoch, epoch).into());
+            if epoch < info.committed_epoch {
+                return Err(
+                    HummockError::expired_epoch(table_id, info.committed_epoch, epoch).into(),
+                );
             }
             // read committed_version directly without build snapshot
             get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)
@@ -661,17 +663,8 @@ impl HummockStorage {
     pub async fn seal_and_sync_epoch(
         &self,
         epoch: u64,
+        table_ids: HashSet<TableId>,
     ) -> StorageResult<risingwave_hummock_sdk::SyncResult> {
-        let table_ids = self
-            .recent_versions
-            .load()
-            .latest_version()
-            .version()
-            .state_table_info
-            .info()
-            .keys()
-            .cloned()
-            .collect();
         self.sync(epoch, table_ids).await
     }
 

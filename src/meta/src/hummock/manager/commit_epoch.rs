@@ -70,42 +70,8 @@ pub struct CommitEpochInfo {
 }
 
 impl HummockManager {
-    #[cfg(any(test, feature = "test"))]
-    pub async fn commit_epoch_for_test(
-        &self,
-        epoch: u64,
-        sstables: Vec<impl Into<LocalSstableInfo>>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-    ) -> Result<()> {
-        let tables = self
-            .versioning
-            .read()
-            .await
-            .current_version
-            .state_table_info
-            .info()
-            .keys()
-            .cloned()
-            .collect();
-        let info = CommitEpochInfo {
-            sstables: sstables.into_iter().map(Into::into).collect(),
-            new_table_watermarks: HashMap::new(),
-            sst_to_context,
-            new_table_fragment_info: NewTableFragmentInfo::None,
-            change_log_delta: HashMap::new(),
-            committed_epoch: epoch,
-            tables_to_commit: tables,
-            is_visible_table_committed_epoch: true,
-        };
-        self.commit_epoch(info).await?;
-        Ok(())
-    }
-
     /// Caller should ensure `epoch` > `max_committed_epoch`
-    pub async fn commit_epoch(
-        &self,
-        commit_info: CommitEpochInfo,
-    ) -> Result<Option<HummockSnapshot>> {
+    pub async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> Result<()> {
         let CommitEpochInfo {
             mut sstables,
             new_table_watermarks,
@@ -120,7 +86,7 @@ impl HummockManager {
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
-            return Ok(None);
+            return Ok(());
         }
 
         let versioning: &mut Versioning = &mut versioning_guard;
@@ -322,14 +288,11 @@ impl HummockManager {
             )?;
         }
 
-        let snapshot = if is_visible_table_committed_epoch {
+        if is_visible_table_committed_epoch {
             let snapshot = HummockSnapshot { committed_epoch };
             let prev_snapshot = self.latest_snapshot.swap(snapshot.into());
             assert!(prev_snapshot.committed_epoch < committed_epoch);
-            Some(snapshot)
-        } else {
-            None
-        };
+        }
 
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
@@ -360,7 +323,7 @@ impl HummockManager {
         {
             self.check_state_consistency().await;
         }
-        Ok(snapshot)
+        Ok(())
     }
 
     fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {

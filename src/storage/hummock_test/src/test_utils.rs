@@ -243,8 +243,24 @@ impl HummockTestEnv {
     // Seal, sync and commit a epoch.
     // On completion of this function call, the provided epoch should be committed and visible.
     pub async fn commit_epoch(&self, epoch: u64) {
-        let res = self.storage.seal_and_sync_epoch(epoch).await.unwrap();
-        self.meta_client.commit_epoch(epoch, res).await.unwrap();
+        let table_ids = self
+            .manager
+            .get_current_version()
+            .await
+            .state_table_info
+            .info()
+            .keys()
+            .cloned()
+            .collect();
+        let res = self
+            .storage
+            .seal_and_sync_epoch(epoch, table_ids)
+            .await
+            .unwrap();
+        self.meta_client
+            .commit_epoch(epoch, res, false)
+            .await
+            .unwrap();
 
         self.storage.try_wait_epoch_for_test(epoch).await;
     }

@@ -22,14 +22,14 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupMerge, GroupMetaChange,
-    GroupTableChange, PbLevelType,
+    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupMerge, PbLevelType,
+    StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
 use super::group_split::get_sub_level_insert_hint;
 use super::{group_split, StateTableId};
-use crate::change_log::TableChangeLogCommon;
+use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, Levels, OverlappingLevel};
@@ -49,8 +49,6 @@ pub struct GroupDeltasSummary {
     pub insert_table_infos: Vec<SstableInfo>,
     pub group_construct: Option<GroupConstruct>,
     pub group_destroy: Option<CompactionGroupId>,
-    pub group_meta_changes: Vec<GroupMetaChange>,
-    pub group_table_change: Option<GroupTableChange>,
     pub new_vnode_partition_count: u32,
     pub group_merge: Option<GroupMerge>,
 }
@@ -66,8 +64,6 @@ pub fn summarize_group_deltas(
     let mut insert_table_infos = vec![];
     let mut group_construct = None;
     let mut group_destroy = None;
-    let mut group_meta_changes = vec![];
-    let mut group_table_change = None;
     let mut new_vnode_partition_count = 0;
     let mut group_merge = None;
 
@@ -93,12 +89,6 @@ pub fn summarize_group_deltas(
                 assert!(group_destroy.is_none());
                 group_destroy = Some(compaction_group_id);
             }
-            GroupDelta::GroupMetaChange(meta_delta) => {
-                group_meta_changes.push(meta_delta.clone());
-            }
-            GroupDelta::GroupTableChange(meta_delta) => {
-                group_table_change = Some(meta_delta.clone());
-            }
             GroupDelta::GroupMerge(merge_delta) => {
                 assert!(group_merge.is_none());
                 group_merge = Some(*merge_delta);
@@ -118,8 +108,6 @@ pub fn summarize_group_deltas(
         insert_table_infos,
         group_construct,
         group_destroy,
-        group_meta_changes,
-        group_table_change,
         new_vnode_partition_count,
         group_merge,
     }
@@ -274,28 +262,17 @@ impl HummockVersion {
 
 pub fn safe_epoch_table_watermarks_impl(
     table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
-    state_table_info: &HummockVersionStateTableInfo,
+    _state_table_info: &HummockVersionStateTableInfo,
     existing_table_ids: &[u32],
 ) -> BTreeMap<u32, TableWatermarks> {
     fn extract_single_table_watermark(
         table_watermarks: &TableWatermarks,
-        safe_epoch: u64,
     ) -> Option<TableWatermarks> {
         if let Some((first_epoch, first_epoch_watermark)) = table_watermarks.watermarks.first() {
-            assert!(
-                *first_epoch >= safe_epoch,
-                "smallest epoch {} in table watermark should be at least safe epoch {}",
-                first_epoch,
-                safe_epoch
-            );
-            if *first_epoch == safe_epoch {
-                Some(TableWatermarks {
-                    watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
-                    direction: table_watermarks.direction,
-                })
-            } else {
-                None
-            }
+            Some(TableWatermarks {
+                watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
+                direction: table_watermarks.direction,
+            })
         } else {
             None
         }
@@ -307,15 +284,8 @@ pub fn safe_epoch_table_watermarks_impl(
             if !existing_table_ids.contains(&u32_table_id) {
                 None
             } else {
-                extract_single_table_watermark(
-                    table_watermarks,
-                    state_table_info
-                        .info()
-                        .get(table_id)
-                        .expect("table should exist")
-                        .safe_epoch,
-                )
-                .map(|table_watermarks| (table_id.table_id, table_watermarks))
+                extract_single_table_watermark(table_watermarks)
+                    .map(|table_watermarks| (table_id.table_id, table_watermarks))
             }
         })
         .collect()
@@ -404,8 +374,7 @@ impl HummockVersion {
                 }
             }
             return;
-        }
-        if !self.levels.contains_key(&parent_group_id) {
+        } else if !self.levels.contains_key(&parent_group_id) {
             warn!(parent_group_id, "non-existing parent group id to init from");
             return;
         }
@@ -617,38 +586,6 @@ impl HummockVersion {
                     member_table_ids,
                     group_construct.get_new_sst_start_id(),
                 );
-            } else if let Some(group_change) = &summary.group_table_change {
-                // TODO: may deprecate this branch? This enum variant is not created anywhere
-                assert!(
-                    group_change.version <= CompatibilityVersion::NoTrivialSplit as _,
-                    "DeltaType::GroupTableChange is not used anymore after CompatibilityVersion::NoMemberTableIds is added"
-                );
-                #[expect(deprecated)]
-                // for backward-compatibility of previous hummock version delta
-                self.init_with_parent_group(
-                    group_change.origin_group_id,
-                    group_change.target_group_id,
-                    BTreeSet::from_iter(group_change.table_ids.clone()),
-                    group_change.new_sst_start_id,
-                );
-
-                let levels = self
-                    .levels
-                    .get_mut(&group_change.origin_group_id)
-                    .expect("compaction group should exist");
-                #[expect(deprecated)]
-                // for backward-compatibility of previous hummock version delta
-                let mut moving_tables = levels
-                    .member_table_ids
-                    .extract_if(|t| group_change.table_ids.contains(t))
-                    .collect_vec();
-                #[expect(deprecated)]
-                // for backward-compatibility of previous hummock version delta
-                self.levels
-                    .get_mut(compaction_group_id)
-                    .expect("compaction group should exist")
-                    .member_table_ids
-                    .append(&mut moving_tables);
             } else if let Some(group_merge) = &summary.group_merge {
                 tracing::info!(
                     "group_merge left {:?} right {:?}",
@@ -662,16 +599,6 @@ impl HummockVersion {
             let levels = self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
                 panic!("compaction group {} does not exist", compaction_group_id)
             });
-            #[expect(deprecated)] // for backward-compatibility of previous hummock version delta
-            for group_meta_delta in &summary.group_meta_changes {
-                levels
-                    .member_table_ids
-                    .extend(group_meta_delta.table_ids_add.clone());
-                levels
-                    .member_table_ids
-                    .retain(|t| !group_meta_delta.table_ids_remove.contains(t));
-                levels.member_table_ids.sort();
-            }
 
             assert!(
                 visible_table_committed_epoch <= version_delta.visible_table_committed_epoch(),
@@ -729,7 +656,6 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.set_max_committed_epoch(version_delta.visible_table_committed_epoch());
-        self.set_safe_epoch(version_delta.visible_table_safe_epoch());
 
         // apply to table watermark
 
@@ -755,10 +681,10 @@ impl HummockVersion {
             let safe_epoch = if let Some(state_table_info) =
                 self.state_table_info.info().get(table_id)
                 && let Some((oldest_epoch, _)) = table_watermarks.watermarks.first()
-                && state_table_info.safe_epoch > *oldest_epoch
+                && state_table_info.committed_epoch > *oldest_epoch
             {
                 // safe epoch has progressed, need further clear.
-                state_table_info.safe_epoch
+                state_table_info.committed_epoch
             } else {
                 // safe epoch not progressed or the table has been removed. No need to truncate
                 continue;
@@ -781,9 +707,25 @@ impl HummockVersion {
         }
 
         // apply to table change log
-        for (table_id, change_log_delta) in &version_delta.change_log_delta {
+        Self::apply_change_log_delta(
+            &mut self.table_change_log,
+            &version_delta.change_log_delta,
+            &version_delta.removed_table_ids,
+            &version_delta.state_table_info_delta,
+            &changed_table_info,
+        );
+    }
+
+    pub fn apply_change_log_delta<T: Clone>(
+        table_change_log: &mut HashMap<TableId, TableChangeLogCommon<T>>,
+        change_log_delta: &HashMap<TableId, ChangeLogDeltaCommon<T>>,
+        removed_table_ids: &HashSet<TableId>,
+        state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
+        changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
+    ) {
+        for (table_id, change_log_delta) in change_log_delta {
             let new_change_log = change_log_delta.new_log.as_ref().unwrap();
-            match self.table_change_log.entry(*table_id) {
+            match table_change_log.entry(*table_id) {
                 Entry::Occupied(entry) => {
                     let change_log = entry.into_mut();
                     if let Some(prev_log) = change_log.0.last() {
@@ -803,22 +745,21 @@ impl HummockVersion {
         // If a table has no new change log entry (even an empty one), it means we have stopped maintained
         // the change log for the table, and then we will remove the table change log.
         // The table change log will also be removed when the table id is removed.
-        self.table_change_log.retain(|table_id, _| {
-            if version_delta.removed_table_ids.contains(table_id) {
+        table_change_log.retain(|table_id, _| {
+            if removed_table_ids.contains(table_id) {
                 return false;
             }
-            if let Some(table_info_delta) = version_delta.state_table_info_delta.get(table_id)
+            if let Some(table_info_delta) = state_table_info_delta.get(table_id)
                 && let Some(Some(prev_table_info)) = changed_table_info.get(table_id) && table_info_delta.committed_epoch > prev_table_info.committed_epoch {
                 // the table exists previously, and its committed epoch has progressed.
             } else {
                 // otherwise, the table change log should be kept anyway
                 return true;
             }
-            let contains = version_delta.change_log_delta.contains_key(table_id);
+            let contains = change_log_delta.contains_key(table_id);
             if !contains {
                 warn!(
                         ?table_id,
-                        max_committed_epoch = version_delta.visible_table_committed_epoch(),
                         "table change log dropped due to no further change log at newly committed epoch",
                     );
             }
@@ -826,8 +767,8 @@ impl HummockVersion {
         });
 
         // truncate the remaining table change log
-        for (table_id, change_log_delta) in &version_delta.change_log_delta {
-            if let Some(change_log) = self.table_change_log.get_mut(table_id) {
+        for (table_id, change_log_delta) in change_log_delta {
+            if let Some(change_log) = table_change_log.get_mut(table_id) {
                 change_log.truncate(change_log_delta.truncate_epoch);
             }
         }
@@ -1302,16 +1243,6 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
 /// Currently this method is only used by risectl validate-version.
 pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     let mut res = Vec::new();
-
-    // Ensure safe_epoch <= max_committed_epoch
-    if version.visible_table_safe_epoch() > version.visible_table_committed_epoch() {
-        res.push(format!(
-            "VERSION: safe_epoch {} > max_committed_epoch {}",
-            version.visible_table_safe_epoch(),
-            version.visible_table_committed_epoch()
-        ));
-    }
-
     // Ensure each table maps to only one compaction group
     for (group_id, levels) in &version.levels {
         // Ensure compaction group id matches

@@ -24,10 +24,6 @@ AzblobProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
-  - name: recursive_scan
-    field_type: bool
-    required: false
-    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -79,10 +75,6 @@ GcsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
-  - name: recursive_scan
-    field_type: bool
-    required: false
-    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -106,18 +98,24 @@ IcebergProperties:
     required: true
   - name: warehouse.path
     field_type: String
+    comments: Path of iceberg warehouse, only applicable in storage catalog.
     required: true
   - name: catalog.name
     field_type: String
+    comments: |-
+      Catalog name, can be omitted for storage catalog, but
+      must be set for other catalogs.
     required: false
   - name: catalog.uri
     field_type: String
+    comments: URI of iceberg catalog, only applicable in rest catalog.
     required: false
   - name: database.name
     field_type: String
     required: false
   - name: table.name
     field_type: String
+    comments: Full name of table, must include schema name.
     required: true
   - name: catalog.jdbc.user
     field_type: String
@@ -493,6 +491,10 @@ MqttProperties:
     field_type: usize
     comments: The maximum number of inflight messages. Defaults to 100
     required: false
+  - name: max_packet_size
+    field_type: u32
+    comments: The max size of messages received by the MQTT client
+    required: false
   - name: tls.client_key
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
@@ -848,10 +850,6 @@ OpendalS3Properties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
-  - name: recursive_scan
-    field_type: bool
-    required: false
-    default: Default::default
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -866,10 +864,6 @@ PosixFsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
-  - name: recursive_scan
-    field_type: bool
-    required: false
-    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false

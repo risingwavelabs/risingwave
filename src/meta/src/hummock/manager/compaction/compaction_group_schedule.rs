@@ -199,7 +199,6 @@ impl HummockManager {
                         table_id,
                         PbStateTableInfoDelta {
                             committed_epoch: info.committed_epoch,
-                            safe_epoch: info.safe_epoch,
                             compaction_group_id: target_compaction_group_id,
                         }
                     )
@@ -257,6 +256,11 @@ impl HummockManager {
         drop(versioning_guard);
         drop(compaction_guard);
         self.report_compact_tasks(canceled_tasks).await?;
+
+        self.metrics
+            .merge_compaction_group_count
+            .with_label_values(&[&left_group_id.to_string()])
+            .inc();
 
         Ok(())
     }

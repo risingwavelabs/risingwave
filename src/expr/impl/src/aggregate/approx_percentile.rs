@@ -18,6 +18,7 @@ use std::ops::Range;
 
 use bytes::{Buf, Bytes};
 use risingwave_common::array::*;
+use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_common_estimate_size::EstimateSize;
@@ -38,6 +39,12 @@ fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
         .literal()
         .map(|x| (*x.as_float64()).into())
         .unwrap();
+    if relative_error <= 0.0 || relative_error >= 1.0 {
+        bail!(
+            "relative_error must be in the range (0, 1), got {}",
+            relative_error
+        )
+    }
     let base = (1.0 + relative_error) / (1.0 - relative_error);
     Ok(Box::new(ApproxPercentile { quantile, base }))
 }
@@ -156,7 +163,8 @@ impl AggregateFunction for ApproxPercentile {
     // approximate quantile bucket on the fly.
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
         let state = state.downcast_ref::<State>();
-        let quantile_count = (state.count as f64 * self.quantile).floor() as u64;
+        let quantile_count =
+            ((state.count.saturating_sub(1)) as f64 * self.quantile).floor() as u64;
         let mut acc_count = 0;
         for (bucket_id, count) in state.neg_buckets.iter().rev() {
             acc_count += count;

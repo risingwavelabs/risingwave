@@ -132,7 +132,6 @@ fn gen_version(
                     TableId::new(table_id as _),
                     StateTableInfoDelta {
                         committed_epoch,
-                        safe_epoch: test_epoch(old_epoch_idx as _),
                         compaction_group_id: StaticCompactionGroupId::StateDefault as _,
                     },
                 )

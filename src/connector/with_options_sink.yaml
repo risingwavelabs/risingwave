@@ -284,9 +284,6 @@ GooglePubSubConfig:
     required: false
 IcebergConfig:
   fields:
-  - name: connector
-    field_type: String
-    required: true
   - name: r#type
     field_type: String
     required: true
@@ -294,22 +291,7 @@ IcebergConfig:
     field_type: bool
     required: false
     default: Default::default
-  - name: table.name
-    field_type: String
-    required: true
-  - name: database.name
-    field_type: String
-    required: false
-  - name: catalog.name
-    field_type: String
-    required: false
   - name: catalog.type
-    field_type: String
-    required: false
-  - name: warehouse.path
-    field_type: String
-    required: true
-  - name: catalog.uri
     field_type: String
     required: false
   - name: s3.region
@@ -323,6 +305,27 @@ IcebergConfig:
     required: true
   - name: s3.secret.key
     field_type: String
+    required: true
+  - name: warehouse.path
+    field_type: String
+    comments: Path of iceberg warehouse, only applicable in storage catalog.
+    required: true
+  - name: catalog.name
+    field_type: String
+    comments: |-
+      Catalog name, can be omitted for storage catalog, but
+      must be set for other catalogs.
+    required: false
+  - name: catalog.uri
+    field_type: String
+    comments: URI of iceberg catalog, only applicable in rest catalog.
+    required: false
+  - name: database.name
+    field_type: String
+    required: false
+  - name: table.name
+    field_type: String
+    comments: Full name of table, must include schema name.
     required: true
   - name: s3.path.style.access
     field_type: bool
@@ -716,6 +719,10 @@ MqttConfig:
   - name: inflight_messages
     field_type: usize
     comments: The maximum number of inflight messages. Defaults to 100
+    required: false
+  - name: max_packet_size
+    field_type: u32
+    comments: The max size of messages received by the MQTT client
     required: false
   - name: tls.client_key
     field_type: String

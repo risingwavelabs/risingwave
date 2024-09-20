@@ -526,7 +526,11 @@ mod tests {
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
-        let sync_result = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
+        let sync_result = test_env
+            .storage
+            .seal_and_sync_epoch(epoch2, HashSet::from_iter([table.id.into()]))
+            .await
+            .unwrap();
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
         reader.init().await.unwrap();

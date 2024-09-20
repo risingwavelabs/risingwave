@@ -25,8 +25,8 @@ use risingwave_pb::hummock::group_delta::PbDeltaType;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{
     CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMerge,
-    PbGroupMetaChange, PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta,
-    PbIntraLevelDelta, PbSstableInfo, PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
+    PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta, PbSstableInfo, PbStateTableInfo,
+    StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
@@ -137,15 +137,13 @@ impl HummockVersionStateTableInfo {
             }
             let new_info = StateTableInfo {
                 committed_epoch: delta.committed_epoch,
-                safe_epoch: delta.safe_epoch,
                 compaction_group_id: delta.compaction_group_id,
             };
             match self.state_table_info.entry(*table_id) {
                 Entry::Occupied(mut entry) => {
                     let prev_info = entry.get_mut();
                     assert!(
-                        new_info.safe_epoch >= prev_info.safe_epoch
-                            && new_info.committed_epoch >= prev_info.committed_epoch,
+                        new_info.committed_epoch >= prev_info.committed_epoch,
                         "state table info regress. table id: {}, prev_info: {:?}, new_info: {:?}",
                         table_id.table_id,
                         prev_info,
@@ -213,7 +211,6 @@ pub struct HummockVersionCommon<T> {
     pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, LevelsCommon<T>>,
     pub(crate) max_committed_epoch: u64,
-    pub(crate) safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<T>>,
     pub state_table_info: HummockVersionStateTableInfo,
@@ -281,7 +278,6 @@ where
                 })
                 .collect(),
             max_committed_epoch: pb_version.max_committed_epoch,
-            safe_epoch: pb_version.safe_epoch,
             table_watermarks: pb_version
                 .table_watermarks
                 .iter()
@@ -322,7 +318,6 @@ where
                 .map(|(group_id, levels)| (*group_id as _, levels.into()))
                 .collect(),
             max_committed_epoch: version.max_committed_epoch,
-            safe_epoch: version.safe_epoch,
             table_watermarks: version
                 .table_watermarks
                 .iter()
@@ -352,7 +347,6 @@ where
                 .map(|(group_id, levels)| (group_id as _, levels.into()))
                 .collect(),
             max_committed_epoch: version.max_committed_epoch,
-            safe_epoch: version.safe_epoch,
             table_watermarks: version
                 .table_watermarks
                 .into_iter()
@@ -398,7 +392,6 @@ impl HummockVersion {
                             TableId::new(*table_id),
                             StateTableInfoDelta {
                                 committed_epoch: self.max_committed_epoch,
-                                safe_epoch: self.safe_epoch,
                                 compaction_group_id: *cg_id,
                             }
                         )
@@ -409,14 +402,6 @@ impl HummockVersion {
                 );
             }
         }
-    }
-
-    pub(crate) fn set_safe_epoch(&mut self, safe_epoch: u64) {
-        self.safe_epoch = safe_epoch;
-    }
-
-    pub fn visible_table_safe_epoch(&self) -> u64 {
-        self.safe_epoch
     }
 
     pub(crate) fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
@@ -437,7 +422,6 @@ impl HummockVersion {
             id: FIRST_VERSION_ID,
             levels: Default::default(),
             max_committed_epoch: INVALID_EPOCH,
-            safe_epoch: INVALID_EPOCH,
             table_watermarks: HashMap::new(),
             table_change_log: HashMap::new(),
             state_table_info: HummockVersionStateTableInfo::empty(),
@@ -458,7 +442,6 @@ impl HummockVersion {
         HummockVersionDelta {
             id: self.next_version_id(),
             prev_id: self.id,
-            safe_epoch: self.safe_epoch,
             trivial_move: false,
             max_committed_epoch: self.max_committed_epoch,
             group_deltas: Default::default(),
@@ -476,7 +459,6 @@ pub struct HummockVersionDeltaCommon<T> {
     pub prev_id: HummockVersionId,
     pub group_deltas: HashMap<CompactionGroupId, GroupDeltasCommon<T>>,
     pub(crate) max_committed_epoch: u64,
-    pub(crate) safe_epoch: u64,
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: HashSet<TableId>,
@@ -599,14 +581,6 @@ impl HummockVersionDelta {
             }))
     }
 
-    pub fn visible_table_safe_epoch(&self) -> u64 {
-        self.safe_epoch
-    }
-
-    pub fn set_safe_epoch(&mut self, safe_epoch: u64) {
-        self.safe_epoch = safe_epoch;
-    }
-
     pub fn visible_table_committed_epoch(&self) -> u64 {
         self.max_committed_epoch
     }
@@ -635,7 +609,6 @@ where
                 })
                 .collect(),
             max_committed_epoch: pb_version_delta.max_committed_epoch,
-            safe_epoch: pb_version_delta.safe_epoch,
             trivial_move: pb_version_delta.trivial_move,
             new_table_watermarks: pb_version_delta
                 .new_table_watermarks
@@ -686,7 +659,6 @@ where
                 .map(|(group_id, deltas)| (*group_id as _, deltas.into()))
                 .collect(),
             max_committed_epoch: version_delta.max_committed_epoch,
-            safe_epoch: version_delta.safe_epoch,
             trivial_move: version_delta.trivial_move,
             new_table_watermarks: version_delta
                 .new_table_watermarks
@@ -726,7 +698,6 @@ where
                 .map(|(group_id, deltas)| (group_id as _, deltas.into()))
                 .collect(),
             max_committed_epoch: version_delta.max_committed_epoch,
-            safe_epoch: version_delta.safe_epoch,
             trivial_move: version_delta.trivial_move,
             new_table_watermarks: version_delta
                 .new_table_watermarks
@@ -766,7 +737,6 @@ where
                 .map(|(group_id, deltas)| (group_id as CompactionGroupId, deltas.into()))
                 .collect(),
             max_committed_epoch: pb_version_delta.max_committed_epoch,
-            safe_epoch: pb_version_delta.safe_epoch,
             trivial_move: pb_version_delta.trivial_move,
             new_table_watermarks: pb_version_delta
                 .new_table_watermarks
@@ -924,11 +894,6 @@ pub enum GroupDeltaCommon<T> {
     IntraLevel(IntraLevelDeltaCommon<T>),
     GroupConstruct(PbGroupConstruct),
     GroupDestroy(PbGroupDestroy),
-    GroupMetaChange(PbGroupMetaChange),
-
-    #[allow(dead_code)]
-    GroupTableChange(PbGroupTableChange),
-
     GroupMerge(PbGroupMerge),
 }
 
@@ -948,12 +913,6 @@ where
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(pb_group_destroy)
-            }
-            Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)) => {
-                GroupDeltaCommon::GroupMetaChange(pb_group_meta_change)
-            }
-            Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
-                GroupDeltaCommon::GroupTableChange(pb_group_table_change)
             }
             Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
                 GroupDeltaCommon::GroupMerge(pb_group_merge)
@@ -978,12 +937,6 @@ where
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy)),
             },
-            GroupDeltaCommon::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)),
-            },
-            GroupDeltaCommon::GroupTableChange(pb_group_table_change) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change)),
-            },
             GroupDeltaCommon::GroupMerge(pb_group_merge) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMerge(pb_group_merge)),
             },
@@ -1006,12 +959,6 @@ where
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(*pb_group_destroy)),
             },
-            GroupDeltaCommon::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupMetaChange(pb_group_meta_change.clone())),
-            },
-            GroupDeltaCommon::GroupTableChange(pb_group_table_change) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change.clone())),
-            },
             GroupDeltaCommon::GroupMerge(pb_group_merge) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMerge(*pb_group_merge)),
             },
@@ -1033,12 +980,6 @@ where
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(*pb_group_destroy)
-            }
-            Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)) => {
-                GroupDeltaCommon::GroupMetaChange(pb_group_meta_change.clone())
-            }
-            Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
-                GroupDeltaCommon::GroupTableChange(pb_group_table_change.clone())
             }
             Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
                 GroupDeltaCommon::GroupMerge(*pb_group_merge)

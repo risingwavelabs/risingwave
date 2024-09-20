@@ -14,10 +14,10 @@
 use std::future::IntoFuture;
 use std::sync::Arc;
 
-use arrow_array_iceberg::RecordBatch;
 use deltalake::parquet::arrow::async_reader::AsyncFileReader;
 use futures_async_stream::try_stream;
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
+use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::types::{Datum, ScalarImpl};
