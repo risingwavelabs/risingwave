@@ -31,7 +31,7 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
     Ok(response)
 }
 
-pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
+pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow::Result<()> {
     let GetClusterInfoResponse {
         worker_nodes: _,
         source_infos: _,
@@ -40,37 +40,113 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
         revision: _,
     } = get_cluster_info(context).await?;
 
+    let mut actor_splits_map: BTreeMap<u32, (usize, String)> = BTreeMap::new();
+
+    // build actor_splits_map
     for table_fragment in &table_fragments {
         if table_fragment.actor_splits.is_empty() {
             continue;
         }
 
-        println!("Table #{}", table_fragment.table_id);
-
         for fragment in table_fragment.fragments.values() {
             let fragment_type_mask = fragment.fragment_type_mask;
             if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
-                || fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0
+                && fragment_type_mask & FragmentTypeFlag::SourceScan as u32 == 0
             {
+                // no source or source backfill
+                continue;
+            }
+            if fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0 {
                 // skip dummy source for dml fragment
                 continue;
             }
 
-            println!("\tFragment #{}", fragment.fragment_id);
             for actor in &fragment.actors {
                 if let Some(ConnectorSplits { splits }) = actor_splits.remove(&actor.actor_id) {
                     let splits = splits
                         .iter()
                         .map(|split| SplitImpl::try_from(split).unwrap())
                         .map(|split| split.id())
-                        .collect_vec();
+                        .collect_vec()
+                        .join(",");
+                    actor_splits_map.insert(actor.actor_id, (splits.len(), splits));
+                }
+            }
+        }
+    }
 
+    // print in the second iteration. Otherwise we don't have upstream splits info
+    for table_fragment in &table_fragments {
+        if table_fragment.actor_splits.is_empty() {
+            continue;
+        }
+        if ignore_id {
+            println!("Table");
+        } else {
+            println!("Table #{}", table_fragment.table_id);
+        }
+        for fragment in table_fragment.fragments.values() {
+            let fragment_type_mask = fragment.fragment_type_mask;
+            if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
+                && fragment_type_mask & FragmentTypeFlag::SourceScan as u32 == 0
+            {
+                // no source or source backfill
+                continue;
+            }
+            if fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0 {
+                // skip dummy source for dml fragment
+                continue;
+            }
+
+            println!(
+                "\tFragment{} ({})",
+                if ignore_id {
+                    "".to_string()
+                } else {
+                    format!(" #{}", fragment.fragment_id)
+                },
+                if fragment_type_mask == FragmentTypeFlag::Source as u32 {
+                    "Source"
+                } else {
+                    "SourceScan"
+                }
+            );
+            for actor in &fragment.actors {
+                if let Some((split_count, splits)) = actor_splits_map.get(&actor.actor_id) {
                     println!(
-                        "\t\tActor #{:<3} ({}): [{}]",
-                        actor.actor_id,
-                        splits.len(),
-                        splits.join(",")
+                        "\t\tActor{} ({} splits): [{}]{}",
+                        if ignore_id {
+                            "".to_string()
+                        } else {
+                            format!(" #{:<3}", actor.actor_id,)
+                        },
+                        split_count,
+                        splits,
+                        if !actor.upstream_actor_id.is_empty() {
+                            assert!(
+                                actor.upstream_actor_id.len() == 1,
+                                "should have only one upstream actor, got {actor:?}"
+                            );
+                            let upstream_splits =
+                                actor_splits_map.get(&actor.upstream_actor_id[0]).unwrap();
+                            format!(
+                                " <- Upstream Actor{}: [{}]",
+                                if ignore_id {
+                                    "".to_string()
+                                } else {
+                                    format!(" #{}", actor.upstream_actor_id[0])
+                                },
+                                upstream_splits.1
+                            )
+                        } else {
+                            "".to_string()
+                        }
                     );
+                } else {
+                    println!(
+                        "\t\tError: Actor #{:<3} (not found in actor_splits)",
+                        actor.actor_id,
+                    )
                 }
             }
         }

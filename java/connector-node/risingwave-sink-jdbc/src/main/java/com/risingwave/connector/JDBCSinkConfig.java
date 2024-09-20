@@ -32,6 +32,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "schema.name")
     private String schemaName;
 
+    @JsonProperty(value = "jdbc.query.timeout")
+    private int queryTimeoutSeconds = 600;
+
     @JsonCreator
     public JDBCSinkConfig(
             @JsonProperty(value = "jdbc.url") String jdbcUrl,
@@ -61,5 +64,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public boolean isUpsertSink() {
         return this.isUpsertSink;
+    }
+
+    public int getQueryTimeout() {
+        return queryTimeoutSeconds;
     }
 }

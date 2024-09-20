@@ -59,3 +59,4 @@ mod rw_worker_nodes;
 
 mod rw_actor_id_to_ddl;
 mod rw_fragment_id_to_ddl;
+mod rw_worker_actor_count;

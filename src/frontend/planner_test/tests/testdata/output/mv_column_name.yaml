@@ -63,7 +63,7 @@
     select count(*), max(a) from t;
   stream_plan: |-
     StreamMaterialize { columns: [count, max], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum0(count), max(max(t.a))], noop_update_hint: true }
+    └─StreamProject { exprs: [sum0(count), max(max(t.a))] }
       └─StreamSimpleAgg { aggs: [sum0(count), max(max(t.a)), count] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [_vnode], aggs: [count, max(t.a)] }

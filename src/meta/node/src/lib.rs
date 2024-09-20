@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lint_reasons)]
 #![feature(let_chains)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
@@ -408,9 +407,9 @@ pub fn start(
                 periodic_tombstone_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_tombstone_reclaim_compaction_interval_sec,
-                periodic_split_compact_group_interval_sec: config
+                periodic_scheduling_compaction_group_interval_sec: config
                     .meta
-                    .periodic_split_compact_group_interval_sec,
+                    .periodic_scheduling_compaction_group_interval_sec,
                 split_group_size_limit: config.meta.split_group_size_limit,
                 min_table_split_size: config.meta.move_table_size_limit,
                 table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
@@ -430,7 +429,6 @@ pub fn start(
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_task_max_progress_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
-                cut_table_size_limit: config.meta.cut_table_size_limit,
                 hybrid_partition_node_count: config.meta.hybrid_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
                 event_log_channel_max_size: config.meta.event_log_channel_max_size,
@@ -457,6 +455,14 @@ pub fn start(
                 table_info_statistic_history_times: config
                     .storage
                     .table_info_statistic_history_times,
+                actor_cnt_per_worker_parallelism_hard_limit: config
+                    .meta
+                    .developer
+                    .actor_cnt_per_worker_parallelism_hard_limit,
+                actor_cnt_per_worker_parallelism_soft_limit: config
+                    .meta
+                    .developer
+                    .actor_cnt_per_worker_parallelism_soft_limit,
             },
             config.system.into_init_system_params(),
             Default::default(),

@@ -13,32 +13,33 @@
 // limitations under the License.
 
 use core::time::Duration;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::anyhow;
 use async_recursion::async_recursion;
 use await_tree::InstrumentAwait;
 use futures::stream::BoxStream;
 use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
+use risingwave_common::{bail, must_match};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::stream_plan::{StreamActor, StreamNode, StreamScanNode, StreamScanType};
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
-    BuildActorInfo, StreamingControlStreamRequest, StreamingControlStreamResponse,
+    StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 use risingwave_storage::monitor::HummockTraceFutureExt;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::{dispatch_state_store, StateStore};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -51,16 +52,17 @@ use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
-    Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatcherImpl, Executor, ExecutorInfo,
+    Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatcherImpl, Execute, Executor,
+    ExecutorInfo, MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor,
     WrapperExecutor,
 };
-use crate::from_proto::create_executor;
+use crate::from_proto::{create_executor, MergeExecutorBuilder};
 use crate::task::barrier_manager::{
     ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
 };
 use crate::task::{
-    ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager,
-    StreamActorManagerState, StreamEnvironment, UpDownActorIds,
+    ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager, StreamEnvironment,
+    UpDownActorIds,
 };
 
 #[cfg(test)]
@@ -214,16 +216,6 @@ impl LocalStreamManager {
             })
     }
 
-    /// Drop the resources of the given actors.
-    pub async fn drop_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
-        self.actor_op_tx
-            .send_and_await(|result_sender| LocalActorOperation::DropActors {
-                actors,
-                result_sender,
-            })
-            .await
-    }
-
     pub async fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
@@ -256,28 +248,9 @@ impl LocalStreamManager {
 }
 
 impl LocalBarrierWorker {
-    /// Drop the resources of the given actors.
-    pub(super) fn drop_actors(&mut self, actors: &[ActorId]) {
-        self.current_shared_context.drop_actors(actors);
-        for &id in actors {
-            self.actor_manager_state.drop_actor(id);
-        }
-        tracing::debug!(actors = ?actors, "drop actors");
-    }
-
     /// Force stop all actors on this worker, and then drop their resources.
     pub(super) async fn reset(&mut self, version_id: HummockVersionId) {
-        let actor_handles = self.actor_manager_state.drain_actor_handles();
-        for (actor_id, handle) in &actor_handles {
-            tracing::debug!("force stopping actor {}", actor_id);
-            handle.abort();
-        }
-        for (actor_id, handle) in actor_handles {
-            tracing::debug!("join actor {}", actor_id);
-            let result = handle.await;
-            assert!(result.is_ok() || result.unwrap_err().is_cancelled());
-        }
-        self.actor_manager_state.clear_state();
+        self.state.abort_actors().await;
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
             m.clear();
         }
@@ -290,26 +263,6 @@ impl LocalBarrierWorker {
         }
         self.reset_state();
         self.actor_manager.env.dml_manager_ref().clear();
-    }
-
-    pub(super) fn update_actors(&mut self, actors: Vec<BuildActorInfo>) -> StreamResult<()> {
-        self.actor_manager_state.update_actors(actors)
-    }
-
-    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
-    /// now.
-    pub(super) fn start_create_actors(&mut self, actors: &[ActorId]) -> StreamResult<()> {
-        let actors: Vec<_> = actors
-            .iter()
-            .map(|actor_id| {
-                self.actor_manager_state
-                    .actors
-                    .remove(actor_id)
-                    .ok_or_else(|| anyhow!("No such actor with actor id:{}", actor_id))
-            })
-            .try_collect()?;
-        self.spawn_actors(actors);
-        Ok(())
     }
 }
 
@@ -340,6 +293,128 @@ impl StreamActorManager {
         ))
     }
 
+    fn get_executor_id(actor_context: &ActorContext, node: &StreamNode) -> u64 {
+        // We assume that the operator_id of different instances from the same RelNode will be the
+        // same.
+        unique_executor_id(actor_context.id, node.operator_id)
+    }
+
+    fn get_executor_info(node: &StreamNode, executor_id: u64) -> ExecutorInfo {
+        let schema: Schema = node.fields.iter().map(Field::from).collect();
+
+        let pk_indices = node
+            .get_stream_key()
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect::<Vec<_>>();
+
+        let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
+        ExecutorInfo {
+            schema,
+            pk_indices,
+            identity,
+        }
+    }
+
+    fn create_snapshot_backfill_input(
+        &self,
+        upstream_node: &StreamNode,
+        actor_context: &ActorContextRef,
+        shared_context: &Arc<SharedContext>,
+    ) -> StreamResult<MergeExecutorInput> {
+        let info = Self::get_executor_info(
+            upstream_node,
+            Self::get_executor_id(actor_context, upstream_node),
+        );
+
+        let upstream_merge = must_match!(upstream_node.get_node_body().unwrap(), NodeBody::Merge(upstream_merge) => {
+            upstream_merge
+        });
+
+        MergeExecutorBuilder::new_input(
+            shared_context.clone(),
+            self.streaming_metrics.clone(),
+            actor_context.clone(),
+            info,
+            upstream_merge,
+        )
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    fn create_snapshot_backfill_node(
+        &self,
+        stream_node: &StreamNode,
+        node: &StreamScanNode,
+        actor_context: &ActorContextRef,
+        vnode_bitmap: Option<Bitmap>,
+        shared_context: &Arc<SharedContext>,
+        env: StreamEnvironment,
+        state_store: impl StateStore,
+    ) -> StreamResult<Executor> {
+        let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
+        let upstream =
+            self.create_snapshot_backfill_input(upstream_node, actor_context, shared_context)?;
+
+        let table_desc: &StorageTableDesc = node.get_table_desc()?;
+
+        let output_indices = node
+            .output_indices
+            .iter()
+            .map(|&i| i as usize)
+            .collect_vec();
+
+        let column_ids = node
+            .upstream_column_ids
+            .iter()
+            .map(ColumnId::from)
+            .collect_vec();
+
+        let progress = shared_context
+            .local_barrier_manager
+            .register_create_mview_progress(actor_context.id);
+
+        let vnodes = vnode_bitmap.map(Arc::new);
+        let barrier_rx = shared_context
+            .local_barrier_manager
+            .subscribe_barrier(actor_context.id);
+
+        let upstream_table =
+            StorageTable::new_partial(state_store.clone(), column_ids, vnodes, table_desc);
+
+        let executor = SnapshotBackfillExecutor::new(
+            upstream_table,
+            upstream,
+            output_indices,
+            actor_context.clone(),
+            progress,
+            env.config().developer.chunk_size,
+            node.rate_limit.map(|x| x as _),
+            barrier_rx,
+            self.streaming_metrics.clone(),
+        )
+        .boxed();
+
+        let info = Self::get_executor_info(
+            stream_node,
+            Self::get_executor_id(actor_context, stream_node),
+        );
+
+        if crate::consistency::insane() {
+            let mut troubled_info = info.clone();
+            troubled_info.identity = format!("{} (troubled)", info.identity);
+            Ok((
+                info,
+                TroublemakerExecutor::new(
+                    (troubled_info, executor).into(),
+                    env.config().developer.chunk_size,
+                ),
+            )
+                .into())
+        } else {
+            Ok((info, executor).into())
+        }
+    }
+
     /// Create a chain(tree) of nodes, with given `store`.
     #[allow(clippy::too_many_arguments)]
     #[async_recursion]
@@ -355,6 +430,22 @@ impl StreamActorManager {
         subtasks: &mut Vec<SubtaskHandle>,
         shared_context: &Arc<SharedContext>,
     ) -> StreamResult<Executor> {
+        if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
+            && let Ok(StreamScanType::SnapshotBackfill) = stream_scan.get_stream_scan_type()
+        {
+            return dispatch_state_store!(env.state_store(), store, {
+                self.create_snapshot_backfill_node(
+                    node,
+                    stream_scan,
+                    actor_context,
+                    vnode_bitmap,
+                    shared_context,
+                    env,
+                    store,
+                )
+            });
+        }
+
         // The "stateful" here means that the executor may issue read operations to the state store
         // massively and continuously. Used to decide whether to apply the optimization of subtasks.
         fn is_stateful_executor(stream_node: &StreamNode) -> bool {
@@ -393,24 +484,13 @@ impl StreamActorManager {
         }
 
         let op_info = node.get_identity().clone();
-        let pk_indices = node
-            .get_stream_key()
-            .iter()
-            .map(|idx| *idx as usize)
-            .collect::<Vec<_>>();
 
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
-        let executor_id = unique_executor_id(actor_context.id, node.operator_id);
+        let executor_id = Self::get_executor_id(actor_context, node);
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
-        let schema: Schema = node.fields.iter().map(Field::from).collect();
 
-        let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity,
-        };
+        let info = Self::get_executor_info(node, executor_id);
 
         let eval_error_report = ActorEvalErrorReport {
             actor_context: actor_context.clone(),
@@ -494,15 +574,11 @@ impl StreamActorManager {
 
     async fn create_actor(
         self: Arc<Self>,
-        actor: BuildActorInfo,
+        actor: StreamActor,
         shared_context: Arc<SharedContext>,
+        related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
         {
-            let BuildActorInfo {
-                actor,
-                related_subscriptions,
-            } = actor;
-            let actor = actor.unwrap();
             let actor_id = actor.actor_id;
             let streaming_config = self.env.config().clone();
             let actor_context = ActorContext::create(
@@ -510,15 +586,7 @@ impl StreamActorManager {
                 self.env.total_mem_usage(),
                 self.streaming_metrics.clone(),
                 actor.dispatcher.len(),
-                related_subscriptions
-                    .into_iter()
-                    .map(|(table_id, subscription_ids)| {
-                        (
-                            TableId::new(table_id),
-                            HashSet::from_iter(subscription_ids.subscription_ids),
-                        )
-                    })
-                    .collect(),
+                related_subscriptions,
                 self.env.meta_client().clone(),
                 streaming_config,
             );
@@ -559,18 +627,23 @@ impl StreamActorManager {
     }
 }
 
-impl LocalBarrierWorker {
-    pub(super) fn spawn_actors(&mut self, actors: Vec<BuildActorInfo>) {
-        for actor in actors {
+impl StreamActorManager {
+    pub(super) fn spawn_actor(
+        self: &Arc<Self>,
+        actor: StreamActor,
+        related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
+        current_shared_context: Arc<SharedContext>,
+    ) -> (JoinHandle<()>, Option<JoinHandle<()>>) {
+        {
             let monitor = tokio_metrics::TaskMonitor::new();
-            let stream_actor_ref = actor.actor.as_ref().unwrap();
+            let stream_actor_ref = &actor;
             let actor_id = stream_actor_ref.actor_id;
             let handle = {
                 let trace_span =
                     format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
-                let barrier_manager = self.current_shared_context.local_barrier_manager.clone();
+                let barrier_manager = current_shared_context.local_barrier_manager.clone();
                 // wrap the future of `create_actor` with `boxed` to avoid stack overflow
-                let actor = self.actor_manager.clone().create_actor(actor, self.current_shared_context.clone()).boxed().and_then(|actor| actor.run()).map(move |result| {
+                let actor = self.clone().create_actor(actor, current_shared_context, related_subscriptions).boxed().and_then(|actor| actor.run()).map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
@@ -578,7 +651,7 @@ impl LocalBarrierWorker {
                         barrier_manager.notify_failure(actor_id, err);
                     }
                 });
-                let traced = match &self.actor_manager.await_tree_reg {
+                let traced = match &self.await_tree_reg {
                     Some(m) => m
                         .register(await_tree_key::Actor(actor_id), trace_span)
                         .instrument(actor)
@@ -586,24 +659,17 @@ impl LocalBarrierWorker {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
-                let with_config =
-                    crate::CONFIG.scope(self.actor_manager.env.config().clone(), instrumented);
+                let with_config = crate::CONFIG.scope(self.env.config().clone(), instrumented);
 
-                self.actor_manager.runtime.spawn(with_config)
+                self.runtime.spawn(with_config)
             };
-            self.actor_manager_state.handles.insert(actor_id, handle);
 
-            if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug
-                || self
-                    .actor_manager
-                    .env
-                    .config()
-                    .developer
-                    .enable_actor_tokio_metrics
+            let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
+                || self.env.config().developer.enable_actor_tokio_metrics
             {
                 tracing::info!("Tokio metrics are enabled.");
-                let streaming_metrics = self.actor_manager.streaming_metrics.clone();
-                let actor_monitor_task = self.actor_manager.runtime.spawn(async move {
+                let streaming_metrics = self.streaming_metrics.clone();
+                let actor_monitor_task = self.runtime.spawn(async move {
                     let metrics = streaming_metrics.new_actor_metrics(actor_id);
                     loop {
                         let task_metrics = monitor.cumulative();
@@ -643,10 +709,11 @@ impl LocalBarrierWorker {
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }
                 });
-                self.actor_manager_state
-                    .actor_monitor_tasks
-                    .insert(actor_id, actor_monitor_task);
-            }
+                Some(actor_monitor_task)
+            } else {
+                None
+            };
+            (handle, monitor_handle)
         }
     }
 }
@@ -654,7 +721,10 @@ impl LocalBarrierWorker {
 impl LocalBarrierWorker {
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn update_actor_info(&self, new_actor_infos: Vec<ActorInfo>) -> StreamResult<()> {
+    pub fn update_actor_info(
+        &self,
+        new_actor_infos: impl Iterator<Item = ActorInfo>,
+    ) -> StreamResult<()> {
         let mut actor_infos = self.current_shared_context.actor_infos.write();
         for actor in new_actor_infos {
             if let Some(prev_actor) = actor_infos.get(&actor.get_actor_id())
@@ -667,44 +737,6 @@ impl LocalBarrierWorker {
             }
             actor_infos.insert(actor.get_actor_id(), actor);
         }
-        Ok(())
-    }
-}
-
-impl StreamActorManagerState {
-    /// `drop_actor` is invoked by meta node via RPC once the stop barrier arrives at the
-    /// sink. All the actors in the actors should stop themselves before this method is invoked.
-    fn drop_actor(&mut self, actor_id: ActorId) {
-        self.actor_monitor_tasks
-            .remove(&actor_id)
-            .inspect(|handle| handle.abort());
-        self.actors.remove(&actor_id);
-
-        // Task should have already stopped when this method is invoked. There might be some
-        // clean-up work left (like dropping in-memory data structures), but we don't have to wait
-        // for them to finish, in order to make this request non-blocking.
-        self.handles.remove(&actor_id);
-    }
-
-    fn drain_actor_handles(&mut self) -> Vec<(ActorId, ActorHandle)> {
-        self.handles.drain().collect()
-    }
-
-    /// `stop_all_actors` is invoked by meta node via RPC for recovery purpose. Different from the
-    /// `drop_actor`, the execution of the actors will be aborted.
-    fn clear_state(&mut self) {
-        self.actors.clear();
-        self.actor_monitor_tasks.clear();
-    }
-
-    fn update_actors(&mut self, actors: Vec<BuildActorInfo>) -> StreamResult<()> {
-        for actor in actors {
-            let actor_id = actor.actor.as_ref().unwrap().get_actor_id();
-            self.actors
-                .try_insert(actor_id, actor)
-                .map_err(|_| anyhow!("duplicated actor {}", actor_id))?;
-        }
-
         Ok(())
     }
 }

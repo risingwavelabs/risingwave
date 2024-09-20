@@ -41,20 +41,6 @@ impl StreamService for StreamServiceImpl {
         impl Stream<Item = std::result::Result<StreamingControlStreamResponse, tonic::Status>>;
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn drop_actors(
-        &self,
-        request: Request<DropActorsRequest>,
-    ) -> std::result::Result<Response<DropActorsResponse>, Status> {
-        let req = request.into_inner();
-        let actors = req.actor_ids;
-        self.mgr.drop_actors(actors).await?;
-        Ok(Response::new(DropActorsResponse {
-            request_id: req.request_id,
-            status: None,
-        }))
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
     async fn wait_epoch_commit(
         &self,
         request: Request<WaitEpochCommitRequest>,

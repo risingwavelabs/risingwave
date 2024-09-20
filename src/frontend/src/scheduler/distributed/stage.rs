@@ -1028,7 +1028,7 @@ impl StageRunner {
                     .expect("no partition info for seq scan")
                     .into_table()
                     .expect("PartitionInfo should be TablePartitionInfo");
-                scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                 scan_node.scan_ranges = partition.scan_ranges;
                 PbPlanNode {
                     children: vec![],
@@ -1045,7 +1045,7 @@ impl StageRunner {
                     .expect("no partition info for seq scan")
                     .into_table()
                     .expect("PartitionInfo should be TablePartitionInfo");
-                scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                 PbPlanNode {
                     children: vec![],
                     identity,

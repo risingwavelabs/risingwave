@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::hash::{VirtualNode, WorkerSlotMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -57,7 +57,8 @@ impl ServingVnodeMapping {
                 } else {
                     None
                 };
-                place_vnode(old_mapping, workers, max_parallelism)
+                // TODO(var-vnode): use vnode count from config
+                place_vnode(old_mapping, workers, max_parallelism, VirtualNode::COUNT)
             };
             match new_mapping {
                 None => {
@@ -192,7 +193,16 @@ pub async fn start_serving_vnode_mapping_worker(
                                         continue;
                                     }
                                     let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
-                                    let (upserted, failed) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
+                                    let filtered_streaming_parallelisms = fragment_ids.iter().filter_map(|frag_id|{
+                                        match streaming_parallelisms.get(frag_id) {
+                                            Some(parallelism) => Some((*frag_id, *parallelism)),
+                                            None => {
+                                                tracing::warn!(fragment_id = *frag_id, "streaming parallelism not found");
+                                                None
+                                            }
+                                        }
+                                    }).collect();
+                                    let (upserted, failed) = serving_vnode_mapping.upsert(filtered_streaming_parallelisms, &workers);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
                                         notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&upserted) }));

@@ -86,7 +86,6 @@ pub use self::command::{
     Reschedule, SnapshotBackfillInfo,
 };
 pub use self::info::InflightSubscriptionInfo;
-pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -171,8 +170,6 @@ pub struct GlobalBarrierManagerContext {
     sink_manager: SinkCoordinatorManager,
 
     pub(super) metrics: Arc<MetaMetrics>,
-
-    stream_rpc_manager: StreamRpcManager,
 
     env: MetaSrvEnv,
 }
@@ -596,7 +593,6 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
-        stream_rpc_manager: StreamRpcManager,
         scale_controller: ScaleControllerRef,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
@@ -624,7 +620,6 @@ impl GlobalBarrierManager {
             scale_controller,
             sink_manager,
             metrics,
-            stream_rpc_manager,
             env: env.clone(),
         };
 
@@ -768,7 +763,9 @@ impl GlobalBarrierManager {
                     if let Some(request) = request {
                         match request {
                             BarrierManagerRequest::GetDdlProgress(result_tx) => {
+                                // Progress of normal backfill
                                 let mut progress = self.checkpoint_control.create_mview_tracker.gen_ddl_progress();
+                                // Progress of snapshot backfill
                                 for creating_job in self.checkpoint_control.creating_streaming_job_controls.values() {
                                     progress.extend([(creating_job.info.table_fragments.table_id().table_id, creating_job.gen_ddl_progress())]);
                                 }
@@ -836,7 +833,7 @@ impl GlobalBarrierManager {
                         .on_new_worker_node_map(self.active_streaming_nodes.current());
                     self.checkpoint_control.creating_streaming_job_controls.values().for_each(|job| job.on_new_worker_node_map(self.active_streaming_nodes.current()));
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node).await;
+                        self.control_stream_manager.add_worker(node, &self.state.inflight_subscription_info).await;
                     }
                 }
 
@@ -965,6 +962,19 @@ impl GlobalBarrierManager {
             info,
         } = &command
         {
+            if self.state.paused_reason().is_some() {
+                warn!("cannot create streaming job with snapshot backfill when paused");
+                for notifier in notifiers {
+                    notifier.notify_start_failed(
+                        anyhow!("cannot create streaming job with snapshot backfill when paused",)
+                            .into(),
+                    );
+                }
+                return Ok(());
+            }
+            let mutation = command
+                .to_mutation(None)
+                .expect("should have some mutation in `CreateStreamingJob` command");
             self.checkpoint_control
                 .creating_streaming_job_controls
                 .insert(
@@ -975,6 +985,7 @@ impl GlobalBarrierManager {
                         prev_epoch.value().0,
                         &self.checkpoint_control.hummock_version_stats,
                         &self.context.metrics,
+                        mutation,
                     ),
                 );
         }
@@ -1035,17 +1046,10 @@ impl GlobalBarrierManager {
 
         let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
 
-        let mut actors_to_pre_sync_barrier: HashMap<_, Vec<_>> = HashMap::new();
         let mut jobs_to_wait = HashSet::new();
 
         for (table_id, creating_job) in &mut self.checkpoint_control.creating_streaming_job_controls
         {
-            for (worker_id, actors) in creating_job.actors_to_pre_sync_barrier() {
-                actors_to_pre_sync_barrier
-                    .entry(*worker_id)
-                    .or_default()
-                    .extend(actors.iter().cloned())
-            }
             if let Some(wait_job) =
                 creating_job.on_new_command(&mut self.control_stream_manager, &command_ctx)?
             {
@@ -1060,7 +1064,6 @@ impl GlobalBarrierManager {
             &command_ctx,
             &pre_applied_graph_info,
             Some(&self.state.inflight_graph_info),
-            actors_to_pre_sync_barrier,
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
@@ -1625,6 +1628,7 @@ impl GlobalBarrierManagerContext {
         Ok(info)
     }
 
+    /// Serving `SHOW JOBS / SELECT * FROM rw_ddl_progress`
     pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
         let mut ddl_progress = {
             let (tx, rx) = oneshot::channel();

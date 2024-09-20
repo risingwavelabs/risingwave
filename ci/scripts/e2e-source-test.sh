@@ -45,7 +45,6 @@ risedev ci-kill
 echo "--- Prepare data"
 cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
 cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
-cp src/connector/src/test_data/complex-schema ./proto-complex-schema
 cp src/connector/src/test_data/complex-schema.json ./json-complex-schema
 
 
@@ -130,7 +129,7 @@ echo "> inserted new rows into postgres"
 
 # start cluster w/o clean-data
 unset RISINGWAVE_CI
-export RUST_LOG="risingwave_stream=debug,risingwave_batch=info,risingwave_storage=info" \
+export RUST_LOG="risingwave_stream=debug,risingwave_batch=info,risingwave_storage=info"
 
 risedev dev ci-1cn-1fe-with-recovery
 echo "> wait for cluster recovery finish"

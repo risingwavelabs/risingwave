@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::{Div, Mul};
 use std::sync::Arc;
 
@@ -138,12 +140,8 @@ impl ToArrow for IcebergArrowConvert {
                         let scale = e.scale() as i8;
                         let diff_scale = abs(max_scale - scale);
                         let value = match scale {
-                            _ if scale < max_scale => {
-                                value.mul(10_i32.pow(diff_scale as u32) as i128)
-                            }
-                            _ if scale > max_scale => {
-                                value.div(10_i32.pow(diff_scale as u32) as i128)
-                            }
+                            _ if scale < max_scale => value.mul(10_i128.pow(diff_scale as u32)),
+                            _ if scale > max_scale => value.div(10_i128.pow(diff_scale as u32)),
                             _ => value,
                         };
                         Some(value)
@@ -170,6 +168,94 @@ impl ToArrow for IcebergArrowConvert {
 }
 
 impl FromArrow for IcebergArrowConvert {}
+
+/// Iceberg sink with `create_table_if_not_exists` option will use this struct to convert the
+/// iceberg data type to arrow data type. Specifically, it will add the field id to the
+/// arrow field metadata, because iceberg-rust and icelake need the field id to be set.
+///
+/// Note: this is different from [`IcebergArrowConvert`], which is used to read from/write to
+/// an _existing_ iceberg table. In that case, we just need to make sure the data is compatible to the existing schema.
+/// But to _create a new table_, we need to meet more requirements of iceberg.
+#[derive(Default)]
+pub struct IcebergCreateTableArrowConvert {
+    next_field_id: RefCell<u32>,
+}
+
+impl IcebergCreateTableArrowConvert {
+    pub fn to_arrow_field(
+        &self,
+        name: &str,
+        data_type: &DataType,
+    ) -> Result<arrow_schema::Field, ArrayError> {
+        ToArrow::to_arrow_field(self, name, data_type)
+    }
+
+    fn add_field_id(&self, arrow_field: &mut arrow_schema::Field) {
+        *self.next_field_id.borrow_mut() += 1;
+        let field_id = *self.next_field_id.borrow();
+
+        let mut metadata = HashMap::new();
+        // for iceberg-rust
+        metadata.insert("PARQUET:field_id".to_string(), field_id.to_string());
+        // for icelake
+        metadata.insert("column_id".to_string(), field_id.to_string());
+        arrow_field.set_metadata(metadata);
+    }
+}
+
+impl ToArrow for IcebergCreateTableArrowConvert {
+    #[inline]
+    fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
+        // To create a iceberg table, we need a decimal type with precision and scale to be set
+        // We choose 28 here
+        // The decimal type finally will be converted to an iceberg decimal type.
+        // Iceberg decimal(P,S)
+        // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be 38 or less.
+        let data_type = arrow_schema::DataType::Decimal128(28, 10);
+
+        let mut arrow_field = arrow_schema::Field::new(name, data_type, true);
+        self.add_field_id(&mut arrow_field);
+        arrow_field
+    }
+
+    /// Convert RisingWave data type to Arrow data type.
+    ///
+    /// This function returns a `Field` instead of `DataType` because some may be converted to
+    /// extension types which require additional metadata in the field.
+    fn to_arrow_field(
+        &self,
+        name: &str,
+        value: &DataType,
+    ) -> Result<arrow_schema::Field, ArrayError> {
+        let data_type = match value {
+            // using the inline function
+            DataType::Boolean => self.bool_type_to_arrow(),
+            DataType::Int16 => self.int16_type_to_arrow(),
+            DataType::Int32 => self.int32_type_to_arrow(),
+            DataType::Int64 => self.int64_type_to_arrow(),
+            DataType::Int256 => self.int256_type_to_arrow(),
+            DataType::Float32 => self.float32_type_to_arrow(),
+            DataType::Float64 => self.float64_type_to_arrow(),
+            DataType::Date => self.date_type_to_arrow(),
+            DataType::Time => self.time_type_to_arrow(),
+            DataType::Timestamp => self.timestamp_type_to_arrow(),
+            DataType::Timestamptz => self.timestamptz_type_to_arrow(),
+            DataType::Interval => self.interval_type_to_arrow(),
+            DataType::Varchar => self.varchar_type_to_arrow(),
+            DataType::Bytea => self.bytea_type_to_arrow(),
+            DataType::Serial => self.serial_type_to_arrow(),
+            DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
+            DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
+            DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
+            DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
+            DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
+        };
+
+        let mut arrow_field = arrow_schema::Field::new(name, data_type, true);
+        self.add_field_id(&mut arrow_field);
+        Ok(arrow_field)
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -202,6 +288,32 @@ mod test {
                 Some(-999999),
                 Some(123400),
                 Some(123456),
+            ])
+            .with_data_type(ty),
+        ) as ArrayRef;
+        assert_eq!(&arrow_array, &expect_array);
+    }
+
+    #[test]
+    fn decimal_with_large_scale() {
+        let array = DecimalArray::from_iter([
+            None,
+            Some(Decimal::NaN),
+            Some(Decimal::PositiveInf),
+            Some(Decimal::NegativeInf),
+            Some(Decimal::Normalized("123.4".parse().unwrap())),
+            Some(Decimal::Normalized("123.456".parse().unwrap())),
+        ]);
+        let ty = DataType::Decimal128(28, 10);
+        let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
+        let expect_array = Arc::new(
+            Decimal128Array::from(vec![
+                None,
+                None,
+                Some(9999999999999999999999999999),
+                Some(-9999999999999999999999999999),
+                Some(1234000000000),
+                Some(1234560000000),
             ])
             .with_data_type(ty),
         ) as ArrayRef;

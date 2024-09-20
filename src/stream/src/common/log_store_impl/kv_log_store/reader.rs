@@ -16,7 +16,7 @@ use std::future::Future;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::pin::Pin;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
@@ -53,17 +53,27 @@ use crate::common::log_store_impl::kv_log_store::serde::{
 };
 use crate::common::log_store_impl::kv_log_store::KvLogStoreMetrics;
 
-type RewindBackoffPolicy = impl Iterator<Item = Duration>;
 pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
 pub(crate) const REWIND_BACKOFF_FACTOR: u64 = 2;
 pub(crate) const REWIND_MAX_DELAY: Duration = Duration::from_secs(180);
 
-fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
-    tokio_retry::strategy::ExponentialBackoff::from_millis(REWIND_BASE_DELAY.as_millis() as _)
-        .factor(REWIND_BACKOFF_FACTOR)
-        .max_delay(REWIND_MAX_DELAY)
-        .map(tokio_retry::strategy::jitter)
+mod rewind_backoff_policy {
+    use std::time::Duration;
+
+    use crate::common::log_store_impl::kv_log_store::{
+        REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
+    };
+
+    pub(super) type RewindBackoffPolicy = impl Iterator<Item = Duration>;
+    pub(super) fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
+        tokio_retry::strategy::ExponentialBackoff::from_millis(REWIND_BASE_DELAY.as_millis() as _)
+            .factor(REWIND_BACKOFF_FACTOR)
+            .max_delay(REWIND_MAX_DELAY)
+            .map(tokio_retry::strategy::jitter)
+    }
 }
+
+use rewind_backoff_policy::*;
 
 struct RewindDelay {
     last_rewind_truncate_offset: Option<TruncateOffset>,
@@ -218,57 +228,70 @@ impl<S: StateStoreRead, F: FnMut() -> bool> AutoRebuildStateStoreReadIter<S, F> 
     }
 }
 
-type TimeoutAutoRebuildIter<S: StateStoreRead> =
-    AutoRebuildStateStoreReadIter<S, impl FnMut() -> bool + Send>;
+mod timeout_auto_rebuild {
+    use std::time::{Duration, Instant};
 
-async fn iter_with_timeout_rebuild<S: StateStoreRead>(
-    state_store: S,
-    range: TableKeyRange,
-    epoch: HummockEpoch,
-    options: ReadOptions,
-    timeout: Duration,
-) -> StorageResult<TimeoutAutoRebuildIter<S>> {
-    const CHECK_TIMEOUT_PERIOD: usize = 100;
-    // use a struct here to avoid accidental copy instead of move on primitive usize
-    struct Count(usize);
-    let mut check_count = Count(0);
-    let mut total_count = Count(0);
-    let mut curr_iter_item_count = Count(0);
-    let mut start_time = Instant::now();
-    let initial_start_time = start_time;
-    AutoRebuildStateStoreReadIter::new(
-        state_store,
-        move || {
-            check_count.0 += 1;
-            curr_iter_item_count.0 += 1;
-            total_count.0 += 1;
-            if check_count.0 == CHECK_TIMEOUT_PERIOD {
-                check_count.0 = 0;
-                if start_time.elapsed() > timeout {
-                    let prev_iter_item_count = curr_iter_item_count.0;
-                    curr_iter_item_count.0 = 0;
-                    start_time = Instant::now();
-                    info!(
-                        table_id = options.table_id.table_id,
-                        iter_exist_time_secs = initial_start_time.elapsed().as_secs(),
-                        prev_iter_item_count,
-                        total_iter_item_count = total_count.0,
-                        "kv log store iter is rebuilt"
-                    );
-                    true
+    use risingwave_hummock_sdk::key::TableKeyRange;
+    use risingwave_hummock_sdk::HummockEpoch;
+    use risingwave_storage::error::StorageResult;
+    use risingwave_storage::store::{ReadOptions, StateStoreRead};
+
+    use crate::common::log_store_impl::kv_log_store::reader::AutoRebuildStateStoreReadIter;
+
+    pub(super) type TimeoutAutoRebuildIter<S: StateStoreRead> =
+        AutoRebuildStateStoreReadIter<S, impl FnMut() -> bool + Send>;
+
+    pub(super) async fn iter_with_timeout_rebuild<S: StateStoreRead>(
+        state_store: S,
+        range: TableKeyRange,
+        epoch: HummockEpoch,
+        options: ReadOptions,
+        timeout: Duration,
+    ) -> StorageResult<TimeoutAutoRebuildIter<S>> {
+        const CHECK_TIMEOUT_PERIOD: usize = 100;
+        // use a struct here to avoid accidental copy instead of move on primitive usize
+        struct Count(usize);
+        let mut check_count = Count(0);
+        let mut total_count = Count(0);
+        let mut curr_iter_item_count = Count(0);
+        let mut start_time = Instant::now();
+        let initial_start_time = start_time;
+        AutoRebuildStateStoreReadIter::new(
+            state_store,
+            move || {
+                check_count.0 += 1;
+                curr_iter_item_count.0 += 1;
+                total_count.0 += 1;
+                if check_count.0 == CHECK_TIMEOUT_PERIOD {
+                    check_count.0 = 0;
+                    if start_time.elapsed() > timeout {
+                        let prev_iter_item_count = curr_iter_item_count.0;
+                        curr_iter_item_count.0 = 0;
+                        start_time = Instant::now();
+                        info!(
+                            table_id = options.table_id.table_id,
+                            iter_exist_time_secs = initial_start_time.elapsed().as_secs(),
+                            prev_iter_item_count,
+                            total_iter_item_count = total_count.0,
+                            "kv log store iter is rebuilt"
+                        );
+                        true
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
-            } else {
-                false
-            }
-        },
-        range,
-        epoch,
-        options,
-    )
-    .await
+            },
+            range,
+            epoch,
+            options,
+        )
+        .await
+    }
 }
+
+use timeout_auto_rebuild::*;
 
 impl<S: StateStoreRead, F: FnMut() -> bool + Send> StateStoreIter
     for AutoRebuildStateStoreReadIter<S, F>

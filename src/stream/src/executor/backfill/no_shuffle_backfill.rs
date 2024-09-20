@@ -30,7 +30,7 @@ use crate::executor::backfill::utils::{
     METADATA_STATE_LEN,
 };
 use crate::executor::prelude::*;
-use crate::task::CreateMviewProgress;
+use crate::task::CreateMviewProgressReporter;
 
 /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
 /// We can decode that into `BackfillState` on recovery.
@@ -76,7 +76,7 @@ pub struct BackfillExecutor<S: StateStore> {
     output_indices: Vec<usize>,
 
     /// PTAL at the docstring for `CreateMviewProgress` to understand how we compute it.
-    progress: CreateMviewProgress,
+    progress: CreateMviewProgressReporter,
 
     actor_id: ActorId,
 
@@ -100,7 +100,7 @@ where
         upstream: Executor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
-        progress: CreateMviewProgress,
+        progress: CreateMviewProgressReporter,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         rate_limit: Option<usize>,

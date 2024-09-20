@@ -12,64 +12,191 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::future::{poll_fn, Future};
 use std::pin::pin;
+use std::task::Poll;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use futures::future::{select, Either};
-use futures::stream::FuturesUnordered;
-use futures::{StreamExt, TryStreamExt};
+use futures::pin_mut;
+use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::VirtualNode;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkParam};
-use risingwave_pb::connector_service::coordinate_request::CommitRequest;
-use risingwave_pb::connector_service::coordinate_response::{
-    CommitResponse, StartCoordinationResponse,
-};
-use risingwave_pb::connector_service::{
-    coordinate_request, coordinate_response, CoordinateRequest, CoordinateResponse, SinkMetadata,
-};
+use risingwave_pb::connector_service::SinkMetadata;
 use thiserror_ext::AsReport;
+use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::time::sleep;
 use tonic::Status;
 use tracing::{error, warn};
 
-use crate::manager::sink_coordination::{
-    NewSinkWriterRequest, SinkCoordinatorResponseSender, SinkWriterRequestStream,
-};
+use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
 
-macro_rules! send_await_with_err_check {
-    ($tx:expr, $msg:expr) => {
-        if $tx.send($msg).await.is_err() {
-            error!("unable to send msg");
+async fn run_future_with_periodic_fn<F: Future>(
+    future: F,
+    interval: Duration,
+    mut f: impl FnMut(),
+) -> F::Output {
+    pin_mut!(future);
+    loop {
+        match select(&mut future, pin!(sleep(interval))).await {
+            Either::Left((output, _)) => {
+                break output;
+            }
+            Either::Right(_) => f(),
         }
-    };
+    }
+}
+
+struct EpochCommitRequests {
+    epoch: u64,
+    metadatas: Vec<SinkMetadata>,
+    handle_ids: HashSet<usize>,
+    bitmap: Bitmap,
+}
+
+impl EpochCommitRequests {
+    fn new(epoch: u64) -> Self {
+        Self {
+            epoch,
+            metadatas: vec![],
+            handle_ids: Default::default(),
+            bitmap: Bitmap::zeros(VirtualNode::COUNT),
+        }
+    }
+
+    fn add_new_request(
+        &mut self,
+        handle_id: usize,
+        metadata: SinkMetadata,
+        vnode_bitmap: Bitmap,
+    ) -> anyhow::Result<()> {
+        self.metadatas.push(metadata);
+        assert!(self.handle_ids.insert(handle_id));
+        let check_bitmap = (&self.bitmap) & &vnode_bitmap;
+        if check_bitmap.count_ones() > 0 {
+            return Err(anyhow!(
+                "duplicate vnode {:?} on epoch {}. request vnode: {:?}, prev vnode: {:?}",
+                check_bitmap.iter_ones().collect_vec(),
+                self.epoch,
+                vnode_bitmap,
+                self.bitmap
+            ));
+        }
+        self.bitmap |= &vnode_bitmap;
+        Ok(())
+    }
+
+    fn can_commit(&self) -> bool {
+        self.bitmap.count_ones() == VirtualNode::COUNT
+    }
+}
+
+struct CoordinationHandleManager {
+    param: SinkParam,
+    writer_handles: HashMap<usize, SinkWriterCoordinationHandle>,
+    next_handle_id: usize,
+    request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+}
+
+impl CoordinationHandleManager {
+    fn ack_commit(
+        &mut self,
+        epoch: u64,
+        handle_ids: impl IntoIterator<Item = usize>,
+    ) -> anyhow::Result<()> {
+        for handle_id in handle_ids {
+            let handle = self.writer_handles.get_mut(&handle_id).ok_or_else(|| {
+                anyhow!(
+                    "fail to find handle for {} when ack commit on epoch {}",
+                    handle_id,
+                    epoch
+                )
+            })?;
+            handle.ack_commit(epoch).map_err(|_| {
+                anyhow!(
+                    "fail to ack commit on epoch {} for handle {}",
+                    epoch,
+                    handle_id
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    async fn next_commit_request_inner(
+        writer_handles: &mut HashMap<usize, SinkWriterCoordinationHandle>,
+    ) -> anyhow::Result<(usize, Bitmap, u64, SinkMetadata)> {
+        poll_fn(|cx| 'outer: loop {
+            for (handle_id, handle) in writer_handles.iter_mut() {
+                if let Poll::Ready(result) = handle.poll_next_commit_request(cx) {
+                    match result {
+                        Ok(Some((epoch, metadata))) => {
+                            return Poll::Ready(Ok((
+                                *handle_id,
+                                handle.vnode_bitmap().clone(),
+                                epoch,
+                                metadata,
+                            )));
+                        }
+                        Ok(None) => {
+                            let handle_id = *handle_id;
+                            writer_handles.remove(&handle_id);
+                            continue 'outer;
+                        }
+                        Err(e) => {
+                            return Poll::Ready(Err(e));
+                        }
+                    }
+                }
+            }
+            return Poll::Pending;
+        })
+        .await
+    }
+
+    async fn next_commit_request(&mut self) -> anyhow::Result<(usize, Bitmap, u64, SinkMetadata)> {
+        loop {
+            select! {
+                handle = self.request_rx.recv() => {
+                    let mut handle = handle.ok_or_else(|| anyhow!("end of writer request stream"))?;
+                    if handle.param() != &self.param {
+                        warn!(prev_param = ?self.param, new_param = ?handle.param(), "sink param mismatch");
+                    }
+                    handle.start()?;
+                    let handle_id = self.next_handle_id;
+                    self.next_handle_id += 1;
+                    self.writer_handles.insert(handle_id, handle);
+                }
+                result = Self::next_commit_request_inner(&mut self.writer_handles) => {
+                    break result;
+                }
+            }
+        }
+    }
 }
 
 pub struct CoordinatorWorker {
-    param: SinkParam,
-    request_streams: Vec<SinkWriterRequestStream>,
-    response_senders: Vec<SinkCoordinatorResponseSender>,
-    request_rx: UnboundedReceiver<NewSinkWriterRequest>,
+    handle_manager: CoordinationHandleManager,
+    pending_epochs: BTreeMap<u64, EpochCommitRequests>,
 }
 
 impl CoordinatorWorker {
     pub async fn run(
-        first_writer_request: NewSinkWriterRequest,
-        request_rx: UnboundedReceiver<NewSinkWriterRequest>,
+        param: SinkParam,
+        request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
     ) {
-        let sink = match build_sink(first_writer_request.param.clone()) {
+        let sink = match build_sink(param.clone()) {
             Ok(sink) => sink,
             Err(e) => {
                 error!(
                     error = %e.as_report(),
                     "unable to build sink with param {:?}",
-                    first_writer_request.param
-                );
-                send_await_with_err_check!(
-                    first_writer_request.response_tx,
-                    Err(Status::invalid_argument("failed to build sink"))
+                    param
                 );
                 return;
             }
@@ -81,247 +208,77 @@ impl CoordinatorWorker {
                     error!(
                         error = %e.as_report(),
                         "unable to build coordinator with param {:?}",
-                        first_writer_request.param
-                    );
-                    send_await_with_err_check!(
-                        first_writer_request.response_tx,
-                        Err(Status::invalid_argument("failed to build coordinator"))
+                        param
                     );
                     return;
                 }
             };
-            Self::execute_coordinator(first_writer_request, request_rx, coordinator).await
+            Self::execute_coordinator(param, request_rx, coordinator).await
         });
     }
 
     pub async fn execute_coordinator(
-        first_writer_request: NewSinkWriterRequest,
-        request_rx: UnboundedReceiver<NewSinkWriterRequest>,
+        param: SinkParam,
+        request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
         coordinator: impl SinkCommitCoordinator,
     ) {
         let mut worker = CoordinatorWorker {
-            param: first_writer_request.param,
-            request_streams: vec![first_writer_request.request_stream],
-            response_senders: vec![first_writer_request.response_tx],
-            request_rx,
+            handle_manager: CoordinationHandleManager {
+                param,
+                writer_handles: HashMap::new(),
+                next_handle_id: 0,
+                request_rx,
+            },
+            pending_epochs: Default::default(),
         };
 
-        if let Err(e) = worker
-            .wait_for_writers(first_writer_request.vnode_bitmap)
-            .await
-        {
-            error!(error = %e.as_report(), "failed to wait for all writers");
-            worker
-                .send_to_all_sink_writers(|| {
-                    Err(Status::cancelled("failed to wait for all writers"))
-                })
-                .await;
-        }
-
-        worker.start_coordination(coordinator).await;
-    }
-
-    async fn send_to_all_sink_writers(
-        &mut self,
-        new_msg: impl Fn() -> Result<CoordinateResponse, Status>,
-    ) {
-        for sender in &self.response_senders {
-            send_await_with_err_check!(sender, new_msg());
-        }
-    }
-
-    async fn next_new_writer(&mut self) -> anyhow::Result<NewSinkWriterRequest> {
-        // TODO: add timeout log
-        match select(
-            pin!(self.request_rx.recv()),
-            pin!(FuturesUnordered::from_iter(
-                self.request_streams
-                    .iter_mut()
-                    .map(|stream| stream.try_next()),
-            )
-            .next()),
-        )
-        .await
-        {
-            Either::Left((Some(req), _)) => Ok(req),
-            Either::Left((None, _)) => Err(anyhow!("manager request stream reaches the end")),
-            Either::Right((Some(Ok(Some(request))), _)) => Err(anyhow!(
-                "get new request from sink writer before initialize: {:?}",
-                request
-            )),
-            Either::Right((Some(Ok(None)), _)) => Err(anyhow!(
-                "one sink writer stream reaches the end before initialize"
-            )),
-            Either::Right((Some(Err(e)), _)) => {
-                Err(anyhow!(e).context("unable to poll one sink writer stream"))
-            }
-            Either::Right((None, _)) => unreachable!("request_streams must not be empty"),
-        }
-    }
-
-    async fn wait_for_writers(&mut self, first_vnode_bitmap: Bitmap) -> anyhow::Result<()> {
-        let mut remaining_count = VirtualNode::COUNT;
-        let mut registered_vnode = HashSet::with_capacity(VirtualNode::COUNT);
-
-        for vnode in first_vnode_bitmap.iter_vnodes() {
-            remaining_count -= 1;
-            registered_vnode.insert(vnode);
-        }
-
-        while remaining_count > 0 {
-            let new_writer_request = self.next_new_writer().await?;
-            if self.param != new_writer_request.param {
-                // TODO: may return error.
-                warn!(
-                    "get different param {:?} while current param {:?}",
-                    new_writer_request.param, self.param
-                );
-            }
-            self.request_streams.push(new_writer_request.request_stream);
-            self.response_senders.push(new_writer_request.response_tx);
-
-            for vnode in new_writer_request.vnode_bitmap.iter_vnodes() {
-                if registered_vnode.contains(&vnode) {
-                    return Err(anyhow!(
-                        "get overlapped vnode: {}, current vnode {:?}",
-                        vnode,
-                        registered_vnode
-                    ));
-                }
-                registered_vnode.insert(vnode);
-                remaining_count -= 1;
-            }
-        }
-
-        self.send_to_all_sink_writers(|| {
-            Ok(CoordinateResponse {
-                msg: Some(coordinate_response::Msg::StartResponse(
-                    StartCoordinationResponse {},
-                )),
-            })
-        })
-        .await;
-        Ok(())
-    }
-
-    async fn collect_all_metadata(&mut self) -> anyhow::Result<(u64, Vec<SinkMetadata>)> {
-        let mut epoch = None;
-        let mut metadata_list = Vec::with_capacity(self.request_streams.len());
-        let mut uncollected_futures = FuturesUnordered::from_iter(
-            self.request_streams
-                .iter_mut()
-                .map(|stream| stream.try_next()),
-        );
-
-        loop {
-            match select(
-                pin!(self.request_rx.recv()),
-                pin!(uncollected_futures.next()),
-            )
-            .await
-            {
-                Either::Left((Some(new_request), _)) => {
-                    warn!("get new writer request while collecting metadata");
-                    send_await_with_err_check!(
-                        new_request.response_tx,
-                        Err(Status::already_exists(
-                            "coordinator already running, should not get new request"
-                        ))
-                    );
-                    continue;
-                }
-                Either::Left((None, _)) => {
-                    return Err(anyhow!(
-                        "coordinator get notified to stop while collecting metadata"
-                    ));
-                }
-                Either::Right((Some(next_result), _)) => match next_result {
-                    Ok(Some(CoordinateRequest {
-                        msg:
-                            Some(coordinate_request::Msg::CommitRequest(CommitRequest {
-                                epoch: request_epoch,
-                                metadata: Some(metadata),
-                            })),
-                    })) => {
-                        match &epoch {
-                            Some(epoch) => {
-                                if *epoch != request_epoch {
-                                    warn!(
-                                        "current epoch is {} but get request from {}",
-                                        epoch, request_epoch
-                                    );
-                                }
-                            }
-                            None => {
-                                epoch = Some(request_epoch);
-                            }
-                        }
-                        metadata_list.push(metadata);
-                    }
-                    Ok(Some(req)) => {
-                        return Err(anyhow!("expect commit request but get {:?}", req));
-                    }
-                    Ok(None) => {
-                        return Err(anyhow!(
-                            "sink writer input reaches the end while collecting metadata"
-                        ));
-                    }
-                    Err(e) => {
-                        return Err(
-                            anyhow!(e).context("failed to poll one of the writer request streams")
-                        );
-                    }
-                },
-                Either::Right((None, _)) => {
-                    break;
-                }
-            }
-        }
-        Ok((
-            epoch.expect("should not be empty when have at least one writer"),
-            metadata_list,
-        ))
-    }
-
-    async fn start_coordination(&mut self, mut coordinator: impl SinkCommitCoordinator) {
-        let result: Result<(), String> = try {
-            coordinator.init().await.map_err(|e| {
-                error!(error = %e.as_report(), "failed to initialize coordinator");
-                format!("failed to initialize coordinator: {:?}", e.as_report())
-            })?;
-            loop {
-                let (epoch, metadata_list) = self.collect_all_metadata().await.map_err(|e| {
-                    error!(error = %e.as_report(), "failed to collect all metadata");
-                    format!("failed to collect all metadata: {:?}", e.as_report())
-                })?;
-                // TODO: measure commit time
-                coordinator
-                    .commit(epoch, metadata_list)
-                    .await
-                    .map_err(|e| {
-                        error!(epoch, error = %e.as_report(), "failed to commit metadata of epoch");
-                        format!("failed to commit: {:?}", e.as_report())
-                    })?;
-
-                self.send_to_all_sink_writers(|| {
-                    Ok(CoordinateResponse {
-                        msg: Some(coordinate_response::Msg::CommitResponse(CommitResponse {
-                            epoch,
-                        })),
-                    })
-                })
-                .await;
-            }
-        };
-
-        if let Err(err_str) = result {
-            self.send_to_all_sink_writers(|| {
-                Err(Status::aborted(format!(
-                    "failed to run coordination: {}",
-                    err_str
+        if let Err(e) = worker.run_coordination(coordinator).await {
+            for handle in worker.handle_manager.writer_handles.into_values() {
+                handle.abort(Status::internal(format!(
+                    "failed to run coordination: {:?}",
+                    e.as_report()
                 )))
-            })
-            .await;
+            }
+        }
+    }
+
+    async fn run_coordination(
+        &mut self,
+        mut coordinator: impl SinkCommitCoordinator,
+    ) -> anyhow::Result<()> {
+        coordinator.init().await?;
+        loop {
+            let (handle_id, vnode_bitmap, epoch, metadata) =
+                self.handle_manager.next_commit_request().await?;
+            self.pending_epochs
+                .entry(epoch)
+                .or_insert_with(|| EpochCommitRequests::new(epoch))
+                .add_new_request(handle_id, metadata, vnode_bitmap)?;
+            if self
+                .pending_epochs
+                .first_key_value()
+                .expect("non-empty")
+                .1
+                .can_commit()
+            {
+                let (epoch, requests) = self.pending_epochs.pop_first().expect("non-empty");
+                // TODO: measure commit time
+                let start_time = Instant::now();
+                run_future_with_periodic_fn(
+                    coordinator.commit(epoch, requests.metadatas),
+                    Duration::from_secs(5),
+                    || {
+                        warn!(
+                            elapsed = ?start_time.elapsed(),
+                            sink_id = self.handle_manager.param.sink_id.sink_id,
+                            "committing"
+                        );
+                    },
+                )
+                .await
+                .map_err(|e| anyhow!(e))?;
+                self.handle_manager.ack_commit(epoch, requests.handle_ids)?;
+            }
         }
     }
 }

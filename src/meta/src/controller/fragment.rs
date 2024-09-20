@@ -1411,7 +1411,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use itertools::Itertools;
-    use risingwave_common::hash::ActorMapping;
+    use risingwave_common::hash::{ActorMapping, VirtualNode};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
     use risingwave_meta_model_v2::actor::ActorStatus;
@@ -1497,8 +1497,11 @@ mod tests {
             })
             .collect();
 
-        let actor_bitmaps =
-            ActorMapping::new_uniform((0..actor_count).map(|i| i as _)).to_bitmaps();
+        let actor_bitmaps = ActorMapping::new_uniform(
+            (0..actor_count).map(|i| i as _),
+            VirtualNode::COUNT_FOR_TEST,
+        )
+        .to_bitmaps();
 
         let pb_actors = (0..actor_count)
             .map(|actor_id| {
@@ -1610,8 +1613,11 @@ mod tests {
             })
             .collect();
 
-        let mut actor_bitmaps =
-            ActorMapping::new_uniform((0..actor_count).map(|i| i as _)).to_bitmaps();
+        let mut actor_bitmaps = ActorMapping::new_uniform(
+            (0..actor_count).map(|i| i as _),
+            VirtualNode::COUNT_FOR_TEST,
+        )
+        .to_bitmaps();
 
         let actors = (0..actor_count)
             .map(|actor_id| {

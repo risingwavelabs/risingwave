@@ -288,7 +288,7 @@ impl RedisSinkPayloadWriter {
                 return Ok(());
             }
         }
-        self.pipe.query(self.conn.as_mut().unwrap()).await?;
+        self.pipe.query::<()>(self.conn.as_mut().unwrap()).await?;
         self.pipe.clear();
         Ok(())
     }

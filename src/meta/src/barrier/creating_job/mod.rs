@@ -16,19 +16,19 @@ mod barrier_control;
 mod status;
 
 use std::cmp::max;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::mem::take;
 use std::sync::Arc;
 use std::time::Duration;
 
-use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::stream_service::{BarrierCompleteResponse, BuildActorInfo};
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, info};
 
 use crate::barrier::command::CommandContext;
@@ -43,7 +43,6 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo};
 use crate::manager::WorkerId;
-use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
@@ -67,6 +66,7 @@ impl CreatingStreamingJobControl {
         backfill_epoch: u64,
         version_stat: &HummockVersionStats,
         metrics: &MetaMetrics,
+        initial_mutation: Mutation,
     ) -> Self {
         info!(
             table_id = info.table_fragments.table_id().table_id,
@@ -76,18 +76,6 @@ impl CreatingStreamingJobControl {
         let mut create_mview_tracker = CreateMviewProgressTracker::default();
         create_mview_tracker.update_tracking_jobs(Some((&info, None)), [], version_stat);
         let fragment_info: HashMap<_, _> = info.new_fragment_info().collect();
-        let snapshot_backfill_actors_set = info.table_fragments.snapshot_backfill_actor_ids();
-        let mut snapshot_backfill_actors: HashMap<_, HashSet<_>> = HashMap::new();
-        for fragment in fragment_info.values() {
-            for (actor_id, worker_node) in &fragment.actors {
-                if snapshot_backfill_actors_set.contains(actor_id) {
-                    snapshot_backfill_actors
-                        .entry(*worker_node)
-                        .or_default()
-                        .insert(*actor_id);
-                }
-            }
-        }
 
         let table_id = info.table_fragments.table_id();
         let table_id_str = format!("{}", table_id.table_id);
@@ -107,24 +95,7 @@ impl CreatingStreamingJobControl {
                 graph_info: InflightGraphInfo::new(fragment_info),
                 backfill_epoch,
                 pending_non_checkpoint_barriers: vec![],
-                snapshot_backfill_actors,
-                actors_to_create: Some(
-                    actors_to_create
-                        .into_iter()
-                        .map(|(worker_id, actors)| {
-                            (
-                                worker_id,
-                                actors
-                                    .into_iter()
-                                    .map(|actor| BuildActorInfo {
-                                        actor: Some(actor),
-                                        related_subscriptions: Default::default(),
-                                    })
-                                    .collect_vec(),
-                            )
-                        })
-                        .collect(),
-                ),
+                initial_barrier_info: Some((actors_to_create, initial_mutation)),
             },
             upstream_lag: metrics
                 .snapshot_backfill_lag
@@ -152,22 +123,6 @@ impl CreatingStreamingJobControl {
         if let Some(info) = self.status.active_graph_info() {
             info.on_new_worker_node_map(node_map)
         }
-    }
-
-    pub(super) fn actors_to_pre_sync_barrier(
-        &self,
-    ) -> impl Iterator<Item = (&WorkerId, &HashSet<ActorId>)> + '_ {
-        if let CreatingStreamingJobStatus::ConsumingSnapshot {
-            snapshot_backfill_actors,
-            ..
-        } = &self.status
-        {
-            Some(snapshot_backfill_actors)
-        } else {
-            None
-        }
-        .into_iter()
-        .flat_map(|actors| actors.iter())
     }
 
     pub(super) fn gen_ddl_progress(&self) -> DdlProgress {
@@ -283,17 +238,19 @@ impl CreatingStreamingJobControl {
                 prev_epoch,
                 kind,
                 new_actors,
+                mutation,
             } in barriers_to_inject
             {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
-                    None,
+                    mutation,
                     (&curr_epoch, &prev_epoch),
                     &kind,
                     graph_info,
                     Some(graph_info),
-                    HashMap::new(),
                     new_actors,
+                    vec![],
+                    vec![],
                 )?;
                 self.barrier_control.enqueue_epoch(
                     prev_epoch.value().0,
@@ -357,8 +314,9 @@ impl CreatingStreamingJobControl {
                     &command_ctx.kind,
                     graph_info,
                     Some(graph_info),
-                    HashMap::new(),
                     None,
+                    vec![],
+                    vec![],
                 )?;
                 self.barrier_control.enqueue_epoch(
                     command_ctx.prev_epoch.value().0,
@@ -404,8 +362,9 @@ impl CreatingStreamingJobControl {
                     } else {
                         Some(graph_info)
                     },
-                    HashMap::new(),
                     None,
+                    vec![],
+                    vec![],
                 )?;
                 let prev_epoch = command_ctx.prev_epoch.value().0;
                 self.barrier_control.enqueue_epoch(

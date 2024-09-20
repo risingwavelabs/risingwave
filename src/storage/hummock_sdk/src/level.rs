@@ -23,19 +23,24 @@ use risingwave_pb::hummock::{
 use crate::sstable_info::SstableInfo;
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct OverlappingLevel {
-    pub sub_levels: Vec<Level>,
+pub struct OverlappingLevelCommon<T> {
+    pub sub_levels: Vec<LevelCommon<T>>,
     pub total_file_size: u64,
     pub uncompressed_file_size: u64,
 }
 
-impl From<&PbOverlappingLevel> for OverlappingLevel {
+pub type OverlappingLevel = OverlappingLevelCommon<SstableInfo>;
+
+impl<T> From<&PbOverlappingLevel> for OverlappingLevelCommon<T>
+where
+    for<'a> LevelCommon<T>: From<&'a PbLevel>,
+{
     fn from(pb_overlapping_level: &PbOverlappingLevel) -> Self {
         Self {
             sub_levels: pb_overlapping_level
                 .sub_levels
                 .iter()
-                .map(Level::from)
+                .map(LevelCommon::from)
                 .collect_vec(),
             total_file_size: pb_overlapping_level.total_file_size,
             uncompressed_file_size: pb_overlapping_level.uncompressed_file_size,
@@ -43,13 +48,16 @@ impl From<&PbOverlappingLevel> for OverlappingLevel {
     }
 }
 
-impl From<&OverlappingLevel> for PbOverlappingLevel {
-    fn from(overlapping_level: &OverlappingLevel) -> Self {
+impl<T> From<&OverlappingLevelCommon<T>> for PbOverlappingLevel
+where
+    for<'a> &'a LevelCommon<T>: Into<PbLevel>,
+{
+    fn from(overlapping_level: &OverlappingLevelCommon<T>) -> Self {
         Self {
             sub_levels: overlapping_level
                 .sub_levels
                 .iter()
-                .map(|pb_level| pb_level.into())
+                .map(|level| level.into())
                 .collect_vec(),
             total_file_size: overlapping_level.total_file_size,
             uncompressed_file_size: overlapping_level.uncompressed_file_size,
@@ -57,8 +65,11 @@ impl From<&OverlappingLevel> for PbOverlappingLevel {
     }
 }
 
-impl From<OverlappingLevel> for PbOverlappingLevel {
-    fn from(overlapping_level: OverlappingLevel) -> Self {
+impl<T> From<OverlappingLevelCommon<T>> for PbOverlappingLevel
+where
+    LevelCommon<T>: Into<PbLevel>,
+{
+    fn from(overlapping_level: OverlappingLevelCommon<T>) -> Self {
         Self {
             sub_levels: overlapping_level
                 .sub_levels
@@ -71,13 +82,16 @@ impl From<OverlappingLevel> for PbOverlappingLevel {
     }
 }
 
-impl From<PbOverlappingLevel> for OverlappingLevel {
+impl<T> From<PbOverlappingLevel> for OverlappingLevelCommon<T>
+where
+    LevelCommon<T>: From<PbLevel>,
+{
     fn from(pb_overlapping_level: PbOverlappingLevel) -> Self {
         Self {
             sub_levels: pb_overlapping_level
                 .sub_levels
                 .into_iter()
-                .map(Level::from)
+                .map(LevelCommon::from)
                 .collect_vec(),
             total_file_size: pb_overlapping_level.total_file_size,
             uncompressed_file_size: pb_overlapping_level.uncompressed_file_size,
@@ -97,26 +111,27 @@ impl OverlappingLevel {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Level {
+pub struct LevelCommon<T> {
     pub level_idx: u32,
     pub level_type: PbLevelType,
-    pub table_infos: Vec<SstableInfo>,
+    pub table_infos: Vec<T>,
     pub total_file_size: u64,
     pub sub_level_id: u64,
     pub uncompressed_file_size: u64,
     pub vnode_partition_count: u32,
 }
 
-impl From<&PbLevel> for Level {
+pub type Level = LevelCommon<SstableInfo>;
+
+impl<T> From<&PbLevel> for LevelCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+{
     fn from(pb_level: &PbLevel) -> Self {
         Self {
             level_idx: pb_level.level_idx,
             level_type: PbLevelType::try_from(pb_level.level_type).unwrap(),
-            table_infos: pb_level
-                .table_infos
-                .iter()
-                .map(SstableInfo::from)
-                .collect_vec(),
+            table_infos: pb_level.table_infos.iter().map(Into::into).collect_vec(),
             total_file_size: pb_level.total_file_size,
             sub_level_id: pb_level.sub_level_id,
             uncompressed_file_size: pb_level.uncompressed_file_size,
@@ -125,16 +140,15 @@ impl From<&PbLevel> for Level {
     }
 }
 
-impl From<&Level> for PbLevel {
-    fn from(level: &Level) -> Self {
+impl<T> From<&LevelCommon<T>> for PbLevel
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    fn from(level: &LevelCommon<T>) -> Self {
         Self {
             level_idx: level.level_idx,
             level_type: level.level_type.into(),
-            table_infos: level
-                .table_infos
-                .iter()
-                .map(PbSstableInfo::from)
-                .collect_vec(),
+            table_infos: level.table_infos.iter().map(Into::into).collect_vec(),
             total_file_size: level.total_file_size,
             sub_level_id: level.sub_level_id,
             uncompressed_file_size: level.uncompressed_file_size,
@@ -143,16 +157,15 @@ impl From<&Level> for PbLevel {
     }
 }
 
-impl From<Level> for PbLevel {
-    fn from(level: Level) -> Self {
+impl<T> From<LevelCommon<T>> for PbLevel
+where
+    PbSstableInfo: From<T>,
+{
+    fn from(level: LevelCommon<T>) -> Self {
         Self {
             level_idx: level.level_idx,
             level_type: level.level_type.into(),
-            table_infos: level
-                .table_infos
-                .into_iter()
-                .map(PbSstableInfo::from)
-                .collect_vec(),
+            table_infos: level.table_infos.into_iter().map(Into::into).collect_vec(),
             total_file_size: level.total_file_size,
             sub_level_id: level.sub_level_id,
             uncompressed_file_size: level.uncompressed_file_size,
@@ -161,7 +174,10 @@ impl From<Level> for PbLevel {
     }
 }
 
-impl From<PbLevel> for Level {
+impl<T> From<PbLevel> for LevelCommon<T>
+where
+    T: From<PbSstableInfo>,
+{
     fn from(pb_level: PbLevel) -> Self {
         Self {
             level_idx: pb_level.level_idx,
@@ -169,7 +185,7 @@ impl From<PbLevel> for Level {
             table_infos: pb_level
                 .table_infos
                 .into_iter()
-                .map(SstableInfo::from)
+                .map(Into::into)
                 .collect_vec(),
             total_file_size: pb_level.total_file_size,
             sub_level_id: pb_level.sub_level_id,
@@ -196,15 +212,17 @@ impl Level {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Levels {
-    pub levels: Vec<Level>,
-    pub l0: OverlappingLevel,
+pub struct LevelsCommon<T> {
+    pub levels: Vec<LevelCommon<T>>,
+    pub l0: OverlappingLevelCommon<T>,
     pub group_id: u64,
     pub parent_group_id: u64,
 
     #[deprecated]
     pub member_table_ids: Vec<u32>,
 }
+
+pub type Levels = LevelsCommon<SstableInfo>;
 
 impl Levels {
     pub fn level0(&self) -> &OverlappingLevel {
@@ -236,15 +254,25 @@ impl Levels {
     }
 }
 
-impl Levels {
-    pub fn from_protobuf(pb_levels: &PbLevels) -> Self {
-        Self::from(pb_levels)
-    }
-
+impl<T> LevelsCommon<T>
+where
+    PbLevels: for<'a> From<&'a LevelsCommon<T>>,
+{
     pub fn to_protobuf(&self) -> PbLevels {
         self.into()
     }
+}
 
+impl<T> LevelsCommon<T>
+where
+    LevelsCommon<T>: for<'a> From<&'a PbLevels>,
+{
+    pub fn from_protobuf(pb_levels: &PbLevels) -> LevelsCommon<T> {
+        LevelsCommon::<T>::from(pb_levels)
+    }
+}
+
+impl Levels {
     pub fn estimated_encode_len(&self) -> usize {
         let mut basic = self
             .levels
@@ -260,12 +288,15 @@ impl Levels {
     }
 }
 
-impl From<&PbLevels> for Levels {
+impl<T> From<&PbLevels> for LevelsCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+{
     #[expect(deprecated)]
     fn from(pb_levels: &PbLevels) -> Self {
         Self {
-            l0: OverlappingLevel::from(pb_levels.l0.as_ref().unwrap()),
-            levels: pb_levels.levels.iter().map(Level::from).collect_vec(),
+            l0: OverlappingLevelCommon::from(pb_levels.l0.as_ref().unwrap()),
+            levels: pb_levels.levels.iter().map(Into::into).collect_vec(),
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
             member_table_ids: pb_levels.member_table_ids.clone(),
@@ -273,9 +304,12 @@ impl From<&PbLevels> for Levels {
     }
 }
 
-impl From<&Levels> for PbLevels {
+impl<T> From<&LevelsCommon<T>> for PbLevels
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
     #[expect(deprecated)]
-    fn from(levels: &Levels) -> Self {
+    fn from(levels: &LevelsCommon<T>) -> Self {
         Self {
             l0: Some((&levels.l0).into()),
             levels: levels.levels.iter().map(PbLevel::from).collect_vec(),
@@ -286,28 +320,38 @@ impl From<&Levels> for PbLevels {
     }
 }
 
-impl From<PbLevels> for Levels {
+impl<T> From<PbLevels> for LevelsCommon<T>
+where
+    T: From<PbSstableInfo>,
+{
     #[expect(deprecated)]
     fn from(pb_levels: PbLevels) -> Self {
         Self {
-            l0: OverlappingLevel::from(pb_levels.l0.as_ref().unwrap()),
-            levels: pb_levels.levels.into_iter().map(Level::from).collect_vec(),
+            l0: OverlappingLevelCommon::from(pb_levels.l0.unwrap()),
+            levels: pb_levels
+                .levels
+                .into_iter()
+                .map(LevelCommon::from)
+                .collect_vec(),
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
-            member_table_ids: pb_levels.member_table_ids.clone(),
+            member_table_ids: pb_levels.member_table_ids,
         }
     }
 }
 
-impl From<Levels> for PbLevels {
-    fn from(levels: Levels) -> Self {
+impl<T> From<LevelsCommon<T>> for PbLevels
+where
+    PbSstableInfo: From<T>,
+{
+    fn from(levels: LevelsCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
             l0: Some(levels.l0.into()),
             levels: levels.levels.into_iter().map(PbLevel::from).collect_vec(),
             group_id: levels.group_id,
             parent_group_id: levels.parent_group_id,
-            member_table_ids: levels.member_table_ids.clone(),
+            member_table_ids: levels.member_table_ids,
         }
     }
 }

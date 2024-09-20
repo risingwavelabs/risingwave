@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::fmt::Debug;
-use std::future::Future;
 use std::marker::PhantomData;
 use std::mem::size_of_val;
 use std::ops::Bound::Included;
@@ -27,16 +26,15 @@ use bytes::Bytes;
 use prometheus::IntGauge;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::{
-    Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
-    HummockIteratorDirection, ValueMeta,
+    Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection, ValueMeta,
 };
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockEpoch, HummockResult, MonotonicDeleteEvent};
+use crate::hummock::{HummockEpoch, HummockResult};
 use crate::mem_table::ImmId;
 use crate::store::ReadOptions;
 
@@ -841,122 +839,6 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool> HummockIterator
 
     fn value_meta(&self) -> ValueMeta {
         ValueMeta::default()
-    }
-}
-
-pub struct SharedBufferDeleteRangeIterator {
-    monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
-    next_idx: usize,
-}
-
-impl SharedBufferDeleteRangeIterator {
-    #[cfg(any(test, feature = "test"))]
-    pub(crate) fn new(
-        epoch: HummockEpoch,
-        table_id: TableId,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> Self {
-        use itertools::Itertools;
-        let point_range_pairs = delete_ranges
-            .into_iter()
-            .map(|(left_bound, right_bound)| {
-                (
-                    match left_bound {
-                        Bound::Excluded(x) => PointRange::from_user_key(
-                            UserKey::new(table_id, TableKey(x.to_vec())),
-                            true,
-                        ),
-                        Bound::Included(x) => PointRange::from_user_key(
-                            UserKey::new(table_id, TableKey(x.to_vec())),
-                            false,
-                        ),
-                        Bound::Unbounded => unreachable!(),
-                    },
-                    match right_bound {
-                        Bound::Excluded(x) => PointRange::from_user_key(
-                            UserKey::new(table_id, TableKey(x.to_vec())),
-                            false,
-                        ),
-                        Bound::Included(x) => PointRange::from_user_key(
-                            UserKey::new(table_id, TableKey(x.to_vec())),
-                            true,
-                        ),
-                        Bound::Unbounded => PointRange::from_user_key(
-                            UserKey::new(
-                                TableId::new(table_id.table_id() + 1),
-                                TableKey::default(),
-                            ),
-                            false,
-                        ),
-                    },
-                )
-            })
-            .collect_vec();
-        let mut monotonic_tombstone_events = Vec::with_capacity(point_range_pairs.len() * 2);
-        for (start_point_range, end_point_range) in point_range_pairs {
-            monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: start_point_range,
-                new_epoch: epoch,
-            });
-            monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                event_key: end_point_range,
-                new_epoch: HummockEpoch::MAX,
-            });
-        }
-        Self {
-            monotonic_tombstone_events,
-            next_idx: 0,
-        }
-    }
-}
-
-impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next_extended_user_key(&self) -> PointRange<&[u8]> {
-        self.monotonic_tombstone_events[self.next_idx]
-            .event_key
-            .as_ref()
-    }
-
-    fn current_epoch(&self) -> HummockEpoch {
-        if self.next_idx > 0 {
-            self.monotonic_tombstone_events[self.next_idx - 1].new_epoch
-        } else {
-            HummockEpoch::MAX
-        }
-    }
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move {
-            self.next_idx += 1;
-            Ok(())
-        }
-    }
-
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move {
-            self.next_idx = 0;
-            Ok(())
-        }
-    }
-
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-            self.next_idx = self.monotonic_tombstone_events.partition_point(
-                |MonotonicDeleteEvent { event_key, .. }| {
-                    event_key.as_ref().le(&target_extended_user_key)
-                },
-            );
-            Ok(())
-        }
-    }
-
-    fn is_valid(&self) -> bool {
-        self.next_idx < self.monotonic_tombstone_events.len()
     }
 }
 

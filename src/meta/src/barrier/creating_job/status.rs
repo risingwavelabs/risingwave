@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::mem::take;
 use std::sync::Arc;
 
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
-use risingwave_pb::stream_service::BuildActorInfo;
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{BarrierKind, TracedEpoch};
 use crate::manager::WorkerId;
-use crate::model::ActorId;
 
 #[derive(Debug)]
 pub(super) enum CreatingStreamingJobStatus {
@@ -39,8 +39,9 @@ pub(super) enum CreatingStreamingJobStatus {
         backfill_epoch: u64,
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
-        snapshot_backfill_actors: HashMap<WorkerId, HashSet<ActorId>>,
-        actors_to_create: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
+        /// Info of the first barrier: (`actors_to_create`, `mutation`)
+        /// Take the mutation out when injecting the first barrier
+        initial_barrier_info: Option<(HashMap<WorkerId, Vec<StreamActor>>, Mutation)>,
     },
     ConsumingLogStore {
         graph_info: InflightGraphInfo,
@@ -59,7 +60,8 @@ pub(super) struct CreatingJobInjectBarrierInfo {
     pub curr_epoch: TracedEpoch,
     pub prev_epoch: TracedEpoch,
     pub kind: BarrierKind,
-    pub new_actors: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
+    pub new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
+    pub mutation: Option<Mutation>,
 }
 
 impl CreatingStreamingJobStatus {
@@ -104,12 +106,12 @@ impl CreatingStreamingJobStatus {
             graph_info,
             pending_non_checkpoint_barriers,
             ref backfill_epoch,
-            actors_to_create,
+            initial_barrier_info,
             ..
         } = self
         {
             if create_mview_tracker.has_pending_finished_jobs() {
-                assert!(actors_to_create.is_none());
+                assert!(initial_barrier_info.is_none());
                 pending_non_checkpoint_barriers.push(*backfill_epoch);
 
                 let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
@@ -119,6 +121,7 @@ impl CreatingStreamingJobStatus {
                         prev_epoch: TracedEpoch::new(prev_epoch),
                         kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
                         new_actors: None,
+                        mutation: None,
                     }]
                     .into_iter()
                     .chain(pending_commands.drain(..).map(|command_ctx| {
@@ -127,6 +130,7 @@ impl CreatingStreamingJobStatus {
                             prev_epoch: command_ctx.prev_epoch.clone(),
                             kind: command_ctx.kind.clone(),
                             new_actors: None,
+                            mutation: None,
                         }
                     }))
                     .collect();
@@ -145,12 +149,19 @@ impl CreatingStreamingJobStatus {
                 } else {
                     BarrierKind::Barrier
                 };
+                let (new_actors, mutation) =
+                    if let Some((new_actors, mutation)) = initial_barrier_info.take() {
+                        (Some(new_actors), Some(mutation))
+                    } else {
+                        Default::default()
+                    };
                 Some((
                     vec![CreatingJobInjectBarrierInfo {
                         curr_epoch,
                         prev_epoch,
                         kind,
-                        new_actors: actors_to_create.take(),
+                        new_actors,
+                        mutation,
                     }],
                     None,
                 ))

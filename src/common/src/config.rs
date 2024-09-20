@@ -33,7 +33,6 @@ use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
 use crate::for_all_params;
-use crate::hash::VirtualNode;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
@@ -299,8 +298,11 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    #[serde(default = "default::meta::periodic_split_compact_group_interval_sec")]
-    pub periodic_split_compact_group_interval_sec: u64,
+    #[serde(
+        default = "default::meta::periodic_scheduling_compaction_group_interval_sec",
+        alias = "periodic_split_compact_group_interval_sec"
+    )]
+    pub periodic_scheduling_compaction_group_interval_sec: u64,
 
     #[serde(default = "default::meta::move_table_size_limit")]
     pub move_table_size_limit: u64,
@@ -309,6 +311,7 @@ pub struct MetaConfig {
     pub split_group_size_limit: u64,
 
     #[serde(default = "default::meta::cut_table_size_limit")]
+    #[deprecated]
     pub cut_table_size_limit: u64,
 
     #[serde(default, flatten)]
@@ -427,16 +430,13 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
                     )))
                 }
             }
-            Parallelism::Int(i) => Ok(DefaultParallelism::Default(if i > VirtualNode::COUNT {
-                Err(serde::de::Error::custom(format!(
-                    "default parallelism should be not great than {}",
-                    VirtualNode::COUNT
-                )))?
-            } else {
+            Parallelism::Int(i) => Ok(DefaultParallelism::Default(
+                // Note: we won't check whether this exceeds the maximum parallelism (i.e., vnode count)
+                // here because it requires extra context. The check will be done when scheduling jobs.
                 NonZeroUsize::new(i).ok_or_else(|| {
-                    serde::de::Error::custom("default parallelism should be greater than 0")
-                })?
-            })),
+                    serde::de::Error::custom("default parallelism should not be 0")
+                })?,
+            )),
         }
     }
 }
@@ -466,6 +466,16 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default = "default::developer::max_get_task_probe_times")]
     pub max_get_task_probe_times: usize,
+
+    /// Max number of actor allowed per parallelism (default = 100).
+    /// CREATE MV/Table will be noticed when the number of actors exceeds this limit.
+    #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_soft_limit")]
+    pub actor_cnt_per_worker_parallelism_soft_limit: usize,
+
+    /// Max number of actor allowed per parallelism (default = 400).
+    /// CREATE MV/Table will be rejected when the number of actors exceeds this limit.
+    #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
+    pub actor_cnt_per_worker_parallelism_hard_limit: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -692,6 +702,9 @@ pub struct StorageConfig {
     /// max memory usage for large query
     #[serde(default)]
     pub prefetch_buffer_capacity_mb: Option<usize>,
+
+    #[serde(default)]
+    pub max_cached_recent_versions_number: Option<usize>,
 
     /// max prefetch block number
     #[serde(default = "default::storage::max_prefetch_block_number")]
@@ -1390,7 +1403,7 @@ pub mod default {
             1800 // 30mi
         }
 
-        pub fn periodic_split_compact_group_interval_sec() -> u64 {
+        pub fn periodic_scheduling_compaction_group_interval_sec() -> u64 {
             10 // 10s
         }
 
@@ -1857,6 +1870,14 @@ pub mod default {
 
         pub fn max_get_task_probe_times() -> usize {
             5
+        }
+
+        pub fn actor_cnt_per_worker_parallelism_soft_limit() -> usize {
+            100
+        }
+
+        pub fn actor_cnt_per_worker_parallelism_hard_limit() -> usize {
+            400
         }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {
@@ -2605,6 +2626,27 @@ mod tests {
                     .developer
                     .retryable_service_error_codes,
                 vec!["dummy".to_string()]
+            );
+        }
+    }
+
+    #[test]
+    fn test_meta_configs_backward_compatibility() {
+        // Test periodic_space_reclaim_compaction_interval_sec
+        {
+            let config: RwConfig = toml::from_str(
+                r#"
+            [meta]
+            periodic_split_compact_group_interval_sec = 1
+            "#,
+            )
+            .unwrap();
+
+            assert_eq!(
+                config
+                    .meta
+                    .periodic_scheduling_compaction_group_interval_sec,
+                1
             );
         }
     }
