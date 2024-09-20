@@ -23,10 +23,12 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{
     GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, FrontendHummockVersionDelta, HummockEpoch, HummockVersionId,
+};
 use risingwave_pb::hummock::{
-    CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionStats,
-    StateTableInfoDelta,
+    CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionDeltas,
+    HummockVersionStats, StateTableInfoDelta,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -228,6 +230,17 @@ impl<'a> InMemValTransaction for HummockVersionTransaction<'a> {
                     Operation::Add,
                     Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                         version_deltas: pb_deltas,
+                    }),
+                );
+                self.notification_manager.notify_frontend_without_version(
+                    Operation::Update,
+                    Info::HummockVersionDeltas(HummockVersionDeltas {
+                        version_deltas: deltas
+                            .iter()
+                            .map(|delta| {
+                                FrontendHummockVersionDelta::from_delta(delta).to_protobuf()
+                            })
+                            .collect(),
                     }),
                 );
             }

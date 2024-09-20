@@ -455,6 +455,28 @@ message HashJoinNode {
   bool is_append_only = 14;
 }
 
+message AsOfJoinNode {
+  plan_common.AsOfJoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  // Used for internal table states.
+  catalog.Table left_table = 4;
+  // Used for internal table states.
+  catalog.Table right_table = 5;
+  // The output indices of current node
+  repeated uint32 output_indices = 6;
+  // Left deduped input pk indices. The pk of the left_table and
+  // The pk of the left_table is  [left_join_key | left_inequality_key | left_deduped_input_pk_indices]
+  // left_inequality_key is not used but for forward compatibility.
+  repeated uint32 left_deduped_input_pk_indices = 7;
+  // Right deduped input pk indices.
+  // The pk of the right_table is  [right_join_key | right_inequality_key | right_deduped_input_pk_indices]
+  // right_inequality_key is not used but for forward compatibility.
+  repeated uint32 right_deduped_input_pk_indices = 8;
+  repeated bool null_safe = 9;
+  optional plan_common.AsOfJoinDesc asof_desc = 10;
+}
+
 message TemporalJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;

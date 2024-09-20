@@ -47,12 +47,7 @@ pub struct FsSourceCommon {
     #[serde(rename = "refresh.interval.sec")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub refresh_interval_sec: Option<u64>,
-
-    #[serde(rename = "recursive_scan", default)]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub recursive_scan: Option<bool>,
 }
-
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]

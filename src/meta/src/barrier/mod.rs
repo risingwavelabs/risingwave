@@ -41,7 +41,6 @@ use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -833,7 +832,7 @@ impl GlobalBarrierManager {
                         .on_new_worker_node_map(self.active_streaming_nodes.current());
                     self.checkpoint_control.creating_streaming_job_controls.values().for_each(|job| job.on_new_worker_node_map(self.active_streaming_nodes.current()));
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node).await;
+                        self.control_stream_manager.add_worker(node, &self.state.inflight_subscription_info).await;
                     }
                 }
 
@@ -1046,17 +1045,10 @@ impl GlobalBarrierManager {
 
         let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
 
-        let mut actors_to_pre_sync_barrier: HashMap<_, Vec<_>> = HashMap::new();
         let mut jobs_to_wait = HashSet::new();
 
         for (table_id, creating_job) in &mut self.checkpoint_control.creating_streaming_job_controls
         {
-            for (worker_id, actors) in creating_job.actors_to_pre_sync_barrier() {
-                actors_to_pre_sync_barrier
-                    .entry(*worker_id)
-                    .or_default()
-                    .extend(actors.iter().cloned())
-            }
             if let Some(wait_job) =
                 creating_job.on_new_command(&mut self.control_stream_manager, &command_ctx)?
             {
@@ -1071,7 +1063,6 @@ impl GlobalBarrierManager {
             &command_ctx,
             &pre_applied_graph_info,
             Some(&self.state.inflight_graph_info),
-            actors_to_pre_sync_barrier,
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
@@ -1281,13 +1272,6 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<Option<HummockVersionStats>> {
         {
             {
-                // We must ensure all epochs are committed in ascending order,
-                // because the storage engine will query from new to old in the order in which
-                // the L0 layer files are generated.
-                // See https://github.com/risingwave-labs/risingwave/issues/1251
-                // hummock_manager commit epoch.
-                let mut new_snapshot = None;
-
                 match &command_ctx.kind {
                     BarrierKind::Initial => {}
                     BarrierKind::Checkpoint(epochs) => {
@@ -1298,7 +1282,7 @@ impl GlobalBarrierManagerContext {
                             backfill_pinned_log_epoch,
                             tables_to_commit,
                         );
-                        new_snapshot = self.hummock_manager.commit_epoch(commit_info).await?;
+                        self.hummock_manager.commit_epoch(commit_info).await?;
                     }
                     BarrierKind::Barrier => {
                         // if we collect a barrier(checkpoint = false),
@@ -1309,16 +1293,6 @@ impl GlobalBarrierManagerContext {
                 }
 
                 command_ctx.post_collect().await?;
-                // Notify new snapshot after fragment_mapping changes have been notified in
-                // `post_collect`.
-                if let Some(snapshot) = new_snapshot {
-                    self.env
-                        .notification_manager()
-                        .notify_frontend_without_version(
-                            Operation::Update, // Frontends don't care about operation.
-                            Info::HummockSnapshot(snapshot),
-                        );
-                }
                 Ok(if command_ctx.kind.is_checkpoint() {
                     Some(self.hummock_manager.get_version_stats().await)
                 } else {

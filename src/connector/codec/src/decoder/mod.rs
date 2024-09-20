@@ -14,6 +14,7 @@
 
 pub mod avro;
 pub mod json;
+pub mod protobuf;
 pub mod utils;
 
 use risingwave_common::error::NotImplemented;

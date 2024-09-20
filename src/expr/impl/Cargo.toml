@@ -24,10 +24,7 @@ wasm-udf = ["arrow-udf-wasm", "zstd"]
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
-arrow-array = { workspace = true }
 arrow-flight = { workspace = true, optional = true }
-arrow-schema = { workspace = true }
-arrow-schema-iceberg = { workspace = true }
 arrow-udf-flight = { workspace = true, optional = true }
 arrow-udf-js = { workspace = true, optional = true }
 arrow-udf-python = { workspace = true, optional = true }
@@ -51,7 +48,7 @@ itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { version = "0.3", features = ["used_linker"] }
 md5 = "0.7"
-moka = { version = "0.12", features = ["sync"] }
+moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"
 openssl = "0.10"
 regex = "1"

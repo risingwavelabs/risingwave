@@ -32,7 +32,7 @@ use risingwave_storage::table::SINGLETON_VNODE;
 use crate::common::table::state_table::{
     ReplicatedStateTable, StateTable, WatermarkCacheStateTable,
 };
-use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
+use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indices};
 
 #[tokio::test]
 async fn test_state_table_update_insert() {
@@ -48,7 +48,7 @@ async fn test_state_table_update_insert() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -241,7 +241,7 @@ async fn test_state_table_iter_with_prefix() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -376,7 +376,7 @@ async fn test_state_table_iter_with_pk_range() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -516,7 +516,7 @@ async fn test_mem_table_assertion() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -560,7 +560,7 @@ async fn test_state_table_iter_with_value_indices() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table_with_value_indices(
+    let table = gen_pbtable_with_value_indices(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -733,7 +733,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table_with_value_indices(
+    let table = gen_pbtable_with_value_indices(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -981,7 +981,7 @@ async fn test_state_table_write_chunk() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1113,7 +1113,7 @@ async fn test_state_table_write_chunk_visibility() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1239,7 +1239,7 @@ async fn test_state_table_write_chunk_value_indices() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table_with_value_indices(
+    let table = gen_pbtable_with_value_indices(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1338,7 +1338,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1464,7 +1464,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1639,7 +1639,7 @@ async fn test_state_table_watermark_cache_refill() {
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1735,7 +1735,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1921,7 +1921,7 @@ async fn test_replicated_state_table_replication() {
     ];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,

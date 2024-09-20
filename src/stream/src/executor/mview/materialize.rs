@@ -37,6 +37,7 @@ use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
+use crate::common::table::test_utils::gen_pbtable;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::prelude::*;
 
@@ -364,12 +365,16 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             Arc::from((0..columns.len()).collect_vec()),
             Arc::from(columns.clone().into_boxed_slice()),
         );
-        let state_table = StateTableInner::new_without_distribution(
+        let state_table = StateTableInner::from_table_catalog(
+            &gen_pbtable(
+                table_id,
+                columns,
+                arrange_order_types,
+                arrange_columns.clone(),
+                0,
+            ),
             store,
-            table_id,
-            columns,
-            arrange_order_types,
-            arrange_columns.clone(),
+            None,
         )
         .await;
 
@@ -2007,12 +2012,16 @@ mod tests {
         ];
         let pk_indices = vec![0];
 
-        let mut table = StateTable::new_without_distribution(
+        let mut table = StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::from(1002),
+                column_descs.clone(),
+                order_types,
+                pk_indices,
+                0,
+            ),
             memory_state_store.clone(),
-            TableId::from(1002),
-            column_descs.clone(),
-            order_types,
-            pk_indices,
+            None,
         )
         .await;
 

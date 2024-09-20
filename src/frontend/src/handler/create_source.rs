@@ -21,7 +21,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
@@ -42,7 +42,6 @@ use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
     CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY,
     CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR,
@@ -66,7 +65,7 @@ use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
     ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
 };
-use risingwave_sqlparser::parser::IncludeOption;
+use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
@@ -594,8 +593,43 @@ fn bind_columns_from_source_for_cdc(
     Ok((Some(columns), stream_source_info))
 }
 
+// check the additional column compatibility with the format and encode
+fn check_additional_column_compatibility(
+    column_def: &IncludeOptionItem,
+    source_schema: Option<&ConnectorSchema>,
+) -> Result<()> {
+    // only allow header column have inner field
+    if column_def.inner_field.is_some()
+        && !column_def
+            .column_type
+            .real_value()
+            .eq_ignore_ascii_case("header")
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "Only header column can have inner field, but got {:?}",
+            column_def.column_type.real_value(),
+        ))));
+    }
+
+    // Payload column only allowed when encode is JSON
+    if let Some(schema) = source_schema
+        && column_def
+            .column_type
+            .real_value()
+            .eq_ignore_ascii_case("payload")
+        && !matches!(schema.row_encode, Encode::Json)
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "INCLUDE payload is only allowed when using ENCODE JSON, but got ENCODE {:?}",
+            schema.row_encode
+        ))));
+    }
+    Ok(())
+}
+
 /// add connector-spec columns to the end of column catalog
 pub fn handle_addition_columns(
+    source_schema: Option<&ConnectorSchema>,
     with_properties: &BTreeMap<String, String>,
     mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
@@ -619,17 +653,7 @@ pub fn handle_addition_columns(
         .unwrap(); // there must be at least one column in the column catalog
 
     while let Some(item) = additional_columns.pop() {
-        {
-            // only allow header column have inner field
-            if item.inner_field.is_some()
-                && !item.column_type.real_value().eq_ignore_ascii_case("header")
-            {
-                return Err(RwError::from(ProtocolError(format!(
-                    "Only header column can have inner field, but got {:?}",
-                    item.column_type.real_value(),
-                ))));
-            }
-        }
+        check_additional_column_compatibility(&item, source_schema)?;
 
         let data_type_name: Option<String> = item
             .header_inner_expect_type
@@ -1326,8 +1350,7 @@ pub async fn extract_iceberg_columns(
 ) -> anyhow::Result<Vec<ColumnCatalog>> {
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
-        let iceberg_config: IcebergConfig = properties.to_iceberg_config();
-        let table = iceberg_config.load_table_v2().await?;
+        let table = properties.load_table_v2().await?;
         let iceberg_schema: arrow_schema_iceberg::Schema =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
@@ -1369,8 +1392,6 @@ pub async fn check_iceberg_source(
         )));
     };
 
-    let iceberg_config = properties.to_iceberg_config();
-
     let schema = Schema {
         fields: columns
             .iter()
@@ -1379,7 +1400,7 @@ pub async fn check_iceberg_source(
             .collect(),
     };
 
-    let table = iceberg_config.load_table_v2().await?;
+    let table = properties.load_table_v2().await?;
 
     let iceberg_schema = iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
@@ -1512,6 +1533,7 @@ pub async fn bind_create_source_or_table_with_connector(
 
     // add additional columns before bind pk, because `format upsert` requires the key column
     handle_addition_columns(
+        Some(&source_schema),
         &with_properties,
         include_column_options,
         &mut columns,
