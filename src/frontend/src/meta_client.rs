@@ -27,7 +27,6 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -47,7 +46,6 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
     async fn try_unregister(&self);
-    async fn get_snapshot(&self) -> Result<HummockSnapshot>;
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId>;
 
@@ -137,10 +135,6 @@ pub struct FrontendMetaClientImpl(pub MetaClient);
 impl FrontendMetaClient for FrontendMetaClientImpl {
     async fn try_unregister(&self) {
         self.0.try_unregister().await;
-    }
-
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        self.0.get_snapshot().await
     }
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId> {

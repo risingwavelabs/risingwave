@@ -39,14 +39,8 @@ impl RecentVersions {
 
     fn has_table_committed(&self, new_version: &PinnedVersion) -> bool {
         let mut has_table_committed = false;
-        for (table_id, info) in new_version.version().state_table_info.info() {
-            if let Some(prev_info) = self
-                .latest_version
-                .version()
-                .state_table_info
-                .info()
-                .get(table_id)
-            {
+        for (table_id, info) in new_version.state_table_info.info() {
+            if let Some(prev_info) = self.latest_version.state_table_info.info().get(table_id) {
                 match info.committed_epoch.cmp(&prev_info.committed_epoch) {
                     Ordering::Less => {
                         unreachable!(
@@ -68,7 +62,7 @@ impl RecentVersions {
 
     #[must_use]
     pub fn with_new_version(&self, version: PinnedVersion) -> Self {
-        assert!(version.version().id > self.latest_version.version().id);
+        assert!(version.id > self.latest_version.id);
         let is_committed = self.has_table_committed(&version);
         let recent_versions = if self.is_latest_committed {
             let prev_recent_versions = if self.recent_versions.len() >= self.max_version_num {
@@ -104,13 +98,7 @@ impl RecentVersions {
         table_id: TableId,
         epoch: HummockEpoch,
     ) -> Option<PinnedVersion> {
-        if let Some(info) = self
-            .latest_version
-            .version()
-            .state_table_info
-            .info()
-            .get(&table_id)
-        {
+        if let Some(info) = self.latest_version.state_table_info.info().get(&table_id) {
             if info.committed_epoch <= epoch {
                 Some(self.latest_version.clone())
             } else {
@@ -131,7 +119,6 @@ impl RecentVersions {
                 epoch
                     < self
                         .latest_version
-                        .version()
                         .state_table_info
                         .info()
                         .get(&table_id)
@@ -140,7 +127,7 @@ impl RecentVersions {
             );
         }
         let result = self.recent_versions.binary_search_by(|version| {
-            let committed_epoch = version.version().table_committed_epoch(table_id);
+            let committed_epoch = version.table_committed_epoch(table_id);
             if let Some(committed_epoch) = committed_epoch {
                 committed_epoch.cmp(&epoch)
             } else {
@@ -164,12 +151,7 @@ impl RecentVersions {
                     self.recent_versions.get(index - 1).cloned()
                 };
                 version.and_then(|version| {
-                    if version
-                        .version()
-                        .state_table_info
-                        .info()
-                        .contains_key(&table_id)
-                    {
+                    if version.state_table_info.info().contains_key(&table_id) {
                         Some(version)
                     } else {
                         // if the table does not exist in the version, return `None` to try get a time travel version

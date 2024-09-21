@@ -585,7 +585,6 @@ pub(crate) async fn wait_for_epoch(
         // avoid unnecessary check in the loop if the value does not change
         let committed_epoch = receiver
             .borrow_and_update()
-            .version()
             .table_committed_epoch(options.table_id);
         if let Some(committed_epoch) = committed_epoch
             && committed_epoch >= wait_epoch
@@ -621,10 +620,7 @@ pub(crate) async fn wait_for_epoch(
             }
             Ok(Ok(_)) => {
                 // TODO: should handle the corner case of drop table
-                let new_committed_epoch = receiver
-                    .borrow()
-                    .version()
-                    .table_committed_epoch(options.table_id);
+                let new_committed_epoch = receiver.borrow().table_committed_epoch(options.table_id);
                 if let Some(committed_epoch) = new_committed_epoch
                     && committed_epoch >= wait_epoch
                 {

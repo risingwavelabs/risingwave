@@ -49,7 +49,6 @@ use risingwave_pb::ddl_service::{
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -937,10 +936,6 @@ pub struct MockFrontendMetaClient {}
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
-
-    async fn get_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot { committed_epoch: 0 })
-    }
 
     async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockVersionId> {
         Ok(INVALID_VERSION_ID)

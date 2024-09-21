@@ -79,7 +79,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
                 args.use_new_object_prefix_strategy,
             )?)
             .await?;
-        let version = hummock.inner().get_pinned_version().version().clone();
+        let version = hummock.inner().get_pinned_version().clone();
         let sstable_store = hummock.sstable_store();
         for level in version.get_combined_levels() {
             for sstable_info in &level.table_infos {

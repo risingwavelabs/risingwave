@@ -544,9 +544,7 @@ impl HummockVersion {
             &version_delta.removed_table_ids,
         );
 
-        if !is_commit_epoch
-            && self.visible_table_committed_epoch() < version_delta.visible_table_committed_epoch()
-        {
+        if !is_commit_epoch && self.max_committed_epoch < version_delta.max_committed_epoch {
             is_commit_epoch = true;
             tracing::trace!("max committed epoch bumped but no table committed epoch is changed");
         }
@@ -594,17 +592,17 @@ impl HummockVersion {
                 );
                 self.merge_compaction_group(group_merge.left_group_id, group_merge.right_group_id)
             }
-            let visible_table_committed_epoch = self.visible_table_committed_epoch();
+            let max_committed_epoch = self.max_committed_epoch;
             let group_destroy = summary.group_destroy;
             let levels = self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
                 panic!("compaction group {} does not exist", compaction_group_id)
             });
 
             assert!(
-                visible_table_committed_epoch <= version_delta.visible_table_committed_epoch(),
+                max_committed_epoch <= version_delta.max_committed_epoch,
                 "new max commit epoch {} is older than the current max commit epoch {}",
-                version_delta.visible_table_committed_epoch(),
-                visible_table_committed_epoch
+                version_delta.max_committed_epoch,
+                max_committed_epoch
             );
             if is_commit_epoch {
                 // `max_committed_epoch` increases. It must be a `commit_epoch`
@@ -655,7 +653,7 @@ impl HummockVersion {
             }
         }
         self.id = version_delta.id;
-        self.set_max_committed_epoch(version_delta.visible_table_committed_epoch());
+        self.max_committed_epoch = version_delta.max_committed_epoch;
 
         // apply to table watermark
 

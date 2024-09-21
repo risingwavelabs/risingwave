@@ -36,7 +36,9 @@ use crate::compaction_group::StaticCompactionGroupId;
 use crate::level::LevelsCommon;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
-use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID};
+use crate::{
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersionStateTableInfo {
@@ -404,12 +406,12 @@ impl HummockVersion {
         }
     }
 
-    pub(crate) fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
-        self.max_committed_epoch = max_committed_epoch;
+    pub fn max_committed_epoch_for_meta(&self) -> u64 {
+        self.max_committed_epoch
     }
 
     #[cfg(any(test, feature = "test"))]
-    pub fn max_committed_epoch(&self) -> u64 {
+    pub fn max_committed_epoch_for_test(&self) -> u64 {
         self.max_committed_epoch
     }
 
@@ -418,10 +420,6 @@ impl HummockVersion {
             .info()
             .get(&table_id)
             .map(|info| info.committed_epoch)
-    }
-
-    pub fn visible_table_committed_epoch(&self) -> u64 {
-        self.max_committed_epoch
     }
 
     pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
@@ -445,12 +443,19 @@ impl HummockVersion {
         init_version
     }
 
-    pub fn version_delta_after(&self) -> HummockVersionDelta {
+    pub fn version_delta_after(&self, max_committed_epoch: Option<u64>) -> HummockVersionDelta {
+        let max_committed_epoch = max_committed_epoch.unwrap_or(self.max_committed_epoch);
+        assert!(
+            max_committed_epoch >= self.max_committed_epoch,
+            "new max_committed_epoch {} less than prev max_committed_epoch: {}",
+            max_committed_epoch,
+            self.max_committed_epoch
+        );
         HummockVersionDelta {
             id: self.next_version_id(),
             prev_id: self.id,
             trivial_move: false,
-            max_committed_epoch: self.max_committed_epoch,
+            max_committed_epoch,
             group_deltas: Default::default(),
             new_table_watermarks: HashMap::new(),
             removed_table_ids: HashSet::new(),
@@ -588,12 +593,8 @@ impl HummockVersionDelta {
             }))
     }
 
-    pub fn visible_table_committed_epoch(&self) -> u64 {
+    pub fn max_committed_epoch_for_migration(&self) -> HummockEpoch {
         self.max_committed_epoch
-    }
-
-    pub fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
-        self.max_committed_epoch = max_committed_epoch;
     }
 }
 
