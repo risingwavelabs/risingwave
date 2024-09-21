@@ -322,14 +322,10 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_source(&self, source: PbSource) -> Result<()> {
-        self.create_source_inner(source).map(|_| ())
-    }
-
-    async fn create_source_with_graph(
+    async fn create_source(
         &self,
         source: PbSource,
-        _graph: StreamFragmentGraph,
+        _graph: Option<StreamFragmentGraph>,
     ) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
     }
@@ -573,12 +569,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
-        self.catalog.write().update_source(&source);
-        Ok(())
-    }
-
-    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
+    async fn alter_source(&self, source: PbSource) -> Result<()> {
         self.catalog.write().update_source(&source);
         Ok(())
     }

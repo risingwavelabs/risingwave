@@ -82,7 +82,7 @@ async fn handle_declare_subscription_cursor(
         risingwave_sqlparser::ast::Since::Full => None,
     };
     // Create cursor based on the response
-    session
+    if let Err(e) = session
         .get_cursor_manager()
         .add_subscription_cursor(
             cursor_name.clone(),
@@ -91,7 +91,15 @@ async fn handle_declare_subscription_cursor(
             subscription,
             &handle_args,
         )
-        .await?;
+        .await
+    {
+        session
+            .env()
+            .cursor_metrics
+            .subscription_cursor_error_count
+            .inc();
+        return Err(e);
+    }
 
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
