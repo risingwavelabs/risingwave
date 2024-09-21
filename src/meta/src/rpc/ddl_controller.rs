@@ -131,7 +131,7 @@ pub enum DdlCommand {
     DropDatabase(DatabaseId),
     CreateSchema(Schema),
     DropSchema(SchemaId),
-    CreateSource(Source),
+    CreateSourceWithoutStreamingJob(Source),
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
     DropFunction(FunctionId),
@@ -291,7 +291,9 @@ impl DdlController {
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
                 DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).await,
                 DdlCommand::DropSchema(schema_id) => ctrl.drop_schema(schema_id).await,
-                DdlCommand::CreateSource(source) => ctrl.create_source(source).await,
+                DdlCommand::CreateSourceWithoutStreamingJob(source) => {
+                    ctrl.create_source_without_streaming_job(source).await
+                }
                 DdlCommand::DropSource(source_id, drop_mode) => {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
@@ -342,7 +344,7 @@ impl DdlController {
                 }
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
                 DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
-                DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
+                DdlCommand::AlterSourceColumn(source) => ctrl.alter_source(source).await,
                 DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
                 DdlCommand::CreateSubscription(subscription) => {
                     ctrl.create_subscription(subscription).await
@@ -469,7 +471,11 @@ impl DdlController {
         }
     }
 
-    async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
+    /// Shared source is handled in [`Self::create_streaming_job`]
+    async fn create_source_without_streaming_job(
+        &self,
+        mut source: Source,
+    ) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 source.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
@@ -534,11 +540,12 @@ impl DdlController {
         Ok(version)
     }
 
-    // Maybe we can unify `alter_source_column` and `alter_source_name`.
-    async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+    /// This replaces the source in the catalog.
+    /// Note: `StreamSourceInfo` in downstream MVs' `SourceExecutor`s are not updated.
+    async fn alter_source(&self, source: Source) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.alter_source_column(source).await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.alter_source_column(source).await,
+            MetadataManager::V1(mgr) => mgr.catalog_manager.alter_source(source).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.alter_source(source).await,
         }
     }
 

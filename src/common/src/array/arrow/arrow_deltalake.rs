@@ -22,17 +22,11 @@ use std::sync::Arc;
 
 use arrow_array::ArrayRef;
 use num_traits::abs;
-use {
-    arrow_array_deltalake as arrow_array, arrow_buffer_deltalake as arrow_buffer,
-    arrow_cast_deltalake as arrow_cast, arrow_schema_deltalake as arrow_schema,
-};
-type ArrowIntervalType = i128;
 
-use self::arrow_impl::ToArrow;
+pub use super::arrow_48::{
+    arrow_array, arrow_buffer, arrow_cast, arrow_schema, FromArrow, ToArrow,
+};
 use crate::array::{Array, ArrayError, DataChunk, Decimal, DecimalArray};
-#[expect(clippy::duplicate_mod)]
-#[path = "./arrow_impl.rs"]
-mod arrow_impl;
 
 pub struct DeltaLakeConvert;
 
@@ -103,8 +97,8 @@ mod test {
     use arrow_array::cast::AsArray;
     use arrow_array::ArrayRef;
     use arrow_schema::Field;
-    use {arrow_array_deltalake as arrow_array, arrow_schema_deltalake as arrow_schema};
 
+    use super::*;
     use crate::array::arrow::arrow_deltalake::DeltaLakeConvert;
     use crate::array::{ArrayImpl, Decimal, DecimalArray, ListArray, ListValue};
     use crate::bitmap::Bitmap;

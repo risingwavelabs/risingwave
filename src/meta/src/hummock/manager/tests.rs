@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![cfg(test)]
+
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,7 +38,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot};
+use risingwave_pb::hummock::HummockPinnedVersion;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
@@ -53,13 +54,6 @@ use crate::rpc::metrics::MetaMetrics;
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
-}
-
-fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
-    pin_snapshots
-        .iter()
-        .map(|p| p.minimal_pinned_snapshot)
-        .collect_vec()
 }
 
 fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
@@ -106,23 +100,6 @@ fn get_compaction_group_object_ids(
         .collect_vec()
 }
 
-async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
-    match env.meta_store_ref() {
-        MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store).await.unwrap(),
-        MetaStoreImpl::Sql(sql_meta_store) => {
-            use risingwave_meta_model_v2::hummock_pinned_snapshot;
-            use sea_orm::EntityTrait;
-            hummock_pinned_snapshot::Entity::find()
-                .all(&sql_meta_store.conn)
-                .await
-                .unwrap()
-                .into_iter()
-                .map(Into::into)
-                .collect()
-        }
-    }
-}
-
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
     match env.meta_store_ref() {
         MetaStoreImpl::Kv(meta_store) => HummockPinnedVersion::list(meta_store).await.unwrap(),
@@ -137,59 +114,6 @@ async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPin
                 .map(Into::into)
                 .collect()
         }
-    }
-}
-
-#[tokio::test]
-async fn test_unpin_snapshot_before() {
-    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
-    let epoch = test_epoch(0);
-
-    for _ in 0..2 {
-        let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
-        assert_eq!(pin_result.committed_epoch, epoch);
-        let pinned_snapshots = list_pinned_snapshot_from_meta_store(&env).await;
-        assert_eq!(pinned_snapshots[0].context_id, context_id);
-        assert_eq!(
-            pinned_snapshots[0].minimal_pinned_snapshot,
-            pin_result.committed_epoch
-        );
-    }
-
-    // unpin nonexistent target will not return error
-    for _ in 0..3 {
-        hummock_manager
-            .unpin_snapshot_before(
-                context_id,
-                HummockSnapshot {
-                    committed_epoch: epoch,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            pin_snapshots_epoch(&list_pinned_snapshot_from_meta_store(&env).await),
-            vec![epoch]
-        );
-    }
-
-    let epoch2 = epoch.next_epoch();
-    // unpin nonexistent target will not return error
-    for _ in 0..3 {
-        hummock_manager
-            .unpin_snapshot_before(
-                context_id,
-                HummockSnapshot {
-                    committed_epoch: epoch2,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            pin_snapshots_epoch(&list_pinned_snapshot_from_meta_store(&env).await),
-            vec![epoch]
-        );
     }
 }
 
@@ -458,8 +382,6 @@ async fn test_release_context_resource() {
     );
     hummock_manager.pin_version(context_id_1).await.unwrap();
     hummock_manager.pin_version(context_id_2).await.unwrap();
-    hummock_manager.pin_snapshot(context_id_1).await.unwrap();
-    hummock_manager.pin_snapshot(context_id_2).await.unwrap();
     assert_eq!(
         pin_versions_sum(&list_pinned_version_from_meta_store(&env).await),
         2
@@ -472,8 +394,6 @@ async fn test_release_context_resource() {
     let pinned_versions = list_pinned_version_from_meta_store(&env).await;
     assert_eq!(pin_versions_sum(&pinned_versions), 1);
     assert_eq!(pinned_versions[0].context_id, context_id_2);
-    let pinned_snapshots = list_pinned_snapshot_from_meta_store(&env).await;
-    assert_eq!(pinned_snapshots[0].context_id, context_id_2);
     // it's OK to call again
     hummock_manager
         .release_contexts(&vec![context_id_1])
@@ -676,7 +596,6 @@ async fn test_pin_snapshot_response_lost() {
         hummock_manager.clone(),
         worker_node.id,
     ));
-    let context_id = worker_node.id;
 
     let mut epoch = test_epoch(1);
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
@@ -702,7 +621,7 @@ async fn test_pin_snapshot_response_lost() {
 
     // Pin a snapshot with smallest last_pin
     // [ e0 ] -> [ e0:pinned ]
-    let mut epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    let mut epoch_recorded_in_frontend = hummock_manager.latest_snapshot();
     let prev_epoch = epoch.prev_epoch();
     assert_eq!(epoch_recorded_in_frontend.committed_epoch, prev_epoch);
 
@@ -729,13 +648,13 @@ async fn test_pin_snapshot_response_lost() {
 
     // Assume the response of the previous rpc is lost.
     // [ e0:pinned, e1 ] -> [ e0, e1:pinned ]
-    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    epoch_recorded_in_frontend = hummock_manager.latest_snapshot();
     let prev_epoch = epoch.prev_epoch();
     assert_eq!(epoch_recorded_in_frontend.committed_epoch, prev_epoch);
 
     // Assume the response of the previous rpc is lost.
     // [ e0, e1:pinned ] -> [ e0, e1:pinned ]
-    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    epoch_recorded_in_frontend = hummock_manager.latest_snapshot();
     assert_eq!(
         epoch_recorded_in_frontend.committed_epoch,
         epoch.prev_epoch()
@@ -764,7 +683,7 @@ async fn test_pin_snapshot_response_lost() {
 
     // Use correct snapshot id.
     // [ e0, e1:pinned, e2 ] -> [ e0, e1:pinned, e2:pinned ]
-    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    epoch_recorded_in_frontend = hummock_manager.latest_snapshot();
     assert_eq!(
         epoch_recorded_in_frontend.committed_epoch,
         epoch.prev_epoch()
@@ -793,7 +712,7 @@ async fn test_pin_snapshot_response_lost() {
 
     // Use u64::MAX as epoch to pin greatest snapshot
     // [ e0, e1:pinned, e2:pinned, e3 ] -> [ e0, e1:pinned, e2:pinned, e3::pinned ]
-    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    epoch_recorded_in_frontend = hummock_manager.latest_snapshot();
     assert_eq!(
         epoch_recorded_in_frontend.committed_epoch,
         epoch.prev_epoch()

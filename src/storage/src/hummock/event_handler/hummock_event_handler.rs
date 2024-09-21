@@ -939,7 +939,7 @@ mod tests {
 
     use futures::FutureExt;
     use parking_lot::Mutex;
-    use risingwave_common::bitmap::BitmapBuilder;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::version::HummockVersion;
@@ -1160,7 +1160,7 @@ mod tests {
                 table_id: TEST_TABLE_ID,
                 new_read_version_sender: tx,
                 is_replicated: false,
-                vnodes: Arc::new(BitmapBuilder::filled(VirtualNode::COUNT).finish()),
+                vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             });
             rx.await.unwrap()
         };

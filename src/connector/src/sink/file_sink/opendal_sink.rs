@@ -17,11 +17,11 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use arrow_schema_iceberg::SchemaRef;
 use async_trait::async_trait;
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties;
+use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;

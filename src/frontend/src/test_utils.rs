@@ -319,14 +319,10 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_source(&self, source: PbSource) -> Result<()> {
-        self.create_source_inner(source).map(|_| ())
-    }
-
-    async fn create_source_with_graph(
+    async fn create_source(
         &self,
         source: PbSource,
-        _graph: StreamFragmentGraph,
+        _graph: Option<StreamFragmentGraph>,
     ) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
     }
@@ -570,12 +566,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
-        self.catalog.write().update_source(&source);
-        Ok(())
-    }
-
-    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
+    async fn alter_source(&self, source: PbSource) -> Result<()> {
         self.catalog.write().update_source(&source);
         Ok(())
     }
@@ -939,10 +930,6 @@ pub struct MockFrontendMetaClient {}
 impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
 
-    async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot { committed_epoch: 0 })
-    }
-
     async fn get_snapshot(&self) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot { committed_epoch: 0 })
     }
@@ -982,14 +969,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
-    async fn unpin_snapshot(&self) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn unpin_snapshot_before(&self, _epoch: u64) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
         Ok(vec![])
     }
@@ -1023,10 +1002,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(u32, u64)>> {
-        unimplemented!()
-    }
-
-    async fn list_hummock_pinned_snapshots(&self) -> RpcResult<Vec<(u32, u64)>> {
         unimplemented!()
     }
 

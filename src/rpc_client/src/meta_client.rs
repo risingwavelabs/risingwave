@@ -426,26 +426,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn create_source(&self, source: PbSource) -> Result<WaitVersion> {
-        let request = CreateSourceRequest {
-            source: Some(source),
-            fragment_graph: None,
-        };
-
-        let resp = self.inner.create_source(request).await?;
-        Ok(resp
-            .version
-            .ok_or_else(|| anyhow!("wait version not set"))?)
-    }
-
-    pub async fn create_source_with_graph(
+    pub async fn create_source(
         &self,
         source: PbSource,
-        graph: StreamFragmentGraph,
+        graph: Option<StreamFragmentGraph>,
     ) -> Result<WaitVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
-            fragment_graph: Some(graph),
+            fragment_graph: graph,
         };
 
         let resp = self.inner.create_source(request).await?;
@@ -538,17 +526,6 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    // only adding columns is supported
-    pub async fn alter_source_column(&self, source: PbSource) -> Result<WaitVersion> {
-        let request = AlterSourceRequest {
-            source: Some(source),
-        };
-        let resp = self.inner.alter_source(request).await?;
-        Ok(resp
-            .version
-            .ok_or_else(|| anyhow!("wait version not set"))?)
-    }
-
     pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<WaitVersion> {
         let request = AlterOwnerRequest {
             object: Some(object),
@@ -575,7 +552,7 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn alter_source_with_sr(&self, source: PbSource) -> Result<WaitVersion> {
+    pub async fn alter_source(&self, source: PbSource) -> Result<WaitVersion> {
         let request = AlterSourceRequest {
             source: Some(source),
         };
@@ -1091,15 +1068,6 @@ impl MetaClient {
             .await
     }
 
-    pub async fn risectl_get_pinned_snapshots_summary(
-        &self,
-    ) -> Result<RiseCtlGetPinnedSnapshotsSummaryResponse> {
-        let request = RiseCtlGetPinnedSnapshotsSummaryRequest {};
-        self.inner
-            .rise_ctl_get_pinned_snapshots_summary(request)
-            .await
-    }
-
     pub async fn risectl_get_checkpoint_hummock_version(
         &self,
     ) -> Result<RiseCtlGetCheckpointVersionResponse> {
@@ -1194,15 +1162,6 @@ impl MetaClient {
                 .current_version
                 .unwrap(),
         ))
-    }
-
-    pub async fn pin_specific_snapshot(&self, epoch: HummockEpoch) -> Result<HummockSnapshot> {
-        let req = PinSpecificSnapshotRequest {
-            context_id: self.worker_id(),
-            epoch,
-        };
-        let resp = self.inner.pin_specific_snapshot(req).await?;
-        Ok(resp.snapshot.unwrap())
     }
 
     pub async fn get_assigned_compact_task_num(&self) -> Result<usize> {
@@ -1550,38 +1509,10 @@ impl HummockMetaClient for MetaClient {
         ))
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        let req = PinSnapshotRequest {
-            context_id: self.worker_id(),
-        };
-        let resp = self.inner.pin_snapshot(req).await?;
-        Ok(resp.snapshot.unwrap())
-    }
-
     async fn get_snapshot(&self) -> Result<HummockSnapshot> {
         let req = GetEpochRequest {};
         let resp = self.inner.get_epoch(req).await?;
         Ok(resp.snapshot.unwrap())
-    }
-
-    async fn unpin_snapshot(&self) -> Result<()> {
-        let req = UnpinSnapshotRequest {
-            context_id: self.worker_id(),
-        };
-        self.inner.unpin_snapshot(req).await?;
-        Ok(())
-    }
-
-    async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()> {
-        let req = UnpinSnapshotBeforeRequest {
-            context_id: self.worker_id(),
-            // For unpin_snapshot_before, we do not care about snapshots list but only min epoch.
-            min_snapshot: Some(HummockSnapshot {
-                committed_epoch: pinned_epochs,
-            }),
-        };
-        self.inner.unpin_snapshot_before(req).await?;
-        Ok(())
     }
 
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
@@ -2175,18 +2106,13 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_assigned_compact_task_num, GetAssignedCompactTaskNumRequest, GetAssignedCompactTaskNumResponse }
             ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
             ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
-            ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
-            ,{ hummock_client, pin_specific_snapshot, PinSpecificSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
-            ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
-            ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
             ,{ hummock_client, rise_ctl_get_pinned_versions_summary, RiseCtlGetPinnedVersionsSummaryRequest, RiseCtlGetPinnedVersionsSummaryResponse }
-            ,{ hummock_client, rise_ctl_get_pinned_snapshots_summary, RiseCtlGetPinnedSnapshotsSummaryRequest, RiseCtlGetPinnedSnapshotsSummaryResponse }
             ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
             ,{ hummock_client, rise_ctl_get_checkpoint_version, RiseCtlGetCheckpointVersionRequest, RiseCtlGetCheckpointVersionResponse }

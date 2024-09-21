@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -113,16 +113,6 @@ impl HummockManager {
             .read()
             .await
             .pinned_versions
-            .values()
-            .cloned()
-            .collect_vec()
-    }
-
-    pub async fn list_pinned_snapshot(&self) -> Vec<HummockPinnedSnapshot> {
-        self.context_info
-            .read()
-            .await
-            .pinned_snapshots
             .values()
             .cloned()
             .collect_vec()

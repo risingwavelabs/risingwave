@@ -68,7 +68,16 @@ impl VirtualNode {
 
 impl VirtualNode {
     /// The maximum count of virtual nodes that fits in [`VirtualNodeInner`].
-    pub const MAX_COUNT: usize = 1 << VirtualNodeInner::BITS;
+    ///
+    /// Note that the most significant bit is not used. This is because we use signed integers (`i16`)
+    /// for the scalar representation, where overflow can be confusing in terms of ordering.
+    // TODO(var-vnode): the only usage is in log-store, shall we update it by storing the vnode as
+    // bytea to enable 2^16 vnodes?
+    pub const MAX_COUNT: usize = 1 << (VirtualNodeInner::BITS - 1);
+    /// The maximum value of the virtual node that can be represented.
+    ///
+    /// Note that this is **NOT** the maximum value of the virtual node, which depends on the configuration.
+    pub const MAX_REPRESENTABLE: VirtualNode = VirtualNode::from_index(Self::MAX_COUNT - 1);
     /// The size of a virtual node in bytes, in memory or serialized representation.
     pub const SIZE: usize = std::mem::size_of::<Self>();
 }
@@ -96,6 +105,7 @@ impl VirtualNode {
 
     /// Creates a virtual node from the given scalar representation. Used by `VNODE` expression.
     pub const fn from_scalar(scalar: i16) -> Self {
+        debug_assert!(scalar >= 0);
         Self(scalar as _)
     }
 
@@ -115,6 +125,7 @@ impl VirtualNode {
     /// Creates a virtual node from the given big-endian bytes representation.
     pub const fn from_be_bytes(bytes: [u8; Self::SIZE]) -> Self {
         let inner = VirtualNodeInner::from_be_bytes(bytes);
+        debug_assert!((inner as usize) < Self::MAX_COUNT);
         Self(inner)
     }
 
