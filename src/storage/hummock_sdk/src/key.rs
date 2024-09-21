@@ -54,7 +54,15 @@ pub fn is_empty_key_range(key_range: &TableKeyRange) -> bool {
     }
 }
 
-// returning left inclusive and right exclusive
+/// Returns left inclusive and right exclusive vnode index of the given range.
+///
+/// # Vnode count unawareness
+///
+/// Note that this function is not aware of the vnode count that is actually used in this table.
+/// For example, if the total vnode count is 256, `Unbounded` can be a correct end bound for vnode 255,
+/// but this function will still return `Excluded(256)`.
+///
+/// See also [`vnode`] and [`end_bound_of_vnode`] which hold such invariant.
 pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
     let (left, right) = range;
     let left = match left {
@@ -73,12 +81,20 @@ pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
                 vnode.to_index() + 1
             }
         }
-        Unbounded => VirtualNode::COUNT,
+        Unbounded => VirtualNode::MAX_REPRESENTABLE.to_index() + 1,
     };
     (left, right)
 }
 
-// Ensure there is only one vnode involved in table key range and return the vnode
+/// Ensure there is only one vnode involved in table key range and return the vnode.
+///
+/// # Vnode count unawareness
+///
+/// Note that this function is not aware of the vnode count that is actually used in this table.
+/// For example, if the total vnode count is 256, `Unbounded` can be a correct end bound for vnode 255,
+/// but this function will still require `Excluded(256)`.
+///
+/// See also [`vnode_range`] and [`end_bound_of_vnode`] which hold such invariant.
 pub fn vnode(range: &TableKeyRange) -> VirtualNode {
     let (l, r_exclusive) = vnode_range(range);
     assert_eq!(r_exclusive - l, 1);
@@ -319,8 +335,15 @@ pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
     }
 }
 
+/// [`Unbounded`] if the vnode is the maximum representable value (i.e. [`VirtualNode::MAX_REPRESENTABLE`]),
+/// otherwise [`Excluded`] the next vnode.
+///
+/// Note that this function is not aware of the vnode count that is actually used in this table.
+/// For example, if the total vnode count is 256, `Unbounded` can be a correct end bound for vnode 255,
+/// but this function will still return `Excluded(256)`. See also [`vnode`] and [`vnode_range`] which
+/// rely on such invariant.
 pub fn end_bound_of_vnode(vnode: VirtualNode) -> Bound<Bytes> {
-    if vnode == VirtualNode::MAX {
+    if vnode == VirtualNode::MAX_REPRESENTABLE {
         Unbounded
     } else {
         let end_bound_index = vnode.to_index() + 1;
@@ -1271,7 +1294,7 @@ mod tests {
                 Excluded(TableKey(concat(234, b"")))
             )
         );
-        let max_vnode = VirtualNode::COUNT - 1;
+        let max_vnode = VirtualNode::MAX_REPRESENTABLE.to_index();
         assert_eq!(
             prefixed_range_with_vnode(
                 (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
@@ -1304,7 +1327,7 @@ mod tests {
             Excluded(b"1".as_slice()),
             Unbounded,
         ];
-        for vnode in 0..VirtualNode::COUNT {
+        for vnode in 0..VirtualNode::MAX_COUNT {
             for left in &left_bound {
                 for right in &right_bound {
                     assert_eq!(

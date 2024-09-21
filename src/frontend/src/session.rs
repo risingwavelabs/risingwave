@@ -1607,7 +1607,6 @@ impl Session for SessionImpl {
                         self.elapse_since_last_idle_instant()
                     {
                         if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
-                            self.unpin_snapshot();
                             return Err(PsqlError::IdleInTxnTimeout);
                         }
                     }

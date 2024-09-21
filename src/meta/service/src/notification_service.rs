@@ -412,12 +412,7 @@ impl NotificationService for NotificationServiceImpl {
 
         let meta_snapshot = match subscribe_type {
             SubscribeType::Compactor => self.compactor_subscribe().await?,
-            SubscribeType::Frontend => {
-                self.hummock_manager
-                    .pin_snapshot(req.get_worker_id())
-                    .await?;
-                self.frontend_subscribe().await?
-            }
+            SubscribeType::Frontend => self.frontend_subscribe().await?,
             SubscribeType::Hummock => {
                 self.hummock_manager
                     .pin_version(req.get_worker_id())
