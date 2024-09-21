@@ -310,8 +310,6 @@ impl Execute for OpendalStreamingUploaderExecute {
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct OpendalStreamingUploader {
     writer: Writer,
-    op: Operator,
-    path: String,
     /// Buffer for data. It will store at least `UPLOAD_BUFFER_SIZE` bytes of data before wrapping itself
     /// into a stream and upload to object store as a part.
     buf: Vec<Bytes>,
@@ -358,8 +356,6 @@ impl OpendalStreamingUploader {
             .await?;
         Ok(Self {
             writer,
-            op,
-            path,
             buf: vec![],
             not_uploaded_len: 0,
             is_valid: true,
