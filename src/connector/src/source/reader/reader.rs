@@ -288,7 +288,7 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(
                 }
             }
         }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(list_interval_sec)).await;
     }
 }
 

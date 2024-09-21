@@ -31,11 +31,11 @@ def do_test(config, file_num, item_num_per_file, prefix):
     cur.execute(f'''CREATE sink test_file_sink_batching as select
         v1, v2 from t WITH (
         connector = 's3',
-        s3.region_name = 'custom',
-        s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
-        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        s3.region_name = '{config['S3_REGION']}',
+        s3.bucket_name = '{config['S3_BUCKET']}',
+        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
+        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
         s3.path = 'test_sink/',
         s3.file_type = 'parquet',
         type = 'append-only',
@@ -51,11 +51,11 @@ def do_test(config, file_num, item_num_per_file, prefix):
         connector = 's3',
         match_pattern = 'test_sink/*.parquet',
         refresh.interval.sec = 1,
-        s3.region_name = 'custom',
-        s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
-        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        s3.region_name = '{config['S3_REGION']}',
+        s3.bucket_name = '{config['S3_BUCKET']}',
+        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
+        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
     ) FORMAT PLAIN ENCODE PARQUET;''')
     
     cur.execute(f'''ALTER SINK test_file_sink_batching SET PARALLELISM = 2;''')
@@ -81,10 +81,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
     cur.execute(f'select count(*) from test_sink_table')
     result = cur.fetchone()
     _assert_eq('count(*)', result[0], 1)
-    print('the rollover_seconds has reached, count(*) = 1')
-
-    
-
+    print('the rollover_seconds has reached, count(*) = ', result[0])
 
     cur.execute(f'''
     INSERT INTO t VALUES (20, 20);
@@ -97,8 +94,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
     # count(*) = 1 
     result = cur.fetchone()
     _assert_eq('count(*)', result[0], 1)
-    print('the max row count has not reached, count(*) = 1')
-
+    print('the max row count has not reached, count(*) = ', result[0])
 
     cur.execute(f'''
     INSERT INTO t VALUES (60, 20);
@@ -115,11 +111,9 @@ def do_test(config, file_num, item_num_per_file, prefix):
     result = cur.fetchone()
     _assert_greater('count(*)', result[0], 1)
     print('the rollover_seconds has reached, count(*) = ', result[0])
-
     
     cur.close()
     conn.close()
-
 
 if __name__ == "__main__":
     FILE_NUM = 10
@@ -127,22 +121,14 @@ if __name__ == "__main__":
 
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
-        "127.0.0.1:9301",
-        "hummockadmin",
-        "hummockadmin",
-        secure=False,
+        config["S3_ENDPOINT"],
+        access_key=config["S3_ACCESS_KEY"],
+        secret_key=config["S3_SECRET_KEY"],
+        secure=True,
     )
     run_id = str(random.randint(1000, 9999))
     _local = lambda idx: f'data_{idx}.parquet'
     _s3 = lambda idx: f"{run_id}_data_{idx}.parquet"
 
-
     # do test
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
-
-    # # clean up s3 files
-    # for idx, _ in enumerate(data):
-    #    client.remove_object("hummock001", _s3(idx))
-
-
-
