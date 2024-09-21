@@ -375,13 +375,3 @@ SELECT * FROM partitioned_timestamp_table_shared ORDER BY c_boolean, c_int;
 17 t 2024-09-07 16:45:00
 18 t 2025-01-08 18:30:00
 19 t 2025-07-09 07:10:00
-
-query TTT
-SELECT * FROM partitioned_timestamp_table_2023_shared ORDER BY c_boolean, c_int;
-----
-1 f 2023-02-01 10:30:00
-2 f 2023-05-15 11:45:00
-3 f 2023-11-03 12:15:00
-11 t 2023-02-01 10:30:00
-12 t 2023-05-15 11:45:00
-13 t 2023-11-03 12:15:00

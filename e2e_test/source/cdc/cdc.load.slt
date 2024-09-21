@@ -259,6 +259,7 @@ create table upper_orders (
  slot.name = 'orders'
 );
 
+# for the partitioned table
 statement ok
 CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
   c_int int,
@@ -278,7 +279,7 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
  slot.name = 'my_slot_partition'
 );
 
-# for only one partition
+# for only one partition, as Postgres does not support adding both a partitioned tableand its individual partitions to the same publication, we use different publication for the partition
 statement ok
 CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
   c_int int,
