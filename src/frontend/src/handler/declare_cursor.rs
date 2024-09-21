@@ -157,6 +157,7 @@ pub async fn create_chunk_stream_for_cursor(
         plan_fragmenter,
         query_mode,
         schema,
+        scan_tables,
         ..
     } = plan_fragmenter_result;
 
@@ -169,10 +170,10 @@ pub async fn create_chunk_stream_for_cursor(
         match query_mode {
             QueryMode::Auto => unreachable!(),
             QueryMode::Local => CursorDataChunkStream::LocalDataChunk(Some(
-                local_execute(session.clone(), query, can_timeout_cancel).await?,
+                local_execute(session.clone(), query, can_timeout_cancel, scan_tables).await?,
             )),
             QueryMode::Distributed => CursorDataChunkStream::DistributedDataChunk(Some(
-                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
+                distribute_execute(session.clone(), query, can_timeout_cancel, scan_tables).await?,
             )),
         },
         schema.fields.clone(),
