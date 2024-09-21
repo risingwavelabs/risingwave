@@ -413,6 +413,13 @@ impl HummockVersion {
         self.max_committed_epoch
     }
 
+    pub fn table_committed_epoch(&self, table_id: TableId) -> Option<u64> {
+        self.state_table_info
+            .info()
+            .get(&table_id)
+            .map(|info| info.committed_epoch)
+    }
+
     pub fn visible_table_committed_epoch(&self) -> u64 {
         self.max_committed_epoch
     }

@@ -298,9 +298,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     fn try_wait_epoch(
         &self,
         epoch: HummockReadEpoch,
+        options: TryWaitEpochOptions,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
         self.inner
-            .try_wait_epoch(epoch)
+            .try_wait_epoch(epoch, options)
             .verbose_instrument_await("store_wait_epoch")
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in wait_epoch"))
     }

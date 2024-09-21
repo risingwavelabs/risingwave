@@ -170,6 +170,11 @@ pub struct TracedNewLocalOptions {
     pub vnodes: TracedBitmap,
 }
 
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+pub struct TracedTryWaitEpochOptions {
+    pub table_id: TracedTableId,
+}
+
 #[cfg(test)]
 impl TracedNewLocalOptions {
     pub(crate) fn for_test(table_id: u32) -> Self {

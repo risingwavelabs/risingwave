@@ -25,7 +25,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
+use risingwave_hummock_sdk::EpochWithGap;
 use tracing::{warn, Instrument};
 
 use super::version::{StagingData, VersionUpdate};
@@ -37,6 +37,7 @@ use crate::hummock::iterator::{
     Backward, BackwardUserIterator, ConcatIteratorInner, Forward, HummockIteratorUnion,
     IteratorFactory, MergeIterator, UserIterator,
 };
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferBatchOldValues, SharedBufferItem,
     SharedBufferValue,
@@ -96,7 +97,7 @@ pub struct LocalHummockStorage {
 
     write_limiter: WriteLimiterRef,
 
-    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
 
     mem_table_spill_threshold: usize,
 }
@@ -134,8 +135,15 @@ impl LocalHummockStorage {
             .await
     }
 
-    pub async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
-        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
+    async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
+        wait_for_epoch(
+            &self.version_update_notifier_tx,
+            wait_epoch,
+            TryWaitEpochOptions {
+                table_id: self.table_id,
+            },
+        )
+        .await
     }
 
     pub async fn iter_flushed(
@@ -658,7 +666,7 @@ impl LocalHummockStorage {
         memory_limiter: Arc<MemoryLimiter>,
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
-        version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+        version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
         mem_table_spill_threshold: usize,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();

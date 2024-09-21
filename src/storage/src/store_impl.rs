@@ -568,8 +568,9 @@ pub mod verify {
         fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.actual.try_wait_epoch(epoch)
+            self.actual.try_wait_epoch(epoch, options)
         }
 
         fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
@@ -1134,7 +1135,11 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreExt: StaticSendSync {
-        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
+        async fn try_wait_epoch(
+            &self,
+            epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
+        ) -> StorageResult<()>;
 
         fn sync(
             &self,
@@ -1147,8 +1152,12 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStore> DynamicDispatchedStateStoreExt for S {
-        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.try_wait_epoch(epoch).await
+        async fn try_wait_epoch(
+            &self,
+            epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
+        ) -> StorageResult<()> {
+            self.try_wait_epoch(epoch, options).await
         }
 
         fn sync(
@@ -1233,8 +1242,9 @@ pub mod boxed_state_store {
         fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref().try_wait_epoch(epoch)
+            self.deref().try_wait_epoch(epoch, options)
         }
 
         fn sync(
