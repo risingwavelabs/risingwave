@@ -132,7 +132,7 @@ impl PinnedSnapshot {
                     }
                 })
             })?
-            .unwrap_or(Epoch(self.value.max_committed_epoch));
+            .unwrap_or_else(Epoch::now);
         Ok(epoch)
     }
 
@@ -145,7 +145,6 @@ impl PinnedSnapshot {
 fn invalid_snapshot() -> FrontendHummockVersion {
     FrontendHummockVersion {
         id: INVALID_VERSION_ID,
-        max_committed_epoch: 0,
         state_table_info: HummockVersionStateTableInfo::from_protobuf(&HashMap::new()),
         table_change_log: Default::default(),
     }
