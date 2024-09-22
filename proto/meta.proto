@@ -160,17 +160,11 @@ enum PausedReason {
 
 message PauseRequest {}
 
-message PauseResponse {
-  optional PausedReason prev = 1;
-  optional PausedReason curr = 2;
-}
+message PauseResponse {}
 
 message ResumeRequest {}
 
-message ResumeResponse {
-  optional PausedReason prev = 1;
-  optional PausedReason curr = 2;
-}
+message ResumeResponse {}
 
 message CancelCreatingJobsRequest {
   message CreatingJobInfo {

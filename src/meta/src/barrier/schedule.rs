@@ -27,7 +27,7 @@ use tokio::select;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
 
-use super::notifier::{BarrierInfo, Notifier};
+use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
 use crate::model::ActorId;
@@ -251,7 +251,7 @@ impl BarrierScheduler {
     /// Returns the barrier info of each command.
     ///
     /// TODO: atomicity of multiple commands is not guaranteed.
-    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<Vec<BarrierInfo>> {
+    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
         let mut contexts = Vec::with_capacity(commands.len());
         let mut scheduleds = Vec::with_capacity(commands.len());
 
@@ -272,16 +272,13 @@ impl BarrierScheduler {
 
         self.push(scheduleds)?;
 
-        let mut infos = Vec::with_capacity(contexts.len());
-
         for (injected_rx, collect_rx) in contexts {
             // Wait for this command to be injected, and record the result.
             tracing::trace!("waiting for injected_rx");
-            let info = injected_rx
+            injected_rx
                 .await
                 .ok()
                 .context("failed to inject barrier")??;
-            infos.push(info);
 
             tracing::trace!("waiting for collect_rx");
             // Throw the error if it occurs when collecting this barrier.
@@ -291,35 +288,28 @@ impl BarrierScheduler {
                 .context("failed to collect barrier")??;
         }
 
-        Ok(infos)
+        Ok(())
     }
 
     /// Run a command with a `Pause` command before and `Resume` command after it. Used for
     /// configuration change.
     ///
     /// Returns the barrier info of the actual command.
-    pub async fn run_config_change_command_with_pause(
-        &self,
-        command: Command,
-    ) -> MetaResult<BarrierInfo> {
+    pub async fn run_config_change_command_with_pause(&self, command: Command) -> MetaResult<()> {
         self.run_multiple_commands(vec![
             Command::pause(PausedReason::ConfigChange),
             command,
             Command::resume(PausedReason::ConfigChange),
         ])
         .await
-        .map(|i| i[1])
     }
 
     /// Run a command and return when it's completely finished.
     ///
     /// Returns the barrier info of the actual command.
-    pub async fn run_command(&self, command: Command) -> MetaResult<BarrierInfo> {
+    pub async fn run_command(&self, command: Command) -> MetaResult<()> {
         tracing::trace!("run_command: {:?}", command);
-        let ret = self
-            .run_multiple_commands(vec![command])
-            .await
-            .map(|i| i[0]);
+        let ret = self.run_multiple_commands(vec![command]).await;
         tracing::trace!("run_command finished");
         ret
     }
