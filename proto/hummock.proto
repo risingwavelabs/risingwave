@@ -227,15 +227,6 @@ message HummockVersionArchive {
   repeated HummockVersionDelta version_deltas = 2;
 }
 
-// We will have two epoch after decouple
-message HummockSnapshot {
-  // Epoch with checkpoint, we will read durable data with it.
-  uint64 committed_epoch = 1;
-  // Epoch without checkpoint, we will read real-time data with it. But it may be rolled back.
-  reserved 2;
-  reserved "current_epoch";
-}
-
 message VersionUpdatePayload {
   oneof payload {
     HummockVersionDeltas version_deltas = 1;
@@ -271,13 +262,6 @@ message GetAssignedCompactTaskNumRequest {}
 
 message GetAssignedCompactTaskNumResponse {
   uint32 num_tasks = 1;
-}
-
-message GetEpochRequest {}
-
-message GetEpochResponse {
-  common.Status status = 1;
-  HummockSnapshot snapshot = 2;
 }
 
 // When right_exclusive=false, it represents [left, right], of which both boundary are open. When right_exclusive=true,
