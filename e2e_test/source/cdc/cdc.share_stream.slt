@@ -289,6 +289,14 @@ INCLUDE TABLE_NAME as table_name
 FROM pg_source TABLE 'public.person';
 
 statement ok
+CREATE TABLE partitioned_timestamp_table_shared(
+    c_int int,
+    c_boolean boolean,
+    c_timestamp timestamp,
+    PRIMARY KEY (c_int, c_timestamp)
+) from pg_source table 'public.partitioned_timestamp_table';
+
+statement ok
 CREATE MATERIALIZED VIEW person_new_cnt AS SELECT COUNT(*) AS cnt FROM person_new;
 
 sleep 3s
