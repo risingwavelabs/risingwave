@@ -56,20 +56,8 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.get_current_version().await
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.meta_client.pin_snapshot().await
-    }
-
     async fn get_snapshot(&self) -> Result<HummockSnapshot> {
         self.meta_client.get_snapshot().await
-    }
-
-    async fn unpin_snapshot(&self) -> Result<()> {
-        self.meta_client.unpin_snapshot().await
-    }
-
-    async fn unpin_snapshot_before(&self, _min_epoch: HummockEpoch) -> Result<()> {
-        unreachable!("Currently CNs should not call this function")
     }
 
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {

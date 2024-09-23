@@ -258,3 +258,43 @@ create table upper_orders (
  table.name = 'Orders',
  slot.name = 'orders'
 );
+
+# for the partitioned table
+statement ok
+CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
+  c_int int,
+  c_boolean boolean,
+  c_timestamp timestamp,
+  PRIMARY KEY (c_int, c_timestamp)
+) WITH (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ schema.name = 'public',
+ table.name = 'partitioned_timestamp_table',
+ publication.name = 'rw_publication_partition_root',
+ slot.name = 'my_slot_partition'
+);
+
+# for only one partition, as Postgres does not support adding both a partitioned tableand its individual partitions to the same publication, we use different publication for the partition
+statement ok
+CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
+  c_int int,
+  c_boolean boolean,
+  c_timestamp timestamp,
+  PRIMARY KEY (c_int, c_timestamp)
+) WITH (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ schema.name = 'public',
+ table.name = 'partitioned_timestamp_table_2023',
+ publication.name = 'rw_publication_partition',
+ slot.name = 'my_slot_partition_2'
+);

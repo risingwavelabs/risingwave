@@ -2632,7 +2632,7 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+    pub async fn alter_source(&self, source: Source) -> MetaResult<NotificationVersion> {
         let source_id = source.get_id();
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;

@@ -163,53 +163,6 @@ impl HummockManagerService for HummockServiceImpl {
         Ok(Response::new(resp))
     }
 
-    async fn pin_specific_snapshot(
-        &self,
-        request: Request<PinSpecificSnapshotRequest>,
-    ) -> Result<Response<PinSnapshotResponse>, Status> {
-        let req = request.into_inner();
-        let hummock_snapshot = self
-            .hummock_manager
-            .pin_specific_snapshot(req.context_id, req.epoch)
-            .await?;
-        Ok(Response::new(PinSnapshotResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
-        }))
-    }
-
-    async fn pin_snapshot(
-        &self,
-        request: Request<PinSnapshotRequest>,
-    ) -> Result<Response<PinSnapshotResponse>, Status> {
-        let req = request.into_inner();
-        let hummock_snapshot = self.hummock_manager.pin_snapshot(req.context_id).await?;
-        Ok(Response::new(PinSnapshotResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
-        }))
-    }
-
-    async fn unpin_snapshot(
-        &self,
-        request: Request<UnpinSnapshotRequest>,
-    ) -> Result<Response<UnpinSnapshotResponse>, Status> {
-        let req = request.into_inner();
-        self.hummock_manager.unpin_snapshot(req.context_id).await?;
-        Ok(Response::new(UnpinSnapshotResponse { status: None }))
-    }
-
-    async fn unpin_snapshot_before(
-        &self,
-        request: Request<UnpinSnapshotBeforeRequest>,
-    ) -> Result<Response<UnpinSnapshotBeforeResponse>, Status> {
-        let req = request.into_inner();
-        self.hummock_manager
-            .unpin_snapshot_before(req.context_id, req.min_snapshot.unwrap())
-            .await?;
-        Ok(Response::new(UnpinSnapshotBeforeResponse { status: None }))
-    }
-
     async fn get_new_sst_ids(
         &self,
         request: Request<GetNewSstIdsRequest>,
@@ -358,23 +311,6 @@ impl HummockManagerService for HummockServiceImpl {
         Ok(Response::new(RiseCtlGetPinnedVersionsSummaryResponse {
             summary: Some(PinnedVersionsSummary {
                 pinned_versions,
-                workers,
-            }),
-        }))
-    }
-
-    async fn rise_ctl_get_pinned_snapshots_summary(
-        &self,
-        _request: Request<RiseCtlGetPinnedSnapshotsSummaryRequest>,
-    ) -> Result<Response<RiseCtlGetPinnedSnapshotsSummaryResponse>, Status> {
-        let pinned_snapshots = self.hummock_manager.list_pinned_snapshot().await;
-        let workers = self
-            .hummock_manager
-            .list_workers(&pinned_snapshots.iter().map(|p| p.context_id).collect_vec())
-            .await?;
-        Ok(Response::new(RiseCtlGetPinnedSnapshotsSummaryResponse {
-            summary: Some(PinnedSnapshotsSummary {
-                pinned_snapshots,
                 workers,
             }),
         }))

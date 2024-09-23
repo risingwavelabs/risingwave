@@ -95,8 +95,6 @@ pub trait CatalogWriter: Send + Sync {
         job_type: TableJobType,
     ) -> Result<()>;
 
-    async fn alter_source_column(&self, source: PbSource) -> Result<()>;
-
     async fn create_index(
         &self,
         index: PbIndex,
@@ -104,12 +102,10 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
     ) -> Result<()>;
 
-    async fn create_source(&self, source: PbSource) -> Result<()>;
-
-    async fn create_source_with_graph(
+    async fn create_source(
         &self,
         source: PbSource,
-        graph: StreamFragmentGraph,
+        graph: Option<StreamFragmentGraph>,
     ) -> Result<()>;
 
     async fn create_sink(
@@ -199,7 +195,8 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()>;
 
-    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()>;
+    /// Replace the source in the catalog.
+    async fn alter_source(&self, source: PbSource) -> Result<()>;
 
     async fn alter_parallelism(
         &self,
@@ -299,11 +296,6 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
-        let version = self.meta_client.alter_source_column(source).await?;
-        self.wait_version(version).await
-    }
-
     async fn replace_table(
         &self,
         source: Option<PbSource>,
@@ -319,20 +311,12 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_source(&self, source: PbSource) -> Result<()> {
-        let version = self.meta_client.create_source(source).await?;
-        self.wait_version(version).await
-    }
-
-    async fn create_source_with_graph(
+    async fn create_source(
         &self,
         source: PbSource,
-        graph: StreamFragmentGraph,
+        graph: Option<StreamFragmentGraph>,
     ) -> Result<()> {
-        let version = self
-            .meta_client
-            .create_source_with_graph(source, graph)
-            .await?;
+        let version = self.meta_client.create_source(source, graph).await?;
         self.wait_version(version).await
     }
 
@@ -573,8 +557,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
-        let version = self.meta_client.alter_source_with_sr(source).await?;
+    async fn alter_source(&self, source: PbSource) -> Result<()> {
+        let version = self.meta_client.alter_source(source).await?;
         self.wait_version(version).await
     }
 
