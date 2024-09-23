@@ -62,7 +62,8 @@ public class DbzSourceUtils {
                             ValidatorUtils.getSql("postgres.publication_exist"))) {
                 stmt.setString(1, pubName);
                 var res = stmt.executeQuery();
-                // Note: the value returned here is `pubviaroot`, If there's more than one row, the publication exists
+                // Note: the value returned here is `pubviaroot`, If there's more than one row, the
+                // publication exists
                 if (res.next()) {
                     isPubExist = true;
                 }
