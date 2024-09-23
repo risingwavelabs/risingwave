@@ -39,7 +39,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::monitor::BatchMetricsWithTaskLabels;
+use crate::monitor::BatchMetrics;
 use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
@@ -49,7 +49,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchMetricsWithTaskLabels>,
+    metrics: Option<BatchMetrics>,
 
     table: StorageTable<S>,
     scan_ranges: Vec<ScanRange>,
@@ -165,7 +165,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         chunk_size: usize,
         identity: String,
         limit: Option<u64>,
-        metrics: Option<BatchMetricsWithTaskLabels>,
+        metrics: Option<BatchMetrics>,
         as_of: Option<AsOf>,
     ) -> Self {
         Self {
@@ -312,12 +312,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             .unwrap_or_else(|| epoch);
 
         // Create collector.
-        let histogram = metrics.as_ref().map(|metrics| {
-            metrics
-                .executor_metrics()
-                .row_seq_scan_next_duration
-                .with_guarded_label_values(&metrics.executor_labels(&identity))
-        });
+        let histogram = metrics
+            .as_ref()
+            .map(|metrics| &metrics.executor_metrics().row_seq_scan_next_duration);
 
         if ordered {
             // Currently we execute range-scans concurrently so the order is not guaranteed if
@@ -342,7 +339,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         for point_get in point_gets {
             let table = table.clone();
             if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch, histogram.clone()).await?
+                Self::execute_point_get(table, point_get, query_epoch, histogram).await?
             {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     returned += chunk.cardinality() as u64;
@@ -376,7 +373,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 query_epoch,
                 chunk_size,
                 limit,
-                histogram.clone(),
+                histogram,
             );
             #[for_await]
             for chunk in stream {

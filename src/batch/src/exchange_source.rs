@@ -48,6 +48,7 @@ impl ExchangeSourceImpl {
         }
     }
 
+    #[expect(dead_code)]
     pub(crate) fn get_task_id(&self) -> TaskId {
         match self {
             ExchangeSourceImpl::Grpc(grpc) => grpc.get_task_id(),
