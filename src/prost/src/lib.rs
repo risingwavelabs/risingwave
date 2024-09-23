@@ -15,7 +15,6 @@
 // for derived code of `Message`
 #![expect(clippy::all)]
 #![expect(clippy::doc_markdown)]
-#![feature(lint_reasons)]
 
 use std::str::FromStr;
 

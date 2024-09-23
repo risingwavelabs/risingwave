@@ -56,20 +56,8 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.get_current_version().await
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.meta_client.pin_snapshot().await
-    }
-
     async fn get_snapshot(&self) -> Result<HummockSnapshot> {
         self.meta_client.get_snapshot().await
-    }
-
-    async fn unpin_snapshot(&self) -> Result<()> {
-        self.meta_client.unpin_snapshot().await
-    }
-
-    async fn unpin_snapshot_before(&self, _min_epoch: HummockEpoch) -> Result<()> {
-        unreachable!("Currently CNs should not call this function")
     }
 
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
@@ -80,7 +68,12 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch, _sync_result: SyncResult) -> Result<()> {
+    async fn commit_epoch(
+        &self,
+        _epoch: HummockEpoch,
+        _sync_result: SyncResult,
+        _is_log_store: bool,
+    ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
 
@@ -130,7 +123,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.subscribe_compaction_event().await
     }
 
-    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
-        self.meta_client.get_version_by_epoch(epoch).await
+    async fn get_version_by_epoch(
+        &self,
+        epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<PbHummockVersion> {
+        self.meta_client.get_version_by_epoch(epoch, table_id).await
     }
 }

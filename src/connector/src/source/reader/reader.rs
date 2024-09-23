@@ -279,7 +279,6 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(
                     {
                         yield res
                     } else {
-                        // Currrntly due to the lack of prefix list, we just skip the unmatched files.
                         continue;
                     }
                 }

@@ -188,6 +188,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::test_utils::MockSource;
 
     #[tokio::test]
@@ -206,12 +207,10 @@ mod tests {
         let order_types = vec![OrderType::ascending()];
 
         let state_store = MemoryStateStore::new();
-        let state_table = StateTable::new_without_distribution(
+        let state_table = StateTable::from_table_catalog(
+            &gen_pbtable(table_id, column_descs, order_types, pk_indices.clone(), 0),
             state_store,
-            table_id,
-            column_descs,
-            order_types,
-            pk_indices.clone(),
+            None,
         )
         .await;
 

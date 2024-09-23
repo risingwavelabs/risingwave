@@ -188,6 +188,7 @@ fn datum_to_bson(field: &Field, datum: DatumRef<'_>) -> Bson {
             subtype: BinarySubtype::Generic,
             bytes: v.into(),
         }),
+        // TODO(map): support map
         _ => {
             if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                 tracing::warn!(

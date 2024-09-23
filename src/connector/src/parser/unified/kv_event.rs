@@ -79,6 +79,9 @@ where
     pub fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult<DatumCow<'_>> {
         match desc.additional_column.column_type {
             Some(AdditionalColumnType::Key(_)) => self.access_key(&[&desc.name], &desc.data_type),
+            // hack here: Get the whole payload as a single column
+            // use a special mark empty slice as path to represent the whole payload
+            Some(AdditionalColumnType::Payload(_)) => self.access_value(&[], &desc.data_type),
             None => self.access_value(&[&desc.name], &desc.data_type),
             _ => unreachable!(),
         }

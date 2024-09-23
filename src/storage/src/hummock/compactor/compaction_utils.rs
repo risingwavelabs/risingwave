@@ -39,14 +39,13 @@ use crate::hummock::compactor::{
     TtlCompactionFilter,
 };
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, SkipWatermarkIterator,
-    UserIterator,
+    Forward, HummockIterator, MergeIterator, SkipWatermarkIterator, UserIterator,
 };
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
 use crate::hummock::{
     CachePolicy, FilterBuilder, GetObjectId, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableDeleteRangeIterator, SstableWriterFactory, SstableWriterOptions,
+    SstableBuilderOptions, SstableWriterFactory, SstableWriterOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -122,7 +121,7 @@ pub struct TaskConfig {
     pub key_range: KeyRange,
     pub cache_policy: CachePolicy,
     pub gc_delete_keys: bool,
-    pub watermark: u64,
+    pub retain_multiple_version: bool,
     /// `stats_target_table_ids` decides whether a dropped key should be counted as table stats
     /// change. For an divided SST as input, a dropped key shouldn't be counted if its table id
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
@@ -349,7 +348,6 @@ pub async fn check_compaction_result(
     }
 
     let mut table_iters = Vec::new();
-    let mut del_iter = ForwardMergeRangeIterator::default();
     for level in &compact_task.input_ssts {
         if level.table_infos.is_empty() {
             continue;
@@ -358,7 +356,6 @@ pub async fn check_compaction_result(
         // Do not need to filter the table because manager has done it.
         if level.level_type == PbLevelType::Nonoverlapping {
             debug_assert!(can_concat(&level.table_infos));
-            del_iter.add_concat_iter(level.table_infos.clone(), context.sstable_store.clone());
 
             table_iters.push(ConcatSstableIterator::new(
                 compact_task.existing_table_ids.clone(),
@@ -369,13 +366,7 @@ pub async fn check_compaction_result(
                 context.storage_opts.compactor_iter_max_io_retry_times,
             ));
         } else {
-            let mut stats = StoreLocalStatistic::default();
             for table_info in &level.table_infos {
-                let table = context
-                    .sstable_store
-                    .sstable(table_info, &mut stats)
-                    .await?;
-                del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table));
                 table_iters.push(ConcatSstableIterator::new(
                     compact_task.existing_table_ids.clone(),
                     vec![table_info.clone()],

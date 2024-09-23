@@ -16,6 +16,7 @@
 
 mod agg_common;
 mod append_only_dedup;
+mod asof_join;
 mod barrier_recv;
 mod batch_query;
 mod cdc_filter;
@@ -80,7 +81,7 @@ use self::hash_join::*;
 use self::hop_window::*;
 use self::lookup::*;
 use self::lookup_union::*;
-use self::merge::*;
+pub(crate) use self::merge::MergeExecutorBuilder;
 use self::mview::*;
 use self::no_op::*;
 use self::now::NowExecutorBuilder;

@@ -31,7 +31,7 @@ use futures::prelude::{Future, TryFuture};
 use itertools::Itertools;
 use maplit::hashmap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -416,16 +416,13 @@ impl DynamoDbFormatter {
         row.iter()
             .zip_eq_debug((self.schema.clone()).into_fields())
             .map(|(scalar, field)| {
-                map_data_type(scalar, &field.data_type()).map(|attr| (field.name, attr))
+                map_data(scalar, &field.data_type()).map(|attr| (field.name, attr))
             })
             .collect()
     }
 }
 
-fn map_data_type(
-    scalar_ref: Option<ScalarRefImpl<'_>>,
-    data_type: &DataType,
-) -> Result<AttributeValue> {
+fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Result<AttributeValue> {
     let Some(scalar_ref) = scalar_ref else {
         return Ok(AttributeValue::Null(true));
     };
@@ -452,24 +449,25 @@ fn map_data_type(
             let list_attr = scalar_ref
                 .into_list()
                 .iter()
-                .map(|x| map_data_type(x, datatype))
+                .map(|x| map_data(x, datatype))
                 .collect::<Result<Vec<_>>>()?;
             AttributeValue::L(list_attr)
         }
         DataType::Struct(st) => {
             let mut map = HashMap::with_capacity(st.len());
-            for (sub_datum_ref, sub_field) in
-                scalar_ref.into_struct().iter_fields_ref().zip_eq_debug(
-                    st.iter()
-                        .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-                )
+            for (sub_datum_ref, (name, data_type)) in scalar_ref
+                .into_struct()
+                .iter_fields_ref()
+                .zip_eq_debug(st.iter())
             {
-                let attr = map_data_type(sub_datum_ref, &sub_field.data_type())?;
-                map.insert(sub_field.name.clone(), attr);
+                let attr = map_data(sub_datum_ref, data_type)?;
+                map.insert(name.to_string(), attr);
             }
             AttributeValue::M(map)
         }
-        DataType::Map(_) => todo!(),
+        DataType::Map(_m) => {
+            return Err(SinkError::DynamoDb(anyhow!("map is not supported yet")));
+        }
     };
     Ok(attr)
 }

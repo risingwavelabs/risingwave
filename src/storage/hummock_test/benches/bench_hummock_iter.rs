@@ -107,7 +107,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                     (Unbounded, Unbounded),
                     epoch,
                     ReadOptions {
-                        ignore_range_tombstone: true,
                         prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()

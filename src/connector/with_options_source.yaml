@@ -98,18 +98,24 @@ IcebergProperties:
     required: true
   - name: warehouse.path
     field_type: String
+    comments: Path of iceberg warehouse, only applicable in storage catalog.
     required: true
   - name: catalog.name
     field_type: String
+    comments: |-
+      Catalog name, can be omitted for storage catalog, but
+      must be set for other catalogs.
     required: false
   - name: catalog.uri
     field_type: String
+    comments: URI of iceberg catalog, only applicable in rest catalog.
     required: false
   - name: database.name
     field_type: String
     required: false
   - name: table.name
     field_type: String
+    comments: Full name of table, must include schema name.
     required: true
   - name: catalog.jdbc.user
     field_type: String
@@ -484,6 +490,10 @@ MqttProperties:
   - name: inflight_messages
     field_type: usize
     comments: The maximum number of inflight messages. Defaults to 100
+    required: false
+  - name: max_packet_size
+    field_type: u32
+    comments: The max size of messages received by the MQTT client
     required: false
   - name: tls.client_key
     field_type: String
@@ -1000,6 +1010,17 @@ PulsarProperties:
     field_type: String
     required: false
     default: Default::default
+  - name: subscription.name.prefix
+    field_type: String
+    comments: |-
+      Specify a custom consumer group id prefix for the source.
+      Defaults to `rw-consumer`.
+
+      Notes:
+      - Each job (materialized view) will have multiple subscriptions and
+      contains a generated suffix in the subscription name.
+      The subscription name will be `{subscription_name_prefix}-{fragment_id}-{actor_id}`.
+    required: false
 S3Properties:
   fields:
   - name: s3.region_name

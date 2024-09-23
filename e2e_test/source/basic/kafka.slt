@@ -188,17 +188,6 @@ create table s10 with (
 ) FORMAT PLAIN ENCODE AVRO (schema.location = 'file:///risingwave/avro-complex-schema.avsc', with_deprecated_file_header = true);
 
 statement ok
-create table s11 with (
-  connector = 'kafka',
-  topic = 'proto_c_bin',
-  properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest')
-FORMAT PLAIN ENCODE PROTOBUF (
-  message = 'test.User',
-  schema.location = 'file:///risingwave/proto-complex-schema'
-);
-
-statement ok
 CREATE TABLE s12(
     id int,
     code string,
@@ -272,17 +261,6 @@ create table s16 (v1 int, v2 varchar) with (
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'latest'
 ) FORMAT PLAIN ENCODE JSON
-
-statement ok
-create source s17 with (
-  connector = 'kafka',
-  topic = 'proto_c_bin',
-  properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest')
-FORMAT PLAIN ENCODE PROTOBUF (
-  message = 'test.User',
-  schema.location = 'file:///risingwave/proto-complex-schema'
-);
 
 statement ok
 create source s18 with (
@@ -498,6 +476,26 @@ FORMAT DEBEZIUM ENCODE JSON (
   ignore_key = 'true'
 )
 
+statement error INCLUDE payload is only allowed when using ENCODE JSON, but got ENCODE Bytes
+CREATE TABLE test_include_payload (a bytea)
+INCLUDE payload
+WITH (
+    connector = 'kafka',
+    topic = 'kafka_1_partition_topic',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE BYTES
+
+statement ok
+CREATE TABLE test_include_payload (v1 int, v2 varchar)
+INCLUDE payload
+WITH (
+    connector = 'kafka',
+    topic = 'kafka_1_partition_topic',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON
+
 statement ok
 flush;
 
@@ -512,6 +510,13 @@ select v1, v2 from t0;
 3 333
 4 4444
 
+query ITT rowsort
+select v1, v2, _rw_kafka_payload from test_include_payload;
+----
+1 1 {"v1": 1, "v2": "1"}
+2 22 {"v1": 2, "v2": "22"}
+3 333 {"v1": 3, "v2": "333"}
+4 4444 {"v1": 4, "v2": "4444"}
 
 query IT rowsort
 select v1, v2 from s0;
@@ -670,11 +675,6 @@ select id, code, timestamp, xfas, contacts, sex from s10;
 100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ("{1xxx,2xxx}","{1xxx,2xxx}") MALE
 
 query ITITT
-select id, code, timestamp, xfas, contacts, sex from s11;
-----
-0 abc 1473305798 {"(0,200,127.0.0.1)","(1,400,127.0.0.2)"} ("{1xxx,2xxx}","{1xxx,2xxx}") MALE
-
-query ITITT
 select id, code, timestamp, xfas, contacts, jsonb from s12;
 ----
 100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ("{1xxx,2xxx}","{1xxx,2xxx}") {"blockNumber": 16938734}
@@ -702,9 +702,6 @@ select count(*) from s16
 
 statement error Not supported: alter source with schema registry
 alter source s18 add column v10 int;
-
-statement error Not supported: alter source with schema registry
-alter source s17 add column v10 int;
 
 query III rowsort
 select * from s21;
@@ -849,9 +846,6 @@ statement ok
 drop table s10
 
 statement ok
-drop table s11
-
-statement ok
 drop table s12
 
 statement ok
@@ -865,9 +859,6 @@ drop table s15
 
 statement ok
 drop table s16
-
-statement ok
-drop source s17
 
 statement ok
 drop source s18
@@ -916,3 +907,6 @@ drop table source_with_rdkafka_props;
 
 statement ok
 drop table debezium_ignore_key;
+
+statement ok
+drop table test_include_payload;

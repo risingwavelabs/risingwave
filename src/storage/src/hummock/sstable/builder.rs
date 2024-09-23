@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
-use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -411,6 +409,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .map(|block_meta| block_meta.uncompressed_size as u64)
             .sum::<u64>();
 
+        #[expect(deprecated)]
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
             bloom_filter,
@@ -449,21 +448,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                     encoded_size_u32, meta_offset_u32, self.last_table_id, self.table_ids
                 )
             });
-
-        // Expand the epoch of the whole sst by tombstone epoch
-        let (tombstone_min_epoch, tombstone_max_epoch) = {
-            let mut tombstone_min_epoch = HummockEpoch::MAX;
-            let mut tombstone_max_epoch = u64::MIN;
-
-            for monotonic_delete in &meta.monotonic_tombstone_events {
-                if !is_max_epoch(monotonic_delete.new_epoch) {
-                    tombstone_min_epoch = cmp::min(tombstone_min_epoch, monotonic_delete.new_epoch);
-                    tombstone_max_epoch = cmp::max(tombstone_max_epoch, monotonic_delete.new_epoch);
-                }
-            }
-
-            (tombstone_min_epoch, tombstone_max_epoch)
-        };
 
         let (avg_key_size, avg_value_size) = if self.table_stats.is_empty() {
             (0, 0)
@@ -522,9 +506,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             stale_key_count,
             total_key_count,
             uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
-            min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
-            max_epoch: cmp::max(max_epoch, tombstone_max_epoch),
-            range_tombstone_count: meta.monotonic_tombstone_events.len() as u64,
+            min_epoch,
+            max_epoch,
+            range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
         };
         tracing::trace!(

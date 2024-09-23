@@ -70,42 +70,8 @@ pub struct CommitEpochInfo {
 }
 
 impl HummockManager {
-    #[cfg(any(test, feature = "test"))]
-    pub async fn commit_epoch_for_test(
-        &self,
-        epoch: u64,
-        sstables: Vec<impl Into<LocalSstableInfo>>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-    ) -> Result<()> {
-        let tables = self
-            .versioning
-            .read()
-            .await
-            .current_version
-            .state_table_info
-            .info()
-            .keys()
-            .cloned()
-            .collect();
-        let info = CommitEpochInfo {
-            sstables: sstables.into_iter().map(Into::into).collect(),
-            new_table_watermarks: HashMap::new(),
-            sst_to_context,
-            new_table_fragment_info: NewTableFragmentInfo::None,
-            change_log_delta: HashMap::new(),
-            committed_epoch: epoch,
-            tables_to_commit: tables,
-            is_visible_table_committed_epoch: true,
-        };
-        self.commit_epoch(info).await?;
-        Ok(())
-    }
-
     /// Caller should ensure `epoch` > `max_committed_epoch`
-    pub async fn commit_epoch(
-        &self,
-        commit_info: CommitEpochInfo,
-    ) -> Result<Option<HummockSnapshot>> {
+    pub async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> Result<()> {
         let CommitEpochInfo {
             mut sstables,
             new_table_watermarks,
@@ -120,7 +86,7 @@ impl HummockManager {
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
-            return Ok(None);
+            return Ok(());
         }
 
         let versioning: &mut Versioning = &mut versioning_guard;
@@ -232,7 +198,7 @@ impl HummockManager {
             is_visible_table_committed_epoch,
             new_compaction_group,
             commit_sstables,
-            new_table_ids,
+            &new_table_ids,
             new_table_watermarks,
             change_log_delta,
         );
@@ -289,6 +255,9 @@ impl HummockManager {
                 .values()
                 .map(|g| (g.group_id, g.parent_group_id))
                 .collect();
+            let time_travel_tables_to_commit = table_compaction_group_mapping
+                .iter()
+                .filter(|(table_id, _)| tables_to_commit.contains(table_id));
             let mut txn = sql_store.conn.begin().await?;
             let version_snapshot_sst_ids = self
                 .write_time_travel_metadata(
@@ -297,6 +266,8 @@ impl HummockManager {
                     time_travel_delta,
                     &group_parents,
                     &versioning.last_time_travel_snapshot_sst_ids,
+                    time_travel_tables_to_commit,
+                    committed_epoch,
                 )
                 .await?;
             commit_multi_var_with_provided_txn!(
@@ -317,14 +288,11 @@ impl HummockManager {
             )?;
         }
 
-        let snapshot = if is_visible_table_committed_epoch {
+        if is_visible_table_committed_epoch {
             let snapshot = HummockSnapshot { committed_epoch };
             let prev_snapshot = self.latest_snapshot.swap(snapshot.into());
             assert!(prev_snapshot.committed_epoch < committed_epoch);
-            Some(snapshot)
-        } else {
-            None
-        };
+        }
 
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
@@ -355,7 +323,7 @@ impl HummockManager {
         {
             self.check_state_consistency().await;
         }
-        Ok(snapshot)
+        Ok(())
     }
 
     fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {

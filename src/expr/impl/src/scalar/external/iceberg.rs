@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use icelake::types::{
     create_transform_function, Any as IcelakeDataType, BoxedTransformFunction, Transform,
 };
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
 use risingwave_common::row::OwnedRow;

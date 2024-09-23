@@ -409,11 +409,7 @@ async fn start_replay(
             // pop the latest epoch
             replayed_epochs.pop();
             let mut epochs = vec![max_committed_epoch];
-            epochs.extend(
-                pin_old_snapshots(&meta_client, &replayed_epochs, 1)
-                    .await
-                    .into_iter(),
-            );
+            epochs.extend(pin_old_snapshots(&meta_client, &replayed_epochs, 1).into_iter());
             tracing::info!("===== Prepare to check snapshots: {:?}", epochs);
 
             let old_version_iters = open_hummock_iters(&hummock, &epochs, table_to_check).await?;
@@ -519,15 +515,14 @@ async fn start_replay(
     Ok(())
 }
 
-async fn pin_old_snapshots(
-    meta_client: &MetaClient,
+fn pin_old_snapshots(
+    _meta_client: &MetaClient,
     replayed_epochs: &[HummockEpoch],
     num: usize,
 ) -> Vec<HummockEpoch> {
     let mut old_epochs = vec![];
     for &epoch in replayed_epochs.iter().rev().take(num) {
         old_epochs.push(epoch);
-        let _ = meta_client.pin_specific_snapshot(epoch).await;
     }
     old_epochs
 }
