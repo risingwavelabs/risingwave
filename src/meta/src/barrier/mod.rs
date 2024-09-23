@@ -54,7 +54,6 @@ use self::command::CommandContext;
 use self::notifier::Notifier;
 use crate::barrier::creating_job::CreatingStreamingJobControl;
 use crate::barrier::info::InflightGraphInfo;
-use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::state::BarrierManagerState;
@@ -1073,16 +1072,9 @@ impl GlobalBarrierManager {
         };
 
         // Notify about the injection.
-        let prev_paused_reason = self.state.paused_reason();
         let curr_paused_reason = command_ctx.next_paused_reason();
 
-        let info = BarrierInfo {
-            prev_epoch: prev_epoch.value(),
-            curr_epoch: curr_epoch.value(),
-            prev_paused_reason,
-            curr_paused_reason,
-        };
-        notifiers.iter_mut().for_each(|n| n.notify_started(info));
+        notifiers.iter_mut().for_each(|n| n.notify_started());
 
         // Update the paused state after the barrier is injected.
         self.state.set_paused_reason(curr_paused_reason);

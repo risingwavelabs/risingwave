@@ -331,6 +331,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     private void validatePublicationConfig(boolean isSuperUser) throws SQLException {
         boolean isPublicationCoversTable = false;
         boolean isPublicationExists = false;
+        boolean isPublicationViaRoot = false;
         boolean isPartialPublicationEnabled = false;
 
         // Check whether publication exists
@@ -340,7 +341,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             stmt.setString(1, pubName);
             var res = stmt.executeQuery();
             while (res.next()) {
-                isPublicationExists = res.getBoolean(1);
+                isPublicationViaRoot = res.getBoolean(1);
+                isPublicationExists = true;
             }
         }
 
@@ -370,6 +372,31 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 isPartialPublicationEnabled = res.getBoolean(1);
             }
         }
+
+        List<String> partitions = new ArrayList<>();
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        ValidatorUtils.getSql("postgres.partition_names"))) {
+            stmt.setString(1, schemaName);
+            stmt.setString(2, tableName);
+            var res = stmt.executeQuery();
+            while (res.next()) {
+                partitions.add(res.getString(1));
+            }
+        }
+        if (!partitions.isEmpty() && isPublicationExists && !isPublicationViaRoot) {
+            // make sure the publication are created with `publish_via_partition_root = true`, which
+            // is required by partitioned tables.
+            throw ValidatorUtils.invalidArgument(
+                    "Table '"
+                            + tableName
+                            + "' has partitions, which requires publication '"
+                            + pubName
+                            + "' to be created with `publish_via_partition_root = true`. \nHint: you can run `SELECT pubviaroot from pg_publication WHERE pubname = '"
+                            + pubName
+                            + "'` in the upstream Postgres to check.");
+        }
+
         // PG 15 and up supports partial publication of table
         // check whether publication covers all columns of the table schema
         if (isPartialPublicationEnabled) {

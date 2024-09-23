@@ -177,7 +177,8 @@ public class PostgresSourceTest {
                 "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
         SourceTestClient.performQuery(connDbz, query);
         // create a partial publication, check whether error is reported
-        query = "CREATE PUBLICATION rw_publication FOR TABLE orders (o_key)";
+        query =
+                "CREATE PUBLICATION rw_publication FOR TABLE orders (o_key) WITH ( publish_via_partition_root = true );";
         SourceTestClient.performQuery(connDbz, query);
         ConnectorServiceProto.TableSchema tableSchema =
                 ConnectorServiceProto.TableSchema.newBuilder()
