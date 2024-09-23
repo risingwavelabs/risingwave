@@ -10435,6 +10435,7 @@ version = "2.1.0-alpha"
 dependencies = [
  "auto_impl",
  "bytes",
+ "cfg-or-panic",
  "clap",
  "darwin-libproc",
  "easy-ext",

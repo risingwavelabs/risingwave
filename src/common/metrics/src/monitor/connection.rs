@@ -22,6 +22,7 @@ use std::sync::LazyLock;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use cfg_or_panic::cfg_or_panic;
 use futures::FutureExt;
 use http::Uri;
 use hyper_util::client::legacy::connect::dns::{GaiAddrs, GaiFuture, GaiResolver, Name};
@@ -591,6 +592,7 @@ impl Service<Name> for MonitoredGaiResolver {
     }
 }
 
+#[cfg_or_panic(not(madsim))]
 fn monitored_http_connector(
     connection_type: impl Into<String>,
     config: TcpConfig,
@@ -606,6 +608,7 @@ fn monitored_http_connector(
 }
 
 /// Attach general configurations to the endpoint.
+#[cfg_or_panic(not(madsim))]
 fn configure_endpoint(endpoint: Endpoint) -> Endpoint {
     // This is to mitigate https://github.com/risingwavelabs/risingwave/issues/18039.
     // TODO: remove this after https://github.com/hyperium/hyper/issues/3724 gets resolved.
