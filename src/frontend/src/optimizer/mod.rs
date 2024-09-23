@@ -29,7 +29,7 @@ pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, ScanTableVisitor, SysTableVisitor,
 };
 use risingwave_sqlparser::ast::OnConflict;
 
