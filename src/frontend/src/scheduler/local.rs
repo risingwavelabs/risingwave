@@ -52,7 +52,7 @@ use crate::error::RwError;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::{QuerySnapshot, SchedulerError, SchedulerResult};
+use crate::scheduler::{SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
 // TODO(error-handling): use a concrete error type.
@@ -61,8 +61,6 @@ pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
-    // The snapshot will be released when LocalQueryExecution is dropped.
-    _snapshot: QuerySnapshot,
     batch_query_epoch: BatchQueryEpoch,
     session: Arc<SessionImpl>,
     worker_node_manager: WorkerNodeSelector,
@@ -74,27 +72,24 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: QuerySnapshot,
+        support_barrier_read: bool,
+        batch_query_epoch: BatchQueryEpoch,
         session: Arc<SessionImpl>,
         timeout: Option<Duration>,
-    ) -> SchedulerResult<Self> {
+    ) -> Self {
         let sql = sql.into();
-        let worker_node_manager = WorkerNodeSelector::new(
-            front_env.worker_node_manager_ref(),
-            snapshot.support_barrier_read(),
-        );
-        let batch_query_epoch = snapshot.batch_query_epoch()?;
+        let worker_node_manager =
+            WorkerNodeSelector::new(front_env.worker_node_manager_ref(), support_barrier_read);
 
-        Ok(Self {
+        Self {
             sql,
             query,
             front_env,
-            _snapshot: snapshot,
             batch_query_epoch,
             session,
             worker_node_manager,
             timeout,
-        })
+        }
     }
 
     fn shutdown_rx(&self) -> ShutdownToken {

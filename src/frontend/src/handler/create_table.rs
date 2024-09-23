@@ -330,6 +330,7 @@ pub fn bind_sql_column_constraints(
                     // here. Actually we do not require purity of the expression here since we're only to get a
                     // snapshot value.
                     let rewritten_expr_impl = session
+                        .pinned_snapshot()
                         .inline_now_proc_time()
                         .rewrite_expr(expr_impl.clone());
 

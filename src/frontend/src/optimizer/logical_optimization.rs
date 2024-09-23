@@ -540,7 +540,7 @@ impl LogicalOptimizer {
             return plan;
         }
 
-        let mut v = ctx.session_ctx().inline_now_proc_time();
+        let mut v = ctx.session_ctx().pinned_snapshot().inline_now_proc_time();
 
         let plan = plan.rewrite_exprs_recursive(&mut v);
 
