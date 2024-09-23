@@ -668,7 +668,7 @@ impl FunctionAttr {
             true => self.append_only,
         };
 
-        let pb_type = format_ident!("{}", utils::to_camel_case(&name));
+        let pb_kind = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = match append_only {
             false => format_ident!("{}", self.ident_name()),
             true => format_ident!("{}_append_only", self.ident_name()),
@@ -707,7 +707,7 @@ impl FunctionAttr {
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
                 FuncSign {
-                    name: risingwave_pb::expr::agg_call::Type::#pb_type.into(),
+                    name: risingwave_pb::expr::agg_call::PbKind::#pb_kind.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,

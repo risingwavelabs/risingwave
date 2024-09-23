@@ -19,7 +19,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::*;
-use risingwave_pb::expr::agg_call::PbType as PbAggKind;
+use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 
 use super::{align_types, cast_ok_base, CastContext};
