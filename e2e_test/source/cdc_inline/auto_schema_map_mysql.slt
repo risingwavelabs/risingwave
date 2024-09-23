@@ -50,6 +50,7 @@ mysql --protocol=tcp -u root mytest -e "
         v6 time DEFAULT '12:34:56',
         v7 timestamp DEFAULT '2020-01-01 12:34:56',
         v8 datetime DEFAULT '2020-01-01 12:34:56',
+        v9 VARCHAR(255) DEFAULT (UUID()),
         PRIMARY KEY (id)
     );
     INSERT INTO test_default(id) VALUES (1),(2);
@@ -90,11 +91,20 @@ create table test_default (*) from mysql_source table 'mytest.test_default';
 
 sleep 3s
 
+statement ok
+insert into test_default(id) values (4),(5);
+
+statement ok
+FLUSH;
+
+
 query TTTTTTTTTTTTT
 SELECT * FROM test_default order by id;
 ----
 1 default_name 18 1.1 2.2 3.30 0 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 2020-01-01 12:34:56
 2 default_name 18 1.1 2.2 3.30 0 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 2020-01-01 12:34:56
+4 default_name 18 1.1 2.2 3.30 0 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 2020-01-01 12:34:56 NULL
+5 default_name 18 1.1 2.2 3.30 0 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 2020-01-01 12:34:56 NULL
 
 
 statement ok

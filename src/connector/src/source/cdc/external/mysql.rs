@@ -120,19 +120,23 @@ impl MySqlExternalTable {
                         DataType::Int16 => Some(ScalarImpl::Int16(val as _)),
                         DataType::Int32 => Some(ScalarImpl::Int32(val as _)),
                         DataType::Int64 => Some(ScalarImpl::Int64(val)),
-                        _ => {
-                            unreachable!("unexpected default value type for integer column")
-                        }
+                        _ => Err(anyhow!("unexpected default value type for integer column"))?,
                     },
                     ColumnDefault::Real(val) => match data_type {
                         DataType::Float32 => Some(ScalarImpl::Float32(F32::from(val as f32))),
                         DataType::Float64 => Some(ScalarImpl::Float64(val.into())),
-                        DataType::Decimal => Some(ScalarImpl::Decimal(Decimal::try_from(val)?)),
-                        _ => {
-                            unreachable!("unexpected default value type for float column")
-                        }
+                        DataType::Decimal => Some(ScalarImpl::Decimal(
+                            Decimal::try_from(val).map_err(|err| {
+                                anyhow!("failed to convert default value to decimal").context(err)
+                            })?,
+                        )),
+                        _ => Err(anyhow!("unexpected default value type for float column"))?,
                     },
-                    ColumnDefault::String(val) | ColumnDefault::CustomExpr(val) => {
+                    ColumnDefault::String(mut val) => {
+                        // append timezone to the default value of timestamptz
+                        if data_type == DataType::Timestamptz {
+                            val.push_str("+00:00");
+                        }
                         match ScalarImpl::from_text(val.as_str(), &data_type) {
                             Ok(scalar) => Some(scalar),
                             Err(err) => {
@@ -141,8 +145,8 @@ impl MySqlExternalTable {
                             }
                         }
                     }
-                    ColumnDefault::CurrentTimestamp => {
-                        tracing::warn!("MySQL CURRENT_TIMESTAMP default value not supported");
+                    ColumnDefault::CurrentTimestamp | ColumnDefault::CustomExpr(_) => {
+                        tracing::warn!("MySQL CURRENT_TIMESTAMP and custom expression default value not supported");
                         None
                     }
                 };
