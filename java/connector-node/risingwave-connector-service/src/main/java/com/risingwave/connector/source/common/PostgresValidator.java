@@ -397,6 +397,68 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                             + "'` in the upstream Postgres to check.");
         }
 
+        if (isPublicationExists) {
+            List<String> family = new ArrayList<>();
+            boolean findRoot = false;
+            String currentPartition = tableName;
+            System.out.println("WKXLOG before find root: " + family);
+
+            while (!findRoot) {
+                try (var stmt =
+                        jdbcConnection.prepareStatement(
+                                ValidatorUtils.getSql("postgres.partition_parent"))) {
+                    stmt.setString(
+                            1, String.format("\"%s\".\"%s\"", this.schemaName, currentPartition));
+                    stmt.setString(
+                            2, String.format("\"%s\".\"%s\"", this.schemaName, currentPartition));
+                    stmt.setString(
+                            3, String.format("\"%s\".\"%s\"", this.schemaName, currentPartition));
+                    var res = stmt.executeQuery();
+                    if (res.next()) {
+                        String parent = res.getString(1);
+                        family.add(parent);
+                        currentPartition = parent;
+                    } else {
+                        findRoot = true;
+                    }
+                }
+            }
+            System.out.println("WKXLOG after find root: " + family);
+            try (var stmt =
+                    jdbcConnection.prepareStatement(
+                            ValidatorUtils.getSql("postgres.partition_descendants"))) {
+                stmt.setString(1, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
+                stmt.setString(2, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
+                var res = stmt.executeQuery();
+                while (res.next()) {
+                    String descendant = res.getString(1);
+                    family.add(descendant);
+                }
+            }
+
+            System.out.println("WKXLOG after find descendants: " + family);
+
+            for (String relative : family) {
+                try (var stmt =
+                        jdbcConnection.prepareStatement(
+                                ValidatorUtils.getSql("postgres.partition_in_publication.check"))) {
+                    stmt.setString(1, schemaName);
+                    stmt.setString(2, relative);
+                    stmt.setString(3, pubName);
+                    var res = stmt.executeQuery();
+                    while (res.next()) {
+                        if (res.getBoolean(1)) {
+                            throw ValidatorUtils.invalidArgument(
+                                    String.format(
+                                            "The ancestor or descendant partition '%s' of the table partition '%s' is already covered in the publication '%s'. Please use a new publication for '%s'",
+                                            relative, tableName, pubName, tableName));
+                        }
+                    }
+                }
+            }
+            System.out.println("WKXLOG after publication.check: " + family);
+        }
+
         // PG 15 and up supports partial publication of table
         // check whether publication covers all columns of the table schema
         if (isPartialPublicationEnabled) {
