@@ -1634,7 +1634,11 @@ impl DdlController {
         let parallelism = self.resolve_stream_parallelism(specified_parallelism, &cluster_info)?;
         let parallelism_limited = parallelism > max_parallelism;
         if parallelism_limited {
-            tracing::warn!("Too many parallelism, use {} instead", max_parallelism);
+            // TODO(var-vnode): may return error here?
+            tracing::warn!(
+                "Too many parallelism, use max parallelism {} instead",
+                max_parallelism
+            );
         }
         let parallelism = parallelism.min(max_parallelism);
 
