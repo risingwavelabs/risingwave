@@ -607,7 +607,7 @@ fn monitored_http_connector(
 
 /// Attach general configurations to the endpoint.
 fn configure_endpoint(endpoint: Endpoint) -> Endpoint {
-    // This is to metigate https://github.com/risingwavelabs/risingwave/issues/18039.
+    // This is to mitigate https://github.com/risingwavelabs/risingwave/issues/18039.
     // TODO: remove this after https://github.com/hyperium/hyper/issues/3724 gets resolved.
     endpoint.http2_max_header_list_size(16 * 1024 * 1024)
 }
