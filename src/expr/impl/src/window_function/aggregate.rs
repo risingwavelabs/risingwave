@@ -53,7 +53,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
     let agg_type = must_match!(&call.kind, WindowFuncKind::Aggregate(agg_type) => agg_type);
     let arg_data_types = call.args.arg_types().to_vec();
     let agg_call = AggCall {
-        kind: agg_type.clone(),
+        agg_type: agg_type.clone(),
         args: call.args.clone(),
         return_type: call.return_type.clone(),
         column_orders: Vec::new(), // the input is already sorted

@@ -38,7 +38,7 @@ pub async fn agg_call_filter_res(
 ) -> StreamExecutorResult<Bitmap> {
     let mut vis = chunk.visibility().clone();
     if matches!(
-        agg_call.kind,
+        agg_call.agg_type,
         AggType::Builtin(PbAggKind::Min | PbAggKind::Max | PbAggKind::StringAgg)
     ) {
         // should skip NULL value for these kinds of agg function

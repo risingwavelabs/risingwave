@@ -124,7 +124,7 @@ impl MaterializedInputState {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
-        let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
+        let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.agg_type {
             AggType::Builtin(
                 PbAggKind::Min | PbAggKind::Max | PbAggKind::FirstValue | PbAggKind::LastValue,
             ) => Box::new(GenericAggStateCache::new(
@@ -142,12 +142,12 @@ impl MaterializedInputState {
                 agg_call.args.arg_types(),
             )),
             _ => panic!(
-                "Agg kind `{}` is not expected to have materialized input state",
-                agg_call.kind
+                "Agg type `{}` is not expected to have materialized input state",
+                agg_call.agg_type
             ),
         };
         let output_first_value = matches!(
-            agg_call.kind,
+            agg_call.agg_type,
             AggType::Builtin(
                 PbAggKind::Min | PbAggKind::Max | PbAggKind::FirstValue | PbAggKind::LastValue
             )
@@ -245,12 +245,12 @@ fn generate_order_columns_before_version_issue_13465(
     arg_col_indices: &[usize],
 ) -> (Vec<usize>, Vec<OrderType>) {
     let (mut order_col_indices, mut order_types) = if matches!(
-        agg_call.kind,
+        agg_call.agg_type,
         AggType::Builtin(PbAggKind::Min | PbAggKind::Max)
     ) {
         // `min`/`max` need not to order by any other columns, but have to
         // order by the agg value implicitly.
-        let order_type = if matches!(agg_call.kind, AggType::Builtin(PbAggKind::Min)) {
+        let order_type = if matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Min)) {
             OrderType::ascending()
         } else {
             OrderType::descending()
@@ -263,7 +263,7 @@ fn generate_order_columns_before_version_issue_13465(
             .map(|p| {
                 (
                     p.column_index,
-                    if matches!(agg_call.kind, AggType::Builtin(PbAggKind::LastValue)) {
+                    if matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::LastValue)) {
                         p.order_type.reverse()
                     } else {
                         p.order_type

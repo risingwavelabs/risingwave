@@ -41,8 +41,8 @@ use crate::Result;
 //  advanced features like order by, filter, distinct, etc. should be handled by the upper layer.
 #[derive(Debug, Clone)]
 pub struct AggCall {
-    /// Aggregation kind for constructing agg state.
-    pub kind: AggType,
+    /// Aggregation type for constructing agg state.
+    pub agg_type: AggType,
 
     /// Arguments of aggregation function input.
     pub args: AggArgs,
@@ -96,7 +96,7 @@ impl AggCall {
             })
             .collect_vec();
         Ok(AggCall {
-            kind: agg_type,
+            agg_type,
             args,
             return_type: DataType::from(agg_call.get_return_type()?),
             column_orders,
@@ -160,7 +160,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
         self.tokens.next(); // Consume the RParen
 
         AggCall {
-            kind: AggType::from_protobuf(func, None, None).unwrap(),
+            agg_type: AggType::from_protobuf(func, None, None).unwrap(),
             args: AggArgs {
                 data_types: children.iter().map(|(_, ty)| ty.clone()).collect(),
                 val_indices: children.iter().map(|(idx, _)| *idx).collect(),

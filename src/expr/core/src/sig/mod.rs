@@ -407,7 +407,7 @@ impl FuncName {
 
     pub fn as_aggregate(&self) -> PbAggKind {
         match self {
-            Self::Aggregate(ty) => *ty,
+            Self::Aggregate(kind) => *kind,
             _ => panic!("Expected an aggregate function"),
         }
     }

@@ -328,7 +328,7 @@ pub mod agg_executor {
         input_fields: Vec<Field>,
         is_append_only: bool,
     ) -> AggStateStorage<S> {
-        match agg_call.kind {
+        match agg_call.agg_type {
             AggType::Builtin(PbAggKind::Min | PbAggKind::Max) if !is_append_only => {
                 let mut column_descs = Vec::new();
                 let mut order_types = Vec::new();
@@ -353,7 +353,7 @@ pub mod agg_executor {
                     add_column(*idx, input_fields[*idx].data_type(), None);
                 }
 
-                add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if matches!(agg_call.kind, AggType::Builtin(PbAggKind::Max)) {
+                add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Max)) {
                     Some(OrderType::descending())
                 } else {
                     Some(OrderType::ascending())
