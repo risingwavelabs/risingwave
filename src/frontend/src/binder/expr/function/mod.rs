@@ -153,7 +153,7 @@ impl Binder {
             .flatten_ok()
             .try_collect()?;
 
-        let wrapped_agg_kind = if scalar_as_agg {
+        let wrapped_agg_type = if scalar_as_agg {
             // Let's firstly try to apply the `AGGREGATE:` prefix.
             // We will reject functions that are not able to be wrapped as aggregate function.
             let mut array_args = args
@@ -187,7 +187,7 @@ impl Binder {
             None
         };
 
-        let udf = if wrapped_agg_kind.is_none()
+        let udf = if wrapped_agg_type.is_none()
             && let Ok(schema) = self.first_valid_schema()
             && let Some(func) = schema
                 .get_function_by_name_inputs(&func_name, &mut args)
@@ -227,15 +227,15 @@ impl Binder {
             None
         };
 
-        let agg_kind = if let Some(wrapped_agg_kind) = wrapped_agg_kind {
-            Some(wrapped_agg_kind)
+        let agg_type = if let Some(wrapped_agg_type) = wrapped_agg_type {
+            Some(wrapped_agg_type)
         } else if let Some(ref udf) = udf
             && udf.kind.is_aggregate()
         {
             assert_ne!(udf.language, "sql", "SQL UDAF is not supported yet");
             Some(AggType::UserDefined(udf.as_ref().into()))
-        } else if let Ok(kind) = AggType::from_str(&func_name) {
-            Some(kind)
+        } else if let Ok(agg_type) = AggType::from_str(&func_name) {
+            Some(agg_type)
         } else {
             None
         };
@@ -259,9 +259,9 @@ impl Binder {
                 "`WITHIN GROUP` is not allowed in window function call"
             );
 
-            let kind = if let Some(agg_kind) = agg_kind {
+            let kind = if let Some(agg_type) = agg_type {
                 // aggregate as window function
-                WindowFuncKind::Aggregate(agg_kind)
+                WindowFuncKind::Aggregate(agg_type)
             } else if let Ok(kind) = WindowFuncKind::from_str(&func_name) {
                 kind
             } else {
@@ -277,13 +277,13 @@ impl Binder {
         );
 
         // try to bind it as an aggregate function call
-        if let Some(agg_kind) = agg_kind {
+        if let Some(agg_type) = agg_type {
             reject_syntax!(
                 arg_list.variadic,
                 "`VARIADIC` is not allowed in aggregate function call"
             );
             return self.bind_aggregate_function(
-                agg_kind,
+                agg_type,
                 arg_list.distinct,
                 args,
                 arg_list.order_by,

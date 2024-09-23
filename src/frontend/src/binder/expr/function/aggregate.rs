@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_expr::aggregate::{agg_kinds, AggType, PbAggKind};
+use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
 use risingwave_sqlparser::ast::{self, FunctionArgExpr};
 
 use crate::binder::Clause;
@@ -48,7 +48,7 @@ impl Binder {
 
     pub(super) fn bind_aggregate_function(
         &mut self,
-        kind: AggType,
+        agg_type: AggType,
         distinct: bool,
         args: Vec<ExprImpl>,
         order_by: Vec<ast::OrderByExpr>,
@@ -57,10 +57,10 @@ impl Binder {
     ) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
 
-        let (direct_args, args, order_by) = if matches!(kind, agg_kinds::ordered_set!()) {
-            self.bind_ordered_set_agg(&kind, distinct, args, order_by, within_group)?
+        let (direct_args, args, order_by) = if matches!(agg_type, agg_types::ordered_set!()) {
+            self.bind_ordered_set_agg(&agg_type, distinct, args, order_by, within_group)?
         } else {
-            self.bind_normal_agg(&kind, distinct, args, order_by, within_group)?
+            self.bind_normal_agg(&agg_type, distinct, args, order_by, within_group)?
         };
 
         let filter = match filter {
@@ -86,7 +86,7 @@ impl Binder {
         };
 
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-            kind,
+            agg_type,
             args,
             distinct,
             order_by,
@@ -107,7 +107,7 @@ impl Binder {
         // aggregate_name ( [ expression [ , ... ] ] ) WITHIN GROUP ( order_by_clause ) [ FILTER
         // ( WHERE filter_clause ) ]
 
-        assert!(matches!(kind, agg_kinds::ordered_set!()));
+        assert!(matches!(kind, agg_types::ordered_set!()));
 
         if !order_by.is_empty() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -222,7 +222,7 @@ impl Binder {
         //   filter_clause ) ]
         // aggregate_name ( * ) [ FILTER ( WHERE filter_clause ) ]
 
-        assert!(!matches!(kind, agg_kinds::ordered_set!()));
+        assert!(!matches!(kind, agg_types::ordered_set!()));
 
         if within_group.is_some() {
             return Err(ErrorCode::InvalidInputSyntax(format!(

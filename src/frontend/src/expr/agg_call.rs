@@ -21,7 +21,7 @@ use crate::utils::Condition;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
-    pub agg_kind: AggType,
+    pub agg_type: AggType,
     pub return_type: DataType,
     pub args: Vec<ExprImpl>,
     pub distinct: bool,
@@ -34,7 +34,7 @@ impl std::fmt::Debug for AggCall {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if f.alternate() {
             f.debug_struct("AggCall")
-                .field("agg_kind", &self.agg_kind)
+                .field("agg_type", &self.agg_type)
                 .field("return_type", &self.return_type)
                 .field("args", &self.args)
                 .field("filter", &self.filter)
@@ -43,7 +43,7 @@ impl std::fmt::Debug for AggCall {
                 .field("direct_args", &self.direct_args)
                 .finish()
         } else {
-            let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
+            let mut builder = f.debug_tuple(&format!("{}", self.agg_type));
             self.args.iter().for_each(|child| {
                 builder.field(child);
             });
@@ -56,20 +56,20 @@ impl AggCall {
     /// Returns error if the function name matches with an existing function
     /// but with illegal arguments.
     pub fn new(
-        agg_kind: AggType,
+        agg_type: AggType,
         mut args: Vec<ExprImpl>,
         distinct: bool,
         order_by: OrderBy,
         filter: Condition,
         direct_args: Vec<Literal>,
     ) -> Result<Self> {
-        let return_type = match &agg_kind {
+        let return_type = match &agg_type {
             AggType::Builtin(kind) => infer_type((*kind).into(), &mut args)?,
             AggType::UserDefined(udf) => udf.return_type.as_ref().unwrap().into(),
             AggType::WrapScalar(expr) => expr.return_type.as_ref().unwrap().into(),
         };
         Ok(AggCall {
-            agg_kind,
+            agg_type,
             return_type,
             args,
             distinct,
@@ -81,12 +81,12 @@ impl AggCall {
 
     /// Constructs an `AggCall` without type inference.
     pub fn new_unchecked(
-        agg_kind: AggType,
+        agg_type: AggType,
         args: Vec<ExprImpl>,
         return_type: DataType,
     ) -> Result<Self> {
         Ok(AggCall {
-            agg_kind,
+            agg_type,
             return_type,
             args,
             distinct: false,
@@ -96,8 +96,8 @@ impl AggCall {
         })
     }
 
-    pub fn agg_kind(&self) -> AggType {
-        self.agg_kind.clone()
+    pub fn agg_type(&self) -> AggType {
+        self.agg_type.clone()
     }
 
     /// Get a reference to the agg call's arguments.

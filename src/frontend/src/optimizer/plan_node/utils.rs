@@ -288,7 +288,7 @@ pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
     let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
     // Accumulate the affected rows.
     let sum_agg = PlanAggCall {
-        agg_kind: PbAggKind::Sum.into(),
+        agg_type: PbAggKind::Sum.into(),
         return_type: DataType::Int64,
         inputs: vec![InputRef::new(0, DataType::Int64)],
         distinct: false,

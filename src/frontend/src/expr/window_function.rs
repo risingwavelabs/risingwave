@@ -87,7 +87,7 @@ impl WindowFunction {
                 );
             }
 
-            (Aggregate(agg_kind), args) => Ok(match agg_kind {
+            (Aggregate(agg_type), args) => Ok(match agg_type {
                 AggType::Builtin(kind) => infer_type((*kind).into(), args)?,
                 AggType::UserDefined(udf) => udf.return_type.as_ref().unwrap().into(),
                 AggType::WrapScalar(expr) => expr.return_type.as_ref().unwrap().into(),

@@ -105,9 +105,9 @@ impl<'a> LogicalOverWindowBuilder<'a> {
             window_func.frame,
         );
 
-        let new_expr = if let WindowFuncKind::Aggregate(agg_kind) = &kind
+        let new_expr = if let WindowFuncKind::Aggregate(agg_type) = &kind
             && matches!(
-                agg_kind,
+                agg_type,
                 AggType::Builtin(
                     PbAggKind::Avg
                         | PbAggKind::StddevPop
@@ -117,7 +117,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                 )
             ) {
             let agg_call = AggCall::new(
-                agg_kind.clone(),
+                agg_type.clone(),
                 args,
                 false,
                 order_by,
@@ -128,7 +128,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                 Ok(self.push_window_func(
                     // AggCall -> WindowFunction
                     WindowFunction::new(
-                        WindowFuncKind::Aggregate(agg_call.agg_kind),
+                        WindowFuncKind::Aggregate(agg_call.agg_type),
                         partition_by.clone(),
                         agg_call.order_by.clone(),
                         agg_call.args.clone(),
@@ -188,9 +188,9 @@ impl<'a> OverWindowProjectBuilder<'a> {
         &mut self,
         window_function: &WindowFunction,
     ) -> std::result::Result<(), ErrorCode> {
-        if let WindowFuncKind::Aggregate(agg_kind) = &window_function.kind
+        if let WindowFuncKind::Aggregate(agg_type) = &window_function.kind
             && matches!(
-                agg_kind,
+                agg_type,
                 AggType::Builtin(
                     PbAggKind::StddevPop
                         | PbAggKind::StddevSamp

@@ -34,12 +34,12 @@ enable_jemalloc!();
 
 fn create_agg_call(
     input_schema: &Schema,
-    agg_kind: AggType,
+    agg_type: AggType,
     args: Vec<usize>,
     return_type: DataType,
 ) -> PbAggCall {
     PbAggCall {
-        kind: agg_kind.to_protobuf() as i32,
+        kind: agg_type.to_protobuf() as i32,
         args: args
             .into_iter()
             .map(|col_idx| PbInputRef {
@@ -59,7 +59,7 @@ fn create_agg_call(
 
 fn create_hash_agg_executor(
     group_key_columns: Vec<usize>,
-    agg_kind: AggType,
+    agg_type: AggType,
     arg_columns: Vec<usize>,
     return_type: DataType,
     chunk_size: usize,
@@ -75,7 +75,7 @@ fn create_hash_agg_executor(
 
     let agg_calls = vec![create_agg_call(
         input_schema,
-        agg_kind,
+        agg_type,
         arg_columns,
         return_type,
     )];
@@ -131,7 +131,7 @@ fn bench_hash_agg(c: &mut Criterion) {
         (vec![0, 2], PbAggKind::Min, vec![1], DataType::Int64),
     ];
 
-    for (group_key_columns, agg_kind, arg_columns, return_type) in bench_variants {
+    for (group_key_columns, agg_type, arg_columns, return_type) in bench_variants {
         for chunk_size in &[32, 128, 512, 1024, 2048, 4096] {
             c.bench_with_input(
                 BenchmarkId::new("HashAggExecutor", chunk_size),
@@ -142,7 +142,7 @@ fn bench_hash_agg(c: &mut Criterion) {
                         || {
                             create_hash_agg_executor(
                                 group_key_columns.clone(),
-                                agg_kind.into(),
+                                agg_type.into(),
                                 arg_columns.clone(),
                                 return_type.clone(),
                                 chunk_size,

@@ -140,7 +140,7 @@ impl Rule for ApplyAggTransposeRule {
                 // convert count(*) to count(1).
                 let pos_of_constant_column = node.schema().len() - 1;
                 agg_calls.iter_mut().for_each(|agg_call| {
-                    match agg_call.agg_kind {
+                    match agg_call.agg_type {
                         AggType::Builtin(PbAggKind::Count) if agg_call.inputs.is_empty() => {
                             let input_ref = InputRef::new(pos_of_constant_column, DataType::Int32);
                             agg_call.inputs.push(input_ref);
@@ -187,7 +187,7 @@ impl Rule for ApplyAggTransposeRule {
                             // no-op when `agg(0 rows) == agg(1 row of nulls)`
                         }
                         AggType::Builtin(PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar) => {
-                            panic!("Unexpected aggregate function: {:?}", agg_call.agg_kind)
+                            panic!("Unexpected aggregate function: {:?}", agg_call.agg_type)
                         }
                     }
                 });

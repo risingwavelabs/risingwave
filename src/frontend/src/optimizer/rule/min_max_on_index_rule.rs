@@ -50,14 +50,14 @@ impl Rule for MinMaxOnIndexRule {
         let first_call = calls.iter().exactly_one().ok()?;
 
         if matches!(
-            first_call.agg_kind,
+            first_call.agg_type,
             AggType::Builtin(PbAggKind::Min | PbAggKind::Max)
         ) && !first_call.distinct
             && first_call.filter.always_true()
             && first_call.order_by.is_empty()
         {
             let logical_scan: LogicalScan = logical_agg.input().as_logical_scan()?.to_owned();
-            let kind = &calls.first()?.agg_kind;
+            let kind = &calls.first()?.agg_type;
             if !logical_scan.predicate().always_true() {
                 return None;
             }
@@ -114,7 +114,7 @@ impl MinMaxOnIndexRule {
 
                 let formatting_agg = Agg::new(
                     vec![PlanAggCall {
-                        agg_kind: logical_agg.agg_calls().first()?.agg_kind.clone(),
+                        agg_type: logical_agg.agg_calls().first()?.agg_type.clone(),
                         return_type: logical_agg.schema().fields[0].data_type.clone(),
                         inputs: vec![InputRef::new(
                             0,
@@ -184,7 +184,7 @@ impl MinMaxOnIndexRule {
 
             let formatting_agg = Agg::new(
                 vec![PlanAggCall {
-                    agg_kind: logical_agg.agg_calls().first()?.agg_kind.clone(),
+                    agg_type: logical_agg.agg_calls().first()?.agg_type.clone(),
                     return_type: logical_agg.schema().fields[0].data_type.clone(),
                     inputs: vec![InputRef::new(
                         0,

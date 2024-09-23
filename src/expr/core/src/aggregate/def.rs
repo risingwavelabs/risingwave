@@ -65,7 +65,7 @@ pub struct AggCall {
 
 impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
-        let agg_kind = AggType::from_protobuf(
+        let agg_type = AggType::from_protobuf(
             agg_call.get_kind()?,
             agg_call.udf.as_ref(),
             agg_call.scalar.as_ref(),
@@ -96,7 +96,7 @@ impl AggCall {
             })
             .collect_vec();
         Ok(AggCall {
-            kind: agg_kind,
+            kind: agg_type,
             args,
             return_type: DataType::from(agg_call.get_return_type()?),
             column_orders,
@@ -291,7 +291,7 @@ impl AggType {
 /// Macros to generate match arms for `AggType`.
 /// IMPORTANT: These macros must be carefully maintained especially when adding new
 /// `AggType`/`PbAggKind` variants.
-pub mod agg_kinds {
+pub mod agg_types {
     /// [`AggType`](super::AggType)s that are currently not supported in streaming mode.
     #[macro_export]
     macro_rules! unimplemented_in_stream {
@@ -490,8 +490,8 @@ impl AggType {
             AggType::Builtin(PbAggKind::Sum0 | PbAggKind::Count) => {
                 Some(Self::Builtin(PbAggKind::Sum0))
             }
-            agg_kinds::simply_cannot_two_phase!() => None,
-            agg_kinds::rewritten!() => None,
+            agg_types::simply_cannot_two_phase!() => None,
+            agg_types::rewritten!() => None,
             // invalid variants
             AggType::Builtin(
                 PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar,

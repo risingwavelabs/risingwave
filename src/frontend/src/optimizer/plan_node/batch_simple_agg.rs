@@ -58,8 +58,8 @@ impl BatchSimpleAgg {
                 // Ban two phase approx percentile.
                 .agg_calls
                 .iter()
-                .map(|agg_call| &agg_call.agg_kind)
-                .all(|agg_kind| !matches!(agg_kind, AggType::Builtin(PbAggKind::ApproxPercentile)))
+                .map(|agg_call| &agg_call.agg_type)
+                .all(|agg_type| !matches!(agg_type, AggType::Builtin(PbAggKind::ApproxPercentile)))
             && self.two_phase_agg_enabled()
     }
 }
