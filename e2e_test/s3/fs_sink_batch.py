@@ -35,7 +35,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
         s3.path = 'test_sink/',
         s3.file_type = 'parquet',
         type = 'append-only',
@@ -55,7 +55,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
     ) FORMAT PLAIN ENCODE PARQUET;''')
 
     cur.execute(f'''ALTER SINK test_file_sink_batching SET PARALLELISM = 2;''')

@@ -208,8 +208,13 @@ impl SinkWriter for OpenDalSinkWriter {
         chunk: StreamChunk,
         chunk_id: usize,
     ) -> Result<Option<usize>> {
+        let epoch = self.epoch.ok_or_else(|| {
+            SinkError::File("epoch has not been initialize, call `begin_epoch`".to_string())
+        })?;
+
         if self.sink_writer.is_none() {
-            self.create_sink_writer(self.current_writer_idx).await?;
+            self.create_sink_writer(self.current_writer_idx, epoch)
+                .await?;
         };
 
         // While writing this chunk (via `append_only`), it checks if the maximum row count
@@ -414,7 +419,11 @@ impl OpenDalSinkWriter {
             .as_secs() as usize
     }
 
-    async fn create_object_writer(&mut self, writer_idx: usize) -> Result<OpendalWriter> {
+    async fn create_object_writer(
+        &mut self,
+        writer_idx: usize,
+        epoch: u64,
+    ) -> Result<OpendalWriter> {
         // Todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
             SinkEncode::Parquet => "parquet",
@@ -427,12 +436,38 @@ impl OpenDalSinkWriter {
         // 2. The file name includes the `executor_id` and the creation time in seconds since the UNIX epoch.
         // 3. Finally, the name is suffixed with a `writer_idx` to distinguish between multiple writers.
         // If the engine type is `Fs`, the path is automatically handled, and the filename does not include a path prefix.
-        let object_name = match self.engine_type {
-            // For the local fs sink, the data will be automatically written to the defined path.
-            // Therefore, there is no need to specify the path in the file name.
-            EngineType::Fs => {
-                format!(
-                    "{}{}_{}_{}.{}",
+        let object_name = if self.no_batching_strategy_defined() {
+            match self.engine_type {
+                // For the local fs sink, the data will be automatically written to the defined path.
+                // Therefore, there is no need to specify the path in the file name.
+                EngineType::Fs => {
+                    format!("{}_{}.{}", epoch, self.executor_id, suffix,)
+                }
+                _ => format!(
+                    "{}/{}_{}.{}",
+                    self.write_path, epoch, self.executor_id, suffix,
+                ),
+            }
+        } else {
+            match self.engine_type {
+                // For the local fs sink, the data will be automatically written to the defined path.
+                // Therefore, there is no need to specify the path in the file name.
+                EngineType::Fs => {
+                    format!(
+                        "{}{}_{}_{}.{}",
+                        self.partition_granularity(),
+                        self.executor_id,
+                        self.created_time
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Time went backwards")
+                            .as_secs(),
+                        writer_idx,
+                        suffix
+                    )
+                }
+                _ => format!(
+                    "{}/{}{}_{}_{}.{}",
+                    self.write_path,
                     self.partition_granularity(),
                     self.executor_id,
                     self.created_time
@@ -440,22 +475,11 @@ impl OpenDalSinkWriter {
                         .expect("Time went backwards")
                         .as_secs(),
                     writer_idx,
-                    suffix
-                )
+                    suffix,
+                ),
             }
-            _ => format!(
-                "{}/{}{}_{}_{}.{}",
-                self.write_path,
-                self.partition_granularity(),
-                self.executor_id,
-                self.created_time
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards")
-                    .as_secs(),
-                writer_idx,
-                suffix,
-            ),
         };
+
         tracing::info!("create new writer, file name: {:?}", object_name);
         Ok(self
             .operator
@@ -464,8 +488,8 @@ impl OpenDalSinkWriter {
             .await?)
     }
 
-    async fn create_sink_writer(&mut self, writer_idx: usize) -> Result<()> {
-        let object_writer = self.create_object_writer(writer_idx).await?;
+    async fn create_sink_writer(&mut self, writer_idx: usize, epoch: u64) -> Result<()> {
+        let object_writer = self.create_object_writer(writer_idx, epoch).await?;
         match self.encode_type {
             SinkEncode::Parquet => {
                 let props = WriterProperties::builder();
