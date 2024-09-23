@@ -42,7 +42,6 @@ def_anyhow_newtype! {
     url::ParseError => "failed to parse url",
     serde_json::Error => "failed to parse json",
     csv::Error => "failed to parse csv",
-    rust_decimal::Error => transparent,
 
     uuid::Error => transparent, // believed to be self-explanatory
 
