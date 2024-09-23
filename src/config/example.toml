@@ -207,7 +207,7 @@ recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
 set_atomic_write_dir = false
-opendal_upload_concurrency = 8
+opendal_upload_concurrency = 256
 opendal_writer_abort_on_err = false
 upload_part_size = 16777216
 

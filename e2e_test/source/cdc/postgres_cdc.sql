@@ -112,3 +112,34 @@ CREATE TABLE "Orders" (
     name varchar
 );
 INSERT INTO "Orders" VALUES (1, 'happy');
+
+
+CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
+     c_int int,
+     c_boolean boolean,
+     c_timestamp timestamp,
+     PRIMARY KEY (c_int, c_timestamp)
+) PARTITION BY RANGE (c_timestamp);
+
+CREATE TABLE partitioned_timestamp_table_2023 PARTITION OF partitioned_timestamp_table
+    FOR VALUES FROM ('2023-01-01') TO ('2023-12-31');
+
+CREATE TABLE partitioned_timestamp_table_2024 PARTITION OF partitioned_timestamp_table
+    FOR VALUES FROM ('2024-01-01') TO ('2024-12-31');
+
+CREATE TABLE partitioned_timestamp_table_2025 PARTITION OF partitioned_timestamp_table
+    FOR VALUES FROM ('2025-01-01') TO ('2025-12-31');
+
+INSERT INTO partitioned_timestamp_table (c_int, c_boolean, c_timestamp) VALUES
+(1, false, '2023-02-01 10:30:00'),
+(2, false, '2023-05-15 11:45:00'),
+(3, false, '2023-11-03 12:15:00'),
+(4, false, '2024-01-04 13:00:00'),
+(5, false, '2024-03-05 09:30:00'),
+(6, false, '2024-06-06 14:20:00'),
+(7, false, '2024-09-07 16:45:00'),
+(8, false, '2025-01-08 18:30:00'),
+(9, false, '2025-07-09 07:10:00');
+
+-- Here we create this publication without `WITH ( publish_via_partition_root = true )` only for tests. Normally, it should be added.
+create publication rw_publication_pubviaroot_false for TABLE partitioned_timestamp_table;
