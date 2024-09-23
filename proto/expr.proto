@@ -471,6 +471,20 @@ message AggCall {
   ExprNode scalar = 9;
 }
 
+// The aggregation type.
+//
+// Ideally this should be used to encode the Rust `AggCall::agg_type` field, but historically we
+// flattened it into multiple fields in proto `AggCall` - `kind` + `udf` + `scalar`. So this
+// `AggType` proto type is only used by `WindowFunction` currently.
+message AggType {
+  AggCall.Kind kind = 1;
+
+  // UDF metadata. Only present when the kind is `USER_DEFINED`.
+  optional UserDefinedFunctionMetadata udf_meta = 8;
+  // Wrapped scalar expression. Only present when the kind is `WRAP_SCALAR`.
+  optional ExprNode scalar_expr = 9;
+}
+
 message WindowFrame {
   enum Type {
     TYPE_UNSPECIFIED = 0;
@@ -562,7 +576,8 @@ message WindowFunction {
 
   oneof type {
     GeneralType general = 1;
-    AggCall.Kind aggregate = 2;
+    AggCall.Kind aggregate_simple = 2 [deprecated = true]; // Deprecated since we have a new `aggregate` variant.
+    AggType aggregate = 103;
   }
   repeated InputRef args = 3;
   data.DataType return_type = 4;

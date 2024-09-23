@@ -51,11 +51,14 @@ impl WindowFuncKind {
                 Ok(PbGeneralType::Lead) => Self::Lead,
                 Err(_) => bail!("no such window function type"),
             },
-            PbType::Aggregate(agg_type) => match PbAggKind::try_from(*agg_type) {
+            PbType::AggregateSimple(agg_type) => match PbAggKind::try_from(*agg_type) {
                 // TODO(runji): support UDAF and wrapped scalar functions
-                Ok(agg_type) => Self::Aggregate(AggType::from_protobuf(agg_type, None, None)?),
+                Ok(agg_type) => {
+                    Self::Aggregate(AggType::from_protobuf_flatten(agg_type, None, None)?)
+                }
                 Err(_) => bail!("no such aggregate function type"),
             },
+            PbType::Aggregate(agg_type) => Self::Aggregate(AggType::from_protobuf(agg_type)?),
         };
         Ok(kind)
     }
