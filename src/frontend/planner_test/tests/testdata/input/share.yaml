@@ -91,8 +91,7 @@
   before:
   - create_sources
   sql: |
-    create table output (auction_id BIGINT, bid_id BIGINT, auction_date_time TIMESTAMP, bid_date_time TIMESTAMP);
-    select * from output union (select A.id as a_id, B.id as b_id, A.date_time as A_ts, B.date_time as B_ts from auction A join auction B on A.id = B.id where A.initial_bid = 1 and B.initial_bid = 2 and A.date_time > now() - INTERVAL '1' SECOND);
+    select A.id as a_id, B.id as b_id, A.date_time as A_ts, B.date_time as B_ts from auction A join auction B on A.id = B.id where A.initial_bid = 1 and B.initial_bid = 2 and A.date_time > now() - INTERVAL '1' SECOND;
   expected_outputs:
   - batch_plan
   - stream_plan
