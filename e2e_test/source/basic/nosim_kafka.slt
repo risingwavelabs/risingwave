@@ -15,7 +15,9 @@ FORMAT UPSERT ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 
 statement ok
-CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id)) with (
+CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id))
+INCLUDE TIMESTAMP
+with (
     connector = 'kafka',
     kafka.topic = 'debezium_non_compact_avro_json',
     kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
