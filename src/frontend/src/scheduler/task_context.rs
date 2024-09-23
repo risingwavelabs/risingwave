@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use prometheus::core::Atomic;
 use risingwave_batch::error::Result;
-use risingwave_batch::monitor::BatchMetricsWithTaskLabels;
+use risingwave_batch::monitor::BatchMetrics;
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::SysCatalogReaderRef;
@@ -73,7 +73,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         unimplemented!("not supported in local mode")
     }
 
-    fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels> {
+    fn batch_metrics(&self) -> Option<BatchMetrics> {
         None
     }
 

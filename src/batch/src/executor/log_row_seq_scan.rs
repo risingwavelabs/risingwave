@@ -34,7 +34,7 @@ use risingwave_storage::{dispatch_state_store, StateStore};
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::error::{BatchError, Result};
-use crate::monitor::BatchMetricsWithTaskLabels;
+use crate::monitor::BatchMetrics;
 use crate::task::BatchTaskContext;
 
 pub struct LogRowSeqScanExecutor<S: StateStore> {
@@ -45,7 +45,7 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchMetricsWithTaskLabels>,
+    metrics: Option<BatchMetrics>,
 
     table: StorageTable<S>,
     old_epoch: u64,
@@ -59,7 +59,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         new_epoch: u64,
         chunk_size: usize,
         identity: String,
-        metrics: Option<BatchMetricsWithTaskLabels>,
+        metrics: Option<BatchMetrics>,
     ) -> Self {
         let mut schema = table.schema().clone();
         schema.fields.push(Field::with_name(
@@ -156,17 +156,16 @@ impl<S: StateStore> Executor for LogRowSeqScanExecutor<S> {
 }
 
 impl<S: StateStore> LogRowSeqScanExecutor<S> {
-    #[allow(unused_variables)]
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let Self {
             chunk_size,
-            identity,
             metrics,
             table,
             old_epoch,
             new_epoch,
             schema,
+            ..
         } = *self;
         let table = std::sync::Arc::new(table);
 

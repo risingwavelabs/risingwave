@@ -25,9 +25,7 @@ use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_storage::StateStoreImpl;
 
 use crate::error::Result;
-use crate::monitor::{
-    BatchMetricsWithTaskLabels, BatchMetricsWithTaskLabelsInner, BatchSpillMetrics,
-};
+use crate::monitor::{BatchMetrics, BatchMetricsInner, BatchSpillMetrics};
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 use crate::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 
@@ -52,7 +50,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     /// Get batch metrics.
     /// None indicates that not collect task metrics.
-    fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels>;
+    fn batch_metrics(&self) -> Option<BatchMetrics>;
 
     fn spill_metrics(&self) -> Arc<BatchSpillMetrics>;
 
@@ -75,7 +73,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 pub struct ComputeNodeContext {
     env: BatchEnvironment,
 
-    batch_metrics: BatchMetricsWithTaskLabels,
+    batch_metrics: BatchMetrics,
 
     mem_context: MemoryContext,
 }
@@ -103,7 +101,7 @@ impl BatchTaskContext for ComputeNodeContext {
         self.env.state_store()
     }
 
-    fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels> {
+    fn batch_metrics(&self) -> Option<BatchMetrics> {
         Some(self.batch_metrics.clone())
     }
 
@@ -138,14 +136,14 @@ impl ComputeNodeContext {
     pub fn for_test() -> Self {
         Self {
             env: BatchEnvironment::for_test(),
-            batch_metrics: BatchMetricsWithTaskLabels::for_test().into(),
+            batch_metrics: BatchMetrics::for_test().into(),
             mem_context: MemoryContext::none(),
         }
     }
 
     pub fn new(env: BatchEnvironment) -> Self {
         let mem_context = env.task_manager().memory_context_ref();
-        let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(
+        let batch_metrics = Arc::new(BatchMetricsInner::new(
             env.task_manager().metrics(),
             env.executor_metrics(),
         ));

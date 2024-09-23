@@ -22,6 +22,10 @@ use prometheus::{
 use risingwave_common::metrics::TrAdderGauge;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
+/// Metrics for batch executor.
+/// Currently, it contains:
+/// - `exchange_recv_row_number`: Total number of row that have been received for exchange.
+/// - `row_seq_scan_next_duration`: Time spent iterating next rows.
 #[derive(Clone)]
 pub struct BatchExecutorMetrics {
     pub exchange_recv_row_number: GenericCounter<AtomicU64>,
@@ -59,17 +63,15 @@ impl BatchExecutorMetrics {
     }
 }
 
-pub type BatchMetricsWithTaskLabels = Arc<BatchMetricsWithTaskLabelsInner>;
+pub type BatchMetrics = Arc<BatchMetricsInner>;
 
-/// A wrapper of `BatchTaskMetrics` and `BatchExecutorMetrics` that contains the labels derived from
-/// a `TaskId` so that we don't have to pass `task_id` around and repeatedly generate the same
-/// labels.
-pub struct BatchMetricsWithTaskLabelsInner {
+/// A wrapper of `BatchManagerMetrics` and `BatchExecutorMetrics` that contains all metrics for batch.
+pub struct BatchMetricsInner {
     batch_manager_metrics: Arc<BatchManagerMetrics>,
     executor_metrics: Arc<BatchExecutorMetrics>,
 }
 
-impl BatchMetricsWithTaskLabelsInner {
+impl BatchMetricsInner {
     pub fn new(
         batch_manager_metrics: Arc<BatchManagerMetrics>,
         executor_metrics: Arc<BatchExecutorMetrics>,

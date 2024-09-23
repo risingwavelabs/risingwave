@@ -39,7 +39,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::monitor::BatchMetricsWithTaskLabels;
+use crate::monitor::BatchMetrics;
 use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
@@ -49,7 +49,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchMetricsWithTaskLabels>,
+    metrics: Option<BatchMetrics>,
 
     table: StorageTable<S>,
     scan_ranges: Vec<ScanRange>,
@@ -165,7 +165,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         chunk_size: usize,
         identity: String,
         limit: Option<u64>,
-        metrics: Option<BatchMetricsWithTaskLabels>,
+        metrics: Option<BatchMetrics>,
         as_of: Option<AsOf>,
     ) -> Self {
         Self {

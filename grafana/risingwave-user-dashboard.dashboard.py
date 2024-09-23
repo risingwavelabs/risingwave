@@ -540,9 +540,9 @@ def section_network(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"{metric('batch_exchange_recv_row_number')}",
-                            "",
-                        ),
+                            f"sum(rate({metric('batch_exchange_recv_row_number')}[$__rate_interval])) by ({NODE_LABEL})",
+                            "Recv @ {{%s}}" % NODE_LABEL,
+                        )
                     ],
                 ),
             ],

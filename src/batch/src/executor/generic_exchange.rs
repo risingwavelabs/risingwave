@@ -35,7 +35,7 @@ use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
-use crate::monitor::BatchMetricsWithTaskLabels;
+use crate::monitor::BatchMetrics;
 
 pub struct GenericExchangeExecutor<CS, C> {
     proto_sources: Vec<PbExchangeSource>,
@@ -51,7 +51,7 @@ pub struct GenericExchangeExecutor<CS, C> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchMetricsWithTaskLabels>,
+    metrics: Option<BatchMetrics>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -212,7 +212,6 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
                     source_creator,
                     self.context.clone(),
                     self.metrics.clone(),
-                    self.identity.clone(),
                 )
             });
 
@@ -237,8 +236,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
         prost_source: PbExchangeSource,
         source_creator: CS,
         context: C,
-        metrics: Option<BatchMetricsWithTaskLabels>,
-        _identity: String,
+        metrics: Option<BatchMetrics>,
     ) {
         let mut source = source_creator
             .create_source(context.clone(), &prost_source)
@@ -254,7 +252,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
                     debug!("Exchange source {:?} output empty chunk.", source);
                 }
 
-                if let Some(ref counter) = counter {
+                if let Some(counter) = counter {
                     counter.inc_by(res.cardinality().try_into().unwrap());
                 }
 
