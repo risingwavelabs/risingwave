@@ -26,7 +26,6 @@ use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::{HummockVersionDeltas, StateTableInfoDelta};
 use tokio::sync::watch;
 
-use crate::expr::InlineNowProcTime;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::SchedulerError;
 
@@ -76,17 +75,6 @@ impl QuerySnapshot {
         })
     }
 
-    pub fn inline_now_proc_time(&self) -> Result<InlineNowProcTime, SchedulerError> {
-        let epoch = match &self.snapshot {
-            ReadSnapshot::FrontendPinned { snapshot, .. } => {
-                snapshot.batch_query_epoch(&self.scan_tables)?
-            }
-            ReadSnapshot::Other(epoch) => *epoch,
-            ReadSnapshot::ReadUncommitted => Epoch::now(),
-        };
-        Ok(InlineNowProcTime::new(epoch))
-    }
-
     /// Returns true if this snapshot is a barrier read.
     pub fn support_barrier_read(&self) -> bool {
         matches!(&self.snapshot, ReadSnapshot::ReadUncommitted)
@@ -132,7 +120,13 @@ impl PinnedSnapshot {
                     }
                 })
             })?
-            .unwrap_or_else(Epoch::now);
+            .unwrap_or_else(|| {
+                self.value
+                    .state_table_info
+                    .max_table_committed_epoch()
+                    .map(Epoch)
+                    .unwrap_or_else(Epoch::now)
+            });
         Ok(epoch)
     }
 
@@ -145,7 +139,6 @@ impl PinnedSnapshot {
 fn invalid_snapshot() -> FrontendHummockVersion {
     FrontendHummockVersion {
         id: INVALID_VERSION_ID,
-        max_committed_epoch: 0,
         state_table_info: HummockVersionStateTableInfo::from_protobuf(&HashMap::new()),
         table_change_log: Default::default(),
     }

@@ -847,10 +847,8 @@ impl SessionImpl {
                 .acquire()
                 .version()
                 .state_table_info
-                .info()
-                .values()
-                .map(|info| Epoch(info.committed_epoch))
-                .max()
+                .max_table_committed_epoch()
+                .map(Epoch)
                 .unwrap_or_else(Epoch::now),
         )
     }
