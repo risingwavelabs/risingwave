@@ -703,7 +703,7 @@ impl PlanRoot {
             Ok(dml_node)
         }
 
-        let kind = if row_id_index.is_none() {
+        let kind = if row_id_index.is_some() {
             PrimaryKeyKind::AppendOnly
         } else if let Some(row_id_index) = row_id_index {
             assert_eq!(
