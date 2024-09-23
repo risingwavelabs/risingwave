@@ -591,23 +591,38 @@ impl Service<Name> for MonitoredGaiResolver {
     }
 }
 
+fn monitored_http_connector(
+    connection_type: impl Into<String>,
+    config: TcpConfig,
+) -> MonitoredConnection<HttpConnector<MonitoredGaiResolver>, MonitorNewConnectionImpl> {
+    let resolver = MonitoredGaiResolver::default();
+    let mut http = HttpConnector::new_with_resolver(resolver);
+
+    http.enforce_http(false);
+    http.set_nodelay(config.tcp_nodelay);
+    http.set_keepalive(config.keepalive_duration);
+
+    monitor_connector(http, connection_type)
+}
+
+/// Attach general configurations to the endpoint.
+fn configure_endpoint(endpoint: Endpoint) -> Endpoint {
+    // This is to metigate https://github.com/risingwavelabs/risingwave/issues/18039.
+    // TODO: remove this after https://github.com/hyperium/hyper/issues/3724 gets resolved.
+    endpoint.http2_max_header_list_size(16 * 1024 * 1024)
+}
+
 #[easy_ext::ext(EndpointExt)]
 impl Endpoint {
     pub async fn monitored_connect(
-        self,
+        mut self,
         connection_type: impl Into<String>,
         config: TcpConfig,
     ) -> Result<Channel, tonic::transport::Error> {
         #[cfg(not(madsim))]
         {
-            let resolver = MonitoredGaiResolver::default();
-            let mut http = HttpConnector::new_with_resolver(resolver);
-
-            http.enforce_http(false);
-            http.set_nodelay(config.tcp_nodelay);
-            http.set_keepalive(config.keepalive_duration);
-
-            let connector = monitor_connector(http, connection_type);
+            self = configure_endpoint(self);
+            let connector = monitored_http_connector(connection_type, config);
             self.connect_with_connector(connector).await
         }
         #[cfg(madsim)]
@@ -618,16 +633,12 @@ impl Endpoint {
 
     #[cfg(not(madsim))]
     pub fn monitored_connect_lazy(
-        self,
+        mut self,
         connection_type: impl Into<String>,
         config: TcpConfig,
     ) -> Channel {
-        let mut http = HttpConnector::new();
-        http.enforce_http(false);
-        http.set_nodelay(config.tcp_nodelay);
-        http.set_keepalive(config.keepalive_duration);
-
-        let connector = monitor_connector(http, connection_type);
+        self = configure_endpoint(self);
+        let connector = monitored_http_connector(connection_type, config);
         self.connect_with_connector_lazy(connector)
     }
 }
