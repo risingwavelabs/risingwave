@@ -214,7 +214,6 @@ mod tests {
                             table_id.table_id,
                             StateTableInfo {
                                 committed_epoch,
-                                safe_epoch: 0,
                                 compaction_group_id: 0,
                             },
                         )

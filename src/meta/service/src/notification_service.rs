@@ -15,6 +15,7 @@
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
+use risingwave_hummock_sdk::FrontendHummockVersion;
 use risingwave_meta::manager::{MetadataManager, SessionParamsManagerImpl};
 use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
@@ -305,7 +306,12 @@ impl NotificationServiceImpl {
 
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
 
-        let hummock_snapshot = Some(self.hummock_manager.latest_snapshot());
+        let hummock_version = self
+            .hummock_manager
+            .on_current_version(|version| {
+                FrontendHummockVersion::from_version(version).to_protobuf()
+            })
+            .await;
 
         let session_params = match self.env.session_params_manager_impl_ref() {
             SessionParamsManagerImpl::Kv(manager) => manager.get_params().await,
@@ -331,7 +337,7 @@ impl NotificationServiceImpl {
             secrets: decrypted_secrets,
             users,
             nodes,
-            hummock_snapshot,
+            hummock_version: Some(hummock_version),
             version: Some(SnapshotVersion {
                 catalog_version,
                 worker_node_version,
@@ -406,12 +412,7 @@ impl NotificationService for NotificationServiceImpl {
 
         let meta_snapshot = match subscribe_type {
             SubscribeType::Compactor => self.compactor_subscribe().await?,
-            SubscribeType::Frontend => {
-                self.hummock_manager
-                    .pin_snapshot(req.get_worker_id())
-                    .await?;
-                self.frontend_subscribe().await?
-            }
+            SubscribeType::Frontend => self.frontend_subscribe().await?,
             SubscribeType::Hummock => {
                 self.hummock_manager
                     .pin_version(req.get_worker_id())

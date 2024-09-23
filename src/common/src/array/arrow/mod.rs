@@ -12,16 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// These mods imports arrow_impl.rs to provide FromArrow, ToArrow traits for corresponding arrow versions,
+// and the default From/To implementations.
+mod arrow_48;
+mod arrow_52;
+// These mods import mods above and may override some methods.
 mod arrow_deltalake;
 mod arrow_iceberg;
 mod arrow_udf;
 
 pub use arrow_deltalake::DeltaLakeConvert;
 pub use arrow_iceberg::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
-pub use arrow_udf::{FromArrow, ToArrow, UdfArrowConvert};
-
+pub use arrow_udf::UdfArrowConvert;
+pub use reexport::*;
+/// For other RisingWave crates, they can directly use arrow re-exported here, without adding
+/// `arrow` dependencies in their `Cargo.toml`. And they don't need to care about the version.
+mod reexport {
+    pub use super::arrow_deltalake::{
+        arrow_array as arrow_array_deltalake, arrow_buffer as arrow_buffer_deltalake,
+        arrow_cast as arrow_cast_deltalake, arrow_schema as arrow_schema_deltalake,
+        FromArrow as DeltaLakeFromArrow, ToArrow as DeltaLakeToArrow,
+    };
+    pub use super::arrow_iceberg::{
+        arrow_array as arrow_array_iceberg, arrow_buffer as arrow_buffer_iceberg,
+        arrow_cast as arrow_cast_iceberg, arrow_schema as arrow_schema_iceberg,
+        FromArrow as IcebergFromArrow, ToArrow as IcebergToArrow,
+    };
+    pub use super::arrow_udf::{
+        arrow_array as arrow_array_udf, arrow_buffer as arrow_buffer_udf,
+        arrow_cast as arrow_cast_udf, arrow_schema as arrow_schema_udf, FromArrow as UdfFromArrow,
+        ToArrow as UdfToArrow,
+    };
+}
 use crate::types::Interval;
 
+/// Arrow 52 changed the interval type from `i128` to `arrow_buffer::IntervalMonthDayNano`, so
+/// we introduced this trait to customize the conversion in `arrow_impl.rs`.
+/// We may delete this after all arrow versions are upgraded.
 trait ArrowIntervalTypeTrait {
     fn to_interval(self) -> Interval;
     fn from_interval(value: Interval) -> Self;
