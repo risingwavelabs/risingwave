@@ -54,20 +54,41 @@ pub struct ElasticSearchOpenSearchConfig {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub index_column: Option<usize>,
 
-    // #[serde(rename = "max_task_num")]
-    // #[serde_as(as = "Option<DisplayFromStr>")]
-    // pub max_task_num: Option<usize>,
     #[serde(rename = "retry_on_conflict")]
-    pub retry_on_conflict: Option<i32>,
+    #[serde_as(as = "DisplayFromStr")]
+    #[serde(default = "default_retry_on_conflict")]
+    pub retry_on_conflict: i32,
 
     #[serde(rename = "batch_num_messages")]
-    pub batch_num_messages: Option<usize>,
+    #[serde_as(as = "DisplayFromStr")]
+    #[serde(default = "default_batch_num_messages")]
+    pub batch_num_messages: usize,
 
     #[serde(rename = "batch_size_kb")]
-    pub batch_size_kb: Option<usize>,
+    #[serde_as(as = "DisplayFromStr")]
+    #[serde(default = "default_batch_size_kb")]
+    pub batch_size_kb: usize,
 
     #[serde(rename = "concurrent_requests")]
-    pub concurrent_requests: Option<usize>,
+    #[serde_as(as = "DisplayFromStr")]
+    #[serde(default = "default_concurrent_requests")]
+    pub concurrent_requests: usize,
+}
+
+fn default_retry_on_conflict() -> i32 {
+    3
+}
+
+fn default_batch_num_messages() -> usize {
+    512
+}
+
+fn default_batch_size_kb() -> usize {
+    5 * 1024
+}
+
+fn default_concurrent_requests() -> usize {
+    1024
 }
 
 impl ElasticSearchOpenSearchConfig {
@@ -136,7 +157,12 @@ pub struct ElasticSearchOpenSearchFormatter {
     index: Option<String>,
 }
 
-type BuildBulkPara = (String, String, Option<Map<String, Value>>);
+pub struct BuildBulkPara {
+    pub index: String,
+    pub key: String,
+    pub value: Option<Map<String, Value>>,
+    pub mem_size_b: usize,
+}
 
 impl ElasticSearchOpenSearchFormatter {
     pub fn new(
@@ -229,11 +255,22 @@ impl ElasticSearchOpenSearchFormatter {
                 Op::Insert | Op::UpdateInsert => {
                     let key = self.key_encoder.encode(rows)?;
                     let value = self.value_encoder.encode(rows)?;
-                    result_vec.push((index.to_string(), key, Some(value)));
+                    result_vec.push(BuildBulkPara {
+                        index: index.to_string(),
+                        key,
+                        value: Some(value),
+                        mem_size_b: rows.value_estimate_size(),
+                    });
                 }
                 Op::Delete => {
                     let key = self.key_encoder.encode(rows)?;
-                    result_vec.push((index.to_string(), key, None));
+                    let mem_size_b = std::mem::size_of_val(&key);
+                    result_vec.push(BuildBulkPara {
+                        index: index.to_string(),
+                        key,
+                        value: None,
+                        mem_size_b,
+                    });
                 }
                 Op::UpdateDelete => continue,
             }

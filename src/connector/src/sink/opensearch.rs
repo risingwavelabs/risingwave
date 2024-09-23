@@ -19,11 +19,11 @@ use futures::FutureExt;
 use opensearch::{BulkOperation, BulkParts, OpenSearch};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tonic::async_trait;
 
 use super::elasticsearch_opensearch_common::{
-    validate_config, ElasticSearchOpenSearchConfig, ElasticSearchOpenSearchFormatter,
+    validate_config, BuildBulkPara, ElasticSearchOpenSearchConfig, ElasticSearchOpenSearchFormatter,
 };
 use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
@@ -78,13 +78,14 @@ impl Sink for OpenSearchSink {
             self.schema.clone(),
             self.pk_indices.clone(),
         )?
-        .into_log_sinker(usize::MAX))
+        .into_log_sinker(self.config.concurrent_requests))
     }
 }
 
 pub struct OpenSearchSinkWriter {
     client: Arc<OpenSearch>,
     formatter: ElasticSearchOpenSearchFormatter,
+    config: ElasticSearchOpenSearchConfig,
 }
 
 impl OpenSearchSinkWriter {
@@ -97,11 +98,15 @@ impl OpenSearchSinkWriter {
         let formatter = ElasticSearchOpenSearchFormatter::new(
             pk_indices,
             &schema,
-            config.delimiter,
+            config.delimiter.clone(),
             config.index_column,
-            config.index,
+            config.index.clone(),
         )?;
-        Ok(Self { client, formatter })
+        Ok(Self {
+            client,
+            formatter,
+            config,
+        })
     }
 }
 
@@ -113,29 +118,66 @@ impl AsyncTruncateSinkWriter for OpenSearchSinkWriter {
         chunk: StreamChunk,
         mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        let mut bulks: Vec<BulkOperation<_>> = Vec::with_capacity(chunk.capacity());
-        for (index, key, value) in self.formatter.covert_chunk(chunk)? {
+        let chunk_capacity = chunk.capacity();
+        let mut all_bulks: Vec<Vec<BulkOperation<_>>> = vec![];
+        let mut bulks: Vec<BulkOperation<_>> = Vec::with_capacity(chunk_capacity);
+
+        let mut bulks_size = 0;
+        for build_bulk_para in self.formatter.covert_chunk(chunk)? {
+            let BuildBulkPara {
+                key,
+                value,
+                index,
+                mem_size_b,
+            } = build_bulk_para;
+
+            bulks_size += mem_size_b;
             if let Some(value) = value {
-                bulks.push(BulkOperation::index(value).index(index).id(key).into());
+                let value = json!({
+                    "doc": value,
+                    "doc_as_upsert": true
+                });
+                bulks.push(
+                    BulkOperation::update(key, value)
+                        .index(index)
+                        .retry_on_conflict(self.config.retry_on_conflict)
+                        .into(),
+                );
             } else {
                 bulks.push(BulkOperation::delete(key).index(index).into());
             }
-        }
-        let clent_clone = self.client.clone();
-        let future = async move {
-            let result = clent_clone.bulk(BulkParts::None).body(bulks).send().await?;
-            let json = result.json::<Value>().await?;
-            if json["errors"].as_bool().is_none() || json["errors"].as_bool().unwrap() {
-                Err(SinkError::ElasticSearchOpenSearch(anyhow!(
-                    "send bulk to opensearch failed: {:?}",
-                    json
-                )))
-            } else {
-                Ok(())
+            if bulks.len() >= self.config.batch_num_messages
+                || bulks_size >= self.config.batch_size_kb * 1024
+            {
+                all_bulks.push(bulks);
+                bulks = Vec::with_capacity(chunk_capacity);
+                bulks_size = 0;
             }
         }
-        .boxed();
-        add_future.add_future_may_await(future).await?;
+        if !bulks.is_empty() {
+            all_bulks.push(bulks);
+        }
+        for bulks in all_bulks {
+            let client_clone = self.client.clone();
+            let future = async move {
+                let result = client_clone
+                    .bulk(BulkParts::None)
+                    .body(bulks)
+                    .send()
+                    .await?;
+                let json = result.json::<Value>().await?;
+                if json["errors"].as_bool().is_none() || json["errors"].as_bool().unwrap() {
+                    Err(SinkError::ElasticSearchOpenSearch(anyhow!(
+                        "send bulk to elasticsearch failed: {:?}",
+                        json
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
+            .boxed();
+            add_future.add_future_may_await(future).await?;
+        }
         Ok(())
     }
 }
