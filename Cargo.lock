@@ -2897,7 +2897,7 @@ dependencies = [
  "futures-core",
  "prost 0.13.1",
  "prost-types 0.13.1",
- "tonic 0.12.1",
+ "tonic 0.12.2",
  "tracing-core",
 ]
 
@@ -2921,7 +2921,7 @@ dependencies = [
  "thread_local",
  "tokio",
  "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
- "tonic 0.12.1",
+ "tonic 0.12.2",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -4513,7 +4513,7 @@ dependencies = [
  "prost 0.13.1",
  "tokio",
  "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
- "tonic 0.12.1",
+ "tonic 0.12.2",
  "tonic-build",
  "tower",
  "tower-service",
@@ -5464,7 +5464,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-retry",
- "tonic 0.12.1",
+ "tonic 0.12.2",
  "tower",
  "tracing",
 ]
@@ -5477,7 +5477,7 @@ checksum = "0ae8ab26ef7c7c3f7dfb9cc3982293d031d8e78c85d00ddfb704b5c35aeff7c8"
 dependencies = [
  "prost 0.13.1",
  "prost-types 0.13.1",
- "tonic 0.12.1",
+ "tonic 0.12.2",
 ]
 
 [[package]]
@@ -6987,7 +6987,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.8.12",
- "tonic 0.12.1",
+ "tonic 0.12.2",
  "tracing",
 ]
 
@@ -7049,7 +7049,7 @@ dependencies = [
  "futures-util",
  "madsim",
  "tokio",
- "tonic 0.12.1",
+ "tonic 0.12.2",
  "tower",
  "tracing",
 ]
@@ -8076,7 +8076,7 @@ dependencies = [
  "prost 0.13.1",
  "thiserror",
  "tokio",
- "tonic 0.12.1",
+ "tonic 0.12.2",
 ]
 
 [[package]]
@@ -8088,7 +8088,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "prost 0.13.1",
- "tonic 0.12.1",
+ "tonic 0.12.2",
 ]
 
 [[package]]
@@ -8180,7 +8180,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tonic 0.12.1",
+ "tonic 0.12.2",
  "tonic-build",
  "tracing",
 ]
@@ -14471,9 +14471,9 @@ dependencies = [
 
 [[package]]
 name = "tonic"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38659f4a91aba8598d27821589f5db7dddd94601e7a01b1e485a50e5484c7401"
+checksum = "c6f6ba989e4b2c58ae83d862d3a3e27690b6e3ae630d0deb59f3697f32aa88ad"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -14505,9 +14505,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "568392c5a2bd0020723e3f387891176aabafe36fd9fcd074ad309dfa0c8eb964"
+checksum = "fe4ee8877250136bd7e3d2331632810a4df4ea5e004656990d8d66d2f5ee8a67"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
