@@ -69,10 +69,10 @@ impl StreamManagerService for StreamServiceImpl {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();
 
-        let snapshot = self.barrier_scheduler.flush(req.checkpoint).await?;
+        let version_id = self.barrier_scheduler.flush(req.checkpoint).await?;
         Ok(Response::new(FlushResponse {
             status: None,
-            snapshot: Some(snapshot),
+            hummock_version_id: version_id.to_u64(),
         }))
     }
 

@@ -21,7 +21,7 @@ use anyhow::{anyhow, Context};
 use assert_matches::assert_matches;
 use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::meta::PausedReason;
 use tokio::select;
 use tokio::sync::{oneshot, watch};
@@ -315,7 +315,7 @@ impl BarrierScheduler {
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self, checkpoint: bool) -> MetaResult<HummockSnapshot> {
+    pub async fn flush(&self, checkpoint: bool) -> MetaResult<HummockVersionId> {
         let start = Instant::now();
 
         tracing::debug!("start barrier flush");
@@ -324,8 +324,8 @@ impl BarrierScheduler {
         let elapsed = Instant::now().duration_since(start);
         tracing::debug!("barrier flushed in {:?}", elapsed);
 
-        let snapshot = self.hummock_manager.latest_snapshot();
-        Ok(snapshot)
+        let version_id = self.hummock_manager.get_version_id().await;
+        Ok(version_id)
     }
 }
 

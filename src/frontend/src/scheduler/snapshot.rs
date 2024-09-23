@@ -18,10 +18,10 @@ use std::sync::Arc;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
-    FrontendHummockVersion, FrontendHummockVersionDelta, INVALID_VERSION_ID,
+    FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
 };
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use risingwave_pb::hummock::{HummockVersionDeltas, PbHummockSnapshot};
+use risingwave_pb::hummock::HummockVersionDeltas;
 use tokio::sync::watch;
 
 use crate::expr::InlineNowProcTime;
@@ -192,9 +192,9 @@ impl HummockSnapshotManager {
     }
 
     /// Wait until the latest snapshot is newer than the given one.
-    pub async fn wait(&self, snapshot: PbHummockSnapshot) {
+    pub async fn wait(&self, version_id: HummockVersionId) {
         let mut rx = self.latest_snapshot.subscribe();
-        while rx.borrow_and_update().value.max_committed_epoch < snapshot.committed_epoch {
+        while rx.borrow_and_update().value.id < version_id {
             rx.changed().await.unwrap();
         }
     }
