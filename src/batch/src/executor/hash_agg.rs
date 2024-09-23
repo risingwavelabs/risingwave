@@ -755,7 +755,7 @@ mod tests {
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::PbDataType;
-    use risingwave_pb::expr::agg_call::Type;
+    use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
     use risingwave_pb::expr::{AggCall, InputRef};
 
     use super::*;
@@ -788,7 +788,7 @@ mod tests {
             ));
 
             let agg_call = AggCall {
-                r#type: Type::Sum as i32,
+                r#type: PbAggKind::Sum as i32,
                 args: vec![InputRef {
                     index: 2,
                     r#type: Some(PbDataType {
@@ -873,7 +873,7 @@ mod tests {
         );
 
         let agg_call = AggCall {
-            r#type: Type::Count as i32,
+            r#type: PbAggKind::Count as i32,
             args: vec![],
             return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
@@ -985,7 +985,7 @@ mod tests {
         );
 
         let agg_call = AggCall {
-            r#type: Type::Sum as i32,
+            r#type: PbAggKind::Sum as i32,
             args: vec![InputRef {
                 index: 2,
                 r#type: Some(PbDataType {
@@ -1078,7 +1078,7 @@ mod tests {
         ));
 
         let agg_call = AggCall {
-            r#type: Type::Sum as i32,
+            r#type: PbAggKind::Sum as i32,
             args: vec![InputRef {
                 index: 2,
                 r#type: Some(PbDataType {

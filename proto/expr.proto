@@ -422,7 +422,7 @@ message FunctionCall {
 
 // Aggregate Function Calls for Aggregation
 message AggCall {
-  enum Type {
+  enum Kind {
     UNSPECIFIED = 0;
     SUM = 1;
     MIN = 2;
@@ -458,7 +458,7 @@ message AggCall {
     // wraps a scalar function that takes a list as input as an aggregate function.
     WRAP_SCALAR = 101;
   }
-  Type type = 1;
+  Kind type = 1;
   repeated InputRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
@@ -562,7 +562,7 @@ message WindowFunction {
 
   oneof type {
     GeneralType general = 1;
-    AggCall.Type aggregate = 2;
+    AggCall.Kind aggregate = 2;
   }
   repeated InputRef args = 3;
   data.DataType return_type = 4;

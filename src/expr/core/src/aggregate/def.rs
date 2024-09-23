@@ -26,7 +26,7 @@ use risingwave_common::bail;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
-pub use risingwave_pb::expr::agg_call::PbType as PbAggKind;
+pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::{PbAggCall, PbExprNode, PbInputRef, PbUserDefinedFunctionMetadata};
 
 use crate::expr::{
