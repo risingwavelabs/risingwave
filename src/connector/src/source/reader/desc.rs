@@ -90,8 +90,11 @@ impl SourceDescBuilder {
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.to_lowercase())
             .unwrap();
-        let (columns_exist, additional_columns) =
-            source_add_partition_offset_cols(&self.columns, &connector_name);
+        let (columns_exist, additional_columns) = source_add_partition_offset_cols(
+            &self.columns,
+            &connector_name,
+            self.source_info.get_format().as_ref().unwrap(),
+        );
 
         let mut columns: Vec<_> = self
             .columns

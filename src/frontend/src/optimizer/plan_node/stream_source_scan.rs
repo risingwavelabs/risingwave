@@ -61,6 +61,7 @@ impl StreamSourceScan {
             let (columns_exist, additional_columns) = source_add_partition_offset_cols(
                 &core.column_catalog,
                 &source_catalog.connector_name(),
+                source_catalog.info.get_format().as_ref().unwrap(),
             );
             for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
                 if !existed {

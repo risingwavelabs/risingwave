@@ -637,7 +637,14 @@ pub fn handle_addition_columns(
 ) -> Result<()> {
     let connector_name = with_properties.get_connector().unwrap(); // there must be a connector in source
 
-    if get_supported_additional_columns(connector_name.as_str(), is_cdc_backfill_table).is_none()
+    // CDC source will not pass the source_schema, and get the additional column set from
+    // `CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS`, does not check FORMAT compatibility.
+    // So set to FORMAT::Unspecified in this case.
+    let format_type = &source_schema
+        .and_then(|schema| format_to_prost(&schema.format).into())
+        .unwrap_or(FormatType::Unspecified);
+    if get_supported_additional_columns(connector_name.as_str(), format_type, is_cdc_backfill_table)
+        .is_none()
         && !additional_columns.is_empty()
     {
         return Err(RwError::from(ProtocolError(format!(
@@ -667,6 +674,7 @@ pub fn handle_addition_columns(
             data_type_name.as_deref(),
             true,
             is_cdc_backfill_table,
+            format_type,
         )?;
         columns.push(ColumnCatalog::visible(col));
     }
@@ -899,12 +907,6 @@ pub(crate) async fn bind_source_pk(
         }
 
         (Format::Debezium, Encode::Json) => {
-            if !additional_column_names.is_empty() {
-                return Err(RwError::from(ProtocolError(format!(
-                    "FORMAT DEBEZIUM forbids additional columns, but got {:?}",
-                    additional_column_names
-                ))));
-            }
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with FORMAT DEBEZIUM."
@@ -990,7 +992,11 @@ pub(crate) async fn bind_source_pk(
 }
 
 // Add a hidden column `_rw_kafka_timestamp` to each message from Kafka source.
-fn check_and_add_timestamp_column(with_properties: &WithOptions, columns: &mut Vec<ColumnCatalog>) {
+fn check_and_add_timestamp_column(
+    with_properties: &WithOptions,
+    columns: &mut Vec<ColumnCatalog>,
+    format_type: &FormatType,
+) {
     if with_properties.is_kafka_connector() {
         if columns.iter().any(|col| {
             matches!(
@@ -1012,6 +1018,7 @@ fn check_and_add_timestamp_column(with_properties: &WithOptions, columns: &mut V
             None,
             true,
             false,
+            format_type,
         )
         .unwrap();
         columns.push(ColumnCatalog::hidden(col));
@@ -1542,7 +1549,11 @@ pub async fn bind_create_source_or_table_with_connector(
     // compatible with the behavior that add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
     if is_create_source {
         // must behind `handle_addition_columns`
-        check_and_add_timestamp_column(&with_properties, &mut columns);
+        check_and_add_timestamp_column(
+            &with_properties,
+            &mut columns,
+            &format_to_prost(&source_schema.format),
+        );
     }
 
     // resolve privatelink connection for Kafka
