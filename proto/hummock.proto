@@ -267,24 +267,10 @@ message UnpinVersionResponse {
   common.Status status = 1;
 }
 
-message PinSnapshotRequest {
-  uint32 context_id = 1;
-}
-
-message PinSpecificSnapshotRequest {
-  uint32 context_id = 1;
-  uint64 epoch = 2;
-}
-
 message GetAssignedCompactTaskNumRequest {}
 
 message GetAssignedCompactTaskNumResponse {
   uint32 num_tasks = 1;
-}
-
-message PinSnapshotResponse {
-  common.Status status = 1;
-  HummockSnapshot snapshot = 2;
 }
 
 message GetEpochRequest {}
@@ -292,23 +278,6 @@ message GetEpochRequest {}
 message GetEpochResponse {
   common.Status status = 1;
   HummockSnapshot snapshot = 2;
-}
-
-message UnpinSnapshotRequest {
-  uint32 context_id = 1;
-}
-
-message UnpinSnapshotResponse {
-  common.Status status = 1;
-}
-
-message UnpinSnapshotBeforeRequest {
-  uint32 context_id = 1;
-  HummockSnapshot min_snapshot = 3;
-}
-
-message UnpinSnapshotBeforeResponse {
-  common.Status status = 1;
 }
 
 // When right_exclusive=false, it represents [left, right], of which both boundary are open. When right_exclusive=true,
@@ -641,21 +610,10 @@ message PinnedVersionsSummary {
   map<uint32, common.WorkerNode> workers = 2;
 }
 
-message PinnedSnapshotsSummary {
-  repeated HummockPinnedSnapshot pinned_snapshots = 1;
-  map<uint32, common.WorkerNode> workers = 2;
-}
-
 message RiseCtlGetPinnedVersionsSummaryRequest {}
 
 message RiseCtlGetPinnedVersionsSummaryResponse {
   PinnedVersionsSummary summary = 1;
-}
-
-message RiseCtlGetPinnedSnapshotsSummaryRequest {}
-
-message RiseCtlGetPinnedSnapshotsSummaryResponse {
-  PinnedSnapshotsSummary summary = 1;
 }
 
 message InitMetadataForReplayRequest {
@@ -853,18 +811,13 @@ service HummockManagerService {
   rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
-  rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
-  rpc PinSpecificSnapshot(PinSpecificSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
-  rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
-  rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
   rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
   rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
-  rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
   rpc RiseCtlPauseVersionCheckpoint(RiseCtlPauseVersionCheckpointRequest) returns (RiseCtlPauseVersionCheckpointResponse);

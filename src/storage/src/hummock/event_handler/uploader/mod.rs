@@ -32,7 +32,6 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{HistogramTimer, IntGauge};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
@@ -339,6 +338,14 @@ impl TableUnsyncData {
         table_watermarks: Vec<VnodeWatermark>,
         direction: WatermarkDirection,
     ) {
+        if table_watermarks.is_empty() {
+            return;
+        }
+        let vnode_count = table_watermarks[0].vnode_count();
+        for watermark in &table_watermarks {
+            assert_eq!(vnode_count, watermark.vnode_count());
+        }
+
         fn apply_new_vnodes(
             vnode_bitmap: &mut BitmapBuilder,
             vnode_watermarks: &Vec<VnodeWatermark>,
@@ -368,14 +375,14 @@ impl TableUnsyncData {
                         prev_watermarks.extend(table_watermarks);
                     }
                     Entry::Vacant(entry) => {
-                        let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::COUNT);
+                        let mut vnode_bitmap = BitmapBuilder::zeroed(vnode_count);
                         apply_new_vnodes(&mut vnode_bitmap, &table_watermarks);
                         entry.insert((table_watermarks, vnode_bitmap));
                     }
                 }
             }
             None => {
-                let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::COUNT);
+                let mut vnode_bitmap = BitmapBuilder::zeroed(vnode_count);
                 apply_new_vnodes(&mut vnode_bitmap, &table_watermarks);
                 self.table_watermarks = Some((
                     direction,

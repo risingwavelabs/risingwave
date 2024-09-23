@@ -221,6 +221,9 @@ fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
         ColumnType::Bit(_) => {
             return Err(anyhow!("BIT type not supported").into());
         }
+        ColumnType::VarBit(_) => {
+            return Err(anyhow!("VARBIT type not supported").into());
+        }
         ColumnType::TsVector => {
             return Err(anyhow!("TSVECTOR type not supported").into());
         }

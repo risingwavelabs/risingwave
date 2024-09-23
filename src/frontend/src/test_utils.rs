@@ -33,6 +33,7 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::{HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
@@ -929,16 +930,12 @@ pub struct MockFrontendMetaClient {}
 impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
 
-    async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot { committed_epoch: 0 })
-    }
-
     async fn get_snapshot(&self) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
-    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot { committed_epoch: 0 })
+    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockVersionId> {
+        Ok(INVALID_VERSION_ID)
     }
 
     async fn wait(&self) -> RpcResult<()> {
@@ -970,14 +967,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_object_dependencies(&self) -> RpcResult<Vec<PbObjectDependencies>> {
         Ok(vec![])
-    }
-
-    async fn unpin_snapshot(&self) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn unpin_snapshot_before(&self, _epoch: u64) -> RpcResult<()> {
-        Ok(())
     }
 
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
@@ -1013,10 +1002,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(u32, u64)>> {
-        unimplemented!()
-    }
-
-    async fn list_hummock_pinned_snapshots(&self) -> RpcResult<Vec<(u32, u64)>> {
         unimplemented!()
     }
 
