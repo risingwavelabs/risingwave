@@ -43,7 +43,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
         max_row_count = '5',
         force_append_only='true'
     ) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');''')
-    
+
     cur.execute(f'''CREATE TABLE test_sink_table(
         v1 int,
         v2 int,
@@ -57,27 +57,27 @@ def do_test(config, file_num, item_num_per_file, prefix):
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
         s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
     ) FORMAT PLAIN ENCODE PARQUET;''')
-    
+
     cur.execute(f'''ALTER SINK test_file_sink_batching SET PARALLELISM = 2;''')
-    
+
     cur.execute(f'''INSERT INTO t VALUES (10, 10);''')
-    
-    
+
+
     cur.execute(f'select count(*) from test_sink_table')
     # no item will be selectedpsq
     result = cur.fetchone()
-    
+
     def _assert_eq(field, got, expect):
         assert got == expect, f'{field} assertion failed: got {got}, expect {expect}.'
     def _assert_greater(field, got, expect):
         assert got > expect, f'{field} assertion failed: got {got}, expect {expect}.'
-        
+
     _assert_eq('count(*)', result[0], 0)
     print('the rollover_seconds has not reached, count(*) = 0')
-    
-    
+
+
     time.sleep(10)
-    
+
     cur.execute(f'select count(*) from test_sink_table')
     result = cur.fetchone()
     _assert_eq('count(*)', result[0], 1)
@@ -89,9 +89,9 @@ def do_test(config, file_num, item_num_per_file, prefix):
     INSERT INTO t VALUES (40, 40);
     INSERT INTO t VALUES (50, 10);
     ''')
-    
+
     cur.execute(f'select count(*) from test_sink_table')
-    # count(*) = 1 
+    # count(*) = 1
     result = cur.fetchone()
     _assert_eq('count(*)', result[0], 1)
     print('the max row count has not reached, count(*) = ', result[0])
@@ -104,14 +104,14 @@ def do_test(config, file_num, item_num_per_file, prefix):
     INSERT INTO t VALUES (100, 30);
     INSERT INTO t VALUES (100, 10);
     ''')
-    
+
     time.sleep(3)
-    
+
     cur.execute(f'select count(*) from test_sink_table')
     result = cur.fetchone()
     _assert_greater('count(*)', result[0], 1)
     print('the rollover_seconds has reached, count(*) = ', result[0])
-    
+
     cur.close()
     conn.close()
 
