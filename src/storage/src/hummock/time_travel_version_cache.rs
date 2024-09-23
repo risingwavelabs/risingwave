@@ -35,21 +35,22 @@ impl SimpleTimeTravelVersionCache {
 
     pub async fn get_or_insert(
         &self,
+        table_id: u32,
         epoch: HummockEpoch,
         fetch: impl Future<Output = HummockResult<PinnedVersion>>,
     ) -> HummockResult<PinnedVersion> {
         let mut guard = self.inner.lock().await;
-        if let Some(v) = guard.get(&epoch) {
+        if let Some(v) = guard.get(table_id, epoch) {
             return Ok(v);
         }
         let version = fetch.await?;
-        guard.add(epoch, version);
-        Ok(guard.get(&epoch).unwrap())
+        guard.add(table_id, epoch, version);
+        Ok(guard.get(table_id, epoch).unwrap())
     }
 }
 
 struct SimpleTimeTravelVersionCacheInner {
-    cache: Cache<HummockEpoch, PinnedVersion>,
+    cache: Cache<(u32, HummockEpoch), PinnedVersion>,
 }
 
 impl SimpleTimeTravelVersionCacheInner {
@@ -62,11 +63,11 @@ impl SimpleTimeTravelVersionCacheInner {
         Self { cache }
     }
 
-    fn get(&self, epoch: &HummockEpoch) -> Option<PinnedVersion> {
-        self.cache.get(epoch)
+    fn get(&self, table_id: u32, epoch: HummockEpoch) -> Option<PinnedVersion> {
+        self.cache.get(&(table_id, epoch))
     }
 
-    fn add(&mut self, epoch: HummockEpoch, version: PinnedVersion) {
-        self.cache.insert(epoch, version);
+    fn add(&mut self, table_id: u32, epoch: HummockEpoch, version: PinnedVersion) {
+        self.cache.insert((table_id, epoch), version);
     }
 }

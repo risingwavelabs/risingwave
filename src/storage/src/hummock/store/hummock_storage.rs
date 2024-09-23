@@ -322,7 +322,7 @@ impl HummockStorage {
         };
         let version = self
             .simple_time_travel_version_cache
-            .get_or_insert(epoch, fetch)
+            .get_or_insert(table_id.table_id, epoch, fetch)
             .await?;
         Ok(version)
     }
