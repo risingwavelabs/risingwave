@@ -181,7 +181,7 @@ impl ConnectorClient {
                     "grpc-connector-client",
                     TcpConfig {
                         tcp_nodelay: true,
-                        keepalive_duration: None,
+                        ..Default::default()
                     },
                 )
             }
