@@ -482,6 +482,16 @@ pub struct TcpConfig {
     pub keepalive_duration: Option<Duration>,
 }
 
+#[allow(clippy::derivable_impls)]
+impl Default for TcpConfig {
+    fn default() -> Self {
+        Self {
+            tcp_nodelay: false,
+            keepalive_duration: None,
+        }
+    }
+}
+
 pub fn monitor_connector<C>(
     connector: C,
     connection_type: impl Into<String>,
