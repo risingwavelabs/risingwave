@@ -519,7 +519,10 @@ pub(crate) mod tests {
             .start(
                 ExecutionContext::new(SessionImpl::mock().into(), None).into(),
                 worker_node_selector,
-                QuerySnapshot::new(ReadSnapshot::BarrierRead, HashSet::from_iter([0.into()])),
+                QuerySnapshot::new(
+                    ReadSnapshot::ReadUncommitted,
+                    HashSet::from_iter([0.into()])
+                ),
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,

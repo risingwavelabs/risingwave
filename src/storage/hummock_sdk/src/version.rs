@@ -206,6 +206,13 @@ impl HummockVersionStateTableInfo {
     pub fn compaction_group_member_tables(&self) -> &HashMap<CompactionGroupId, BTreeSet<TableId>> {
         &self.compaction_group_member_tables
     }
+
+    pub fn max_table_committed_epoch(&self) -> Option<HummockEpoch> {
+        self.state_table_info
+            .values()
+            .map(|info| info.committed_epoch)
+            .max()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

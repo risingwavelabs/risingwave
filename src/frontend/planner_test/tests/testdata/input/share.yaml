@@ -14,6 +14,7 @@
     nexmark.split.num = '4',
     nexmark.min.event.gap.in.ns = '1000'
     );
+    create table table_for_fixed_now_timestamp;
   expected_outputs: []
 - id: self_join
   before:

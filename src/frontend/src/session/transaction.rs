@@ -229,7 +229,7 @@ impl SessionImpl {
                 if let Some(query_epoch) = query_epoch {
                     ReadSnapshot::Other(query_epoch)
                 } else if self.is_barrier_read() {
-                    ReadSnapshot::BarrierRead
+                    ReadSnapshot::ReadUncommitted
                 } else {
                     // Acquire hummock snapshot for execution.
                     let hummock_snapshot_manager = self.env().hummock_snapshot_manager();

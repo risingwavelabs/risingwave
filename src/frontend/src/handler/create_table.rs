@@ -27,7 +27,6 @@ use risingwave_common::catalog::{
     INITIAL_TABLE_VERSION_ID,
 };
 use risingwave_common::license::Feature;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -57,7 +56,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::create_source::{
     bind_columns_from_source, bind_connector_props, bind_create_source_or_table_with_connector,
     bind_source_watermark, handle_addition_columns, UPSTREAM_SOURCE_KEY,
@@ -330,8 +329,9 @@ pub fn bind_sql_column_constraints(
                     // so the rewritten expression should almost always be pure and we directly call `fold_const`
                     // here. Actually we do not require purity of the expression here since we're only to get a
                     // snapshot value.
-                    let rewritten_expr_impl =
-                        InlineNowProcTime::new(Epoch::now()).rewrite_expr(expr_impl.clone());
+                    let rewritten_expr_impl = session
+                        .inline_now_proc_time()
+                        .rewrite_expr(expr_impl.clone());
 
                     if let Some(snapshot_value) = rewritten_expr_impl.try_fold_const() {
                         let snapshot_value = snapshot_value?;

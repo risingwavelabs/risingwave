@@ -29,7 +29,7 @@ pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, ScanTableVisitor, SysTableVisitor,
 };
 use risingwave_sqlparser::ast::OnConflict;
 
@@ -40,7 +40,7 @@ mod plan_expr_visitor;
 mod rule;
 
 use std::assert_matches::assert_matches;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -279,26 +279,22 @@ impl PlanRoot {
     }
 
     /// Apply logical optimization to the plan for batch.
-    pub fn gen_optimized_logical_plan_for_batch(
-        &mut self,
-        scan_tables: &HashSet<TableId>,
-    ) -> Result<PlanRef> {
+    pub fn gen_optimized_logical_plan_for_batch(&mut self) -> Result<PlanRef> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
-        self.plan =
-            LogicalOptimizer::gen_optimized_logical_plan_for_batch(self.plan.clone(), scan_tables)?;
+        self.plan = LogicalOptimizer::gen_optimized_logical_plan_for_batch(self.plan.clone())?;
         self.phase = PlanPhase::OptimizedLogicalForBatch;
         assert_eq!(self.plan.convention(), Convention::Logical);
         Ok(self.plan.clone())
     }
 
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
-    pub fn gen_batch_plan(&mut self, scan_tables: &HashSet<TableId>) -> Result<PlanRef> {
+    pub fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         assert_eq!(self.plan.convention(), Convention::Logical);
         let mut plan = match self.phase {
             PlanPhase::Logical => {
                 // Logical optimization
-                self.gen_optimized_logical_plan_for_batch(scan_tables)?
+                self.gen_optimized_logical_plan_for_batch()?
             }
             PlanPhase::OptimizedLogicalForBatch => self.plan.clone(),
             PlanPhase::Batch | PlanPhase::OptimizedLogicalForStream | PlanPhase::Stream => {

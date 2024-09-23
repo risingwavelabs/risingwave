@@ -603,8 +603,6 @@ impl TestCase {
             }
         };
 
-        let scan_tables = bound.scan_tables();
-
         let mut planner = Planner::new(context.clone());
 
         let plan_root = match planner.plan(bound) {
@@ -628,7 +626,7 @@ impl TestCase {
         {
             let mut plan_root = plan_root.clone();
             let optimized_logical_plan_for_batch =
-                match plan_root.gen_optimized_logical_plan_for_batch(&scan_tables) {
+                match plan_root.gen_optimized_logical_plan_for_batch() {
                     Ok(optimized_logical_plan_for_batch) => optimized_logical_plan_for_batch,
                     Err(err) => {
                         ret.optimizer_error = Some(err.to_report_string_pretty());
@@ -677,7 +675,7 @@ impl TestCase {
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
                 let mut plan_root = plan_root.clone();
-                let batch_plan = match plan_root.gen_batch_plan(&scan_tables) {
+                let batch_plan = match plan_root.gen_batch_plan() {
                     Ok(_batch_plan) => match plan_root.gen_batch_distributed_plan() {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
@@ -710,7 +708,7 @@ impl TestCase {
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
                 let mut plan_root = plan_root.clone();
-                let batch_plan = match plan_root.gen_batch_plan(&scan_tables) {
+                let batch_plan = match plan_root.gen_batch_plan() {
                     Ok(_batch_plan) => match plan_root.gen_batch_local_plan() {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
@@ -738,7 +736,7 @@ impl TestCase {
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
                 let mut plan_root = plan_root.clone();
-                let batch_plan = match plan_root.gen_batch_plan(&scan_tables) {
+                let batch_plan = match plan_root.gen_batch_plan() {
                     Ok(_batch_plan) => match plan_root.gen_batch_distributed_plan() {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
