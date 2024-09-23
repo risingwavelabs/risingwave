@@ -18,7 +18,7 @@ use risingwave_common::bail;
 use super::plan_node::RewriteExprsRecursive;
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
-use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
+use crate::expr::NowProcTimeFinder;
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, VisitExprsRecursive,
@@ -107,8 +107,6 @@ impl OptimizationStage {
 }
 
 use std::sync::LazyLock;
-
-use risingwave_common::util::epoch::Epoch;
 
 pub struct LogicalOptimizer {}
 
@@ -534,28 +532,15 @@ impl LogicalOptimizer {
         plan
     }
 
-    pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> Result<PlanRef> {
+    pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
         // If now() and proctime() are not found, bail out.
         let mut v = NowProcTimeFinder::default();
         plan.visit_exprs_recursive(&mut v);
         if !v.has() {
-            return Ok(plan);
+            return plan;
         }
 
-        // use the maximun committed_epoch over all tables as the now value, or current timestamp when there is no table
-        let mut v = InlineNowProcTime::new(
-            ctx.session_ctx()
-                .env()
-                .hummock_snapshot_manager()
-                .acquire()
-                .version()
-                .state_table_info
-                .info()
-                .values()
-                .map(|info| Epoch(info.committed_epoch))
-                .max()
-                .unwrap_or_else(Epoch::now),
-        );
+        let mut v = ctx.session_ctx().inline_now_proc_time();
 
         let plan = plan.rewrite_exprs_recursive(&mut v);
 
@@ -563,7 +548,7 @@ impl LogicalOptimizer {
             ctx.trace("Inline Now and ProcTime:");
             ctx.trace(plan.explain_to_string());
         }
-        Ok(plan)
+        plan
     }
 
     pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
@@ -704,7 +689,7 @@ impl LogicalOptimizer {
         }
 
         // Inline `NOW()` and `PROCTIME()`, only for batch queries.
-        plan = Self::inline_now_proc_time(plan, &ctx)?;
+        plan = Self::inline_now_proc_time(plan, &ctx);
 
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
