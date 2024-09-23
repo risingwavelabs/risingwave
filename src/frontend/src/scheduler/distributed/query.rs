@@ -40,7 +40,7 @@ use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
-use crate::scheduler::{ExecutionContextRef, QuerySnapshot, SchedulerError, SchedulerResult};
+use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -124,7 +124,7 @@ impl QueryExecution {
         self: Arc<Self>,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
-        pinned_snapshot: QuerySnapshot,
+        batch_query_epoch: BatchQueryEpoch,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -137,7 +137,7 @@ impl QueryExecution {
         // reference of `pinned_snapshot`. Its ownership will be moved into `QueryRunner` so that it
         // can control when to release the snapshot.
         let stage_executions = self.gen_stage_executions(
-            pinned_snapshot.batch_query_epoch()?,
+            batch_query_epoch,
             context.clone(),
             worker_node_manager,
             compute_client_pool.clone(),
@@ -182,13 +182,13 @@ impl QueryExecution {
                 let span = tracing::info_span!(
                     "distributed_execute",
                     query_id = self.query.query_id.id,
-                    epoch = ?pinned_snapshot.batch_query_epoch(),
+                    epoch = ?batch_query_epoch,
                 );
 
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run(pinned_snapshot).instrument(span).await });
+                tokio::spawn(async move { runner.run().instrument(span).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -296,7 +296,7 @@ impl Debug for QueryRunner {
 }
 
 impl QueryRunner {
-    async fn run(mut self, pinned_snapshot: QuerySnapshot) {
+    async fn run(mut self) {
         self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
@@ -310,8 +310,6 @@ impl QueryRunner {
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
         let has_lookup_join_stage = self.query.has_lookup_join_stage();
-        // To convince the compiler that `pinned_snapshot` will only be dropped once.
-        let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
 
         let mut finished_stage_cnt = 0usize;
         while let Some(msg_inner) = self.msg_receiver.recv().await {
@@ -331,7 +329,6 @@ impl QueryRunner {
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
                         tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
-                        pinned_snapshot_to_drop.take();
                     }
 
                     // For root stage, we execute in frontend local. We will pass the root fragment
@@ -495,7 +492,7 @@ pub(crate) mod tests {
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::{
-        DistributedQueryMetrics, ExecutionContext, QueryExecutionInfo, QuerySnapshot, ReadSnapshot,
+        DistributedQueryMetrics, ExecutionContext, QueryExecutionInfo, ReadSnapshot,
     };
     use crate::session::SessionImpl;
     use crate::utils::Condition;
@@ -519,10 +516,9 @@ pub(crate) mod tests {
             .start(
                 ExecutionContext::new(SessionImpl::mock().into(), None).into(),
                 worker_node_selector,
-                QuerySnapshot::new(
-                    ReadSnapshot::ReadUncommitted,
-                    HashSet::from_iter([0.into()])
-                ),
+                ReadSnapshot::ReadUncommitted
+                    .batch_query_epoch(&HashSet::from_iter([0.into()]))
+                    .unwrap(),
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,

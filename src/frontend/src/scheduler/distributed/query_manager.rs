@@ -191,7 +191,7 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
-        scan_tables: HashSet<TableId>,
+        read_storage_tables: HashSet<TableId>,
     ) -> SchedulerResult<DistributedQueryStream> {
         if let Some(query_limit) = self.disrtibuted_query_limit
             && self.query_metrics.running_query_num.get() as u64 == query_limit
@@ -214,7 +214,7 @@ impl QueryManager {
             .add_query(query_id.clone(), query_execution.clone());
 
         // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let pinned_snapshot = context.session().pinned_snapshot(scan_tables);
+        let pinned_snapshot = context.session().pinned_snapshot();
 
         let worker_node_manager_reader = WorkerNodeSelector::new(
             self.worker_node_manager.clone(),
@@ -225,7 +225,7 @@ impl QueryManager {
             .start(
                 context.clone(),
                 worker_node_manager_reader,
-                pinned_snapshot,
+                pinned_snapshot.batch_query_epoch(&read_storage_tables)?,
                 self.compute_client_pool.clone(),
                 self.catalog_reader.clone(),
                 self.query_execution_info.clone(),

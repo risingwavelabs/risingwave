@@ -60,7 +60,6 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::cluster_limit::ActorCountPerParallelism;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::{cluster_limit, resource_util};
@@ -97,7 +96,6 @@ use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
 };
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::InlineNowProcTime;
 use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
@@ -837,20 +835,6 @@ impl SessionImpl {
 
     pub fn session_id(&self) -> SessionId {
         self.id
-    }
-
-    pub fn inline_now_proc_time(&self) -> InlineNowProcTime {
-        // use the maximum committed_epoch over all tables as the now value, or current timestamp when there is no table
-        InlineNowProcTime::new(
-            self.env()
-                .hummock_snapshot_manager()
-                .acquire()
-                .version()
-                .state_table_info
-                .max_table_committed_epoch()
-                .map(Epoch)
-                .unwrap_or_else(Epoch::now),
-        )
     }
 
     pub fn running_sql(&self) -> Option<Arc<str>> {

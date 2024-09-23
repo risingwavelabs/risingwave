@@ -22,11 +22,11 @@ use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
-pub struct ScanTableVisitor {
+pub struct ReadStorageTableVisitor {
     tables: HashSet<TableId>,
 }
 
-impl ScanTableVisitor {
+impl ReadStorageTableVisitor {
     pub fn collect(plan: PlanRef) -> HashSet<TableId> {
         let mut visitor = Self::default();
         visitor.visit(plan);
@@ -34,7 +34,7 @@ impl ScanTableVisitor {
     }
 }
 
-impl PlanVisitor for ScanTableVisitor {
+impl PlanVisitor for ReadStorageTableVisitor {
     type Result = ();
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;

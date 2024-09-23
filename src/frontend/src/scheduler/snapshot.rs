@@ -26,6 +26,7 @@ use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::{HummockVersionDeltas, StateTableInfoDelta};
 use tokio::sync::watch;
 
+use crate::expr::InlineNowProcTime;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::SchedulerError;
 
@@ -45,25 +46,16 @@ pub enum ReadSnapshot {
     Other(Epoch),
 }
 
-pub struct QuerySnapshot {
-    snapshot: ReadSnapshot,
-    scan_tables: HashSet<TableId>,
-}
-
-impl QuerySnapshot {
-    pub fn new(snapshot: ReadSnapshot, scan_tables: HashSet<TableId>) -> Self {
-        Self {
-            snapshot,
-            scan_tables,
-        }
-    }
-
+impl ReadSnapshot {
     /// Get the [`BatchQueryEpoch`] for this snapshot.
-    pub fn batch_query_epoch(&self) -> Result<BatchQueryEpoch, SchedulerError> {
-        Ok(match &self.snapshot {
+    pub fn batch_query_epoch(
+        &self,
+        read_storage_tables: &HashSet<TableId>,
+    ) -> Result<BatchQueryEpoch, SchedulerError> {
+        Ok(match self {
             ReadSnapshot::FrontendPinned { snapshot } => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Committed(
-                    snapshot.batch_query_epoch(&self.scan_tables)?.0,
+                    snapshot.batch_query_epoch(read_storage_tables)?.0,
                 )),
             },
             ReadSnapshot::ReadUncommitted => BatchQueryEpoch {
@@ -75,9 +67,23 @@ impl QuerySnapshot {
         })
     }
 
+    pub fn inline_now_proc_time(&self) -> InlineNowProcTime {
+        let epoch = match self {
+            ReadSnapshot::FrontendPinned { snapshot } => snapshot
+                .value
+                .state_table_info
+                .max_table_committed_epoch()
+                .map(Epoch)
+                .unwrap_or_else(Epoch::now),
+            ReadSnapshot::ReadUncommitted => Epoch::now(),
+            ReadSnapshot::Other(epoch) => *epoch,
+        };
+        InlineNowProcTime::new(epoch)
+    }
+
     /// Returns true if this snapshot is a barrier read.
     pub fn support_barrier_read(&self) -> bool {
-        matches!(&self.snapshot, ReadSnapshot::ReadUncommitted)
+        matches!(self, ReadSnapshot::ReadUncommitted)
     }
 }
 
@@ -97,9 +103,12 @@ impl std::fmt::Debug for PinnedSnapshot {
 pub type PinnedSnapshotRef = Arc<PinnedSnapshot>;
 
 impl PinnedSnapshot {
-    fn batch_query_epoch(&self, scan_tables: &HashSet<TableId>) -> Result<Epoch, SchedulerError> {
+    fn batch_query_epoch(
+        &self,
+        read_storage_tables: &HashSet<TableId>,
+    ) -> Result<Epoch, SchedulerError> {
         // use the min committed epoch of tables involved in the scan
-        let epoch = scan_tables
+        let epoch = read_storage_tables
             .iter()
             .map(|table_id| {
                 self.value
