@@ -6113,7 +6113,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.3.141592654"
-source = "git+https://github.com/risingwavelabs/icelake.git?rev=10e0e6b1dc6c1395d87f834076f818f6b1992520#10e0e6b1dc6c1395d87f834076f818f6b1992520"
+source = "git+https://github.com/risingwavelabs/icelake.git?rev=490e5af541edab0e9284ba19ddb56c8a16d1c36b#490e5af541edab0e9284ba19ddb56c8a16d1c36b"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (git+https://github.com/apache/avro.git)",

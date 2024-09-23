@@ -137,7 +137,7 @@ otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev =
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 # branch rw_patch
-icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "10e0e6b1dc6c1395d87f834076f818f6b1992520", features = [
+icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "490e5af541edab0e9284ba19ddb56c8a16d1c36b", features = [
     "prometheus",
 ] }
 # branch dev
