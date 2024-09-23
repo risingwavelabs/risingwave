@@ -279,7 +279,7 @@ impl AggType {
         }
     }
 
-    pub fn to_protobuf(&self) -> PbAggKind {
+    pub fn to_protobuf_simple(&self) -> PbAggKind {
         match self {
             Self::Builtin(pb) => *pb,
             Self::UserDefined(_) => PbAggKind::UserDefined,
