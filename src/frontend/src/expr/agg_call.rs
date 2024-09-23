@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::AggType;
 
 use super::{infer_type, Expr, ExprImpl, Literal, OrderBy};
 use crate::error::Result;
@@ -21,7 +21,7 @@ use crate::utils::Condition;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
-    pub agg_kind: AggKind,
+    pub agg_kind: AggType,
     pub return_type: DataType,
     pub args: Vec<ExprImpl>,
     pub distinct: bool,
@@ -56,7 +56,7 @@ impl AggCall {
     /// Returns error if the function name matches with an existing function
     /// but with illegal arguments.
     pub fn new(
-        agg_kind: AggKind,
+        agg_kind: AggType,
         mut args: Vec<ExprImpl>,
         distinct: bool,
         order_by: OrderBy,
@@ -64,9 +64,9 @@ impl AggCall {
         direct_args: Vec<Literal>,
     ) -> Result<Self> {
         let return_type = match &agg_kind {
-            AggKind::Builtin(kind) => infer_type((*kind).into(), &mut args)?,
-            AggKind::UserDefined(udf) => udf.return_type.as_ref().unwrap().into(),
-            AggKind::WrapScalar(expr) => expr.return_type.as_ref().unwrap().into(),
+            AggType::Builtin(kind) => infer_type((*kind).into(), &mut args)?,
+            AggType::UserDefined(udf) => udf.return_type.as_ref().unwrap().into(),
+            AggType::WrapScalar(expr) => expr.return_type.as_ref().unwrap().into(),
         };
         Ok(AggCall {
             agg_kind,
@@ -81,7 +81,7 @@ impl AggCall {
 
     /// Constructs an `AggCall` without type inference.
     pub fn new_unchecked(
-        agg_kind: AggKind,
+        agg_kind: AggType,
         args: Vec<ExprImpl>,
         return_type: DataType,
     ) -> Result<Self> {
@@ -96,7 +96,7 @@ impl AggCall {
         })
     }
 
-    pub fn agg_kind(&self) -> AggKind {
+    pub fn agg_kind(&self) -> AggType {
         self.agg_kind.clone()
     }
 

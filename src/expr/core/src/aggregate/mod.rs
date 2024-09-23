@@ -147,16 +147,16 @@ pub fn build_retractable(agg: &AggCall) -> Result<BoxedAggregateFunction> {
 pub fn build(agg: &AggCall, prefer_append_only: bool) -> Result<BoxedAggregateFunction> {
     // handle special kinds
     let kind = match &agg.kind {
-        AggKind::UserDefined(udf) => {
+        AggType::UserDefined(udf) => {
             return user_defined::new_user_defined(&agg.return_type, udf);
         }
-        AggKind::WrapScalar(scalar) => {
+        AggType::WrapScalar(scalar) => {
             return Ok(Box::new(scalar_wrapper::ScalarWrapper::new(
                 agg.args.arg_types()[0].clone(),
                 build_from_prost(scalar)?,
             )));
         }
-        AggKind::Builtin(kind) => kind,
+        AggType::Builtin(kind) => kind,
     };
 
     // find the signature for builtin aggregation

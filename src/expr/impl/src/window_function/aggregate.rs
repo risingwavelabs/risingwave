@@ -21,7 +21,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_expr::aggregate::{
-    AggCall, AggKind, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
+    AggCall, AggType, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
 };
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::window_function::{
@@ -64,7 +64,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
         direct_args: vec![],
     };
     // TODO(runji): support UDAF and wrapped scalar function
-    let agg_kind = must_match!(agg_kind, AggKind::Builtin(agg_kind) => agg_kind);
+    let agg_kind = must_match!(agg_kind, AggType::Builtin(agg_kind) => agg_kind);
     let agg_func_sig = FUNCTION_REGISTRY
         .get(*agg_kind, &arg_data_types, &call.return_type)
         .expect("the agg func must exist");

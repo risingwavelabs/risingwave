@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggType, PbAggKind};
 use risingwave_sqlparser::ast::{self, FunctionArgExpr};
 
 use crate::binder::Clause;
@@ -48,7 +48,7 @@ impl Binder {
 
     pub(super) fn bind_aggregate_function(
         &mut self,
-        kind: AggKind,
+        kind: AggType,
         distinct: bool,
         args: Vec<ExprImpl>,
         order_by: Vec<ast::OrderByExpr>,
@@ -97,7 +97,7 @@ impl Binder {
 
     fn bind_ordered_set_agg(
         &mut self,
-        kind: &AggKind,
+        kind: &AggType,
         distinct: bool,
         args: Vec<ExprImpl>,
         order_by: Vec<ast::OrderByExpr>,
@@ -138,10 +138,10 @@ impl Binder {
 
         // check signature and do implicit cast
         match (kind, direct_args.len(), args.as_mut_slice()) {
-            (AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc), 1, [arg]) => {
+            (AggType::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc), 1, [arg]) => {
                 let fraction = &mut direct_args[0];
                 decimal_to_float64(fraction, kind)?;
-                if matches!(&kind, AggKind::Builtin(PbAggKind::PercentileCont)) {
+                if matches!(&kind, AggType::Builtin(PbAggKind::PercentileCont)) {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
                         ErrorCode::InvalidInputSyntax(format!(
                             "arg in `{}` must be castable to float64",
@@ -150,8 +150,8 @@ impl Binder {
                     })?;
                 }
             }
-            (AggKind::Builtin(PbAggKind::Mode), 0, [_arg]) => {}
-            (AggKind::Builtin(PbAggKind::ApproxPercentile), 1..=2, [_percentile_col]) => {
+            (AggType::Builtin(PbAggKind::Mode), 0, [_arg]) => {}
+            (AggType::Builtin(PbAggKind::ApproxPercentile), 1..=2, [_percentile_col]) => {
                 let percentile = &mut direct_args[0];
                 decimal_to_float64(percentile, kind)?;
                 match direct_args.len() {
@@ -207,7 +207,7 @@ impl Binder {
 
     fn bind_normal_agg(
         &mut self,
-        kind: &AggKind,
+        kind: &AggType,
         distinct: bool,
         args: Vec<ExprImpl>,
         order_by: Vec<ast::OrderByExpr>,
@@ -242,8 +242,8 @@ impl Binder {
         if distinct {
             if matches!(
                 kind,
-                AggKind::Builtin(PbAggKind::ApproxCountDistinct)
-                    | AggKind::Builtin(PbAggKind::ApproxPercentile)
+                AggType::Builtin(PbAggKind::ApproxCountDistinct)
+                    | AggType::Builtin(PbAggKind::ApproxPercentile)
             ) {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "DISTINCT is not allowed for approximate aggregation `{}`",
@@ -283,7 +283,7 @@ impl Binder {
     }
 }
 
-fn decimal_to_float64(decimal_expr: &mut ExprImpl, kind: &AggKind) -> Result<()> {
+fn decimal_to_float64(decimal_expr: &mut ExprImpl, kind: &AggType) -> Result<()> {
     if decimal_expr.cast_implicit_mut(DataType::Float64).is_err() {
         return Err(ErrorCode::InvalidInputSyntax(format!(
             "direct arg in `{}` must be castable to float64",

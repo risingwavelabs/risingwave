@@ -25,7 +25,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc, hash};
-use risingwave_expr::aggregate::{AggCall, AggKind, PbAggKind};
+use risingwave_expr::aggregate::{AggCall, AggType, PbAggKind};
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
@@ -34,7 +34,7 @@ enable_jemalloc!();
 
 fn create_agg_call(
     input_schema: &Schema,
-    agg_kind: AggKind,
+    agg_kind: AggType,
     args: Vec<usize>,
     return_type: DataType,
 ) -> PbAggCall {
@@ -59,7 +59,7 @@ fn create_agg_call(
 
 fn create_hash_agg_executor(
     group_key_columns: Vec<usize>,
-    agg_kind: AggKind,
+    agg_kind: AggType,
     arg_columns: Vec<usize>,
     return_type: DataType,
     chunk_size: usize,

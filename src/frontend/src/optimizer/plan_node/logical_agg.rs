@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail, bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggType, PbAggKind};
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
@@ -389,7 +389,7 @@ impl LogicalAgg {
         let mut approx_percentile_col_mapping = Vec::with_capacity(estimated_len);
         let mut non_approx_percentile_col_mapping = Vec::with_capacity(estimated_len);
         for (output_idx, agg_call) in self.agg_calls().iter().enumerate() {
-            if agg_call.agg_kind == AggKind::Builtin(PbAggKind::ApproxPercentile) {
+            if agg_call.agg_kind == AggType::Builtin(PbAggKind::ApproxPercentile) {
                 approx_percentile_agg_calls.push(agg_call.clone());
                 approx_percentile_col_mapping.push(Some(output_idx));
             } else {
@@ -612,7 +612,7 @@ impl LogicalAggBuilder {
     ) -> Result<ExprImpl> {
         match agg_call.agg_kind {
             // Rewrite avg to cast(sum as avg_return_type) / count.
-            AggKind::Builtin(PbAggKind::Avg) => {
+            AggType::Builtin(PbAggKind::Avg) => {
                 assert_eq!(agg_call.args.len(), 1);
 
                 let sum = ExprImpl::from(push_agg_call(AggCall::new(
@@ -644,7 +644,7 @@ impl LogicalAggBuilder {
             // which is in a sense more general than the pow function, especially when calculating
             // covariances in the future. Also we don't have the sqrt function for rooting, so we
             // use pow(x, 0.5) to simulate
-            AggKind::Builtin(
+            AggType::Builtin(
                 kind @ (PbAggKind::StddevPop
                 | PbAggKind::StddevSamp
                 | PbAggKind::VarPop
@@ -740,7 +740,7 @@ impl LogicalAggBuilder {
                     _ => unreachable!(),
                 }
             }
-            AggKind::Builtin(PbAggKind::ApproxPercentile) => {
+            AggType::Builtin(PbAggKind::ApproxPercentile) => {
                 if agg_call.order_by.sort_exprs[0].order_type == OrderType::descending() {
                     // Rewrite DESC into 1.0-percentile for approx_percentile.
                     let prev_percentile = agg_call.direct_args[0].clone();
@@ -871,7 +871,7 @@ impl LogicalAggBuilder {
             agg_call.distinct = false;
         }
 
-        if matches!(agg_call.agg_kind, AggKind::Builtin(PbAggKind::Grouping)) {
+        if matches!(agg_call.agg_kind, AggType::Builtin(PbAggKind::Grouping)) {
             if self.grouping_sets.is_empty() {
                 return Err(ErrorCode::NotSupported(
                     "GROUPING must be used in a query with grouping sets".into(),

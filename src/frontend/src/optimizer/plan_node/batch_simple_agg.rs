@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::aggregate::{AggKind, PbAggKind};
+use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
@@ -59,7 +59,7 @@ impl BatchSimpleAgg {
                 .agg_calls
                 .iter()
                 .map(|agg_call| &agg_call.agg_kind)
-                .all(|agg_kind| !matches!(agg_kind, AggKind::Builtin(PbAggKind::ApproxPercentile)))
+                .all(|agg_kind| !matches!(agg_kind, AggType::Builtin(PbAggKind::ApproxPercentile)))
             && self.two_phase_agg_enabled()
     }
 }

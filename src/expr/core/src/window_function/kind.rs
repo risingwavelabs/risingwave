@@ -15,7 +15,7 @@
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 
-use crate::aggregate::AggKind;
+use crate::aggregate::AggType;
 use crate::Result;
 
 /// Kind of window functions.
@@ -31,7 +31,7 @@ pub enum WindowFuncKind {
 
     // Aggregate functions that are used with `OVER`.
     #[display("{0}")]
-    Aggregate(AggKind),
+    Aggregate(AggType),
 }
 
 impl WindowFuncKind {
@@ -53,7 +53,7 @@ impl WindowFuncKind {
             },
             PbType::Aggregate(agg_type) => match PbAggKind::try_from(*agg_type) {
                 // TODO(runji): support UDAF and wrapped scalar functions
-                Ok(agg_type) => Self::Aggregate(AggKind::from_protobuf(agg_type, None, None)?),
+                Ok(agg_type) => Self::Aggregate(AggType::from_protobuf(agg_type, None, None)?),
                 Err(_) => bail!("no such aggregate function type"),
             },
         };

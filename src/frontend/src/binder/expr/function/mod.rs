@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_sqlparser::ast::{self, Function, FunctionArg, FunctionArgExpr, Ident};
 use risingwave_sqlparser::parser::ParserError;
@@ -182,7 +182,7 @@ impl Binder {
             };
 
             // now this is either an aggregate/window function call
-            Some(AggKind::WrapScalar(scalar_func_expr.to_expr_proto()))
+            Some(AggType::WrapScalar(scalar_func_expr.to_expr_proto()))
         } else {
             None
         };
@@ -233,8 +233,8 @@ impl Binder {
             && udf.kind.is_aggregate()
         {
             assert_ne!(udf.language, "sql", "SQL UDAF is not supported yet");
-            Some(AggKind::UserDefined(udf.as_ref().into()))
-        } else if let Ok(kind) = AggKind::from_str(&func_name) {
+            Some(AggType::UserDefined(udf.as_ref().into()))
+        } else if let Ok(kind) = AggType::from_str(&func_name) {
             Some(kind)
         } else {
             None

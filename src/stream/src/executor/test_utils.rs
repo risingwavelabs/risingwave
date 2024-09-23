@@ -277,7 +277,7 @@ pub mod agg_executor {
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::aggregate::{AggCall, AggKind, PbAggKind};
+    use risingwave_expr::aggregate::{AggCall, AggType, PbAggKind};
     use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::StateStore;
 
@@ -329,7 +329,7 @@ pub mod agg_executor {
         is_append_only: bool,
     ) -> AggStateStorage<S> {
         match agg_call.kind {
-            AggKind::Builtin(PbAggKind::Min | PbAggKind::Max) if !is_append_only => {
+            AggType::Builtin(PbAggKind::Min | PbAggKind::Max) if !is_append_only => {
                 let mut column_descs = Vec::new();
                 let mut order_types = Vec::new();
                 let mut upstream_columns = Vec::new();
@@ -353,7 +353,7 @@ pub mod agg_executor {
                     add_column(*idx, input_fields[*idx].data_type(), None);
                 }
 
-                add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if matches!(agg_call.kind, AggKind::Builtin(PbAggKind::Max)) {
+                add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if matches!(agg_call.kind, AggType::Builtin(PbAggKind::Max)) {
                     Some(OrderType::descending())
                 } else {
                     Some(OrderType::ascending())
@@ -377,7 +377,7 @@ pub mod agg_executor {
 
                 AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None), order_columns }
             }
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::Min /* append only */
                 | PbAggKind::Max /* append only */
                 | PbAggKind::Sum

@@ -23,7 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
-use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggType, PbAggKind};
 use risingwave_expr::sig::{FuncBuilder, FUNCTION_REGISTRY};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as PbAggCallState};
@@ -108,7 +108,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
                 let order_ok = matches!(
                     call.agg_kind,
                     agg_kinds::result_unaffected_by_order_by!()
-                        | AggKind::Builtin(PbAggKind::ApproxPercentile)
+                        | AggType::Builtin(PbAggKind::ApproxPercentile)
                 ) || call.order_by.is_empty();
                 let distinct_ok =
                     matches!(call.agg_kind, agg_kinds::result_unaffected_by_distinct!())
@@ -422,20 +422,20 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     // columns with order requirement in state table
                     let sort_keys = {
                         match agg_call.agg_kind {
-                            AggKind::Builtin(PbAggKind::Min) => {
+                            AggType::Builtin(PbAggKind::Min) => {
                                 vec![(OrderType::ascending(), agg_call.inputs[0].index)]
                             }
-                            AggKind::Builtin(PbAggKind::Max) => {
+                            AggType::Builtin(PbAggKind::Max) => {
                                 vec![(OrderType::descending(), agg_call.inputs[0].index)]
                             }
-                            AggKind::Builtin(
+                            AggType::Builtin(
                                 PbAggKind::FirstValue
                                 | PbAggKind::LastValue
                                 | PbAggKind::StringAgg
                                 | PbAggKind::ArrayAgg
                                 | PbAggKind::JsonbAgg,
                             )
-                            | AggKind::WrapScalar(_) => {
+                            | AggType::WrapScalar(_) => {
                                 if agg_call.order_by.is_empty() {
                                     me.ctx().warn_to_user(format!(
                                         "{} without ORDER BY may produce non-deterministic result",
@@ -449,7 +449,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                         (
                                             if matches!(
                                                 agg_call.agg_kind,
-                                                AggKind::Builtin(PbAggKind::LastValue)
+                                                AggType::Builtin(PbAggKind::LastValue)
                                             ) {
                                                 o.order_type.reverse()
                                             } else {
@@ -460,7 +460,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                     })
                                     .collect()
                             }
-                            AggKind::Builtin(PbAggKind::JsonbObjectAgg) => agg_call
+                            AggType::Builtin(PbAggKind::JsonbObjectAgg) => agg_call
                                 .order_by
                                 .iter()
                                 .map(|o| (o.order_type, o.column_index))
@@ -482,7 +482,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     // other columns that should be contained in state table
                     let include_keys = match agg_call.agg_kind {
                         // `agg_kinds::materialized_input_state` except for `min`/`max`
-                        AggKind::Builtin(
+                        AggType::Builtin(
                             PbAggKind::FirstValue
                             | PbAggKind::LastValue
                             | PbAggKind::StringAgg
@@ -490,7 +490,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                             | PbAggKind::JsonbAgg
                             | PbAggKind::JsonbObjectAgg,
                         )
-                        | AggKind::WrapScalar(_) => {
+                        | AggType::WrapScalar(_) => {
                             agg_call.inputs.iter().map(|i| i.index).collect()
                         }
                         _ => vec![],
@@ -505,7 +505,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 agg_kinds::unimplemented_in_stream!() => {
                     unreachable!("should have been banned")
                 }
-                AggKind::Builtin(
+                AggType::Builtin(
                     PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar,
                 ) => {
                     unreachable!("invalid agg kind")
@@ -532,16 +532,16 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
             let agg_kind = match agg_call.agg_kind {
-                AggKind::UserDefined(_) => {
+                AggType::UserDefined(_) => {
                     // for user defined aggregate, the state type is always BYTEA
                     field.data_type = DataType::Bytea;
                     continue;
                 }
-                AggKind::WrapScalar(_) => {
+                AggType::WrapScalar(_) => {
                     // for wrapped scalar function, the state is always NULL
                     continue;
                 }
-                AggKind::Builtin(kind) => kind,
+                AggType::Builtin(kind) => kind,
             };
             let sig = FUNCTION_REGISTRY
                 .get(
@@ -705,7 +705,7 @@ impl_distill_unit_from_fields!(Agg, stream::StreamPlanRef);
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggCall {
     /// Kind of aggregation function
-    pub agg_kind: AggKind,
+    pub agg_kind: AggType,
 
     /// Data type of the returned column
     pub return_type: DataType,
@@ -781,9 +781,9 @@ impl PlanAggCall {
     pub fn to_protobuf(&self) -> PbAggCall {
         PbAggCall {
             kind: match &self.agg_kind {
-                AggKind::Builtin(kind) => *kind,
-                AggKind::UserDefined(_) => PbAggKind::UserDefined,
-                AggKind::WrapScalar(_) => PbAggKind::WrapScalar,
+                AggType::Builtin(kind) => *kind,
+                AggType::UserDefined(_) => PbAggKind::UserDefined,
+                AggType::WrapScalar(_) => PbAggKind::WrapScalar,
             }
             .into(),
             return_type: Some(self.return_type.to_protobuf()),
@@ -800,11 +800,11 @@ impl PlanAggCall {
                 })
                 .collect(),
             udf: match &self.agg_kind {
-                AggKind::UserDefined(udf) => Some(udf.clone()),
+                AggType::UserDefined(udf) => Some(udf.clone()),
                 _ => None,
             },
             scalar: match &self.agg_kind {
-                AggKind::WrapScalar(expr) => Some(expr.clone()),
+                AggType::WrapScalar(expr) => Some(expr.clone()),
                 _ => None,
             },
         }
