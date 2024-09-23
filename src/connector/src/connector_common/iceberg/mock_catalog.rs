@@ -23,6 +23,7 @@ use opendal::services::Memory;
 use opendal::Operator;
 
 /// A mock catalog for iceberg used for plan test.
+#[derive(Debug)]
 pub struct MockCatalog;
 
 impl MockCatalog {
@@ -231,5 +232,254 @@ impl Catalog for MockCatalog {
 
     async fn update_table(self: Arc<Self>, _update_table: &UpdateTable) -> icelake::Result<Table> {
         unimplemented!()
+    }
+}
+
+mod v2 {
+    use std::collections::HashMap;
+
+    use async_trait::async_trait;
+    use iceberg::io::FileIO;
+    use iceberg::spec::{
+        NestedField, PrimitiveType, Schema, TableMetadataBuilder, Transform, Type,
+        UnboundPartitionField, UnboundPartitionSpec,
+    };
+    use iceberg::table::Table as TableV2;
+    use iceberg::{
+        Catalog as CatalogV2, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+    };
+
+    use super::MockCatalog;
+
+    impl MockCatalog {
+        fn build_table_v2(
+            name: &str,
+            schema: Schema,
+            partition_spec: UnboundPartitionSpec,
+        ) -> TableV2 {
+            let file_io = FileIO::from_path("memory://").unwrap().build().unwrap();
+            let table_creation = TableCreation {
+                name: "ignore".to_string(),
+                location: Some("1".to_string()),
+                schema,
+                partition_spec: Some(partition_spec),
+                sort_order: None,
+                properties: HashMap::new(),
+            };
+            TableV2::builder()
+                .identifier(TableIdent::new(
+                    NamespaceIdent::new("mock_namespace".to_string()),
+                    name.to_string(),
+                ))
+                .file_io(file_io)
+                .metadata(
+                    TableMetadataBuilder::from_table_creation(table_creation)
+                        .unwrap()
+                        .build()
+                        .unwrap(),
+                )
+                .build()
+                .unwrap()
+        }
+
+        fn sparse_table_v2() -> TableV2 {
+            Self::build_table_v2(
+                Self::SPARSE_TABLE,
+                Schema::builder()
+                    .with_fields(vec![
+                        NestedField::new(1, "v1", Type::Primitive(PrimitiveType::Int), true).into(),
+                        NestedField::new(2, "v2", Type::Primitive(PrimitiveType::Long), true)
+                            .into(),
+                        NestedField::new(3, "v3", Type::Primitive(PrimitiveType::String), true)
+                            .into(),
+                        NestedField::new(4, "v4", Type::Primitive(PrimitiveType::Time), true)
+                            .into(),
+                    ])
+                    .build()
+                    .unwrap(),
+                UnboundPartitionSpec::builder()
+                    .with_spec_id(1)
+                    .add_partition_fields(vec![
+                        UnboundPartitionField {
+                            source_id: 1,
+                            field_id: Some(5),
+                            name: "f1".to_string(),
+                            transform: Transform::Identity,
+                        },
+                        UnboundPartitionField {
+                            source_id: 2,
+                            field_id: Some(6),
+                            name: "f2".to_string(),
+                            transform: Transform::Bucket(1),
+                        },
+                        UnboundPartitionField {
+                            source_id: 3,
+                            field_id: Some(7),
+                            name: "f3".to_string(),
+                            transform: Transform::Truncate(1),
+                        },
+                        UnboundPartitionField {
+                            source_id: 4,
+                            field_id: Some(8),
+                            name: "f4".to_string(),
+                            transform: Transform::Void,
+                        },
+                    ])
+                    .unwrap()
+                    .build(),
+            )
+        }
+
+        fn range_table_v2() -> TableV2 {
+            Self::build_table_v2(
+                Self::RANGE_TABLE,
+                Schema::builder()
+                    .with_fields(vec![
+                        NestedField::new(1, "v1", Type::Primitive(PrimitiveType::Date), true)
+                            .into(),
+                        NestedField::new(2, "v2", Type::Primitive(PrimitiveType::Timestamp), true)
+                            .into(),
+                        NestedField::new(
+                            3,
+                            "v3",
+                            Type::Primitive(PrimitiveType::Timestamptz),
+                            true,
+                        )
+                        .into(),
+                        NestedField::new(
+                            4,
+                            "v4",
+                            Type::Primitive(PrimitiveType::Timestamptz),
+                            true,
+                        )
+                        .into(),
+                    ])
+                    .build()
+                    .unwrap(),
+                UnboundPartitionSpec::builder()
+                    .with_spec_id(1)
+                    .add_partition_fields(vec![
+                        UnboundPartitionField {
+                            source_id: 1,
+                            field_id: Some(5),
+                            name: "f1".to_string(),
+                            transform: Transform::Year,
+                        },
+                        UnboundPartitionField {
+                            source_id: 2,
+                            field_id: Some(6),
+                            name: "f2".to_string(),
+                            transform: Transform::Month,
+                        },
+                        UnboundPartitionField {
+                            source_id: 3,
+                            field_id: Some(7),
+                            name: "f3".to_string(),
+                            transform: Transform::Day,
+                        },
+                        UnboundPartitionField {
+                            source_id: 4,
+                            field_id: Some(8),
+                            name: "f4".to_string(),
+                            transform: Transform::Hour,
+                        },
+                    ])
+                    .unwrap()
+                    .build(),
+            )
+        }
+    }
+
+    #[async_trait]
+    impl CatalogV2 for MockCatalog {
+        /// List namespaces from table.
+        async fn list_namespaces(
+            &self,
+            _parent: Option<&NamespaceIdent>,
+        ) -> iceberg::Result<Vec<NamespaceIdent>> {
+            todo!()
+        }
+
+        /// Create a new namespace inside the catalog.
+        async fn create_namespace(
+            &self,
+            _namespace: &iceberg::NamespaceIdent,
+            _properties: HashMap<String, String>,
+        ) -> iceberg::Result<iceberg::Namespace> {
+            todo!()
+        }
+
+        /// Get a namespace information from the catalog.
+        async fn get_namespace(&self, _namespace: &NamespaceIdent) -> iceberg::Result<Namespace> {
+            todo!()
+        }
+
+        /// Check if namespace exists in catalog.
+        async fn namespace_exists(&self, _namespace: &NamespaceIdent) -> iceberg::Result<bool> {
+            todo!()
+        }
+
+        /// Drop a namespace from the catalog.
+        async fn drop_namespace(&self, _namespace: &NamespaceIdent) -> iceberg::Result<()> {
+            todo!()
+        }
+
+        /// List tables from namespace.
+        async fn list_tables(
+            &self,
+            _namespace: &NamespaceIdent,
+        ) -> iceberg::Result<Vec<TableIdent>> {
+            todo!()
+        }
+
+        async fn update_namespace(
+            &self,
+            _namespace: &NamespaceIdent,
+            _properties: HashMap<String, String>,
+        ) -> iceberg::Result<()> {
+            todo!()
+        }
+
+        /// Create a new table inside the namespace.
+        async fn create_table(
+            &self,
+            _namespace: &NamespaceIdent,
+            _creation: TableCreation,
+        ) -> iceberg::Result<TableV2> {
+            todo!()
+        }
+
+        /// Load table from the catalog.
+        async fn load_table(&self, table: &TableIdent) -> iceberg::Result<TableV2> {
+            match table.name.as_ref() {
+                Self::SPARSE_TABLE => Ok(Self::sparse_table_v2()),
+                Self::RANGE_TABLE => Ok(Self::range_table_v2()),
+                _ => unimplemented!("table {} not found", table.name()),
+            }
+        }
+
+        /// Drop a table from the catalog.
+        async fn drop_table(&self, _table: &TableIdent) -> iceberg::Result<()> {
+            todo!()
+        }
+
+        /// Check if a table exists in the catalog.
+        async fn table_exists(&self, table: &TableIdent) -> iceberg::Result<bool> {
+            match table.name.as_ref() {
+                Self::SPARSE_TABLE => Ok(true),
+                Self::RANGE_TABLE => Ok(true),
+                _ => Ok(false),
+            }
+        }
+
+        /// Rename a table in the catalog.
+        async fn rename_table(&self, _src: &TableIdent, _dest: &TableIdent) -> iceberg::Result<()> {
+            todo!()
+        }
+
+        /// Update a table to the catalog.
+        async fn update_table(&self, _commit: TableCommit) -> iceberg::Result<TableV2> {
+            todo!()
+        }
     }
 }
