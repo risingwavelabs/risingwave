@@ -9136,28 +9136,6 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
-dependencies = [
- "bytes",
- "heck 0.4.1",
- "itertools 0.11.0",
- "log",
- "multimap 0.8.3",
- "once_cell",
- "petgraph",
- "prettyplease 0.2.15",
- "prost 0.12.6",
- "prost-types 0.12.6",
- "regex",
- "syn 2.0.66",
- "tempfile",
- "which",
-]
-
-[[package]]
-name = "prost-build"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5bb182580f71dd070f88d01ce3de9f4da5021db7115d2e1c3605a754153b77c1"
@@ -10697,7 +10675,7 @@ dependencies = [
  "madsim-tokio",
  "num-bigint",
  "prost 0.13.1",
- "prost-build 0.12.1",
+ "prost-build 0.13.1",
  "prost-reflect",
  "prost-types 0.13.1",
  "protox",
@@ -10898,7 +10876,7 @@ dependencies = [
  "sql-json-path",
  "thiserror",
  "thiserror-ext",
- "tonic 0.11.0",
+ "tonic 0.12.2",
  "tracing",
  "workspace-hack",
  "zstd 0.13.0",
