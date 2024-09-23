@@ -43,7 +43,7 @@ use risingwave_connector::source::reader::desc::test_utils::create_source_desc_b
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
-use risingwave_pb::plan_common::PbRowFormatType;
+use risingwave_pb::plan_common::{EncodeType, FormatType, PbRowFormatType};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::panic_store::PanicStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -112,7 +112,8 @@ async fn test_table_materialize() -> StreamResult<()> {
         ],
     };
     let source_info = StreamSourceInfo {
-        row_format: PbRowFormatType::Json as i32,
+        format: FormatType::Plain as i32,
+        row_encode: EncodeType::Json as i32,
         ..Default::default()
     };
     let properties = convert_args!(btreemap!(

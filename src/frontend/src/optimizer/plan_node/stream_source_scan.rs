@@ -22,6 +22,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::parser::additional_columns::source_add_partition_offset_cols;
+use risingwave_pb::plan_common::FormatType;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::PbStreamNode;
 
@@ -61,7 +62,11 @@ impl StreamSourceScan {
             let (columns_exist, additional_columns) = source_add_partition_offset_cols(
                 &core.column_catalog,
                 &source_catalog.connector_name(),
-                source_catalog.info.get_format().as_ref().unwrap(),
+                source_catalog
+                    .info
+                    .get_format()
+                    .as_ref()
+                    .unwrap_or(&FormatType::Unspecified),
             );
             for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
                 if !existed {

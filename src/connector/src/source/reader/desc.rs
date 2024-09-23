@@ -18,7 +18,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbStreamSourceInfo;
-use risingwave_pb::plan_common::PbColumnCatalog;
+use risingwave_pb::plan_common::{FormatType, PbColumnCatalog};
 
 #[expect(deprecated)]
 use super::fs_reader::FsSourceReader;
@@ -93,7 +93,10 @@ impl SourceDescBuilder {
         let (columns_exist, additional_columns) = source_add_partition_offset_cols(
             &self.columns,
             &connector_name,
-            self.source_info.get_format().as_ref().unwrap(),
+            self.source_info
+                .get_format()
+                .as_ref()
+                .unwrap_or(&FormatType::Unspecified),
         );
 
         let mut columns: Vec<_> = self
