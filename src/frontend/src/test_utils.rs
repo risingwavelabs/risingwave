@@ -33,6 +33,7 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::{HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
@@ -941,8 +942,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
-    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot { committed_epoch: 0 })
+    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockVersionId> {
+        Ok(INVALID_VERSION_ID)
     }
 
     async fn wait(&self) -> RpcResult<()> {

@@ -83,11 +83,13 @@ public class DbzSourceUtils {
                 if (schemaTableName.isPresent()) {
                     createPublicationSql =
                             String.format(
-                                    "CREATE PUBLICATION %s FOR TABLE %s;",
+                                    "CREATE PUBLICATION %s FOR TABLE %s WITH ( publish_via_partition_root = true );",
                                     quotePostgres(pubName), schemaTableName.get());
                 } else {
                     createPublicationSql =
-                            String.format("CREATE PUBLICATION %s", quotePostgres(pubName));
+                            String.format(
+                                    "CREATE PUBLICATION %s WITH ( publish_via_partition_root = true );",
+                                    quotePostgres(pubName));
                 }
                 try (var stmt = jdbcConnection.createStatement()) {
                     LOG.info(

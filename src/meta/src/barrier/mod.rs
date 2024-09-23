@@ -1301,6 +1301,10 @@ impl GlobalBarrierManagerContext {
             }
         }
     }
+
+    pub fn hummock_manager(&self) -> &HummockManagerRef {
+        &self.hummock_manager
+    }
 }
 
 impl CreateMviewProgressTracker {
