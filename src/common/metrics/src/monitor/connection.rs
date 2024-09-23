@@ -482,6 +482,7 @@ pub struct TcpConfig {
     pub keepalive_duration: Option<Duration>,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for TcpConfig {
     fn default() -> Self {
         Self {
