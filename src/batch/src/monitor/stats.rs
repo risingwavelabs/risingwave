@@ -58,8 +58,9 @@ impl BatchExecutorMetrics {
     }
 
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
-    pub fn for_test() -> Self {
-        GLOBAL_BATCH_EXECUTOR_METRICS.clone()
+    #[cfg(test)]
+    pub fn for_test() -> Arc<Self> {
+        Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone())
     }
 }
 
@@ -88,6 +89,14 @@ impl BatchMetricsInner {
 
     pub fn batch_manager_metrics(&self) -> &BatchManagerMetrics {
         &self.batch_manager_metrics
+    }
+
+    #[cfg(test)]
+    pub fn for_test() -> BatchMetrics {
+        Arc::new(Self {
+            batch_manager_metrics: BatchManagerMetrics::for_test(),
+            executor_metrics: BatchExecutorMetrics::for_test(),
+        })
     }
 }
 

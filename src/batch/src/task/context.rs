@@ -136,7 +136,7 @@ impl ComputeNodeContext {
     pub fn for_test() -> Self {
         Self {
             env: BatchEnvironment::for_test(),
-            batch_metrics: BatchMetrics::for_test().into(),
+            batch_metrics: BatchMetricsInner::for_test(),
             mem_context: MemoryContext::none(),
         }
     }

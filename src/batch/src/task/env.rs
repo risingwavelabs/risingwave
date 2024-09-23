@@ -114,7 +114,7 @@ impl BatchEnvironment {
             client_pool: Arc::new(ComputeClientPool::for_test()),
             dml_manager: Arc::new(DmlManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
-            executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),
+            executor_metrics: BatchExecutorMetrics::for_test(),
             spill_metrics: BatchSpillMetrics::for_test(),
             metric_level: MetricLevel::Debug,
         }
