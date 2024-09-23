@@ -309,9 +309,9 @@ impl HummockStorage {
         epoch: u64,
         table_id: TableId,
     ) -> StorageResult<PinnedVersion> {
-        let fetch = async {
-            let pb_version = self
-                .hummock_meta_client
+        let meta_client = self.hummock_meta_client.clone();
+        let fetch = async move {
+            let pb_version = meta_client
                 .get_version_by_epoch(epoch, table_id.table_id())
                 .await
                 .inspect_err(|e| tracing::error!("{}", e.to_report_string()))

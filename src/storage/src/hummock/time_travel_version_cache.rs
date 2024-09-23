@@ -13,23 +13,31 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::pin::Pin;
 
+use ahash::HashMap;
+use futures::future::Shared;
+use futures::FutureExt;
 use moka::sync::Cache;
+use parking_lot::{Mutex, RwLock};
 use risingwave_hummock_sdk::HummockEpoch;
-use tokio::sync::Mutex;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::HummockResult;
 
+type InflightRequest = Shared<Pin<Box<dyn Future<Output = HummockResult<PinnedVersion>> + Send>>>;
+
 /// A naive cache to reduce number of RPC sent to meta node.
 pub struct SimpleTimeTravelVersionCache {
-    inner: Mutex<SimpleTimeTravelVersionCacheInner>,
+    inner: RwLock<SimpleTimeTravelVersionCacheInner>,
+    request_registry: Mutex<HashMap<(u32, HummockEpoch), InflightRequest>>,
 }
 
 impl SimpleTimeTravelVersionCache {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(SimpleTimeTravelVersionCacheInner::new()),
+            inner: RwLock::new(SimpleTimeTravelVersionCacheInner::new()),
+            request_registry: Default::default(),
         }
     }
 
@@ -37,15 +45,28 @@ impl SimpleTimeTravelVersionCache {
         &self,
         table_id: u32,
         epoch: HummockEpoch,
-        fetch: impl Future<Output = HummockResult<PinnedVersion>>,
+        fetch: impl Future<Output = HummockResult<PinnedVersion>> + Send + 'static,
     ) -> HummockResult<PinnedVersion> {
-        let mut guard = self.inner.lock().await;
-        if let Some(v) = guard.get(table_id, epoch) {
+        // happy path: from cache
+        if let Some(v) = self.inner.read().get(table_id, epoch) {
             return Ok(v);
         }
-        let version = fetch.await?;
-        guard.add(table_id, epoch, version);
-        Ok(guard.get(table_id, epoch).unwrap())
+        // slow path: from RPC
+        let fut = {
+            let mut requests = self.request_registry.lock();
+            let inflight = requests.get(&(table_id, epoch)).cloned();
+            inflight.unwrap_or_else(|| {
+                let request = fetch.boxed().shared();
+                requests.insert((table_id, epoch), request.clone());
+                request
+            })
+        };
+        let result = fut.await;
+        if let Ok(ref v) = result {
+            self.inner.write().try_insert(table_id, epoch, v);
+        }
+        self.request_registry.lock().remove(&(table_id, epoch));
+        result
     }
 }
 
@@ -63,11 +84,15 @@ impl SimpleTimeTravelVersionCacheInner {
         Self { cache }
     }
 
+    /// Tries to get the value
     fn get(&self, table_id: u32, epoch: HummockEpoch) -> Option<PinnedVersion> {
         self.cache.get(&(table_id, epoch))
     }
 
-    fn add(&mut self, table_id: u32, epoch: HummockEpoch, version: PinnedVersion) {
-        self.cache.insert((table_id, epoch), version);
+    /// Inserts entry if key is not present.
+    fn try_insert(&mut self, table_id: u32, epoch: HummockEpoch, version: &PinnedVersion) {
+        if !self.cache.contains_key(&(table_id, epoch)) {
+            self.cache.insert((table_id, epoch), version.clone())
+        }
     }
 }
