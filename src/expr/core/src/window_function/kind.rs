@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 
@@ -51,13 +52,11 @@ impl WindowFuncKind {
                 Ok(PbGeneralType::Lead) => Self::Lead,
                 Err(_) => bail!("no such window function type"),
             },
-            PbType::AggregateSimple(agg_type) => match PbAggKind::try_from(*agg_type) {
-                // TODO(runji): support UDAF and wrapped scalar functions
-                Ok(agg_type) => {
-                    Self::Aggregate(AggType::from_protobuf_flatten(agg_type, None, None)?)
-                }
-                Err(_) => bail!("no such aggregate function type"),
-            },
+            PbType::AggregateSimple(kind) => Self::Aggregate(AggType::from_protobuf_flatten(
+                PbAggKind::try_from(*kind).context("no such aggregate function type")?,
+                None,
+                None,
+            )?),
             PbType::Aggregate(agg_type) => Self::Aggregate(AggType::from_protobuf(agg_type)?),
         };
         Ok(kind)

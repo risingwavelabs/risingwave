@@ -290,7 +290,7 @@ impl AggType {
     }
 
     pub fn from_protobuf(pb_type: &PbAggType) -> Result<Self> {
-        match pb_type.kind() {
+        match PbAggKind::try_from(pb_type.kind).context("no such aggregate function type")? {
             PbAggKind::Unspecified => bail!("Unrecognized agg."),
             PbAggKind::UserDefined => Ok(AggType::UserDefined(pb_type.get_udf_meta()?.clone())),
             PbAggKind::WrapScalar => Ok(AggType::WrapScalar(pb_type.get_scalar_expr()?.clone())),
