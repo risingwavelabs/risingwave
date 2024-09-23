@@ -2110,7 +2110,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -6055,7 +6055,7 @@ dependencies = [
  "moka",
  "murmur3",
  "once_cell",
- "opendal 0.49.0",
+ "opendal",
  "ordered-float 4.1.1",
  "parquet 52.0.0",
  "paste",
@@ -6113,7 +6113,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.3.141592654"
-source = "git+https://github.com/risingwavelabs/icelake.git?rev=db4868f9a5de8ff8f6c04ec4c203bcbe59564cbe#db4868f9a5de8ff8f6c04ec4c203bcbe59564cbe"
+source = "git+https://github.com/risingwavelabs/icelake.git?rev=490e5af541edab0e9284ba19ddb56c8a16d1c36b#490e5af541edab0e9284ba19ddb56c8a16d1c36b"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (git+https://github.com/apache/avro.git)",
@@ -6139,7 +6139,7 @@ dependencies = [
  "log",
  "murmur3",
  "once_cell",
- "opendal 0.47.2",
+ "opendal",
  "ordered-float 3.9.1",
  "parquet 52.0.0",
  "prometheus",
@@ -7911,9 +7911,9 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "opendal"
-version = "0.47.2"
+version = "0.49.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff159a2da374ef2d64848a6547943cf1af7d2ceada5ae77be175e1389aa07ae3"
+checksum = "9b04d09b9822c2f75a1d2fc513a2c1279c70e91e7407936fffdf6a6976ec530a"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7931,42 +7931,12 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "prometheus",
- "quick-xml 0.31.0",
- "reqsign 0.15.2",
+ "quick-xml 0.36.1",
+ "reqsign",
  "reqwest 0.12.4",
  "serde",
  "serde_json",
  "sha2",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "opendal"
-version = "0.49.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39d516adf7db912c38af382c3e92c27cd62fbbc240e630920555d784c2ab1494"
-dependencies = [
- "anyhow",
- "async-trait",
- "backon",
- "base64 0.22.0",
- "bytes",
- "chrono",
- "crc32c",
- "flagset",
- "futures",
- "getrandom",
- "http 1.1.0",
- "log",
- "md-5",
- "once_cell",
- "percent-encoding",
- "quick-xml 0.36.1",
- "reqsign 0.16.0",
- "reqwest 0.12.4",
- "serde",
- "serde_json",
  "tokio",
  "uuid",
 ]
@@ -9227,7 +9197,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.66",
@@ -9419,7 +9389,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -9513,16 +9483,6 @@ name = "quick-xml"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eff6510e86862b57b210fd8cbe8ed3f0d7d600b9c2863cd4549a2e033c66e956"
-dependencies = [
- "memchr",
- "serde",
-]
-
-[[package]]
-name = "quick-xml"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1004a344b30a54e2ee58d66a71b32d2db2feb0a31f9a2d302bf0536f15de2a33"
 dependencies = [
  "memchr",
  "serde",
@@ -9813,9 +9773,9 @@ dependencies = [
 
 [[package]]
 name = "reqsign"
-version = "0.15.2"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70fe66d4cd0b5ed9b1abbfe639bf6baeaaf509f7da2d51b31111ba945be59286"
+checksum = "03dd4ba7c3901dd43e6b8c7446a760d45bc1ea4301002e1a6fa48f97c3a796fa"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9831,38 +9791,10 @@ dependencies = [
  "log",
  "once_cell",
  "percent-encoding",
- "quick-xml 0.31.0",
- "rand",
- "reqwest 0.12.4",
- "rsa",
- "rust-ini",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
-]
-
-[[package]]
-name = "reqsign"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03dd4ba7c3901dd43e6b8c7446a760d45bc1ea4301002e1a6fa48f97c3a796fa"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.0",
- "chrono",
- "form_urlencoded",
- "getrandom",
- "hex",
- "hmac",
- "home",
- "http 1.1.0",
- "log",
- "percent-encoding",
  "quick-xml 0.35.0",
  "rand",
  "reqwest 0.12.4",
+ "rsa",
  "rust-ini",
  "serde",
  "serde_json",
@@ -10154,7 +10086,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
- "opendal 0.47.2",
+ "opendal",
  "parking_lot 0.12.1",
  "parquet 52.0.0",
  "paste",
@@ -10684,7 +10616,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
- "opendal 0.47.2",
+ "opendal",
  "openssl",
  "parking_lot 0.12.1",
  "parquet 52.0.0",
@@ -11445,7 +11377,7 @@ dependencies = [
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal 0.47.2",
+ "opendal",
  "prometheus",
  "reqwest 0.12.4",
  "risingwave_common",
