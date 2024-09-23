@@ -132,7 +132,7 @@ impl PinnedSnapshot {
                     }
                 })
             })?
-            .unwrap_or(Epoch(self.value.max_committed_epoch));
+            .unwrap_or_else(Epoch::now);
         Ok(epoch)
     }
 

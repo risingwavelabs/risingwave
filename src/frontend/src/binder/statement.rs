@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{Field, TableId};
+use risingwave_common::catalog::Field;
 use risingwave_sqlparser::ast::Statement;
 
 use super::delete::BoundDelete;
@@ -57,18 +55,6 @@ impl BoundStatement {
                 .as_ref()
                 .map_or(vec![], |s| s.fields().into()),
             BoundStatement::CreateView(_) => vec![],
-        }
-    }
-
-    pub fn scan_tables(&self) -> HashSet<TableId> {
-        if let BoundStatement::Query(query) = self {
-            let mut tables = HashSet::new();
-            query.body.visit_all_scan_table_id(&mut |table_id| {
-                tables.insert(table_id);
-            });
-            tables
-        } else {
-            HashSet::new()
         }
     }
 }

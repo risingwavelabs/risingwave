@@ -205,8 +205,7 @@ pub struct BatchQueryPlanResult {
     // Note that these relations are only resolved in the binding phase, and it may only be a
     // subset of the final one. i.e. the final one may contain more implicit dependencies on
     // indices.
-    pub(crate) dependent_relations: Vec<TableId>,
-    pub(crate) scan_tables: HashSet<TableId>,
+    pub(crate) dependent_relations: HashSet<TableId>,
 }
 
 fn gen_batch_query_plan(
@@ -224,11 +223,9 @@ fn gen_batch_query_plan(
 
     let mut planner = Planner::new(context);
 
-    let scan_tables = bound.scan_tables();
-
     let mut logical = planner.plan(bound)?;
     let schema = logical.schema();
-    let batch_plan = logical.gen_batch_plan(&scan_tables)?;
+    let batch_plan = logical.gen_batch_plan()?;
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.clone());
@@ -262,8 +259,7 @@ fn gen_batch_query_plan(
         query_mode,
         schema,
         stmt_type,
-        dependent_relations: dependent_relations.into_iter().collect_vec(),
-        scan_tables,
+        dependent_relations: dependent_relations.into_iter().collect(),
     })
 }
 
@@ -315,8 +311,7 @@ pub struct BatchPlanFragmenterResult {
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
-    pub(crate) _dependent_relations: Vec<TableId>,
-    pub(crate) scan_tables: HashSet<TableId>,
+    pub(crate) dependent_relations: HashSet<TableId>,
 }
 
 pub fn gen_batch_plan_fragmenter(
@@ -329,7 +324,6 @@ pub fn gen_batch_plan_fragmenter(
         schema,
         stmt_type,
         dependent_relations,
-        scan_tables,
     } = plan_result;
 
     tracing::trace!(
@@ -353,8 +347,7 @@ pub fn gen_batch_plan_fragmenter(
         query_mode,
         schema,
         stmt_type,
-        _dependent_relations: dependent_relations,
-        scan_tables,
+        dependent_relations,
     })
 }
 
@@ -368,7 +361,7 @@ pub async fn create_stream(
         query_mode,
         schema,
         stmt_type,
-        scan_tables,
+        dependent_relations,
         ..
     } = plan_fragmenter_result;
 
@@ -400,7 +393,13 @@ pub async fn create_stream(
     let row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-            local_execute(session.clone(), query, can_timeout_cancel, scan_tables).await?,
+            local_execute(
+                session.clone(),
+                query,
+                can_timeout_cancel,
+                dependent_relations,
+            )
+            .await?,
             column_types,
             formats,
             session.clone(),
@@ -408,7 +407,13 @@ pub async fn create_stream(
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
             PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                distribute_execute(session.clone(), query, can_timeout_cancel, scan_tables).await?,
+                distribute_execute(
+                    session.clone(),
+                    query,
+                    can_timeout_cancel,
+                    dependent_relations,
+                )
+                .await?,
                 column_types,
                 formats,
                 session.clone(),
@@ -511,7 +516,7 @@ pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
-    scan_tables: HashSet<TableId>,
+    dependent_relations: HashSet<TableId>,
 ) -> Result<LocalQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -523,7 +528,7 @@ pub async fn local_execute(
     let front_env = session.env();
 
     // TODO: if there's no table scan, we don't need to acquire snapshot.
-    let snapshot = session.pinned_snapshot(scan_tables);
+    let snapshot = session.pinned_snapshot(dependent_relations);
 
     // TODO: Passing sql here
     let execution =

@@ -16,7 +16,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{
@@ -121,13 +121,6 @@ impl BoundQuery {
             with_ties: false,
             extra_order_exprs: vec![],
         }
-    }
-
-    pub fn visit_all_scan_table_id(&self, visitor: &mut impl FnMut(TableId)) {
-        self.body.visit_all_scan_table_id(visitor);
-        self.extra_order_exprs
-            .iter()
-            .for_each(|expr| expr.visit_all_scan_table_id(visitor));
     }
 }
 

@@ -185,7 +185,6 @@ fn run_batch_query(
     let bound = binder
         .bind(stmt)
         .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e.as_report())))?;
-    let scan_tables = bound.scan_tables();
     let mut planner = Planner::new(context);
     let mut plan_root = planner.plan(bound).map_err(|e| {
         Failed::from(format!(
@@ -193,7 +192,7 @@ fn run_batch_query(
             e.as_report()
         ))
     })?;
-    plan_root.gen_batch_plan(&scan_tables).map_err(|e| {
+    plan_root.gen_batch_plan().map_err(|e| {
         Failed::from(format!(
             "Failed to generate batch plan:\nReason:\n{}",
             e.as_report()

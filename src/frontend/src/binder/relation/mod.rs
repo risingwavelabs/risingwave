@@ -15,7 +15,6 @@
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
-use either::Either;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
@@ -136,59 +135,6 @@ impl Relation {
             } => table_function
                 .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
             _ => vec![],
-        }
-    }
-
-    pub fn visit_all_scan_table_id(&self, visitor: &mut impl FnMut(TableId)) {
-        match self {
-            Relation::Source(source) => {
-                if let Some(table_id) = &source.catalog.associated_table_id {
-                    visitor(*table_id);
-                }
-            }
-            Relation::BaseTable(table) => {
-                visitor(table.table_id);
-            }
-            Relation::SystemTable(_) => {}
-            Relation::Subquery(subquery) => {
-                subquery.query.body.visit_all_scan_table_id(visitor);
-            }
-            Relation::Join(join) | Relation::Apply(join) => {
-                join.left.visit_all_scan_table_id(visitor);
-                join.right.visit_all_scan_table_id(visitor);
-                join.cond.visit_all_scan_table_id(visitor);
-            }
-            Relation::WindowTableFunction(func) => {
-                func.input.visit_all_scan_table_id(visitor);
-                func.args
-                    .iter()
-                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
-            }
-            Relation::TableFunction { expr, .. } => {
-                expr.visit_all_scan_table_id(visitor);
-            }
-            Relation::Watermark(watermark) => {
-                watermark.input.visit_all_scan_table_id(visitor);
-                watermark
-                    .args
-                    .iter()
-                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
-            }
-            Relation::Share(share) => match &share.input {
-                BoundShareInput::Query(query) => match query {
-                    Either::Left(query) => {
-                        query.visit_all_scan_table_id(visitor);
-                    }
-                    Either::Right(recursive) => {
-                        recursive.base.visit_all_scan_table_id(visitor);
-                        recursive.recursive.visit_all_scan_table_id(visitor);
-                    }
-                },
-                BoundShareInput::ChangeLog(change_log) => {
-                    change_log.visit_all_scan_table_id(visitor);
-                }
-            },
-            Relation::BackCteRef(_) => {}
         }
     }
 }

@@ -14,7 +14,7 @@
 
 use core::mem;
 use core::time::Duration;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -650,8 +650,7 @@ impl SubscriptionCursor {
             query_mode,
             schema,
             stmt_type: StatementType::SELECT,
-            dependent_relations: table_catalog.dependent_relations.clone(),
-            scan_tables: HashSet::from_iter([table_catalog.id]),
+            dependent_relations: table_catalog.dependent_relations.iter().cloned().collect(),
         })
     }
 
