@@ -236,6 +236,7 @@ export default function Streaming() {
     }
   }, [relationId, relationList, setRelationId])
 
+  // The table fragments of the selected fragment id
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
   const fragments = fragmentDependencyCallback()?.fragments

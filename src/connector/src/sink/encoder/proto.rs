@@ -471,10 +471,10 @@ mod tests {
     #[test]
     fn test_encode_proto_ok() {
         let pool_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/test_data/proto_recursive/recursive.pb");
+            .join("codec/tests/test_data/all-types.pb");
         let pool_bytes = std::fs::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
-        let descriptor = pool.get_message_by_name("recursive.AllTypes").unwrap();
+        let descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
         let schema = Schema::new(vec![
             Field::with_name(DataType::Boolean, "bool_field"),
             Field::with_name(DataType::Varchar, "string_field"),
@@ -888,10 +888,10 @@ mod tests {
     #[test]
     fn test_encode_proto_repeated() {
         let pool_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/test_data/proto_recursive/recursive.pb");
-        let pool_bytes = std::fs::read(pool_path).unwrap();
+            .join("codec/tests/test_data/all-types.pb");
+        let pool_bytes = fs_err::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
-        let message_descriptor = pool.get_message_by_name("recursive.AllTypes").unwrap();
+        let message_descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
 
         let schema = Schema::new(vec![Field::with_name(
             DataType::List(DataType::List(DataType::Int32.into()).into()),
@@ -940,10 +940,10 @@ mod tests {
     #[test]
     fn test_encode_proto_err() {
         let pool_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/test_data/proto_recursive/recursive.pb");
+            .join("codec/tests/test_data/all-types.pb");
         let pool_bytes = std::fs::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
-        let message_descriptor = pool.get_message_by_name("recursive.AllTypes").unwrap();
+        let message_descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
 
         let err = validate_fields(
             std::iter::once(("not_exists", &DataType::Int16)),
