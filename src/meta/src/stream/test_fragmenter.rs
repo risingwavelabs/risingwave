@@ -56,7 +56,7 @@ fn make_inputref(idx: u32) -> ExprNode {
 
 fn make_sum_aggcall(idx: u32) -> AggCall {
     AggCall {
-        r#type: PbAggKind::Sum as i32,
+        kind: PbAggKind::Sum as i32,
         args: vec![PbInputRef {
             index: idx,
             r#type: Some(DataType {

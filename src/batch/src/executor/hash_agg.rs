@@ -788,7 +788,7 @@ mod tests {
             ));
 
             let agg_call = AggCall {
-                r#type: PbAggKind::Sum as i32,
+                kind: PbAggKind::Sum as i32,
                 args: vec![InputRef {
                     index: 2,
                     r#type: Some(PbDataType {
@@ -873,7 +873,7 @@ mod tests {
         );
 
         let agg_call = AggCall {
-            r#type: PbAggKind::Count as i32,
+            kind: PbAggKind::Count as i32,
             args: vec![],
             return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
@@ -985,7 +985,7 @@ mod tests {
         );
 
         let agg_call = AggCall {
-            r#type: PbAggKind::Sum as i32,
+            kind: PbAggKind::Sum as i32,
             args: vec![InputRef {
                 index: 2,
                 r#type: Some(PbDataType {
@@ -1078,7 +1078,7 @@ mod tests {
         ));
 
         let agg_call = AggCall {
-            r#type: PbAggKind::Sum as i32,
+            kind: PbAggKind::Sum as i32,
             args: vec![InputRef {
                 index: 2,
                 r#type: Some(PbDataType {

@@ -780,7 +780,7 @@ impl PlanAggCall {
 
     pub fn to_protobuf(&self) -> PbAggCall {
         PbAggCall {
-            r#type: match &self.agg_kind {
+            kind: match &self.agg_kind {
                 AggKind::Builtin(kind) => *kind,
                 AggKind::UserDefined(_) => PbAggKind::UserDefined,
                 AggKind::WrapScalar(_) => PbAggKind::WrapScalar,

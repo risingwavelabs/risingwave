@@ -66,7 +66,7 @@ pub struct AggCall {
 impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
         let agg_kind = AggKind::from_protobuf(
-            agg_call.get_type()?,
+            agg_call.get_kind()?,
             agg_call.udf.as_ref(),
             agg_call.scalar.as_ref(),
         )?;
