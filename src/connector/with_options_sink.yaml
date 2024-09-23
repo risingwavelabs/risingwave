@@ -177,6 +177,10 @@ DynamoDbConfig:
     required: true
     alias:
     - dynamodb.table
+  - name: dynamodb.max_batch_rows
+    field_type: usize
+    required: false
+    default: '1024'
   - name: aws.region
     field_type: String
     required: false
@@ -671,6 +675,11 @@ MongodbConfig:
       result collection.
     required: false
     default: Default::default
+  - name: mongodb.bulk_write.max_entries
+    field_type: usize
+    comments: The maximum entries will accumulate before performing the bulk write, defaults to 1024.
+    required: false
+    default: '1024'
 MqttConfig:
   fields:
   - name: url
