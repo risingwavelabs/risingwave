@@ -72,6 +72,7 @@ use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
+use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
@@ -234,6 +235,7 @@ pub struct MockCatalogWriter {
     id: AtomicU32,
     table_id_to_schema_id: RwLock<HashMap<u32, SchemaId>>,
     schema_id_to_database_id: RwLock<HashMap<u32, DatabaseId>>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 #[async_trait::async_trait]
@@ -280,6 +282,8 @@ impl CatalogWriter for MockCatalogWriter {
         table.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
+        self.hummock_snapshot_manager
+            .add_table_for_test(TableId::new(table.id));
         Ok(())
     }
 
@@ -660,7 +664,10 @@ impl CatalogWriter for MockCatalogWriter {
 }
 
 impl MockCatalogWriter {
-    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
+    pub fn new(
+        catalog: Arc<RwLock<Catalog>>,
+        hummock_snapshot_manager: HummockSnapshotManagerRef,
+    ) -> Self {
         catalog.write().create_database(&PbDatabase {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_string(),
@@ -693,6 +700,7 @@ impl MockCatalogWriter {
             id: AtomicU32::new(3),
             table_id_to_schema_id: Default::default(),
             schema_id_to_database_id: RwLock::new(map),
+            hummock_snapshot_manager,
         }
     }
 

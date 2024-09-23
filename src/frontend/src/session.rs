@@ -186,14 +186,17 @@ impl FrontendEnv {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
-        let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
+        let meta_client = Arc::new(MockFrontendMetaClient {});
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let catalog_writer = Arc::new(MockCatalogWriter::new(
+            catalog.clone(),
+            hummock_snapshot_manager.clone(),
+        ));
         let catalog_reader = CatalogReader::new(catalog);
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let user_info_writer = Arc::new(MockUserInfoWriter::new(user_info_manager.clone()));
         let user_info_reader = UserInfoReader::new(user_info_manager);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let meta_client = Arc::new(MockFrontendMetaClient {});
-        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let query_manager = QueryManager::new(
