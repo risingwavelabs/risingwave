@@ -404,6 +404,53 @@ impl ExprImpl {
     pub fn fold_const(&self) -> RwResult<Datum> {
         self.try_fold_const().expect("expression is not constant")
     }
+
+    pub fn visit_all_scan_table_id(&self, visitor: &mut impl FnMut(TableId)) {
+        match self {
+            ExprImpl::CorrelatedInputRef(_) => {}
+            ExprImpl::InputRef(_) => {}
+            ExprImpl::Literal(_) => {}
+            ExprImpl::FunctionCall(call) => {
+                call.inputs
+                    .iter()
+                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
+            }
+            ExprImpl::FunctionCallWithLambda(call) => {
+                call.inputs_with_lambda_arg()
+                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
+            }
+            ExprImpl::AggCall(agg) => {
+                agg.iter_expr()
+                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
+            }
+            ExprImpl::Subquery(query) => {
+                query.query.body.visit_all_scan_table_id(visitor);
+                query
+                    .query
+                    .extra_order_exprs
+                    .iter()
+                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
+            }
+            ExprImpl::TableFunction(func) => {
+                func.args
+                    .iter()
+                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
+            }
+            ExprImpl::WindowFunction(func) => {
+                func.args
+                    .iter()
+                    .chain(func.partition_by.iter())
+                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
+            }
+            ExprImpl::UserDefinedFunction(func) => {
+                func.args
+                    .iter()
+                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
+            }
+            ExprImpl::Parameter(_) => {}
+            ExprImpl::Now(_) => {}
+        }
+    }
 }
 
 /// Implement helper functions which recursively checks whether an variant is included in the
@@ -1168,7 +1215,7 @@ macro_rules! assert_eq_input_ref {
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::row::OwnedRow;
 
 use self::function_call::CastError;

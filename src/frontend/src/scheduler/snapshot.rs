@@ -38,7 +38,7 @@ pub enum ReadSnapshot {
         snapshot: PinnedSnapshotRef,
     },
 
-    BarrierRead,
+    ReadUncommitted,
 
     /// Other arbitrary epoch, e.g. user specified.
     /// Availability and consistency of underlying data should be guaranteed accordingly.
@@ -67,7 +67,7 @@ impl QuerySnapshot {
                     snapshot.batch_query_epoch(&self.scan_tables)?.0,
                 )),
             },
-            ReadSnapshot::BarrierRead => BatchQueryEpoch {
+            ReadSnapshot::ReadUncommitted => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Current(u64::MAX)),
             },
             ReadSnapshot::Other(e) => BatchQueryEpoch {
@@ -82,14 +82,14 @@ impl QuerySnapshot {
                 snapshot.batch_query_epoch(&self.scan_tables)?
             }
             ReadSnapshot::Other(epoch) => *epoch,
-            ReadSnapshot::BarrierRead => Epoch::now(),
+            ReadSnapshot::ReadUncommitted => Epoch::now(),
         };
         Ok(InlineNowProcTime::new(epoch))
     }
 
     /// Returns true if this snapshot is a barrier read.
     pub fn support_barrier_read(&self) -> bool {
-        matches!(&self.snapshot, ReadSnapshot::BarrierRead)
+        matches!(&self.snapshot, ReadSnapshot::ReadUncommitted)
     }
 }
 
@@ -124,7 +124,7 @@ impl PinnedSnapshot {
             .try_fold(None, |prev_min_committed_epoch, committed_epoch| {
                 committed_epoch.map(|committed_epoch| {
                     if let Some(prev_min_committed_epoch) = prev_min_committed_epoch
-                        && prev_min_committed_epoch >= committed_epoch
+                        && prev_min_committed_epoch <= committed_epoch
                     {
                         Some(prev_min_committed_epoch)
                     } else {

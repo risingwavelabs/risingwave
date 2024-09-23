@@ -148,13 +148,22 @@ impl BoundSetExpr {
         match self {
             BoundSetExpr::Select(select) => {
                 if let Some(relation) = &select.from {
-                    relation.visit_all_scan_table(visitor);
+                    relation.visit_all_scan_table_id(visitor);
                 }
+                select
+                    .exprs()
+                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
             }
             BoundSetExpr::Query(query) => {
-                query.body.visit_all_scan_table_id(visitor);
+                query.visit_all_scan_table_id(visitor);
             }
-            BoundSetExpr::Values(_) => {}
+            BoundSetExpr::Values(values) => {
+                values
+                    .rows
+                    .iter()
+                    .flatten()
+                    .for_each(|expr| expr.visit_all_scan_table_id(visitor));
+            }
             BoundSetExpr::SetOperation { left, right, .. } => {
                 left.visit_all_scan_table_id(visitor);
                 right.visit_all_scan_table_id(visitor);

@@ -124,6 +124,10 @@ impl AggCall {
     pub fn filter_mut(&mut self) -> &mut Condition {
         &mut self.filter
     }
+
+    pub fn iter_expr(&self) -> impl Iterator<Item = &ExprImpl> + '_ {
+        self.args.iter().chain(self.filter.conjunctions.iter())
+    }
 }
 
 impl Expr for AggCall {
