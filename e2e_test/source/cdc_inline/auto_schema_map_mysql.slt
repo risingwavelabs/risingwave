@@ -107,8 +107,8 @@ FLUSH;
 query TTTTTTTTTTTTTT
 SELECT * FROM test_default where id>=4 order by id;
 ----
-4 default_name 18 1.1 2.2 3.30 0 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 2020-01-01 12:34:56 NULL
-5 default_name 18 1.1 2.2 3.30 0 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 2020-01-01 12:34:56 NULL
+4 default_name 18 1.1 2.2 3.3 0 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 2020-01-01 12:34:56 NULL
+5 default_name 18 1.1 2.2 3.3 0 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 2020-01-01 12:34:56 NULL
 
 statement ok
 create table rw_customers (*) from mysql_source table 'mytest.customers';
