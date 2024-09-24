@@ -63,6 +63,12 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
         else:
             return f"CSV (delimiter = ',', without_header = {str('without' in fmt).lower()})"
 
+    def _include_clause():
+        if fmt == 'json':
+            return 'INCLUDE payload as rw_payload'
+        else:
+            return ''
+
     # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE {_table()}(
         id int,
@@ -70,7 +76,7 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
         sex int,
         mark int,
     )
-    INCLUDE payload as rw_payload
+    {_include_clause()}
     WITH (
         connector = 's3',
         match_pattern = '{prefix}*.{fmt}',
@@ -113,7 +119,7 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
     cur.execute(stmt)
     result = cur.fetchone()
     print("Got one line with rw_payload: ", result)
-    payload = json.loads(result[4])
+    payload = result[4]
     _assert_eq('id', payload['id'], result[0])
     _assert_eq('name', payload['name'], result[1])
     _assert_eq('sex', payload['sex'], result[2])
