@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail, bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
+use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
@@ -389,7 +389,7 @@ impl LogicalAgg {
         let mut approx_percentile_col_mapping = Vec::with_capacity(estimated_len);
         let mut non_approx_percentile_col_mapping = Vec::with_capacity(estimated_len);
         for (output_idx, agg_call) in self.agg_calls().iter().enumerate() {
-            if agg_call.agg_kind == AggKind::Builtin(PbAggKind::ApproxPercentile) {
+            if agg_call.agg_type == AggType::Builtin(PbAggKind::ApproxPercentile) {
                 approx_percentile_agg_calls.push(agg_call.clone());
                 approx_percentile_col_mapping.push(Some(output_idx));
             } else {
@@ -610,9 +610,9 @@ impl LogicalAggBuilder {
         agg_call: AggCall,
         mut push_agg_call: impl FnMut(AggCall) -> Result<InputRef>,
     ) -> Result<ExprImpl> {
-        match agg_call.agg_kind {
+        match agg_call.agg_type {
             // Rewrite avg to cast(sum as avg_return_type) / count.
-            AggKind::Builtin(PbAggKind::Avg) => {
+            AggType::Builtin(PbAggKind::Avg) => {
                 assert_eq!(agg_call.args.len(), 1);
 
                 let sum = ExprImpl::from(push_agg_call(AggCall::new(
@@ -644,7 +644,7 @@ impl LogicalAggBuilder {
             // which is in a sense more general than the pow function, especially when calculating
             // covariances in the future. Also we don't have the sqrt function for rooting, so we
             // use pow(x, 0.5) to simulate
-            AggKind::Builtin(
+            AggType::Builtin(
                 kind @ (PbAggKind::StddevPop
                 | PbAggKind::StddevSamp
                 | PbAggKind::VarPop
@@ -740,7 +740,7 @@ impl LogicalAggBuilder {
                     _ => unreachable!(),
                 }
             }
-            AggKind::Builtin(PbAggKind::ApproxPercentile) => {
+            AggType::Builtin(PbAggKind::ApproxPercentile) => {
                 if agg_call.order_by.sort_exprs[0].order_type == OrderType::descending() {
                     // Rewrite DESC into 1.0-percentile for approx_percentile.
                     let prev_percentile = agg_call.direct_args[0].clone();
@@ -778,7 +778,7 @@ impl LogicalAggBuilder {
     /// For existing agg calls, return an `InputRef` to the existing one.
     fn push_agg_call(&mut self, agg_call: AggCall) -> Result<InputRef> {
         let AggCall {
-            agg_kind,
+            agg_type,
             return_type,
             args,
             distinct,
@@ -815,7 +815,7 @@ impl LogicalAggBuilder {
             })?;
 
         let plan_agg_call = PlanAggCall {
-            agg_kind,
+            agg_type,
             return_type: return_type.clone(),
             inputs: args,
             distinct,
@@ -846,32 +846,32 @@ impl LogicalAggBuilder {
     ///
     /// Note that the rewriter does not traverse into inputs of agg calls.
     fn try_rewrite_agg_call(&mut self, mut agg_call: AggCall) -> Result<ExprImpl> {
-        if matches!(agg_call.agg_kind, agg_kinds::must_have_order_by!())
+        if matches!(agg_call.agg_type, agg_types::must_have_order_by!())
             && agg_call.order_by.sort_exprs.is_empty()
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "Aggregation function {} requires ORDER BY clause",
-                agg_call.agg_kind
+                agg_call.agg_type
             ))
             .into());
         }
 
         // try ignore ORDER BY if it doesn't affect the result
         if matches!(
-            agg_call.agg_kind,
-            agg_kinds::result_unaffected_by_order_by!()
+            agg_call.agg_type,
+            agg_types::result_unaffected_by_order_by!()
         ) {
             agg_call.order_by = OrderBy::any();
         }
         // try ignore DISTINCT if it doesn't affect the result
         if matches!(
-            agg_call.agg_kind,
-            agg_kinds::result_unaffected_by_distinct!()
+            agg_call.agg_type,
+            agg_types::result_unaffected_by_distinct!()
         ) {
             agg_call.distinct = false;
         }
 
-        if matches!(agg_call.agg_kind, AggKind::Builtin(PbAggKind::Grouping)) {
+        if matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Grouping)) {
             if self.grouping_sets.is_empty() {
                 return Err(ErrorCode::NotSupported(
                     "GROUPING must be used in a query with grouping sets".into(),
@@ -1343,8 +1343,8 @@ impl ToStream for LogicalAgg {
         use super::stream::prelude::*;
 
         for agg_call in self.agg_calls() {
-            if matches!(agg_call.agg_kind, agg_kinds::unimplemented_in_stream!()) {
-                bail_not_implemented!("{} aggregation in materialized view", agg_call.agg_kind);
+            if matches!(agg_call.agg_type, agg_types::unimplemented_in_stream!()) {
+                bail_not_implemented!("{} aggregation in materialized view", agg_call.agg_type);
             }
         }
         let eowc = ctx.emit_on_window_close();
@@ -1517,7 +1517,7 @@ mod tests {
             assert_eq_input_ref!(&exprs[1], 1);
 
             assert_eq!(agg_calls.len(), 1);
-            assert_eq!(agg_calls[0].agg_kind, PbAggKind::Min.into());
+            assert_eq!(agg_calls[0].agg_type, PbAggKind::Min.into());
             assert_eq!(input_ref_to_column_indices(&agg_calls[0].inputs), vec![1]);
             assert_eq!(group_key, vec![0].into());
         }
@@ -1560,9 +1560,9 @@ mod tests {
             }
 
             assert_eq!(agg_calls.len(), 2);
-            assert_eq!(agg_calls[0].agg_kind, PbAggKind::Min.into());
+            assert_eq!(agg_calls[0].agg_type, PbAggKind::Min.into());
             assert_eq!(input_ref_to_column_indices(&agg_calls[0].inputs), vec![1]);
-            assert_eq!(agg_calls[1].agg_kind, PbAggKind::Max.into());
+            assert_eq!(agg_calls[1].agg_type, PbAggKind::Max.into());
             assert_eq!(input_ref_to_column_indices(&agg_calls[1].inputs), vec![2]);
             assert_eq!(group_key, vec![0].into());
         }
@@ -1592,7 +1592,7 @@ mod tests {
             assert_eq_input_ref!(&exprs[1], 1);
 
             assert_eq!(agg_calls.len(), 1);
-            assert_eq!(agg_calls[0].agg_kind, PbAggKind::Min.into());
+            assert_eq!(agg_calls[0].agg_type, PbAggKind::Min.into());
             assert_eq!(input_ref_to_column_indices(&agg_calls[0].inputs), vec![1]);
             assert_eq!(group_key, vec![0].into());
         }
@@ -1609,7 +1609,7 @@ mod tests {
 
         let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let agg_call = PlanAggCall {
-            agg_kind: PbAggKind::Min.into(),
+            agg_type: PbAggKind::Min.into(),
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
@@ -1649,7 +1649,7 @@ mod tests {
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();
-        assert_eq!(agg_call_new.agg_kind, PbAggKind::Min.into());
+        assert_eq!(agg_call_new.agg_type, PbAggKind::Min.into());
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
 
@@ -1692,7 +1692,7 @@ mod tests {
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();
-        assert_eq!(agg_call_new.agg_kind, PbAggKind::Min.into());
+        assert_eq!(agg_call_new.agg_type, PbAggKind::Min.into());
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
 
@@ -1729,7 +1729,7 @@ mod tests {
             ctx,
         );
         let agg_call = PlanAggCall {
-            agg_kind: PbAggKind::Min.into(),
+            agg_type: PbAggKind::Min.into(),
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
@@ -1754,7 +1754,7 @@ mod tests {
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();
-        assert_eq!(agg_call_new.agg_kind, PbAggKind::Min.into());
+        assert_eq!(agg_call_new.agg_type, PbAggKind::Min.into());
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
 
@@ -1793,7 +1793,7 @@ mod tests {
 
         let agg_calls = vec![
             PlanAggCall {
-                agg_kind: PbAggKind::Min.into(),
+                agg_type: PbAggKind::Min.into(),
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(2, ty.clone())],
                 distinct: false,
@@ -1802,7 +1802,7 @@ mod tests {
                 direct_args: vec![],
             },
             PlanAggCall {
-                agg_kind: PbAggKind::Max.into(),
+                agg_type: PbAggKind::Max.into(),
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(1, ty.clone())],
                 distinct: false,
@@ -1828,7 +1828,7 @@ mod tests {
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();
-        assert_eq!(agg_call_new.agg_kind, PbAggKind::Max.into());
+        assert_eq!(agg_call_new.agg_type, PbAggKind::Max.into());
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![0]);
         assert_eq!(agg_call_new.return_type, ty);
 
