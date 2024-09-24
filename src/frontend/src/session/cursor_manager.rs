@@ -456,7 +456,6 @@ impl SubscriptionCursor {
 
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
         let mut cur = 0;
-        let desc = self.fields.iter().map(to_pg_field).collect();
         if let State::Fetch {
             from_snapshot,
             chunk_stream,
@@ -500,6 +499,8 @@ impl SubscriptionCursor {
             }
         }
         self.last_fetch = Instant::now();
+        let desc = self.fields.iter().map(to_pg_field).collect();
+        println!("ans: {:?},{:?}", ans,desc);
 
         Ok((ans, desc))
     }
