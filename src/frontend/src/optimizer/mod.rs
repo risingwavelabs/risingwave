@@ -697,21 +697,24 @@ impl PlanRoot {
                     RequiredDist::hash_shard(pk_column_indices)
                         .enforce_if_not_satisfies(dml_node, &Order::any())?
                 }
-                PrimaryKeyKind::AppendOnlyRowIdPK => StreamExchange::new_no_shuffle(dml_node).into(),
+                PrimaryKeyKind::AppendOnlyRowIdPK => {
+                    StreamExchange::new_no_shuffle(dml_node).into()
+                }
             };
 
             Ok(dml_node)
         }
 
-        let kind = if append_only {
-            assert!(row_id_index.is_some());
-            PrimaryKeyKind::AppendOnlyRowIdPK
-        } else if let Some(row_id_index) = row_id_index {
+        let kind = if let Some(row_id_index) = row_id_index {
             assert_eq!(
                 pk_column_indices.iter().exactly_one().copied().unwrap(),
                 row_id_index
             );
-            PrimaryKeyKind::NonAppendOnlyRowIdPK
+            if append_only {
+                PrimaryKeyKind::AppendOnlyRowIdPK
+            } else {
+                PrimaryKeyKind::NonAppendOnlyRowIdPK
+            }
         } else {
             PrimaryKeyKind::UserDefinedPrimaryKey
         };
