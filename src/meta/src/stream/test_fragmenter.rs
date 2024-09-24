@@ -23,7 +23,7 @@ use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType,
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::expr::agg_call::Type;
+use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
@@ -45,7 +45,7 @@ use crate::MetaResult;
 
 fn make_inputref(idx: u32) -> ExprNode {
     ExprNode {
-        function_type: Type::Unspecified as i32,
+        function_type: PbAggKind::Unspecified as i32,
         return_type: Some(DataType {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
@@ -56,7 +56,7 @@ fn make_inputref(idx: u32) -> ExprNode {
 
 fn make_sum_aggcall(idx: u32) -> AggCall {
     AggCall {
-        r#type: Type::Sum as i32,
+        kind: PbAggKind::Sum as i32,
         args: vec![PbInputRef {
             index: idx,
             r#type: Some(DataType {
