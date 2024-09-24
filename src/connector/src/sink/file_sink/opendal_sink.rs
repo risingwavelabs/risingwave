@@ -203,7 +203,7 @@ impl OpenDalSinkWriter {
     ///
     /// This method writes a chunk and attempts to complete the file write
     /// based on the writer's internal batching strategy. If the write is
-    /// successful, it returns the last chunk_id that was written;
+    /// successful, it returns the last `chunk_id` that was written;
     /// otherwise, it returns None.
     ///
     ///
@@ -230,15 +230,15 @@ impl OpenDalSinkWriter {
             self.append_only(chunk).await? || self.try_finish_write_via_rollover_interval().await?;
         self.written_chunk_id = Some(chunk_id);
         if finish_write {
-            return Ok(Some(chunk_id));
+            Ok(Some(chunk_id))
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 
     /// Attempts to complete the file write using the writer's internal batching strategy.
     ///
-    /// If the write is completed, returns the last chunk_id that was written;
+    /// If the write is completed, returns the last `chunk_id` that was written;
     /// otherwise, returns None.
     ///
     /// For the file sink, currently, the sink decoupling feature is not enabled.
@@ -246,9 +246,9 @@ impl OpenDalSinkWriter {
     /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
     pub async fn try_finish(&mut self) -> Result<Option<usize>> {
         match self.try_finish_write_via_rollover_interval().await? {
-            true => return Ok(self.written_chunk_id),
-            false => return Ok(None),
-        };
+            true => Ok(self.written_chunk_id),
+            false => Ok(None),
+        }
     }
 }
 #[async_trait]
@@ -256,6 +256,7 @@ impl SinkWriter for OpenDalSinkWriter {
     async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
         unreachable!()
     }
+
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.epoch = Some(epoch);
         Ok(())
@@ -277,8 +278,6 @@ impl SinkWriter for OpenDalSinkWriter {
 
         Ok(())
     }
-
-
 }
 
 impl OpenDalSinkWriter {
