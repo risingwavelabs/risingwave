@@ -121,7 +121,7 @@ impl PlanWindowFunction {
             DenseRank => PbType::General(PbGeneralType::DenseRank as _),
             Lag => PbType::General(PbGeneralType::Lag as _),
             Lead => PbType::General(PbGeneralType::Lead as _),
-            Aggregate(agg_type) => PbType::Aggregate(agg_type.to_protobuf()),
+            Aggregate(agg_type) => PbType::Aggregate2(agg_type.to_protobuf()),
         };
 
         PbWindowFunction {

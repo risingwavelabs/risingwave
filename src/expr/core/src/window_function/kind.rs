@@ -52,12 +52,12 @@ impl WindowFuncKind {
                 Ok(PbGeneralType::Lead) => Self::Lead,
                 Err(_) => bail!("no such window function type"),
             },
-            PbType::AggregateSimple(kind) => Self::Aggregate(AggType::from_protobuf_flatten(
+            PbType::Aggregate(kind) => Self::Aggregate(AggType::from_protobuf_flatten(
                 PbAggKind::try_from(*kind).context("no such aggregate function type")?,
                 None,
                 None,
             )?),
-            PbType::Aggregate(agg_type) => Self::Aggregate(AggType::from_protobuf(agg_type)?),
+            PbType::Aggregate2(agg_type) => Self::Aggregate(AggType::from_protobuf(agg_type)?),
         };
         Ok(kind)
     }
