@@ -16,6 +16,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 
+use crate::sink::file_sink::opendal_sink::OpenDalSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{LogSinker, Result, SinkLogReader, SinkMetrics};
@@ -28,16 +29,20 @@ pub fn default_commit_checkpoint_interval() -> u64 {
 /// The `LogSinker` implementation used for commit-decoupled sinks (such as `Iceberg`, `DeltaLake` and `StarRocks`).
 /// The concurrent/frequent commit capability of these sinks is poor, so by leveraging the decoupled log reader,
 /// we delay the checkpoint barrier to make commits less frequent.
-pub struct BatchingLogSinkerOf<W> {
-    writer: W,
+pub struct BatchingLogSinkerOf {
+    writer: OpenDalSinkWriter,
     no_batching_strategy_defined: bool,
     sink_metrics: SinkMetrics,
 }
 
-impl<W> BatchingLogSinkerOf<W> {
+impl BatchingLogSinkerOf {
     /// Create a log sinker with a commit checkpoint interval. The sinker should be used with a
     /// decouple log reader `KvLogStoreReader`.
-    pub fn new(writer: W, no_batching_strategy_defined: bool, sink_metrics: SinkMetrics) -> Self {
+    pub fn new(
+        writer: OpenDalSinkWriter,
+        no_batching_strategy_defined: bool,
+        sink_metrics: SinkMetrics,
+    ) -> Self {
         BatchingLogSinkerOf {
             writer,
             no_batching_strategy_defined,
@@ -47,7 +52,7 @@ impl<W> BatchingLogSinkerOf<W> {
 }
 
 #[async_trait]
-impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for BatchingLogSinkerOf<W> {
+impl LogSinker for BatchingLogSinkerOf {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         let mut sink_writer = self.writer;
         let sink_metrics = self.sink_metrics;

@@ -99,7 +99,7 @@ pub enum EngineType {
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = BatchingLogSinkerOf<OpenDalSinkWriter>;
+    type LogSinker = BatchingLogSinkerOf;
 
     const SINK_NAME: &'static str = S::SINK_NAME;
 
@@ -167,6 +167,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
     }
 }
 
+impl<S: OpendalSinkBackend> FileSink<S> {}
 pub struct OpenDalSinkWriter {
     schema: SchemaRef,
     operator: Operator,
@@ -196,14 +197,18 @@ pub struct OpenDalSinkWriter {
 enum FileWriterEnum {
     ParquetFileWriter(AsyncArrowWriter<Compat<FuturesAsyncWriter>>),
 }
-
-#[async_trait]
-impl SinkWriter for OpenDalSinkWriter {
-    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn write_batch_and_try_finish(
+impl OpenDalSinkWriter {
+    // Writes a stream chunk to the sink and tries to close the writer
+    /// according to the batching strategy.
+    ///
+    /// This method writes a chunk and attempts to complete the file write
+    /// based on the writer's internal batching strategy. If the write is
+    /// successful, it returns the last chunk_id that was written;
+    /// otherwise, it returns None.
+    ///
+    ///
+    /// This method is currently intended for use by the file sink's writer.
+    pub async fn write_batch_and_try_finish(
         &mut self,
         chunk: StreamChunk,
         chunk_id: usize,
@@ -231,6 +236,26 @@ impl SinkWriter for OpenDalSinkWriter {
         }
     }
 
+    /// Attempts to complete the file write using the writer's internal batching strategy.
+    ///
+    /// If the write is completed, returns the last chunk_id that was written;
+    /// otherwise, returns None.
+    ///
+    /// For the file sink, currently, the sink decoupling feature is not enabled.
+    /// When a checkpoint arrives, the force commit is performed to write the data to the file.
+    /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
+    pub async fn try_finish(&mut self) -> Result<Option<usize>> {
+        match self.try_finish_write_via_rollover_interval().await? {
+            true => return Ok(self.written_chunk_id),
+            false => return Ok(None),
+        };
+    }
+}
+#[async_trait]
+impl SinkWriter for OpenDalSinkWriter {
+    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
+        unreachable!()
+    }
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.epoch = Some(epoch);
         Ok(())
@@ -253,15 +278,7 @@ impl SinkWriter for OpenDalSinkWriter {
         Ok(())
     }
 
-    /// For the file sink, currently, the sink decoupling feature is not enabled.
-    /// When a checkpoint arrives, the force commit is performed to write the data to the file.
-    /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
-    async fn try_finish(&mut self) -> Result<Option<usize>> {
-        match self.try_finish_write_via_rollover_interval().await? {
-            true => return Ok(self.written_chunk_id),
-            false => return Ok(None),
-        };
-    }
+
 }
 
 impl OpenDalSinkWriter {
