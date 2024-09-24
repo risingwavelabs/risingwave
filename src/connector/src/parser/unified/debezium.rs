@@ -18,12 +18,8 @@ use risingwave_common::types::{
     DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
     ToOwnedDatum,
 };
-use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector_codec::decoder::AccessExt;
-use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
-use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::additional_column::ColumnType;
-use risingwave_pb::plan_common::DefaultColumnDesc;
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
@@ -240,20 +236,11 @@ pub fn parse_schema_change(
                                     }},
                                 )?,
                             );
-                            // equivalent to `Literal::to_expr_proto`
-                            let default_val_expr_node = ExprNode {
-                                function_type: ExprType::Unspecified as i32,
-                                return_type: Some(data_type.to_protobuf()),
-                                rex_node: Some(RexNode::Constant(snapshot_value.to_protobuf())),
-                            };
                             ColumnDesc::named_with_default_value(
                                 name,
                                 ColumnId::placeholder(),
                                 data_type,
-                                DefaultColumnDesc {
-                                    expr: Some(default_val_expr_node),
-                                    snapshot_value: Some(snapshot_value.to_protobuf()),
-                                },
+                                snapshot_value,
                             )
                         }
                         _ => ColumnDesc::named(name, ColumnId::placeholder(), data_type),
