@@ -424,8 +424,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             List<String> family = new ArrayList<>();
             boolean findRoot = false;
             String currentPartition = tableName;
-            System.out.println("WKXLOG before find root: " + family);
-
             while (!findRoot) {
                 try (var stmt =
                         jdbcConnection.prepareStatement(
@@ -446,7 +444,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                     }
                 }
             }
-            System.out.println("WKXLOG after find root: " + family);
             try (var stmt =
                     jdbcConnection.prepareStatement(
                             ValidatorUtils.getSql("postgres.partition_descendants"))) {
@@ -458,8 +455,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                     family.add(descendant);
                 }
             }
-
-            System.out.println("WKXLOG after find descendants: " + family);
 
             for (String relative : family) {
                 try (var stmt =
@@ -479,7 +474,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                     }
                 }
             }
-            System.out.println("WKXLOG after publication.check: " + family);
         }
 
         // PG 15 and up supports partial publication of table
