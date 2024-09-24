@@ -392,7 +392,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         if (!partitions.isEmpty() && isPublicationExists) {
             // `pubviaroot` in `pg_publication` is added after PG v13, before which PG does not
             // allow adding partitioned table to a publication. So here, if partitions.isEmpty() is
-            // false, we can safely check the value of `pubviaroot` of the publication here.
+            // false, which means the PG version is >= v13, we can safely check the value of
+            // `pubviaroot` of the publication here.
             boolean isPublicationViaRoot = false;
             try (var stmt =
                     jdbcConnection.prepareStatement(
@@ -416,7 +417,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                                 + "'` in the upstream Postgres to check.");
             }
         }
-        //  Only after v13, PG allows adding a partitioned table to a publication. So, if the
+        // Only after v13, PG allows adding a partitioned table to a publication. So, if the
         // version is before v13, the tables in a publication are always partition leaves, we don't
         // check their ancestors and descendants anymore.
         if (isPublicationExists && pgVersion >= 13) {
@@ -427,12 +428,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 try (var stmt =
                         jdbcConnection.prepareStatement(
                                 ValidatorUtils.getSql("postgres.partition_parent"))) {
-                    stmt.setString(
-                            1, String.format("\"%s\".\"%s\"", this.schemaName, currentPartition));
-                    stmt.setString(
-                            2, String.format("\"%s\".\"%s\"", this.schemaName, currentPartition));
-                    stmt.setString(
-                            3, String.format("\"%s\".\"%s\"", this.schemaName, currentPartition));
+                    String schemaPartitionName =
+                            String.format("\"%s\".\"%s\"", this.schemaName, currentPartition);
+                    stmt.setString(1, schemaPartitionName);
+                    stmt.setString(2, schemaPartitionName);
+                    stmt.setString(3, schemaPartitionName);
                     var res = stmt.executeQuery();
                     if (res.next()) {
                         String parent = res.getString(1);
@@ -446,15 +446,21 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             try (var stmt =
                     jdbcConnection.prepareStatement(
                             ValidatorUtils.getSql("postgres.partition_descendants"))) {
-                stmt.setString(1, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
-                stmt.setString(2, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
+                String schemaTableName =
+                        String.format("\"%s\".\"%s\"", this.schemaName, this.tableName);
+                stmt.setString(1, schemaTableName);
+                stmt.setString(2, schemaTableName);
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     String descendant = res.getString(1);
                     family.add(descendant);
                 }
             }
-
+            // The check here was added based on experimental observations. We found that if a table
+            // is added to a publication where its ancestor or descendant is already included, the
+            // table cannot be read data from the slot correctly. Therefore, we must verify whether
+            // its ancestors or descendants are already in the publication. If yes, we deny the
+            // request.
             for (String relative : family) {
                 try (var stmt =
                         jdbcConnection.prepareStatement(
