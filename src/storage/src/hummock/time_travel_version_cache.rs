@@ -55,9 +55,9 @@ impl SimpleTimeTravelVersionCache {
             .await;
         if result.is_err() {
             // Remove the failed entry from cache.
-            // Since this remove is not atomic with the previous or_insert_with, it may remove a successful entry.
+            // It may remove a successful entry due to concurrency.
             // Since failed entry is rare, this should be acceptable.
-            self.cache.remove(&(table_id, epoch));
+            self.cache.invalidate(&(table_id, epoch));
         }
         result
     }
