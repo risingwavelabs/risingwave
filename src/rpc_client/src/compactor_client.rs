@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_common::monitor::EndpointExt;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -47,7 +48,7 @@ impl CompactorClient {
     pub async fn new(host_addr: HostAddr) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
             .connect_timeout(Duration::from_secs(5))
-            .connect()
+            .monitored_connect("grpc-compactor-client", Default::default())
             .await?;
         Ok(Self {
             monitor_client: MonitorServiceClient::new(channel),
@@ -94,26 +95,26 @@ pub struct GrpcCompactorProxyClient {
 }
 
 impl GrpcCompactorProxyClient {
-    pub fn new(channel: Channel, endpoint: String) -> Self {
+    pub async fn new(endpoint: String) -> Self {
+        let channel = Self::connect_to_endpoint(endpoint.clone()).await;
         let core = Arc::new(RwLock::new(GrpcCompactorProxyClientCore::new(channel)));
         Self { core, endpoint }
     }
 
     async fn recreate_core(&self) {
         tracing::info!("GrpcCompactorProxyClient rpc transfer failed, try to reconnect");
-        let channel = self.connect_to_endpoint().await;
+        let channel = Self::connect_to_endpoint(self.endpoint.clone()).await;
         let mut core = self.core.write().await;
         *core = GrpcCompactorProxyClientCore::new(channel);
     }
 
-    async fn connect_to_endpoint(&self) -> Channel {
-        let endpoint =
-            Endpoint::from_shared(self.endpoint.clone()).expect("Fail to construct tonic Endpoint");
+    async fn connect_to_endpoint(endpoint: String) -> Channel {
+        let endpoint = Endpoint::from_shared(endpoint).expect("Fail to construct tonic Endpoint");
         endpoint
             .http2_keep_alive_interval(Duration::from_secs(ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
             .keep_alive_timeout(Duration::from_secs(ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
             .connect_timeout(Duration::from_secs(5))
-            .connect()
+            .monitored_connect("grpc-compactor-proxy-client", Default::default())
             .await
             .expect("Failed to create channel via proxy rpc endpoint.")
     }

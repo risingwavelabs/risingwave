@@ -186,14 +186,17 @@ impl FrontendEnv {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
-        let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
+        let meta_client = Arc::new(MockFrontendMetaClient {});
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let catalog_writer = Arc::new(MockCatalogWriter::new(
+            catalog.clone(),
+            hummock_snapshot_manager.clone(),
+        ));
         let catalog_reader = CatalogReader::new(catalog);
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let user_info_writer = Arc::new(MockUserInfoWriter::new(user_info_manager.clone()));
         let user_info_reader = UserInfoReader::new(user_info_manager);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let meta_client = Arc::new(MockFrontendMetaClient {});
-        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let query_manager = QueryManager::new(
@@ -298,19 +301,21 @@ impl FrontendEnv {
         let mut join_handles = vec![heartbeat_join_handle];
         let mut shutdown_senders = vec![heartbeat_shutdown_sender];
 
+        let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
+        let hummock_snapshot_manager =
+            Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
+
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(CatalogWriterImpl::new(
             meta_client.clone(),
             catalog_updated_rx,
+            hummock_snapshot_manager.clone(),
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
-        let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
-        let hummock_snapshot_manager =
-            Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
         let compute_client_pool = Arc::new(ComputeClientPool::new(
             config.batch_exchange_connection_pool_size(),
         ));

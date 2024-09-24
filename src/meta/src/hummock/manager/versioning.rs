@@ -147,6 +147,10 @@ impl HummockManager {
         f(&self.versioning.read().await.current_version)
     }
 
+    pub async fn get_version_id(&self) -> HummockVersionId {
+        self.on_current_version(|version| version.id).await
+    }
+
     /// Gets the mapping from table id to compaction group id
     pub async fn get_table_compaction_group_id_mapping(
         &self,
