@@ -405,8 +405,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             }
             if (!isPublicationViaRoot) {
                 // Make sure the publication are created with `publish_via_partition_root = true`,
-                // which
-                // is required by partitioned tables.
+                // which is required by partitioned tables.
                 throw ValidatorUtils.invalidArgument(
                         "Table '"
                                 + tableName
