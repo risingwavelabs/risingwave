@@ -842,6 +842,7 @@ impl CatalogController {
                 fragment::Column::DistributionType,
                 fragment::Column::StateTableIds,
                 fragment::Column::UpstreamFragmentId,
+                fragment::Column::VnodeCount,
             ])
             .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
             .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
