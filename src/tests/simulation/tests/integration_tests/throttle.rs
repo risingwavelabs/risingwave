@@ -24,18 +24,21 @@ async fn test_throttle_mv() {
 
     session.run(SET_PARALLELISM).await.unwrap();
     session
-        .run("create table t1 (id int, val varchar, primary key(id))") // table_id: 1
+        .run("create table t1 (id int, val varchar, primary key(id))")
         .await
         .unwrap();
     session
-        .run("create materialized view mv1 as select * from t1") // table_id: 2
+        .run("create materialized view mv1 as select * from t1")
         .await
         .unwrap();
 
+    let res: String = session
+        .run("select id from rw_materialized_views where name = 'mv1'")
+        .await
+        .unwrap();
+    let mv_id: u32 = res.parse().unwrap();
     cluster
-        .throttle_mv(TableId::from(2), Some(200))
+        .throttle_mv(TableId::from(mv_id), None)
         .await
         .unwrap();
-
-    cluster.throttle_mv(TableId::from(2), None).await.unwrap();
 }
