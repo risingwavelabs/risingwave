@@ -616,6 +616,7 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     Keyword::LEFT,
     Keyword::RIGHT,
     Keyword::NATURAL,
+    Keyword::ASOF,
     Keyword::USING,
     Keyword::CLUSTER,
     // for MSSQL-specific OUTER APPLY (seems reserved in most dialects)

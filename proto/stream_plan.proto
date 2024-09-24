@@ -885,6 +885,7 @@ message StreamNode {
     LocalApproxPercentileNode local_approx_percentile = 144;
     GlobalApproxPercentileNode global_approx_percentile = 145;
     RowMergeNode row_merge = 146;
+    AsOfJoinNode as_of_join = 147;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

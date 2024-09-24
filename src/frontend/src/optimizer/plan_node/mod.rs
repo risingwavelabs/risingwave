@@ -883,6 +883,7 @@ mod logical_topn;
 mod logical_union;
 mod logical_update;
 mod logical_values;
+mod stream_asof_join;
 mod stream_changelog;
 mod stream_dedup;
 mod stream_delta_join;
@@ -897,7 +898,6 @@ mod stream_global_approx_percentile;
 mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
-mod stream_asof_join;
 mod stream_hop_window;
 mod stream_local_approx_percentile;
 mod stream_materialize;
@@ -995,6 +995,7 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use stream_asof_join::StreamAsOfJoin;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_changelog::StreamChangeLog;
 pub use stream_dedup::StreamDedup;
@@ -1160,6 +1161,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, GlobalApproxPercentile }
             , { Stream, LocalApproxPercentile }
             , { Stream, RowMerge }
+            , { Stream, AsOfJoin }
         }
     };
 }
@@ -1289,6 +1291,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, GlobalApproxPercentile }
             , { Stream, LocalApproxPercentile }
             , { Stream, RowMerge }
+            , { Stream, AsOfJoin }
         }
     };
 }

@@ -231,14 +231,14 @@ impl StreamHashJoin {
                 // we can not derive the hash distribution from the side where outer join can
                 // generate a NULL row
                 match logical.join_type {
-                    JoinType::Unspecified| JoinType::AsofInner
-                    | JoinType::AsofLeftOuter => unreachable!(),
+                    JoinType::Unspecified | JoinType::AsofInner | JoinType::AsofLeftOuter => {
+                        unreachable!()
+                    }
                     JoinType::FullOuter => Distribution::SomeShard,
                     JoinType::Inner
                     | JoinType::LeftOuter
                     | JoinType::LeftSemi
-                    | JoinType::LeftAnti
-                     => {
+                    | JoinType::LeftAnti => {
                         let l2o = logical
                             .l2i_col_mapping()
                             .composite(&logical.i2o_col_mapping());
