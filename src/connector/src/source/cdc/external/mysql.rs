@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Context};
+use chrono::{DateTime, NaiveDateTime};
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -133,9 +134,25 @@ impl MySqlExternalTable {
                         _ => Err(anyhow!("unexpected default value type for float column"))?,
                     },
                     ColumnDefault::String(mut val) => {
-                        // append timezone to the default value of timestamptz
+                        // mysql timestamp is mapped to timestamptz, we use UTC timezone to
+                        // interpret its value
                         if data_type == DataType::Timestamptz {
-                            val.push_str("+00:00");
+                            let format = "%Y-%m-%d %H:%M:%S";
+                            let naive_datetime = NaiveDateTime::parse_from_str(
+                                val.as_str(),
+                                format,
+                            )
+                            .map_err(|err| {
+                                anyhow!("failed to parse mysql timestamp value").context(err)
+                            })?;
+                            let postgres_timestamptz: DateTime<chrono::Utc> =
+                                DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                                    naive_datetime,
+                                    chrono::Utc,
+                                );
+                            val = postgres_timestamptz
+                                .format("%Y-%m-%d %H:%M:%S%:z")
+                                .to_string();
                         }
                         match ScalarImpl::from_text(val.as_str(), &data_type) {
                             Ok(scalar) => Some(scalar),
