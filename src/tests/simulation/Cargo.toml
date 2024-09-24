@@ -17,7 +17,6 @@ aws-sdk-s3 = { version = "0.5", package = "madsim-aws-sdk-s3" }
 cfg-or-panic = "0.2"
 clap = { workspace = true }
 console = "0.15"
-etcd-client = { workspace = true }
 expect-test = "1"
 fail = { version = "0.5" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

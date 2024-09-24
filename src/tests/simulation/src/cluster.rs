@@ -86,12 +86,6 @@ pub struct Configuration {
     /// This determines `worker_node_parallelism`.
     pub compute_node_cores: usize,
 
-    /// The probability of etcd request timeout.
-    pub etcd_timeout_rate: f32,
-
-    /// Path to etcd data file.
-    pub etcd_data_path: Option<PathBuf>,
-
     /// Queries to run per session.
     pub per_session_queries: Arc<Vec<String>>,
 
@@ -123,8 +117,6 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 1,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
             per_session_queries: vec![].into(),
             sqlite_data_dir: None,
         }
@@ -323,7 +315,6 @@ metrics_level = "Disabled"
 /// | frontend-x       | 192.168.2.x   |
 /// | compute-x        | 192.168.3.x   |
 /// | compactor-x      | 192.168.4.x   |
-/// | etcd             | 192.168.10.1  |
 /// | kafka-broker     | 192.168.11.1  |
 /// | kafka-producer   | 192.168.11.2  |
 /// | object_store_sim | 192.168.12.1  |
@@ -350,16 +341,9 @@ impl Cluster {
         println!("seed = {}", handle.seed());
         println!("{:#?}", conf);
 
-        if conf.sqlite_data_dir.is_some() && conf.etcd_data_path.is_some() {
-            bail!("sqlite_data_dir and etcd_data_path cannot be set at the same time");
-        }
-
         // setup DNS and load balance
         let net = madsim::net::NetSim::current();
         for i in 1..=conf.meta_nodes {
-            if conf.sqlite_data_dir.is_none() {
-                net.add_dns_record("etcd", "192.168.10.1".parse().unwrap());
-            }
             net.add_dns_record(
                 &format!("meta-{i}"),
                 format!("192.168.1.{i}").parse().unwrap(),
@@ -377,28 +361,6 @@ impl Cluster {
                 ServiceAddr::Tcp("192.168.2.0:4566".into()),
                 &format!("192.168.2.{i}:4566"),
             )
-        }
-
-        // etcd node
-        if conf.sqlite_data_dir.is_none() {
-            let etcd_data = conf
-                .etcd_data_path
-                .as_ref()
-                .map(|path| std::fs::read_to_string(path).unwrap());
-            handle
-                .create_node()
-                .name("etcd")
-                .ip("192.168.10.1".parse().unwrap())
-                .init(move || {
-                    let addr = "0.0.0.0:2388".parse().unwrap();
-                    let mut builder =
-                        etcd_client::SimServer::builder().timeout_rate(conf.etcd_timeout_rate);
-                    if let Some(data) = &etcd_data {
-                        builder = builder.load(data.clone());
-                    }
-                    builder.serve(addr)
-                })
-                .build();
         }
 
         // kafka broker
@@ -434,17 +396,16 @@ impl Cluster {
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
-        let mut sql_endpoint = String::new();
-        let mut backend_args = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
-            sql_endpoint = format!(
+        let sql_endpoint = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
+            format!(
                 "sqlite://{}stest-{}.sqlite?mode=rwc",
                 sqlite_data_dir.display(),
                 Uuid::new_v4()
-            );
-            vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint]
+            )
         } else {
-            vec!["--backend", "etcd", "--etcd-endpoints", "etcd:2388"]
+            format!("sqlite://./stest-{}.sqlite?mode=rwc", Uuid::new_v4())
         };
+        let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
 
         // FIXME(kwannoel):
         // Currently we just use the on-disk version,
