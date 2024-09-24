@@ -543,6 +543,10 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    pub fn iter_all_table_ids(&self) -> impl Iterator<Item = &TableId> {
+        self.table_by_id.keys()
+    }
+
     pub fn iter_internal_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()

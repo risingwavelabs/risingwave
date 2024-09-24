@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::str::FromStr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -28,13 +29,16 @@ use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row as _;
-use risingwave_common::types::{write_date_time_tz, DataType, ScalarRefImpl, Timestamptz};
+use risingwave_common::types::{
+    write_date_time_tz, DataType, Interval, ScalarRefImpl, Timestamptz,
+};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
     CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select, SelectItem, SetExpr,
     TableFactor, TableWithJoins,
 };
+use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::session::{current, SessionImpl};
@@ -236,6 +240,19 @@ pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
 
 pub fn convert_logstore_u64_to_unix_millis(logstore_u64: u64) -> u64 {
     Epoch::from(logstore_u64).as_unix_millis()
+}
+
+pub fn convert_interval_to_logstore_u64(interval: &String) -> RwResult<u64> {
+    let retention_seconds = (Interval::from_str(interval)
+        .map_err(|err| {
+            ErrorCode::InternalError(format!(
+                "Covert interval to u64 error, please check format, error: {:?}",
+                err.to_report_string()
+            ))
+        })?
+        .epoch_in_micros()
+        / 1000000) as u64;
+    Ok(retention_seconds)
 }
 
 #[cfg(test)]

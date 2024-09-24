@@ -14,10 +14,11 @@
 
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{
-    PbEpochNewChangeLog, PbHummockVersion, PbHummockVersionDelta, PbTableChangeLog,
+    PbEpochNewChangeLog, PbHummockVersion, PbHummockVersionDelta, PbSstableInfo, PbTableChangeLog,
     StateTableInfoDelta,
 };
 
@@ -166,8 +167,8 @@ impl FrontendHummockVersionDelta {
                             truncate_epoch: change_log_delta.truncate_epoch,
                             new_log: change_log_delta.new_log.as_ref().map(|new_log| {
                                 EpochNewChangeLogCommon {
-                                    new_value: vec![],
-                                    old_value: vec![],
+                                    new_value: new_log.new_value.iter().map(|_| ()).collect(),
+                                    old_value: new_log.new_value.iter().map(|_| ()).collect(),
                                     epochs: new_log.epochs.clone(),
                                 }
                             }),
@@ -199,8 +200,16 @@ impl FrontendHummockVersionDelta {
                         table_id.table_id,
                         PbChangeLogDelta {
                             new_log: delta.new_log.as_ref().map(|new_log| PbEpochNewChangeLog {
-                                old_value: vec![],
-                                new_value: vec![],
+                                old_value: new_log
+                                    .old_value
+                                    .iter()
+                                    .map(|_| mock_pb_sstable_info())
+                                    .collect_vec(),
+                                new_value: new_log
+                                    .new_value
+                                    .iter()
+                                    .map(|_| mock_pb_sstable_info())
+                                    .collect_vec(),
                                 epochs: new_log.epochs.clone(),
                             }),
                             truncate_epoch: delta.truncate_epoch,
@@ -241,8 +250,8 @@ impl FrontendHummockVersionDelta {
                             truncate_epoch: change_log_delta.truncate_epoch,
                             new_log: change_log_delta.new_log.as_ref().map(|new_log| {
                                 EpochNewChangeLogCommon {
-                                    new_value: vec![],
-                                    old_value: vec![],
+                                    new_value: new_log.new_value.iter().map(|_| ()).collect(),
+                                    old_value: new_log.old_value.iter().map(|_| ()).collect(),
                                     epochs: new_log.epochs.clone(),
                                 }
                             }),
@@ -251,5 +260,24 @@ impl FrontendHummockVersionDelta {
                 })
                 .collect(),
         }
+    }
+}
+
+fn mock_pb_sstable_info() -> PbSstableInfo {
+    PbSstableInfo {
+        object_id: 0,
+        sst_id: 0,
+        key_range: None,
+        file_size: 0,
+        table_ids: vec![],
+        meta_offset: 0,
+        stale_key_count: 0,
+        total_key_count: 0,
+        min_epoch: 0,
+        max_epoch: 0,
+        uncompressed_file_size: 0,
+        range_tombstone_count: 0,
+        bloom_filter_kind: 0,
+        sst_size: 0,
     }
 }

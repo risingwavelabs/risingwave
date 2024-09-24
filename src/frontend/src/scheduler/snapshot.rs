@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
@@ -104,6 +105,20 @@ impl PinnedSnapshot {
 
     pub fn committed_epoch(&self) -> u64 {
         self.value.max_committed_epoch
+    }
+
+    pub fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Vec<u64> {
+        if let Some(table_change_log) = self.value.table_change_log.get(&TableId::new(table_id)) {
+            let table_change_log = table_change_log.clone();
+            table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
+        } else {
+            vec![]
+        }
     }
 }
 

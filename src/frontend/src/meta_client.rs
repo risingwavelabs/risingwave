@@ -119,13 +119,6 @@ pub trait FrontendMetaClient: Send + Sync {
         rate_limit: Option<u32>,
     ) -> Result<()>;
 
-    async fn list_change_log_epochs(
-        &self,
-        table_id: u32,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Result<Vec<u64>>;
-
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
 
     async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
@@ -295,17 +288,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .apply_throttle(kind, id, rate_limit)
             .await
             .map(|_| ())
-    }
-
-    async fn list_change_log_epochs(
-        &self,
-        table_id: u32,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Result<Vec<u64>> {
-        self.0
-            .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await
     }
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {

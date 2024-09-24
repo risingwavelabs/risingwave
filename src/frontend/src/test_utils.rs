@@ -1065,15 +1065,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(RecoveryStatus::StatusRunning)
     }
 
-    async fn list_change_log_epochs(
-        &self,
-        _table_id: u32,
-        _min_epoch: u64,
-        _max_count: u32,
-    ) -> RpcResult<Vec<u64>> {
-        unimplemented!()
-    }
-
     async fn get_cluster_limits(&self) -> RpcResult<Vec<ClusterLimit>> {
         Ok(vec![])
     }

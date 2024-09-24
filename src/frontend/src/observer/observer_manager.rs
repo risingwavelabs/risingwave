@@ -18,7 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
-use risingwave_common::catalog::CatalogVersion;
+use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::SessionConfig;
@@ -36,6 +36,7 @@ use tokio::sync::watch::Sender;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{FragmentId, SecretId};
 use crate::scheduler::HummockSnapshotManagerRef;
+use crate::session::SessionMapRef;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
 
@@ -49,6 +50,7 @@ pub struct FrontendObserverNode {
     system_params_manager: LocalSystemParamsManagerRef,
     session_params: Arc<RwLock<SessionConfig>>,
     compute_client_pool: ComputeClientPoolRef,
+    sessions_map: SessionMapRef,
 }
 
 impl ObserverState for FrontendObserverNode {
@@ -87,7 +89,14 @@ impl ObserverState for FrontendObserverNode {
                 )
             }
             Info::HummockVersionDeltas(deltas) => {
+                let table_ids = deltas
+                    .version_deltas
+                    .iter()
+                    .flat_map(|version_deltas| version_deltas.change_log_delta.keys())
+                    .map(|table_id| TableId::new(*table_id))
+                    .collect_vec();
                 self.handle_hummock_snapshot_notification(deltas);
+                self.handle_cursor_notify(table_ids);
             }
             Info::MetaBackupManifestId(_) => {
                 panic!("frontend node should not receive MetaBackupManifestId");
@@ -191,10 +200,14 @@ impl ObserverState for FrontendObserverNode {
             convert_worker_slot_mapping(&streaming_worker_slot_mappings),
             convert_worker_slot_mapping(&serving_worker_slot_mappings),
         );
-        self.hummock_snapshot_manager
-            .init(FrontendHummockVersion::from_protobuf(
-                hummock_version.unwrap(),
-            ));
+        let hummock_version = FrontendHummockVersion::from_protobuf(hummock_version.unwrap());
+        let table_ids = hummock_version
+            .table_change_log
+            .keys()
+            .cloned()
+            .collect_vec();
+        self.hummock_snapshot_manager.init(hummock_version);
+        self.handle_cursor_notify(table_ids);
 
         let snapshot_version = version.unwrap();
         catalog_guard.set_version(snapshot_version.catalog_version);
@@ -222,6 +235,7 @@ impl FrontendObserverNode {
         system_params_manager: LocalSystemParamsManagerRef,
         session_params: Arc<RwLock<SessionConfig>>,
         compute_client_pool: ComputeClientPoolRef,
+        sessions_map: SessionMapRef,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -233,6 +247,7 @@ impl FrontendObserverNode {
             system_params_manager,
             session_params,
             compute_client_pool,
+            sessions_map,
         }
     }
 
@@ -250,13 +265,22 @@ impl FrontendObserverNode {
         match info {
             Info::Database(database) => match resp.operation() {
                 Operation::Add => catalog_guard.create_database(database),
-                Operation::Delete => catalog_guard.drop_database(database.id),
+                Operation::Delete => {
+                    let table_ids = catalog_guard.get_all_tables_id_in_database(database.id);
+                    catalog_guard.drop_database(database.id);
+                    self.handle_cursor_remove_table_ids(table_ids);
+                }
                 Operation::Update => catalog_guard.update_database(database),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Schema(schema) => match resp.operation() {
                 Operation::Add => catalog_guard.create_schema(schema),
-                Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
+                Operation::Delete => {
+                    let table_ids =
+                        catalog_guard.get_all_tables_id_in_schema(schema.database_id, schema.id);
+                    catalog_guard.drop_schema(schema.database_id, schema.id);
+                    self.handle_cursor_remove_table_ids(table_ids);
+                }
                 Operation::Update => catalog_guard.update_schema(schema),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
@@ -268,11 +292,14 @@ impl FrontendObserverNode {
                     match relation {
                         RelationInfo::Table(table) => match resp.operation() {
                             Operation::Add => catalog_guard.create_table(table),
-                            Operation::Delete => catalog_guard.drop_table(
-                                table.database_id,
-                                table.schema_id,
-                                table.id.into(),
-                            ),
+                            Operation::Delete => {
+                                catalog_guard.drop_table(
+                                    table.database_id,
+                                    table.schema_id,
+                                    table.id.into(),
+                                );
+                                self.handle_cursor_remove_table_ids(vec![table.id.into()]);
+                            }
                             Operation::Update => {
                                 let old_fragment_id = catalog_guard
                                     .get_any_table_by_id(&table.id.into())
@@ -466,6 +493,24 @@ impl FrontendObserverNode {
     /// Update max committed epoch in `HummockSnapshotManager`.
     fn handle_hummock_snapshot_notification(&self, deltas: HummockVersionDeltas) {
         self.hummock_snapshot_manager.update(deltas);
+    }
+
+    fn handle_cursor_notify(&self, table_ids: Vec<TableId>) {
+        for session in self.sessions_map.read().values() {
+            session
+                .get_cursor_manager()
+                .get_cursor_notifies()
+                .notify_cursors(&table_ids);
+        }
+    }
+
+    fn handle_cursor_remove_table_ids(&self, table_ids: Vec<TableId>) {
+        for session in self.sessions_map.read().values() {
+            session
+                .get_cursor_manager()
+                .get_cursor_notifies()
+                .remove_tables_ids(&table_ids);
+        }
     }
 
     fn handle_secret_notification(&mut self, resp: SubscribeResponse) {

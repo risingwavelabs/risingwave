@@ -16,7 +16,6 @@ use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_compaction_group_ids, get_table_compaction_group_id_mapping, BranchedSstInfo,
 };
@@ -269,25 +268,6 @@ impl HummockManager {
     pub fn latest_snapshot(&self) -> HummockSnapshot {
         let snapshot = self.latest_snapshot.load();
         HummockSnapshot::clone(&snapshot)
-    }
-
-    pub async fn list_change_log_epochs(
-        &self,
-        table_id: u32,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Vec<u64> {
-        let versioning = self.versioning.read().await;
-        if let Some(table_change_log) = versioning
-            .current_version
-            .table_change_log
-            .get(&TableId::new(table_id))
-        {
-            let table_change_log = table_change_log.clone();
-            table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
-        } else {
-            vec![]
-        }
     }
 }
 

@@ -30,6 +30,8 @@ use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
+use tokio::sync::watch::{channel, Receiver, Sender};
+use tokio::sync::{mpsc, oneshot, RwLock};
 
 use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
@@ -110,13 +112,18 @@ impl Cursor {
         count: u32,
         handle_args: HandlerArgs,
         formats: &Vec<Format>,
+        timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         match self {
             Cursor::Subscription(cursor) => cursor
-                .next(count, handle_args, formats)
+                .next(count, handle_args, formats, timeout_seconds)
                 .await
                 .inspect_err(|_| cursor.cursor_metrics.subscription_cursor_error_count.inc()),
-            Cursor::Query(cursor) => cursor.next(count, formats, handle_args).await,
+            Cursor::Query(cursor) => {
+                cursor
+                    .next(count, formats, handle_args, timeout_seconds)
+                    .await
+            }
         }
     }
 
@@ -161,9 +168,11 @@ impl QueryCursor {
         count: u32,
         formats: &Vec<Format>,
         handle_args: HandlerArgs,
+        timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         // `FETCH NEXT` is equivalent to `FETCH 1`.
         // min with 100 to avoid allocating too many memory at once.
+        let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
         let session = handle_args.session;
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
         let mut cur = 0;
@@ -175,6 +184,11 @@ impl QueryCursor {
         {
             cur += 1;
             ans.push(row);
+            if let Some(timeout_instant) = timeout_instant
+                && Instant::now() > timeout_instant
+            {
+                break;
+            }
         }
         Ok((ans, desc))
     }
@@ -221,6 +235,7 @@ pub struct SubscriptionCursor {
     // and will be reset each time it is created chunk_stream, this is to avoid changes in the catalog due to alter.
     fields: Vec<Field>,
     cursor_metrics: Arc<CursorMetrics>,
+    cursor_notifies: Arc<CursorNotifies>,
     last_fetch: Instant,
 }
 
@@ -232,6 +247,7 @@ impl SubscriptionCursor {
         dependent_table_id: TableId,
         handle_args: &HandlerArgs,
         cursor_metrics: Arc<CursorMetrics>,
+        cursor_notifies: Arc<CursorNotifies>,
     ) -> Result<Self> {
         let (state, fields) = if let Some(start_timestamp) = start_timestamp {
             let table_catalog = handle_args.session.get_table_by_id(&dependent_table_id)?;
@@ -290,6 +306,7 @@ impl SubscriptionCursor {
             fields,
             cursor_metrics,
             last_fetch: Instant::now(),
+            cursor_notifies,
         })
     }
 
@@ -313,9 +330,7 @@ impl SubscriptionCursor {
                         *expected_timestamp,
                         handle_args.clone(),
                         &self.subscription,
-                    )
-                    .await
-                    {
+                    ) {
                         Ok((Some(rw_timestamp), expected_timestamp)) => {
                             let (mut chunk_stream, fields, init_query_timer) =
                                 Self::initiate_query(
@@ -429,7 +444,9 @@ impl SubscriptionCursor {
         count: u32,
         handle_args: HandlerArgs,
         formats: &Vec<Format>,
+        timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
+        let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
         if Instant::now() > self.cursor_need_drop_time {
             return Err(ErrorCode::InternalError(
                 "The cursor has exceeded its maximum lifetime, please recreate it (close then declare cursor).".to_string(),
@@ -467,8 +484,19 @@ impl SubscriptionCursor {
                     ans.push(row);
                 }
                 None => {
-                    break;
+                    if cur == 0 {
+                        self.cursor_notifies
+                            .wait_next_epoch(self.dependent_table_id.table_id(), timeout_seconds)
+                            .await?;
+                    } else {
+                        break;
+                    }
                 }
+            }
+            if let Some(timeout_instant) = timeout_instant
+                && Instant::now() > timeout_instant
+            {
+                break;
             }
         }
         self.last_fetch = Instant::now();
@@ -476,7 +504,7 @@ impl SubscriptionCursor {
         Ok((ans, desc))
     }
 
-    async fn get_next_rw_timestamp(
+    fn get_next_rw_timestamp(
         seek_timestamp: u64,
         table_id: &TableId,
         expected_timestamp: Option<u64>,
@@ -491,9 +519,7 @@ impl SubscriptionCursor {
         )?;
 
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
-        let new_epochs = session
-            .list_change_log_epochs(table_id.table_id(), seek_timestamp, 2)
-            .await?;
+        let new_epochs = session.list_change_log_epochs(table_id.table_id(), seek_timestamp, 2)?;
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {
@@ -673,6 +699,7 @@ impl SubscriptionCursor {
 
 pub struct CursorManager {
     cursor_map: tokio::sync::Mutex<HashMap<String, Cursor>>,
+    cursor_notifies: Arc<CursorNotifies>,
     cursor_metrics: Arc<CursorMetrics>,
 }
 
@@ -681,7 +708,12 @@ impl CursorManager {
         Self {
             cursor_map: tokio::sync::Mutex::new(HashMap::new()),
             cursor_metrics,
+            cursor_notifies: Arc::new(CursorNotifies::new()),
         }
+    }
+
+    pub fn get_cursor_notifies(&self) -> Arc<CursorNotifies> {
+        self.cursor_notifies.clone()
     }
 
     pub async fn add_subscription_cursor(
@@ -701,6 +733,7 @@ impl CursorManager {
             dependent_table_id,
             handle_args,
             self.cursor_metrics.clone(),
+            self.cursor_notifies.clone(),
         )
         .await?;
         let mut cursor_map = self.cursor_map.lock().await;
@@ -773,9 +806,12 @@ impl CursorManager {
         count: u32,
         handle_args: HandlerArgs,
         formats: &Vec<Format>,
+        timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         if let Some(cursor) = self.cursor_map.lock().await.get_mut(&cursor_name) {
-            cursor.next(count, handle_args, formats).await
+            cursor
+                .next(count, handle_args, formats, timeout_seconds)
+                .await
         } else {
             Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
         }
@@ -873,5 +909,107 @@ impl CursorManager {
                 ),
             ],
         )
+    }
+}
+
+enum CursorNotifyState {
+    RemoveTables(Vec<TableId>),
+    NotifyTables(Vec<TableId>),
+}
+pub type CursorNotifyMapRef = Arc<RwLock<HashMap<u32, (Sender<()>, Receiver<()>)>>>;
+pub struct CursorNotifies {
+    cursor_notify_map: CursorNotifyMapRef,
+    sender: mpsc::UnboundedSender<CursorNotifyState>,
+    shutdown_tx: Option<oneshot::Sender<()>>,
+}
+
+impl CursorNotifies {
+    pub fn new() -> Self {
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+        let cursor_notify_map = Arc::new(RwLock::new(
+            HashMap::<u32, (Sender<()>, Receiver<()>)>::new(),
+        ));
+        let cursor_notify_map_clone = cursor_notify_map.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        break;
+                    }
+                    cursor_notify_state = receiver.recv() => {
+                        match cursor_notify_state {
+                            Some(CursorNotifyState::RemoveTables(table_ids)) => {
+                                for table_id in table_ids {
+                                    let mut cursor_notify_map_clone_write = cursor_notify_map_clone.write().await;
+                                    cursor_notify_map_clone_write.remove(&table_id.table_id());
+                                }
+                            }
+                            Some(CursorNotifyState::NotifyTables(table_ids)) => {
+                                let cursor_notify_map_clone_read = cursor_notify_map_clone.read().await;
+                                for table_id in table_ids {
+                                    if let Some((tx,_rx)) = cursor_notify_map_clone_read.get(&table_id.table_id()) {
+                                        tx.send(()).unwrap();
+                                    }
+                                }
+                            }
+                            None => {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        Self {
+            cursor_notify_map,
+            sender,
+            shutdown_tx: Some(shutdown_tx),
+        }
+    }
+
+    pub async fn wait_next_epoch(&self, id: u32, timeout_seconds: Option<u64>) -> Result<()> {
+        let mut rx = {
+            let mut cursor_notify_map_write = self.cursor_notify_map.write().await;
+            let (_tx, rx) = cursor_notify_map_write.entry(id).or_insert_with(|| {
+                let (tx, rx) = channel(());
+                (tx, rx)
+            });
+            rx.clone()
+        };
+        let mut timeout_interval =
+            tokio::time::interval(Duration::from_secs(timeout_seconds.unwrap_or(u64::MAX)));
+        timeout_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        timeout_interval.tick().await;
+        tokio::select! {
+            result = rx.changed() => {
+                result.map_err(|_| {
+                    ErrorCode::InternalError(format!("Cursor dependent table deleted: table_id is {:?}", id))
+                })?;
+            }
+            _ = timeout_interval.tick() => {
+                tracing::debug!("Cursor wait next epoch timeout");
+            }
+        }
+        Ok(())
+    }
+
+    pub fn notify_cursors(&self, ids: &Vec<TableId>) {
+        self.sender
+            .send(CursorNotifyState::NotifyTables(ids.clone()))
+            .unwrap();
+    }
+
+    pub fn remove_tables_ids(&self, ids: &Vec<TableId>) {
+        self.sender
+            .send(CursorNotifyState::RemoveTables(ids.clone()))
+            .unwrap();
+    }
+}
+impl Drop for CursorNotifies {
+    fn drop(&mut self) {
+        if let Some(shutdown_tx) = mem::take(&mut self.shutdown_tx) {
+            shutdown_tx.send(()).ok();
+        }
     }
 }

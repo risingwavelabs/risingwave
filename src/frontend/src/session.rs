@@ -342,6 +342,9 @@ impl FrontendEnv {
 
         // This `session_params` should be initialized during the initial notification in `observer_manager`
         let session_params = Arc::new(RwLock::new(SessionConfig::default()));
+        let sessions_map: SessionMapRef = Arc::new(RwLock::new(HashMap::new()));
+        let cursor_metrics = Arc::new(CursorMetrics::init(sessions_map.clone()));
+
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
@@ -352,6 +355,7 @@ impl FrontendEnv {
             system_params_manager.clone(),
             session_params.clone(),
             compute_client_pool.clone(),
+            sessions_map.clone(),
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
@@ -413,10 +417,7 @@ impl FrontendEnv {
                 .unwrap(),
         ));
 
-        let sessions_map: SessionMapRef = Arc::new(RwLock::new(HashMap::new()));
-        let cursor_metrics = Arc::new(CursorMetrics::init(sessions_map.clone()));
         let sessions = sessions_map.clone();
-
         // Idle transaction background monitor
         let join_handle = tokio::spawn(async move {
             let mut check_idle_txn_interval =
@@ -1086,7 +1087,7 @@ impl SessionImpl {
         Ok(secret.clone())
     }
 
-    pub async fn list_change_log_epochs(
+    pub fn list_change_log_epochs(
         &self,
         table_id: u32,
         min_epoch: u64,
@@ -1094,9 +1095,9 @@ impl SessionImpl {
     ) -> Result<Vec<u64>> {
         Ok(self
             .env
-            .meta_client()
-            .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await?)
+            .hummock_snapshot_manager()
+            .acquire()
+            .list_change_log_epochs(table_id, min_epoch, max_count))
     }
 
     pub fn clear_cancel_query_flag(&self) {
