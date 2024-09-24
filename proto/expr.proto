@@ -576,7 +576,7 @@ message WindowFunction {
 
   oneof type {
     GeneralType general = 1;
-    AggCall.Kind aggregate = 2 [deprecated = true]; // Deprecated since we have a new `aggregate` variant.
+    AggCall.Kind aggregate = 2 [deprecated = true]; // Deprecated since we have a new `aggregate2` variant.
     AggType aggregate2 = 103;
   }
   repeated InputRef args = 3;
