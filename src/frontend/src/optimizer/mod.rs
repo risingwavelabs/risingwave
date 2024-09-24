@@ -675,8 +675,8 @@ impl PlanRoot {
         #[derive(PartialEq, Debug, Copy, Clone)]
         enum PrimaryKeyKind {
             UserDefinedPrimaryKey,
-            NonAppendOnlyRowIdPK,
-            AppendOnlyRowIdPK,
+            NonAppendOnlyRowIdPk,
+            AppendOnlyRowIdPk,
         }
 
         fn inject_dml_node(
@@ -693,11 +693,11 @@ impl PlanRoot {
             dml_node = inject_project_for_generated_column_if_needed(columns, dml_node)?;
 
             dml_node = match kind {
-                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::NonAppendOnlyRowIdPK => {
+                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::NonAppendOnlyRowIdPk => {
                     RequiredDist::hash_shard(pk_column_indices)
                         .enforce_if_not_satisfies(dml_node, &Order::any())?
                 }
-                PrimaryKeyKind::AppendOnlyRowIdPK => {
+                PrimaryKeyKind::AppendOnlyRowIdPk => {
                     StreamExchange::new_no_shuffle(dml_node).into()
                 }
             };
@@ -711,9 +711,9 @@ impl PlanRoot {
                 row_id_index
             );
             if append_only {
-                PrimaryKeyKind::AppendOnlyRowIdPK
+                PrimaryKeyKind::AppendOnlyRowIdPk
             } else {
-                PrimaryKeyKind::NonAppendOnlyRowIdPK
+                PrimaryKeyKind::NonAppendOnlyRowIdPk
             }
         } else {
             PrimaryKeyKind::UserDefinedPrimaryKey
@@ -741,7 +741,7 @@ impl PlanRoot {
                         .enforce_if_not_satisfies(external_source_node, &Order::any())?
                 }
 
-                PrimaryKeyKind::NonAppendOnlyRowIdPK | PrimaryKeyKind::AppendOnlyRowIdPK => {
+                PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
             };
@@ -817,7 +817,7 @@ impl PlanRoot {
                 PrimaryKeyKind::UserDefinedPrimaryKey => {
                     unreachable!()
                 }
-                PrimaryKeyKind::NonAppendOnlyRowIdPK | PrimaryKeyKind::AppendOnlyRowIdPK => {
+                PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
                     stream_plan = StreamRowIdGen::new_with_dist(
                         stream_plan,
                         row_id_index,
