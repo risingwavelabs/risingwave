@@ -17,6 +17,7 @@ normal = ["workspace-hack"]
 [dependencies]
 auto_impl = "1"
 bytes = "1"
+cfg-or-panic = "0.2"
 clap = { workspace = true }
 easy-ext = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
