@@ -23,6 +23,15 @@ pub trait VnodeCountCompat {
     fn vnode_count(&self) -> usize;
 }
 
+/// Implement the trait for given types by delegating to the `maybe_vnode_count` field.
+///
+/// The reason why there's a `maybe_` prefix is that, a getter method with the same name
+/// as the field will be generated for `prost` structs. Directly naming it `vnode_count`
+/// will lead to the method `vnode_count()` returning `0` when the field is unset, which
+/// can be misleading sometimes.
+///
+/// Instead, we name the field as `maybe_vnode_count` and provide the method `vnode_count`
+/// through this trait, ensuring that backward compatibility is handled properly.
 macro_rules! impl_maybe_vnode_count_compat {
     ($($ty:ty),* $(,)?) => {
         $(
