@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::join_all;
@@ -58,7 +58,7 @@ pub struct CreateStreamingJobContext {
     pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
 
     /// Internal tables in the streaming job.
-    pub internal_tables: HashMap<u32, Table>,
+    pub internal_tables: BTreeMap<u32, Table>,
 
     /// The locations of the actors to build in the streaming job.
     pub building_locations: Locations,
