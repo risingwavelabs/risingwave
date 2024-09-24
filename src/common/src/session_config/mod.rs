@@ -311,6 +311,7 @@ pub struct SessionConfig {
     ///
     /// It's not always a good idea to set this to a very large number, as it may cause performance
     /// degradation when performing range scans on the table or the materialized view.
+    // a.k.a. vnode count
     #[parameter(default = VirtualNode::COUNT_FOR_COMPAT, check_hook = check_vnode_count)]
     streaming_max_parallelism: usize,
 }
@@ -339,12 +340,14 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
     }
 }
 
+/// Check if the provided value is a valid vnode count.
+/// Note that we use term `max_parallelism` when it's user-facing.
 fn check_vnode_count(val: &usize) -> Result<(), String> {
     match val {
-        0 => Err("VNODE_COUNT must be greater than 0".to_owned()),
+        0 => Err("STREAMING_MAX_PARALLELISM must be greater than 0".to_owned()),
         1..=VirtualNode::MAX_COUNT => Ok(()),
         _ => Err(format!(
-            "VNODE_COUNT must be less than or equal to {}",
+            "STREAMING_MAX_PARALLELISM must be less than or equal to {}",
             VirtualNode::MAX_COUNT
         )),
     }
