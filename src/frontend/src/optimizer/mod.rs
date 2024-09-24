@@ -675,8 +675,8 @@ impl PlanRoot {
         #[derive(PartialEq, Debug, Copy, Clone)]
         enum PrimaryKeyKind {
             UserDefinedPrimaryKey,
-            RowIdAsPrimaryKey,
-            AppendOnly,
+            NonAppendOnlyRowIdPK,
+            AppendOnlyRowIdPK,
         }
 
         fn inject_dml_node(
@@ -693,11 +693,11 @@ impl PlanRoot {
             dml_node = inject_project_for_generated_column_if_needed(columns, dml_node)?;
 
             dml_node = match kind {
-                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
+                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::NonAppendOnlyRowIdPK => {
                     RequiredDist::hash_shard(pk_column_indices)
                         .enforce_if_not_satisfies(dml_node, &Order::any())?
                 }
-                PrimaryKeyKind::AppendOnly => StreamExchange::new_no_shuffle(dml_node).into(),
+                PrimaryKeyKind::AppendOnlyRowIdPK => StreamExchange::new_no_shuffle(dml_node).into(),
             };
 
             Ok(dml_node)
@@ -705,13 +705,13 @@ impl PlanRoot {
 
         let kind = if append_only {
             assert!(row_id_index.is_some());
-            PrimaryKeyKind::AppendOnly
+            PrimaryKeyKind::AppendOnlyRowIdPK
         } else if let Some(row_id_index) = row_id_index {
             assert_eq!(
                 pk_column_indices.iter().exactly_one().copied().unwrap(),
                 row_id_index
             );
-            PrimaryKeyKind::RowIdAsPrimaryKey
+            PrimaryKeyKind::NonAppendOnlyRowIdPK
         } else {
             PrimaryKeyKind::UserDefinedPrimaryKey
         };
@@ -738,7 +738,7 @@ impl PlanRoot {
                         .enforce_if_not_satisfies(external_source_node, &Order::any())?
                 }
 
-                PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
+                PrimaryKeyKind::NonAppendOnlyRowIdPK | PrimaryKeyKind::AppendOnlyRowIdPK => {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
             };
@@ -814,7 +814,7 @@ impl PlanRoot {
                 PrimaryKeyKind::UserDefinedPrimaryKey => {
                     unreachable!()
                 }
-                PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
+                PrimaryKeyKind::NonAppendOnlyRowIdPK | PrimaryKeyKind::AppendOnlyRowIdPK => {
                     stream_plan = StreamRowIdGen::new_with_dist(
                         stream_plan,
                         row_id_index,
