@@ -89,6 +89,8 @@ impl HummockManager {
             return Ok(());
         }
 
+        assert!(!tables_to_commit.is_empty());
+
         let versioning: &mut Versioning = &mut versioning_guard;
         self.commit_epoch_sanity_check(
             committed_epoch,
