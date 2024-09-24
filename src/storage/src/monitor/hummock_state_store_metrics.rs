@@ -89,6 +89,10 @@ pub struct HummockStateStoreMetrics {
 
     pub event_handler_pending_event: IntGauge,
     pub event_handler_latency: HistogramVec,
+
+    pub safe_version_hit: GenericCounter<AtomicU64>,
+    pub safe_version_hit_index: Histogram,
+    pub safe_version_miss: GenericCounter<AtomicU64>,
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
@@ -445,6 +449,31 @@ impl HummockStateStoreMetrics {
         let event_handler_latency =
             register_histogram_vec_with_registry!(opts, &["event_type"], registry).unwrap();
 
+        let safe_version_hit = GenericCounter::new(
+            "state_store_safe_version_hit",
+            "The total count of a safe version that can be retrieved successfully",
+        )
+        .unwrap();
+        registry
+            .register(Box::new(safe_version_hit.clone()))
+            .unwrap();
+
+        let safe_version_miss = GenericCounter::new(
+            "state_store_safe_version_miss",
+            "The total count of a safe version that cannot be retrieved",
+        )
+        .unwrap();
+        registry
+            .register(Box::new(safe_version_miss.clone()))
+            .unwrap();
+
+        let opts = histogram_opts!(
+            "safe_version_hit_index_histogram",
+            "The index of safe version found in recent versions",
+            exponential_buckets(1.0, 2.0, 10).unwrap(),
+        );
+        let safe_version_hit_index = register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
@@ -480,6 +509,9 @@ impl HummockStateStoreMetrics {
             block_efficiency_histogram,
             event_handler_pending_event,
             event_handler_latency,
+            safe_version_hit,
+            safe_version_hit_index,
+            safe_version_miss,
         }
     }
 

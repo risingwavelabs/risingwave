@@ -13,27 +13,35 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::monitor::HummockStateStoreMetrics;
 
 pub struct RecentVersions {
     latest_version: PinnedVersion,
     is_latest_committed: bool,
     recent_versions: Vec<PinnedVersion>, // earlier version at the front
     max_version_num: usize,
+    metric: Arc<HummockStateStoreMetrics>,
 }
 
 impl RecentVersions {
-    pub fn new(version: PinnedVersion, max_version_num: usize) -> Self {
+    pub fn new(
+        version: PinnedVersion,
+        max_version_num: usize,
+        metric: Arc<HummockStateStoreMetrics>,
+    ) -> Self {
         assert!(max_version_num > 0);
         Self {
             latest_version: version,
             is_latest_committed: true, // The first version is always treated as committed epochs
             recent_versions: Vec::new(),
             max_version_num,
+            metric,
         }
     }
 
@@ -89,6 +97,7 @@ impl RecentVersions {
             is_latest_committed: is_committed,
             recent_versions,
             max_version_num: self.max_version_num,
+            metric: self.metric.clone(),
         }
     }
 
@@ -104,7 +113,7 @@ impl RecentVersions {
         table_id: TableId,
         epoch: HummockEpoch,
     ) -> Option<PinnedVersion> {
-        if let Some(info) = self
+        let result = if let Some(info) = self
             .latest_version
             .version()
             .state_table_info
@@ -112,13 +121,20 @@ impl RecentVersions {
             .get(&table_id)
         {
             if info.committed_epoch <= epoch {
+                self.metric.safe_version_hit_index.observe(0 as _);
                 Some(self.latest_version.clone())
             } else {
                 self.get_safe_version_from_recent(table_id, epoch)
             }
         } else {
             None
+        };
+        if result.is_some() {
+            self.metric.safe_version_hit.inc();
+        } else {
+            self.metric.safe_version_miss.inc();
         }
+        result
     }
 
     fn get_safe_version_from_recent(
@@ -155,7 +171,10 @@ impl RecentVersions {
             }
         });
         match result {
-            Ok(index) => Some(self.recent_versions[index].clone()),
+            Ok(index) => {
+                self.metric.safe_version_hit_index.observe((index + 1) as _);
+                Some(self.recent_versions[index].clone())
+            }
             Err(index) => {
                 // `index` is index of the first version that has `committed_epoch` greater than `epoch`
                 // or `index` equals `recent_version.len()` when `epoch` is greater than all `committed_epoch`
@@ -175,6 +194,7 @@ impl RecentVersions {
                         .info()
                         .contains_key(&table_id)
                     {
+                        self.metric.safe_version_hit_index.observe(index as _);
                         Some(version)
                     } else {
                         // if the table does not exist in the version, return `None` to try get a time travel version
