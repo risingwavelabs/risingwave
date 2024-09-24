@@ -87,7 +87,7 @@ pub trait ExprRewriter {
 
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let AggCall {
-            agg_kind,
+            agg_type,
             return_type,
             args,
             distinct,
@@ -102,7 +102,7 @@ pub trait ExprRewriter {
         let order_by = order_by.rewrite_expr(self);
         let filter = filter.rewrite_expr(self);
         AggCall {
-            agg_kind,
+            agg_type,
             return_type,
             args,
             distinct,
