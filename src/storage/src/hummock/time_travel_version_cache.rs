@@ -46,19 +46,19 @@ impl SimpleTimeTravelVersionCache {
         epoch: HummockEpoch,
         fetch: impl Future<Output = HummockResult<PinnedVersion>> + Send + 'static,
     ) -> HummockResult<PinnedVersion> {
-        let result = self
-            .cache
+        self.cache
             .entry((table_id, epoch))
-            .or_insert_with(|| fetch.boxed().shared())
+            .or_insert_with_if(
+                || fetch.boxed().shared(),
+                |inflight| {
+                    if let Some(result) = inflight.peek() {
+                        return result.is_err();
+                    }
+                    false
+                },
+            )
             .value()
             .clone()
-            .await;
-        if result.is_err() {
-            // Remove the failed entry from cache.
-            // It may remove a successful entry due to concurrency.
-            // Since failed entry is rare, this should be acceptable.
-            self.cache.invalidate(&(table_id, epoch));
-        }
-        result
+            .await
     }
 }
