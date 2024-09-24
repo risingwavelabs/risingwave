@@ -106,7 +106,7 @@ pub async fn list_s3_directory(
     let prefix = format!("s3://{}/", bucket);
     if dir.starts_with(&prefix) {
         let mut builder = S3::default();
-        builder
+        builder = builder
             .region(&s3_region)
             .access_key_id(&s3_access_key)
             .secret_access_key(&s3_secret_key)

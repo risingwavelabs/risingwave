@@ -395,7 +395,7 @@ fn bench_expr(c: &mut Criterion) {
             continue;
         }
         let agg = match build_append_only(&AggCall {
-            kind: sig.name.as_aggregate().into(),
+            agg_type: sig.name.as_aggregate().into(),
             args: sig
                 .inputs_type
                 .iter()

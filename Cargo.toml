@@ -137,14 +137,14 @@ otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev =
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 # branch rw_patch
-icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "db4868f9a5de8ff8f6c04ec4c203bcbe59564cbe", features = [
+icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "490e5af541edab0e9284ba19ddb56c8a16d1c36b", features = [
     "prometheus",
 ] }
 # branch dev
 iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
-opendal = "0.47"
+opendal = "0.49"
 # used only by arrow-udf-flight
 arrow-flight = "52"
 arrow-udf-js = "0.4"

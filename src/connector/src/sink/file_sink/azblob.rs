@@ -58,12 +58,12 @@ impl<S: OpendalSinkBackend> FileSink<S> {
     pub fn new_azblob_sink(config: AzblobConfig) -> Result<Operator> {
         // Create azblob builder.
         let mut builder = Azblob::default();
-        builder.container(&config.common.container_name);
-
-        builder.endpoint(&config.common.endpoint_url);
+        builder = builder
+            .container(&config.common.container_name)
+            .endpoint(&config.common.endpoint_url);
 
         if let Some(account_name) = config.common.account_name {
-            builder.account_name(&account_name);
+            builder = builder.account_name(&account_name);
         } else {
             tracing::warn!(
                 "account_name azblob is not set, container  {}",
@@ -72,7 +72,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
         }
 
         if let Some(account_key) = config.common.account_key {
-            builder.account_key(&account_key);
+            builder = builder.account_key(&account_key);
         } else {
             tracing::warn!(
                 "account_key azblob is not set, container  {}",

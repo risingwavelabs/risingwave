@@ -26,7 +26,7 @@ use risingwave_common::bail;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
-pub use risingwave_pb::expr::agg_call::PbType as PbAggKind;
+pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::{PbAggCall, PbExprNode, PbInputRef, PbUserDefinedFunctionMetadata};
 
 use crate::expr::{
@@ -41,8 +41,8 @@ use crate::Result;
 //  advanced features like order by, filter, distinct, etc. should be handled by the upper layer.
 #[derive(Debug, Clone)]
 pub struct AggCall {
-    /// Aggregation kind for constructing agg state.
-    pub kind: AggKind,
+    /// Aggregation type for constructing agg state.
+    pub agg_type: AggType,
 
     /// Arguments of aggregation function input.
     pub args: AggArgs,
@@ -65,8 +65,8 @@ pub struct AggCall {
 
 impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
-        let agg_kind = AggKind::from_protobuf(
-            agg_call.get_type()?,
+        let agg_type = AggType::from_protobuf(
+            agg_call.get_kind()?,
             agg_call.udf.as_ref(),
             agg_call.scalar.as_ref(),
         )?;
@@ -96,7 +96,7 @@ impl AggCall {
             })
             .collect_vec();
         Ok(AggCall {
-            kind: agg_kind,
+            agg_type,
             args,
             return_type: DataType::from(agg_call.get_return_type()?),
             column_orders,
@@ -160,7 +160,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
         self.tokens.next(); // Consume the RParen
 
         AggCall {
-            kind: AggKind::from_protobuf(func, None, None).unwrap(),
+            agg_type: AggType::from_protobuf(func, None, None).unwrap(),
             args: AggArgs {
                 data_types: children.iter().map(|(_, ty)| ty.clone()).collect(),
                 val_indices: children.iter().map(|(idx, _)| *idx).collect(),
@@ -216,7 +216,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
 
 /// Aggregate function kind.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
-pub enum AggKind {
+pub enum AggType {
     /// Built-in aggregate function.
     ///
     /// The associated value should not be `UserDefined` or `WrapScalar`.
@@ -229,7 +229,7 @@ pub enum AggKind {
     WrapScalar(PbExprNode),
 }
 
-impl Display for AggKind {
+impl Display for AggType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Builtin(kind) => write!(f, "{}", kind.as_str_name().to_lowercase()),
@@ -240,46 +240,46 @@ impl Display for AggKind {
 }
 
 /// `FromStr` for builtin aggregate functions.
-impl FromStr for AggKind {
+impl FromStr for AggType {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let kind = PbAggKind::from_str(s)?;
-        Ok(AggKind::Builtin(kind))
+        Ok(AggType::Builtin(kind))
     }
 }
 
-impl From<PbAggKind> for AggKind {
+impl From<PbAggKind> for AggType {
     fn from(pb: PbAggKind) -> Self {
         assert!(!matches!(
             pb,
             PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar
         ));
-        AggKind::Builtin(pb)
+        AggType::Builtin(pb)
     }
 }
 
-impl AggKind {
+impl AggType {
     pub fn from_protobuf(
-        pb_type: PbAggKind,
+        pb_kind: PbAggKind,
         user_defined: Option<&PbUserDefinedFunctionMetadata>,
         scalar: Option<&PbExprNode>,
     ) -> Result<Self> {
-        match pb_type {
+        match pb_kind {
             PbAggKind::UserDefined => {
                 let user_defined = user_defined.context("expect user defined")?;
-                Ok(AggKind::UserDefined(user_defined.clone()))
+                Ok(AggType::UserDefined(user_defined.clone()))
             }
             PbAggKind::WrapScalar => {
                 let scalar = scalar.context("expect scalar")?;
-                Ok(AggKind::WrapScalar(scalar.clone()))
+                Ok(AggType::WrapScalar(scalar.clone()))
             }
             PbAggKind::Unspecified => bail!("Unrecognized agg."),
-            _ => Ok(AggKind::Builtin(pb_type)),
+            _ => Ok(AggType::Builtin(pb_kind)),
         }
     }
 
-    pub fn to_protobuf(&self) -> PbAggKind {
+    pub fn to_protobuf_simple(&self) -> PbAggKind {
         match self {
             Self::Builtin(pb) => *pb,
             Self::UserDefined(_) => PbAggKind::UserDefined,
@@ -288,27 +288,27 @@ impl AggKind {
     }
 }
 
-/// Macros to generate match arms for [`AggKind`](AggKind).
+/// Macros to generate match arms for `AggType`.
 /// IMPORTANT: These macros must be carefully maintained especially when adding new
-/// [`AggKind`](AggKind) variants.
-pub mod agg_kinds {
-    /// [`AggKind`](super::AggKind)s that are currently not supported in streaming mode.
+/// `AggType`/`PbAggKind` variants.
+pub mod agg_types {
+    /// [`AggType`](super::AggType)s that are currently not supported in streaming mode.
     #[macro_export]
     macro_rules! unimplemented_in_stream {
         () => {
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::PercentileCont | PbAggKind::PercentileDisc | PbAggKind::Mode,
             )
         };
     }
     pub use unimplemented_in_stream;
 
-    /// [`AggKind`](super::AggKind)s that should've been rewritten to other kinds. These kinds
+    /// [`AggType`](super::AggType)s that should've been rewritten to other kinds. These kinds
     /// should not appear when generating physical plan nodes.
     #[macro_export]
     macro_rules! rewritten {
         () => {
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::Avg
                     | PbAggKind::StddevPop
                     | PbAggKind::StddevSamp
@@ -323,12 +323,12 @@ pub mod agg_kinds {
     }
     pub use rewritten;
 
-    /// [`AggKind`](super::AggKind)s of which the aggregate results are not affected by the
+    /// [`AggType`](super::AggType)s of which the aggregate results are not affected by the
     /// user given ORDER BY clause.
     #[macro_export]
     macro_rules! result_unaffected_by_order_by {
         () => {
-            AggKind::Builtin(PbAggKind::BitAnd
+            AggType::Builtin(PbAggKind::BitAnd
                 | PbAggKind::BitOr
                 | PbAggKind::BitXor // XOR is commutative and associative
                 | PbAggKind::BoolAnd
@@ -348,13 +348,13 @@ pub mod agg_kinds {
     }
     pub use result_unaffected_by_order_by;
 
-    /// [`AggKind`](super::AggKind)s that must be called with ORDER BY clause. These are
+    /// [`AggType`](super::AggType)s that must be called with ORDER BY clause. These are
     /// slightly different from variants not in [`result_unaffected_by_order_by`], in that
     /// variants returned by this macro should be banned while the others should just be warned.
     #[macro_export]
     macro_rules! must_have_order_by {
         () => {
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::FirstValue
                     | PbAggKind::LastValue
                     | PbAggKind::PercentileCont
@@ -365,12 +365,12 @@ pub mod agg_kinds {
     }
     pub use must_have_order_by;
 
-    /// [`AggKind`](super::AggKind)s of which the aggregate results are not affected by the
+    /// [`AggType`](super::AggType)s of which the aggregate results are not affected by the
     /// user given DISTINCT keyword.
     #[macro_export]
     macro_rules! result_unaffected_by_distinct {
         () => {
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::BitAnd
                     | PbAggKind::BitOr
                     | PbAggKind::BoolAnd
@@ -383,11 +383,11 @@ pub mod agg_kinds {
     }
     pub use result_unaffected_by_distinct;
 
-    /// [`AggKind`](crate::aggregate::AggKind)s that are simply cannot 2-phased.
+    /// [`AggType`](crate::aggregate::AggType)s that are simply cannot 2-phased.
     #[macro_export]
     macro_rules! simply_cannot_two_phase {
         () => {
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::StringAgg
                     | PbAggKind::ApproxCountDistinct
                     | PbAggKind::ArrayAgg
@@ -405,18 +405,18 @@ pub mod agg_kinds {
                     | PbAggKind::BitAnd
                     | PbAggKind::BitOr
             )
-            | AggKind::UserDefined(_)
-            | AggKind::WrapScalar(_)
+            | AggType::UserDefined(_)
+            | AggType::WrapScalar(_)
         };
     }
     pub use simply_cannot_two_phase;
 
-    /// [`AggKind`](super::AggKind)s that are implemented with a single value state (so-called
+    /// [`AggType`](super::AggType)s that are implemented with a single value state (so-called
     /// stateless).
     #[macro_export]
     macro_rules! single_value_state {
         () => {
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::Sum
                     | PbAggKind::Sum0
                     | PbAggKind::Count
@@ -428,26 +428,26 @@ pub mod agg_kinds {
                     | PbAggKind::ApproxCountDistinct
                     | PbAggKind::InternalLastSeenValue
                     | PbAggKind::ApproxPercentile,
-            ) | AggKind::UserDefined(_)
+            ) | AggType::UserDefined(_)
         };
     }
     pub use single_value_state;
 
-    /// [`AggKind`](super::AggKind)s that are implemented with a single value state (so-called
+    /// [`AggType`](super::AggType)s that are implemented with a single value state (so-called
     /// stateless) iff the input is append-only.
     #[macro_export]
     macro_rules! single_value_state_iff_in_append_only {
         () => {
-            AggKind::Builtin(PbAggKind::Max | PbAggKind::Min)
+            AggType::Builtin(PbAggKind::Max | PbAggKind::Min)
         };
     }
     pub use single_value_state_iff_in_append_only;
 
-    /// [`AggKind`](super::AggKind)s that are implemented with a materialized input state.
+    /// [`AggType`](super::AggType)s that are implemented with a materialized input state.
     #[macro_export]
     macro_rules! materialized_input_state {
         () => {
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::Min
                     | PbAggKind::Max
                     | PbAggKind::FirstValue
@@ -456,7 +456,7 @@ pub mod agg_kinds {
                     | PbAggKind::ArrayAgg
                     | PbAggKind::JsonbAgg
                     | PbAggKind::JsonbObjectAgg,
-            ) | AggKind::WrapScalar(_)
+            ) | AggType::WrapScalar(_)
         };
     }
     pub use materialized_input_state;
@@ -465,7 +465,7 @@ pub mod agg_kinds {
     #[macro_export]
     macro_rules! ordered_set {
         () => {
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::PercentileCont
                     | PbAggKind::PercentileDisc
                     | PbAggKind::Mode
@@ -476,24 +476,24 @@ pub mod agg_kinds {
     pub use ordered_set;
 }
 
-impl AggKind {
+impl AggType {
     /// Get the total phase agg kind from the partial phase agg kind.
     pub fn partial_to_total(&self) -> Option<Self> {
         match self {
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::BitXor
                 | PbAggKind::Min
                 | PbAggKind::Max
                 | PbAggKind::Sum
                 | PbAggKind::InternalLastSeenValue,
             ) => Some(self.clone()),
-            AggKind::Builtin(PbAggKind::Sum0 | PbAggKind::Count) => {
+            AggType::Builtin(PbAggKind::Sum0 | PbAggKind::Count) => {
                 Some(Self::Builtin(PbAggKind::Sum0))
             }
-            agg_kinds::simply_cannot_two_phase!() => None,
-            agg_kinds::rewritten!() => None,
+            agg_types::simply_cannot_two_phase!() => None,
+            agg_types::rewritten!() => None,
             // invalid variants
-            AggKind::Builtin(
+            AggType::Builtin(
                 PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar,
             ) => None,
         }

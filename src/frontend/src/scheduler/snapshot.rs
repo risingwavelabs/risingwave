@@ -129,13 +129,7 @@ impl PinnedSnapshot {
                     }
                 })
             })?
-            .unwrap_or_else(|| {
-                self.value
-                    .state_table_info
-                    .max_table_committed_epoch()
-                    .map(Epoch)
-                    .unwrap_or_else(Epoch::now)
-            });
+            .unwrap_or_else(Epoch::now);
         Ok(epoch)
     }
 
