@@ -75,7 +75,7 @@ fi
 configure_static_openssl
 cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --profile release
 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
-check_link_info production
+check_link_info release
 
 cd target/release && chmod +x risingwave risectl
 
