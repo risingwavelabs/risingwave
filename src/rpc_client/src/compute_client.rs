@@ -73,7 +73,7 @@ impl ComputeClient {
                 "grpc-compute-client",
                 TcpConfig {
                     tcp_nodelay: true,
-                    keepalive_duration: None,
+                    ..Default::default()
                 },
             )
             .await?;
