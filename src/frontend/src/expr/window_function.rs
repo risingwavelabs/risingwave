@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::{Frame, WindowFuncKind};
 
 use super::{Expr, ExprImpl, OrderBy, RwResult};
@@ -87,10 +87,10 @@ impl WindowFunction {
                 );
             }
 
-            (Aggregate(agg_kind), args) => Ok(match agg_kind {
-                AggKind::Builtin(kind) => infer_type((*kind).into(), args)?,
-                AggKind::UserDefined(udf) => udf.return_type.as_ref().unwrap().into(),
-                AggKind::WrapScalar(expr) => expr.return_type.as_ref().unwrap().into(),
+            (Aggregate(agg_type), args) => Ok(match agg_type {
+                AggType::Builtin(kind) => infer_type((*kind).into(), args)?,
+                AggType::UserDefined(udf) => udf.return_type.as_ref().unwrap().into(),
+                AggType::WrapScalar(expr) => expr.return_type.as_ref().unwrap().into(),
             }),
 
             (_, args) => {

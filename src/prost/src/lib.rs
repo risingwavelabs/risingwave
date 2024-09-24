@@ -189,7 +189,7 @@ impl FromStr for crate::expr::table_function::PbType {
     }
 }
 
-impl FromStr for crate::expr::agg_call::PbType {
+impl FromStr for crate::expr::agg_call::PbKind {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

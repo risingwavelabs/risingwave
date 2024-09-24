@@ -139,10 +139,10 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         }
     }
 
-    /// Create a vnode mapping where all vnodes are mapped to the same single item.
+    /// Create a vnode mapping with the single item. Should only be used for singletons.
+    // TODO(var-vnode): make vnode count 1, also `Distribution::vnode_count`
     pub fn new_single(item: T::Item) -> Self {
-        // TODO(var-vnode): always 1 correct?
-        Self::new_uniform(std::iter::once(item), 1)
+        Self::new_uniform(std::iter::once(item), VirtualNode::COUNT)
     }
 
     /// The length (or count) of the vnode in this mapping.

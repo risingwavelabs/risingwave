@@ -62,8 +62,10 @@ public class DbzSourceUtils {
                             ValidatorUtils.getSql("postgres.publication_exist"))) {
                 stmt.setString(1, pubName);
                 var res = stmt.executeQuery();
+                // Note: the value returned here is `pubviaroot`, If there's more than one row, the
+                // publication exists
                 if (res.next()) {
-                    isPubExist = res.getBoolean(1);
+                    isPubExist = true;
                 }
             }
 
@@ -83,11 +85,13 @@ public class DbzSourceUtils {
                 if (schemaTableName.isPresent()) {
                     createPublicationSql =
                             String.format(
-                                    "CREATE PUBLICATION %s FOR TABLE %s;",
+                                    "CREATE PUBLICATION %s FOR TABLE %s WITH ( publish_via_partition_root = true );",
                                     quotePostgres(pubName), schemaTableName.get());
                 } else {
                     createPublicationSql =
-                            String.format("CREATE PUBLICATION %s", quotePostgres(pubName));
+                            String.format(
+                                    "CREATE PUBLICATION %s WITH ( publish_via_partition_root = true );",
+                                    quotePostgres(pubName));
                 }
                 try (var stmt = jdbcConnection.createStatement()) {
                     LOG.info(

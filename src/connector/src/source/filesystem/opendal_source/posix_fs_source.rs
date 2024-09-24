@@ -31,10 +31,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal posix fs source.
     pub fn new_posix_fs_source(posix_fs_properties: PosixFsProperties) -> ConnectorResult<Self> {
         // Create Fs builder.
-        let mut builder = Fs::default();
-
-        builder.root(&posix_fs_properties.root);
-
+        let builder = Fs::default().root(&posix_fs_properties.root);
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())

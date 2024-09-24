@@ -15,7 +15,7 @@
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 
-use crate::aggregate::AggKind;
+use crate::aggregate::AggType;
 use crate::Result;
 
 /// Kind of window functions.
@@ -31,14 +31,14 @@ pub enum WindowFuncKind {
 
     // Aggregate functions that are used with `OVER`.
     #[display("{0}")]
-    Aggregate(AggKind),
+    Aggregate(AggType),
 }
 
 impl WindowFuncKind {
     pub fn from_protobuf(
         window_function_type: &risingwave_pb::expr::window_function::PbType,
     ) -> Result<Self> {
-        use risingwave_pb::expr::agg_call::PbType as PbAggType;
+        use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
         use risingwave_pb::expr::window_function::{PbGeneralType, PbType};
 
         let kind = match window_function_type {
@@ -51,9 +51,9 @@ impl WindowFuncKind {
                 Ok(PbGeneralType::Lead) => Self::Lead,
                 Err(_) => bail!("no such window function type"),
             },
-            PbType::Aggregate(agg_type) => match PbAggType::try_from(*agg_type) {
+            PbType::Aggregate(agg_type) => match PbAggKind::try_from(*agg_type) {
                 // TODO(runji): support UDAF and wrapped scalar functions
-                Ok(agg_type) => Self::Aggregate(AggKind::from_protobuf(agg_type, None, None)?),
+                Ok(agg_type) => Self::Aggregate(AggType::from_protobuf(agg_type, None, None)?),
                 Err(_) => bail!("no such aggregate function type"),
             },
         };

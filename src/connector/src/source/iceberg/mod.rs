@@ -29,9 +29,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::connector_common::IcebergCommon;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
-use crate::sink::iceberg::IcebergConfig;
 use crate::source::{
     BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
@@ -39,30 +39,11 @@ use crate::source::{
 
 pub const ICEBERG_CONNECTOR: &str = "iceberg";
 
-#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
+#[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
 pub struct IcebergProperties {
-    #[serde(rename = "catalog.type")]
-    pub catalog_type: Option<String>,
-    #[serde(rename = "s3.region")]
-    pub region: Option<String>,
-    #[serde(rename = "s3.endpoint")]
-    pub endpoint: Option<String>,
-    #[serde(rename = "s3.access.key")]
-    pub s3_access: String,
-    #[serde(rename = "s3.secret.key")]
-    pub s3_secret: String,
-    #[serde(rename = "warehouse.path")]
-    pub warehouse_path: String,
-    // Catalog name, can be omitted for storage catalog, but
-    // must be set for other catalogs.
-    #[serde(rename = "catalog.name")]
-    pub catalog_name: Option<String>,
-    #[serde(rename = "catalog.uri")]
-    pub catalog_uri: Option<String>, // URI of iceberg catalog, only applicable in rest catalog.
-    #[serde(rename = "database.name")]
-    pub database_name: Option<String>,
-    #[serde(rename = "table.name")]
-    pub table_name: String,
+    #[serde(flatten)]
+    pub common: IcebergCommon,
+
     // For jdbc catalog
     #[serde(rename = "catalog.jdbc.user")]
     pub jdbc_user: Option<String>,
@@ -73,8 +54,10 @@ pub struct IcebergProperties {
     pub unknown_fields: HashMap<String, String>,
 }
 
+use iceberg::table::Table as TableV2;
+
 impl IcebergProperties {
-    pub fn to_iceberg_config(&self) -> IcebergConfig {
+    pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
             java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
@@ -82,20 +65,25 @@ impl IcebergProperties {
         if let Some(jdbc_password) = self.jdbc_password.clone() {
             java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
         }
-        IcebergConfig {
-            catalog_name: self.catalog_name.clone(),
-            database_name: self.database_name.clone(),
-            table_name: self.table_name.clone(),
-            catalog_type: self.catalog_type.clone(),
-            uri: self.catalog_uri.clone(),
-            path: self.warehouse_path.clone(),
-            endpoint: self.endpoint.clone(),
-            access_key: self.s3_access.clone(),
-            secret_key: self.s3_secret.clone(),
-            region: self.region.clone(),
-            java_catalog_props,
-            ..Default::default()
+        // TODO: support path_style_access and java_catalog_props for iceberg source
+        self.common.load_table_v2(&None, &java_catalog_props).await
+    }
+
+    pub async fn load_table_v2_with_metadata(
+        &self,
+        table_meta: TableMetadata,
+    ) -> ConnectorResult<TableV2> {
+        let mut java_catalog_props = HashMap::new();
+        if let Some(jdbc_user) = self.jdbc_user.clone() {
+            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
         }
+        if let Some(jdbc_password) = self.jdbc_password.clone() {
+            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+        }
+        // TODO: support path_style_access and java_catalog_props for iceberg source
+        self.common
+            .load_table_v2_with_metadata(table_meta, &None, &java_catalog_props)
+            .await
     }
 }
 
@@ -169,7 +157,7 @@ impl SplitMetaData for IcebergSplit {
 
 #[derive(Debug, Clone)]
 pub struct IcebergSplitEnumerator {
-    config: IcebergConfig,
+    config: IcebergProperties,
 }
 
 #[async_trait]
@@ -181,10 +169,7 @@ impl SplitEnumerator for IcebergSplitEnumerator {
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<Self> {
-        let iceberg_config = properties.to_iceberg_config();
-        Ok(Self {
-            config: iceberg_config,
-        })
+        Ok(Self { config: properties })
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
@@ -208,6 +193,7 @@ impl IcebergSplitEnumerator {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
+
         let table = self.config.load_table_v2().await?;
 
         let current_snapshot = table.metadata().current_snapshot();

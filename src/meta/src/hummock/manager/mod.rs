@@ -29,12 +29,12 @@ use risingwave_hummock_sdk::{
     HummockContextId, HummockVersionId,
 };
 use risingwave_meta_model_v2::{
-    compaction_status, compaction_task, hummock_pinned_snapshot, hummock_pinned_version,
-    hummock_version_delta, hummock_version_stats,
+    compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
+    hummock_version_stats,
 };
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats,
-    PbCompactTaskAssignment, PbCompactionGroupInfo, SubscribeCompactionEventRequest,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, PbCompactTaskAssignment,
+    PbCompactionGroupInfo, SubscribeCompactionEventRequest,
 };
 use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
@@ -443,21 +443,6 @@ impl HummockManager {
                 .map(|p| (p.context_id, p))
                 .collect(),
             MetaStoreImpl::Sql(sql_meta_store) => hummock_pinned_version::Entity::find()
-                .all(&sql_meta_store.conn)
-                .await
-                .map_err(MetadataModelError::from)?
-                .into_iter()
-                .map(|m| (m.context_id as HummockContextId, m.into()))
-                .collect(),
-        };
-
-        context_info.pinned_snapshots = match &meta_store {
-            MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store)
-                .await?
-                .into_iter()
-                .map(|p| (p.context_id, p))
-                .collect(),
-            MetaStoreImpl::Sql(sql_meta_store) => hummock_pinned_snapshot::Entity::find()
                 .all(&sql_meta_store.conn)
                 .await
                 .map_err(MetadataModelError::from)?
