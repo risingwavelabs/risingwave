@@ -127,3 +127,22 @@ get_latest_cassandra_download_url() {
     local download_url="https://downloads.apache.org/cassandra/${latest_version}/apache-cassandra-${latest_version}-bin.tar.gz"
     echo "$download_url"
 }
+
+configure_static_openssl() {
+    export OPENSSL_STATIC=1
+    export OPENSSL_LIB_DIR="$(dpkg -L libssl-dev | grep libssl.a | xargs dirname)"
+    export OPENSSL_INCLUDE_DIR="$(dpkg -L libssl-dev | grep openssl/ssl.h | xargs dirname)"
+    echo "OPENSSL_STATIC: $OPENSSL_STATIC"
+    echo "OPENSSL_LIB_DIR: $OPENSSL_LIB_DIR"
+    echo "OPENSSL_INCLUDE_DIR: $OPENSSL_INCLUDE_DIR"
+}
+
+check_link_info() {
+  ldd_output=$(ldd target/"$1"/risingwave)
+  echo "$ldd_output"
+  # enforce that libssl is not present if we are building with static openssl
+  if [[ "$profile" == "ci-release" ]] && [[ "$ldd_output" == *"libssl"* ]]; then
+      echo "libssl should not be dynamically linked"
+      exit 1
+  fi
+}
