@@ -52,12 +52,20 @@ pub struct RowIdGenerator {
 
 pub type RowId = i64;
 
-// TODO(var-vnode): how should we handle this for different virtual node counts?
 #[inline]
-pub fn extract_vnode_id_from_row_id(id: RowId) -> VirtualNode {
+pub fn extract_vnode_id_from_row_id(id: RowId, vnode_count: usize) -> VirtualNode {
     let vnode_id = ((id >> VNODE_ID_SHIFT_BITS) & (VNODE_ID_UPPER_BOUND as i64 - 1)) as u32;
     assert!(vnode_id < VNODE_ID_UPPER_BOUND);
-    VirtualNode::from_index(vnode_id as usize)
+
+    // Previously, the vnode count was fixed to 256 for all jobs in all clusters. As a result, the
+    // `vnode_id` must reside in the range of `0..256` and the following modulo operation will be
+    // no-op. So this will retrieve the exact same vnode as when it was generated.
+    //
+    // In newer versions, fragments can have different vnode counts. To make sure the vnode is
+    // within the range, we need to apply modulo operation here. Therefore, there is no guarantee
+    // that the vnode retrieved here is the same as when it was generated. However, the row ids
+    // generated under the same vnode will still yield the same result.
+    VirtualNode::from_index(vnode_id as usize % vnode_count)
 }
 
 impl RowIdGenerator {
