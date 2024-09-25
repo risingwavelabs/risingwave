@@ -191,7 +191,7 @@ pub async fn get_replace_table_plan(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (mut graph, mut table, source, job_type) = generate_stream_graph_for_table(
+    let (mut graph, table, source, job_type) = generate_stream_graph_for_table(
         session,
         table_name,
         original_catalog,
@@ -241,7 +241,10 @@ pub async fn get_replace_table_plan(
         )?;
     }
 
+    // Set some fields ourselves so that the meta service does not need to maintain them.
+    let mut table = table;
     table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
+    table.maybe_vnode_count = Some(original_catalog.vnode_count() as _);
 
     Ok((source, table, graph, col_index_mapping, job_type))
 }

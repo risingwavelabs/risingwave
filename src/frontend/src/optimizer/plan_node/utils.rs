@@ -179,6 +179,7 @@ impl TableCatalogBuilder {
             created_at_cluster_version: None,
             retention_seconds: None,
             cdc_table_id: None,
+            vnode_count: None, // will be filled in by the meta service later
         }
     }
 

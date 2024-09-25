@@ -78,7 +78,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "ab65b31", features = ["mtrace", "nightly"] }
+foyer = { version = "0.11.5", features = ["mtrace", "nightly"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -137,13 +137,13 @@ otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev =
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 # branch rw_patch
-icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "490e5af541edab0e9284ba19ddb56c8a16d1c36b", features = [
+icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "1783f8f106958d6d0ce0249c1c708934a15c2a47", features = [
     "prometheus",
 ] }
 # branch dev
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "84bf51c9d0d5886e4ee306ca4f383f029e1767a4" }
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f8b7bff7bd7853be7733fc1db1203862878f92c1" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f8b7bff7bd7853be7733fc1db1203862878f92c1" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f8b7bff7bd7853be7733fc1db1203862878f92c1" }
 opendal = "0.49"
 # used only by arrow-udf-flight
 arrow-flight = "52"
@@ -161,7 +161,7 @@ deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd
 itertools = "0.12.0"
 jsonbb = "0.1.4"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
-parquet = { version = "52", features = ["async"] }
+parquet = { version = "53", features = ["async"] }
 thiserror-ext = "0.1.2"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [

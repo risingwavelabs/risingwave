@@ -122,13 +122,19 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
 ) PARTITION BY RANGE (c_timestamp);
 
 CREATE TABLE partitioned_timestamp_table_2023 PARTITION OF partitioned_timestamp_table
-    FOR VALUES FROM ('2023-01-01') TO ('2023-12-31');
+    FOR VALUES FROM ('2023-01-01') TO ('2023-12-31') PARTITION BY RANGE (c_timestamp);
 
 CREATE TABLE partitioned_timestamp_table_2024 PARTITION OF partitioned_timestamp_table
     FOR VALUES FROM ('2024-01-01') TO ('2024-12-31');
 
 CREATE TABLE partitioned_timestamp_table_2025 PARTITION OF partitioned_timestamp_table
     FOR VALUES FROM ('2025-01-01') TO ('2025-12-31');
+
+CREATE TABLE partitioned_timestamp_table_2023_h1 PARTITION OF partitioned_timestamp_table_2023
+    FOR VALUES FROM ('2023-01-01') TO ('2023-06-30');
+
+CREATE TABLE partitioned_timestamp_table_2023_h2 PARTITION OF partitioned_timestamp_table_2023
+    FOR VALUES FROM ('2023-07-01') TO ('2024-12-31');
 
 INSERT INTO partitioned_timestamp_table (c_int, c_boolean, c_timestamp) VALUES
 (1, false, '2023-02-01 10:30:00'),

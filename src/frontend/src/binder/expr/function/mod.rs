@@ -227,8 +227,8 @@ impl Binder {
             None
         };
 
-        let agg_type = if let Some(wrapped_agg_type) = wrapped_agg_type {
-            Some(wrapped_agg_type)
+        let agg_type = if wrapped_agg_type.is_some() {
+            wrapped_agg_type
         } else if let Some(ref udf) = udf
             && udf.kind.is_aggregate()
         {

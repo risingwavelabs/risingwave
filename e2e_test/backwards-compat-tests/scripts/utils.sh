@@ -245,6 +245,10 @@ seed_old_cluster() {
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_original.slt"
   fi
 
+  # work around https://github.com/risingwavelabs/risingwave/issues/18650
+  echo "--- wait for a version checkpoint"
+  sleep 60
+
   echo "--- Killing cluster"
   kill_cluster
   echo "--- Killed cluster"
