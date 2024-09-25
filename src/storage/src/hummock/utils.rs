@@ -33,13 +33,13 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
-use super::{HummockError, SstableStoreRef};
+use super::{HummockError, HummockResult, SstableStoreRef};
 use crate::error::StorageResult;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::monitor::MemoryCollector;
-use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead, TryWaitEpochOptions};
+use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -575,25 +575,15 @@ pub(crate) fn filter_with_delete_range<'a>(
     })
 }
 
-pub(crate) async fn wait_for_epoch(
+pub(crate) async fn wait_for_update(
     notifier: &tokio::sync::watch::Sender<PinnedVersion>,
-    wait_epoch: u64,
-    options: TryWaitEpochOptions,
-) -> StorageResult<()> {
+    mut inspect_fn: impl FnMut(&PinnedVersion) -> HummockResult<bool>,
+    mut periodic_debug_info: impl FnMut() -> String,
+) -> HummockResult<()> {
     let mut receiver = notifier.subscribe();
-    let mut committed_epoch = {
-        // avoid unnecessary check in the loop if the value does not change
-        let committed_epoch = receiver
-            .borrow_and_update()
-            .version()
-            .table_committed_epoch(options.table_id);
-        if let Some(committed_epoch) = committed_epoch
-            && committed_epoch >= wait_epoch
-        {
-            return Ok(());
-        }
-        committed_epoch
-    };
+    if inspect_fn(&receiver.borrow_and_update())? {
+        return Ok(());
+    }
     let start_time = Instant::now();
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
@@ -608,29 +598,19 @@ pub(crate) async fn wait_for_epoch(
                 // CN with the same distribution as the upstream MV.
                 // See #3845 for more details.
                 tracing::warn!(
-                    epoch = wait_epoch,
-                    ?committed_epoch,
-                    table_id = options.table_id.table_id,
+                    info = periodic_debug_info(),
                     elapsed = ?start_time.elapsed(),
-                    "wait_epoch timeout when waiting for version update",
+                    "timeout when waiting for version update",
                 );
                 continue;
             }
             Ok(Err(_)) => {
-                return Err(HummockError::wait_epoch("tx dropped").into());
+                return Err(HummockError::wait_epoch("tx dropped"));
             }
             Ok(Ok(_)) => {
-                // TODO: should handle the corner case of drop table
-                let new_committed_epoch = receiver
-                    .borrow()
-                    .version()
-                    .table_committed_epoch(options.table_id);
-                if let Some(committed_epoch) = new_committed_epoch
-                    && committed_epoch >= wait_epoch
-                {
+                if inspect_fn(&receiver.borrow())? {
                     return Ok(());
                 }
-                committed_epoch = new_committed_epoch;
             }
         }
     }

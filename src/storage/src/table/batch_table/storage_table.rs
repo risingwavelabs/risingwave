@@ -760,7 +760,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     pub async fn batch_iter_log_with_pk_bounds(
         &self,
         start_epoch: u64,
-        end_epoch: u64,
+        end_epoch: HummockReadEpoch,
     ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
         let pk_prefix = OwnedRow::default();
         let start_key = self.serialize_pk_bound(&pk_prefix, Unbounded, true);
@@ -987,18 +987,22 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
         table_key_range: TableKeyRange,
         read_options: ReadLogOptions,
         start_epoch: u64,
-        end_epoch: u64,
+        end_epoch: HummockReadEpoch,
     ) -> StorageResult<Self> {
         store
             .try_wait_epoch(
-                HummockReadEpoch::Committed(end_epoch),
+                end_epoch,
                 TryWaitEpochOptions {
                     table_id: read_options.table_id,
                 },
             )
             .await?;
         let iter = store
-            .iter_log((start_epoch, end_epoch), table_key_range, read_options)
+            .iter_log(
+                (start_epoch, end_epoch.get_epoch()),
+                table_key_range,
+                read_options,
+            )
             .await?;
         let iter = Self {
             iter,
