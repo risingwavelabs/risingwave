@@ -14,9 +14,6 @@ ignored = ["workspace-hack"]
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
 
-[features]
-static-openssl = ["openssl/vendored"]
-
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
 auto_enums = { workspace = true }
