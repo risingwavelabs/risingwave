@@ -15,6 +15,7 @@
 use std::sync::{Arc, OnceLock};
 
 use prost::Message;
+use risingwave_common::telemetry::get_telemetry_risingwave_cloud_uuid;
 use risingwave_pb::telemetry::{
     EventMessage as PbEventMessage, PbTelemetryDatabaseObject,
     TelemetryEventStage as PbTelemetryEventStage,
@@ -179,6 +180,7 @@ fn request_to_telemetry_event(
         attributes: attributes.map(|a| a.to_string()),
         node,
         is_test,
+        cloud_uuid: get_telemetry_risingwave_cloud_uuid(),
     };
     let report_bytes = event.encode_to_vec();
 

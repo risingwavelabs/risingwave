@@ -30,17 +30,14 @@ pub trait TelemetryToProtobuf {
 impl From<TelemetryReportBase> for PbTelemetryReportBase {
     fn from(val: TelemetryReportBase) -> Self {
         PbTelemetryReportBase {
-            tracking_id: if let Some(id) = get_telemetry_risingwave_cloud_uuid() {
-                id
-            } else {
-                val.tracking_id
-            },
+            tracking_id: val.tracking_id,
             session_id: val.session_id,
             system_data: Some(val.system_data.into()),
             up_time: val.up_time,
             report_time: val.time_stamp,
             node_type: from_telemetry_node_type(val.node_type) as i32,
             is_test: val.is_test,
+            cloud_uuid: get_telemetry_risingwave_cloud_uuid(),
         }
     }
 }
