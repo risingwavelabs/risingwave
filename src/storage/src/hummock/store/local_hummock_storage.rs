@@ -45,7 +45,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 use crate::hummock::store::version::{read_filter_for_version, HummockVersionReader};
 use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, sanity_check_enabled,
-    wait_for_update,
+    wait_for_epoch,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{
@@ -135,44 +135,8 @@ impl LocalHummockStorage {
             .await
     }
 
-    async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
-        let mut prev_committed_epoch = None;
-        let prev_committed_epoch = &mut prev_committed_epoch;
-        wait_for_update(
-            &self.version_update_notifier_tx,
-            |version| {
-                let committed_epoch = version.version().table_committed_epoch(self.table_id);
-                let ret = if let Some(committed_epoch) = committed_epoch {
-                    if committed_epoch >= wait_epoch {
-                        Ok(true)
-                    } else {
-                        Ok(false)
-                    }
-                } else if prev_committed_epoch.is_none() {
-                    warn!(
-                        table_id = self.table_id.table_id,
-                        version_id = version.id().to_u64(),
-                        "table id not exist yet, wait for registering"
-                    );
-                    Ok(false)
-                } else {
-                    Err(HummockError::wait_epoch(format!(
-                        "table {} has been dropped",
-                        self.table_id
-                    )))
-                };
-                *prev_committed_epoch = committed_epoch;
-                ret
-            },
-            || {
-                format!(
-                    "wait_for_epoch: epoch: {}, table_id: {}",
-                    wait_epoch, self.table_id
-                )
-            },
-        )
-        .await?;
-        Ok(())
+    pub async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
+        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch, self.table_id).await
     }
 
     pub async fn iter_flushed(

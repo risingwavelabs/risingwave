@@ -32,6 +32,7 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tracing::warn;
 
 use super::{HummockError, HummockResult, SstableStoreRef};
 use crate::error::StorageResult;
@@ -573,6 +574,54 @@ pub(crate) fn filter_with_delete_range<'a>(
             true
         }
     })
+}
+
+/// Wait for the `commited_epoch` of `table_id` to reach `wait_epoch`.
+///
+/// When the `table_id` does not exist in the latest version, we assume that
+/// the table is not created yet, and will wait until the table is created.
+pub(crate) async fn wait_for_epoch(
+    notifier: &tokio::sync::watch::Sender<PinnedVersion>,
+    wait_epoch: u64,
+    table_id: TableId,
+) -> StorageResult<()> {
+    let mut prev_committed_epoch = None;
+    let prev_committed_epoch = &mut prev_committed_epoch;
+    wait_for_update(
+        notifier,
+        |version| {
+            let committed_epoch = version.version().table_committed_epoch(table_id);
+            let ret = if let Some(committed_epoch) = committed_epoch {
+                if committed_epoch >= wait_epoch {
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            } else if prev_committed_epoch.is_none() {
+                warn!(
+                    table_id = table_id.table_id,
+                    version_id = version.id().to_u64(),
+                    "table id not exist yet, wait for registering"
+                );
+                Ok(false)
+            } else {
+                Err(HummockError::wait_epoch(format!(
+                    "table {} has been dropped",
+                    table_id
+                )))
+            };
+            *prev_committed_epoch = committed_epoch;
+            ret
+        },
+        || {
+            format!(
+                "wait_for_epoch: epoch: {}, table_id: {}",
+                wait_epoch, table_id
+            )
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 pub(crate) async fn wait_for_update(

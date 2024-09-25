@@ -53,7 +53,7 @@ use crate::hummock::local_version::pinned_version::{start_pinned_version_worker,
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
-use crate::hummock::utils::wait_for_update;
+use crate::hummock::utils::{wait_for_epoch, wait_for_update};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockStorageIterator, HummockStorageRevIterator,
@@ -633,53 +633,61 @@ impl StateStore for HummockStorage {
         wait_epoch: HummockReadEpoch,
         options: TryWaitEpochOptions,
     ) -> StorageResult<()> {
-        let (wait_epoch, wait_version) = match wait_epoch {
-            HummockReadEpoch::Committed(epoch) => (epoch, None),
-            HummockReadEpoch::BatchQueryCommitted(epoch, version_id) => (epoch, Some(version_id)),
-            _ => return Ok(()),
-        };
-        assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
-        let is_valid_version_id = |id| match wait_version {
-            None => true,
-            Some(version_id) => id >= version_id,
-        };
-        // fast path by checking recent_versions
-        {
-            let recent_versions = self.recent_versions.load();
-            let latest_version = recent_versions.latest_version().version();
-            if is_valid_version_id(latest_version.id)
-                && let Some(committed_epoch) =
-                    latest_version.table_committed_epoch(options.table_id)
-                && committed_epoch >= wait_epoch
-            {
-                return Ok(());
-            }
-        }
-        wait_for_update(
-            &self.version_update_notifier_tx,
-            |version| {
-                if !is_valid_version_id(version.version().id) {
-                    return Ok(false);
-                }
-                let committed_epoch = version
-                    .version()
-                    .table_committed_epoch(options.table_id)
-                    .ok_or_else(|| {
-                        HummockError::wait_epoch(format!(
-                            "table id {} has been dropped",
-                            options.table_id
-                        ))
-                    })?;
-                Ok(committed_epoch >= wait_epoch)
-            },
-            || {
-                format!(
-                    "try_wait_epoch: epoch: {}, version_id: {:?}",
-                    wait_epoch, wait_version
+        match wait_epoch {
+            HummockReadEpoch::Committed(wait_epoch) => {
+                assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
+                wait_for_epoch(
+                    &self.version_update_notifier_tx,
+                    wait_epoch,
+                    options.table_id,
                 )
-            },
-        )
-        .await?;
+                .await?;
+            }
+            HummockReadEpoch::BatchQueryCommitted(wait_epoch, wait_version_id) => {
+                assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
+                // fast path by checking recent_versions
+                {
+                    let recent_versions = self.recent_versions.load();
+                    let latest_version = recent_versions.latest_version().version();
+                    if latest_version.id >= wait_version_id
+                        && let Some(committed_epoch) =
+                            latest_version.table_committed_epoch(options.table_id)
+                        && committed_epoch >= wait_epoch
+                    {
+                        return Ok(());
+                    }
+                }
+                wait_for_update(
+                    &self.version_update_notifier_tx,
+                    |version| {
+                        if wait_version_id < version.id() {
+                            return Ok(false);
+                        }
+                        let committed_epoch = version
+                            .version()
+                            .table_committed_epoch(options.table_id)
+                            .ok_or_else(|| {
+                                // In batch query, since we have ensured that the current version must be after the
+                                // `wait_version_id`, when seeing that the table_id not exist in the latest version,
+                                // the table must have been dropped.
+                                HummockError::wait_epoch(format!(
+                                    "table id {} has been dropped",
+                                    options.table_id
+                                ))
+                            })?;
+                        Ok(committed_epoch >= wait_epoch)
+                    },
+                    || {
+                        format!(
+                            "try_wait_epoch: epoch: {}, version_id: {:?}",
+                            wait_epoch, wait_version_id
+                        )
+                    },
+                )
+                .await?;
+            }
+            _ => {}
+        };
         Ok(())
     }
 
