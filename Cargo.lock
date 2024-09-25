@@ -3590,6 +3590,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.3",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core 0.9.8",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3616,7 +3630,7 @@ dependencies = [
  "bytes",
  "bzip2",
  "chrono",
- "dashmap",
+ "dashmap 5.5.3",
  "datafusion-common",
  "datafusion-execution",
  "datafusion-expr",
@@ -3675,7 +3689,7 @@ checksum = "4de1fd0d8db0f2b8e4f4121bfa1c7c09d3a5c08a0a65c2229cd849eb65cff855"
 dependencies = [
  "arrow 48.0.1",
  "chrono",
- "dashmap",
+ "dashmap 5.5.3",
  "datafusion-common",
  "datafusion-expr",
  "futures",
@@ -3876,7 +3890,7 @@ dependencies = [
  "bytes",
  "cfg-if",
  "chrono",
- "dashmap",
+ "dashmap 5.5.3",
  "datafusion",
  "datafusion-common",
  "datafusion-expr",
@@ -5526,7 +5540,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "821239e5672ff23e2a7060901fa622950bbd80b649cdaadd78d1c1767ed14eb4"
 dependencies = [
  "cfg-if",
- "dashmap",
+ "dashmap 5.5.3",
  "futures",
  "futures-timer",
  "no-std-compat",
@@ -11651,7 +11665,7 @@ dependencies = [
  "criterion",
  "crossbeam",
  "darwin-libproc",
- "dashmap",
+ "dashmap 6.1.0",
  "dyn-clone",
  "either",
  "enum-as-inner 0.6.0",
