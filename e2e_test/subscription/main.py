@@ -275,6 +275,8 @@ def test_cursor_with_table_alter():
     row = execute_query("fetch next from cur with (timeout = '2s')",conn)
     check_rows_data([1,2],row[0],"Insert")
     row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    assert row == []
+    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
     check_rows_data([4,4,4],row[0],"Insert")
     execute_insert("insert into t1 values(5,5,5)",conn)
     execute_insert("flush",conn)

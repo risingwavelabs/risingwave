@@ -92,8 +92,19 @@ impl ObserverState for FrontendObserverNode {
                 let table_ids = deltas
                     .version_deltas
                     .iter()
-                    .flat_map(|version_deltas| version_deltas.change_log_delta.keys())
-                    .map(|table_id| TableId::new(*table_id))
+                    .flat_map(|version_deltas| &version_deltas.change_log_delta)
+                    .filter_map(|(table_id, change_log)| match change_log.new_log.as_ref() {
+                        Some(new_log) => {
+                            let new_value_empty = new_log.new_value.is_empty();
+                            let old_value_empty = new_log.old_value.is_empty();
+                            if !new_value_empty || !old_value_empty {
+                                Some(TableId::new(table_id.clone()))
+                            } else {
+                                None
+                            }
+                        }
+                        None => None,
+                    })
                     .collect_vec();
                 self.handle_hummock_snapshot_notification(deltas);
                 self.handle_cursor_notify(table_ids);
@@ -203,8 +214,14 @@ impl ObserverState for FrontendObserverNode {
         let hummock_version = FrontendHummockVersion::from_protobuf(hummock_version.unwrap());
         let table_ids = hummock_version
             .table_change_log
-            .keys()
-            .cloned()
+            .iter()
+            .filter_map(|(table_id, change_log)| {
+                if change_log.get_non_empty_epochs(0, usize::MAX).is_empty() {
+                    None
+                } else {
+                    Some(table_id.clone())
+                }
+            })
             .collect_vec();
         self.hummock_snapshot_manager.init(hummock_version);
         self.handle_cursor_notify(table_ids);
@@ -496,6 +513,9 @@ impl FrontendObserverNode {
     }
 
     fn handle_cursor_notify(&self, table_ids: Vec<TableId>) {
+        if table_ids.is_empty() {
+            return;
+        }
         for session in self.sessions_map.read().values() {
             session
                 .get_cursor_manager()
@@ -505,6 +525,9 @@ impl FrontendObserverNode {
     }
 
     fn handle_cursor_remove_table_ids(&self, table_ids: Vec<TableId>) {
+        if table_ids.is_empty() {
+            return;
+        }
         for session in self.sessions_map.read().values() {
             session
                 .get_cursor_manager()

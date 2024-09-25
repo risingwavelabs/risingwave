@@ -31,7 +31,7 @@ use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
-use tokio::sync::watch::{channel, Receiver, Sender};
+use tokio::sync::broadcast::{channel, Sender};
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 use super::SessionImpl;
@@ -921,9 +921,8 @@ enum CursorNotifyState {
     RemoveTables(Vec<TableId>),
     NotifyTables(Vec<TableId>),
 }
-pub type CursorNotifyMapRef = Arc<RwLock<HashMap<u32, (Sender<()>, Receiver<()>)>>>;
 pub struct CursorNotifies {
-    cursor_notify_map: CursorNotifyMapRef,
+    cursor_notify_map: Arc<RwLock<HashMap<u32, Sender<()>>>>,
     sender: mpsc::UnboundedSender<CursorNotifyState>,
     shutdown_tx: Option<oneshot::Sender<()>>,
 }
@@ -932,9 +931,7 @@ impl CursorNotifies {
     pub fn new() -> Self {
         let (sender, mut receiver) = mpsc::unbounded_channel();
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-        let cursor_notify_map = Arc::new(RwLock::new(
-            HashMap::<u32, (Sender<()>, Receiver<()>)>::new(),
-        ));
+        let cursor_notify_map = Arc::new(RwLock::new(HashMap::<u32, Sender<()>>::new()));
         let cursor_notify_map_clone = cursor_notify_map.clone();
         tokio::spawn(async move {
             loop {
@@ -953,8 +950,9 @@ impl CursorNotifies {
                             Some(CursorNotifyState::NotifyTables(table_ids)) => {
                                 let cursor_notify_map_clone_read = cursor_notify_map_clone.read().await;
                                 for table_id in table_ids {
-                                    if let Some((tx,_rx)) = cursor_notify_map_clone_read.get(&table_id.table_id()) {
-                                        tx.send(()).unwrap();
+                                    if let Some(tx) = cursor_notify_map_clone_read.get(&table_id.table_id()) {
+                                        // Maybe there's no cursor.
+                                        tx.send(()).ok();
                                     }
                                 }
                             }
@@ -976,18 +974,18 @@ impl CursorNotifies {
     pub async fn wait_next_epoch(&self, id: u32, timeout_seconds: Option<u64>) -> Result<()> {
         let mut rx = {
             let mut cursor_notify_map_write = self.cursor_notify_map.write().await;
-            let (_tx, rx) = cursor_notify_map_write.entry(id).or_insert_with(|| {
-                let (tx, rx) = channel(());
-                (tx, rx)
+            let tx = cursor_notify_map_write.entry(id).or_insert_with(|| {
+                let (tx, _rx) = channel(10);
+                tx
             });
-            rx.clone()
+            tx.subscribe()
         };
         let mut timeout_interval =
             tokio::time::interval(Duration::from_secs(timeout_seconds.unwrap_or(u64::MAX)));
         timeout_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         timeout_interval.tick().await;
         tokio::select! {
-            result = rx.changed() => {
+            result = rx.recv() => {
                 result.map_err(|_| {
                     ErrorCode::InternalError(format!("Cursor dependent table deleted: table_id is {:?}", id))
                 })?;
