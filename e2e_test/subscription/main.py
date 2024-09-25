@@ -286,6 +286,8 @@ def test_cursor_with_table_alter():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    assert row == []
+    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
     check_rows_data([6,6],row[0],"Insert")
     drop_table_subscription()
 
