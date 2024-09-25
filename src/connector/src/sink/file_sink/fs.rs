@@ -60,9 +60,7 @@ pub const FS_SINK: &str = "fs";
 impl<S: OpendalSinkBackend> FileSink<S> {
     pub fn new_fs_sink(config: FsConfig) -> Result<Operator> {
         // Create fs builder.
-        let mut builder = Fs::default();
-        // Create fs backend builder.
-        builder.root(&config.common.path);
+        let builder = Fs::default().root(&config.common.path);
         let operator: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())

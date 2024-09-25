@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_expr::aggregate::{AggKind, PbAggKind};
+use risingwave_expr::aggregate::{AggType, PbAggKind};
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -162,14 +162,14 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         // sum is null, so avg is null. And null-rejected expression will be false, so we can still apply this rule and we don't need to generate a 0 value for count.
         let count_exists = agg_calls
             .iter()
-            .any(|agg_call| matches!(agg_call.agg_kind, AggKind::Builtin(PbAggKind::Count)));
+            .any(|agg_call| matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Count)));
 
         if count_exists {
             // When group input is empty, not count agg would return null.
             let null_agg_pos = agg_calls
                 .iter()
                 .positions(|agg_call| {
-                    !matches!(agg_call.agg_kind, AggKind::Builtin(PbAggKind::Count))
+                    !matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Count))
                 })
                 .collect_vec();
 

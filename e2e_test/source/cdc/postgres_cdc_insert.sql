@@ -32,3 +32,13 @@ INSERT INTO list_with_null VALUES (3, '{NULL,-3,-4}', '{NULL,nan,-inf}', '{NULL,
 INSERT INTO list_with_null VALUES (4, '{-4,-5,-6}', '{NULL,-99999999999999999.9999}', '{NULL,-99999999999999999.9999}', '{NULL,-99999999999999999.9999}', '{NULL,sad,ok}', '{b2e4636d-fa03-4ad4-bf16-029a79dca3e2}', '{\\x88,\\x99,\\xAA}');
 INSERT INTO list_with_null VALUES (6, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
+INSERT INTO partitioned_timestamp_table (c_int, c_boolean, c_timestamp) VALUES
+(11, true, '2023-02-01 10:30:00'),
+(12, true, '2023-05-15 11:45:00'),
+(13, true, '2023-11-03 12:15:00'),
+(14, true, '2024-01-04 13:00:00'),
+(15, true, '2024-03-05 09:30:00'),
+(16, true, '2024-06-06 14:20:00'),
+(17, true, '2024-09-07 16:45:00'),
+(18, true, '2025-01-08 18:30:00'),
+(19, true, '2025-07-09 07:10:00');

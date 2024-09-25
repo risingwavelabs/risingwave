@@ -69,35 +69,27 @@ impl StreamManagerService for StreamServiceImpl {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();
 
-        let snapshot = self.barrier_scheduler.flush(req.checkpoint).await?;
+        let version_id = self.barrier_scheduler.flush(req.checkpoint).await?;
         Ok(Response::new(FlushResponse {
             status: None,
-            snapshot: Some(snapshot),
+            hummock_version_id: version_id.to_u64(),
         }))
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        let i = self
-            .barrier_scheduler
+        self.barrier_scheduler
             .run_command(Command::pause(PausedReason::Manual))
             .await?;
-        Ok(Response::new(PauseResponse {
-            prev: i.prev_paused_reason.map(Into::into),
-            curr: i.curr_paused_reason.map(Into::into),
-        }))
+        Ok(Response::new(PauseResponse {}))
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        let i = self
-            .barrier_scheduler
+        self.barrier_scheduler
             .run_command(Command::resume(PausedReason::Manual))
             .await?;
-        Ok(Response::new(ResumeResponse {
-            prev: i.prev_paused_reason.map(Into::into),
-            curr: i.curr_paused_reason.map(Into::into),
-        }))
+        Ok(Response::new(ResumeResponse {}))
     }
 
     #[cfg_attr(coverage, coverage(off))]

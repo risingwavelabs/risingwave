@@ -529,7 +529,7 @@ steps:
     retry: *auto-retry
 
   - label: "S3 source and sink on parquet file"
-    key: "s3-source-check-parquet-file"
+    key: "s3-source-and-sink-parquet-encode"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_parquet_source_and_sink.py"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null

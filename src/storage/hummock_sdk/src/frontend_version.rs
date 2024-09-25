@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{
     PbEpochNewChangeLog, PbHummockVersion, PbHummockVersionDelta, PbTableChangeLog,
@@ -28,7 +29,6 @@ use crate::{HummockVersionId, INVALID_VERSION_ID};
 #[derive(Clone, Debug)]
 pub struct FrontendHummockVersion {
     pub id: HummockVersionId,
-    pub max_committed_epoch: u64,
     pub state_table_info: HummockVersionStateTableInfo,
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<()>>,
 }
@@ -37,7 +37,6 @@ impl FrontendHummockVersion {
     pub fn from_version(version: &HummockVersion) -> Self {
         Self {
             id: version.id,
-            max_committed_epoch: version.max_committed_epoch,
             state_table_info: version.state_table_info.clone(),
             table_change_log: version
                 .table_change_log
@@ -66,8 +65,7 @@ impl FrontendHummockVersion {
         PbHummockVersion {
             id: self.id.0,
             levels: Default::default(),
-            max_committed_epoch: self.max_committed_epoch,
-            safe_epoch: 0,
+            max_committed_epoch: INVALID_EPOCH,
             table_watermarks: Default::default(),
             table_change_logs: self
                 .table_change_log
@@ -96,7 +94,6 @@ impl FrontendHummockVersion {
     pub fn from_protobuf(value: PbHummockVersion) -> Self {
         Self {
             id: HummockVersionId(value.id),
-            max_committed_epoch: value.max_committed_epoch,
             state_table_info: HummockVersionStateTableInfo::from_protobuf(&value.state_table_info),
             table_change_log: value
                 .table_change_logs
@@ -126,7 +123,6 @@ impl FrontendHummockVersion {
             assert_eq!(self.id, delta.prev_id);
         }
         self.id = delta.id;
-        self.max_committed_epoch = delta.max_committed_epoch;
         let (changed_table_info, _) = self
             .state_table_info
             .apply_delta(&delta.state_table_info_delta, &delta.removed_table_id);
@@ -143,7 +139,6 @@ impl FrontendHummockVersion {
 pub struct FrontendHummockVersionDelta {
     pub prev_id: HummockVersionId,
     pub id: HummockVersionId,
-    pub max_committed_epoch: u64,
     pub removed_table_id: HashSet<TableId>,
     pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
     pub change_log_delta: HashMap<TableId, ChangeLogDeltaCommon<()>>,
@@ -154,7 +149,6 @@ impl FrontendHummockVersionDelta {
         Self {
             prev_id: delta.prev_id,
             id: delta.id,
-            max_committed_epoch: delta.max_committed_epoch,
             removed_table_id: delta.removed_table_ids.clone(),
             state_table_info_delta: delta.state_table_info_delta.clone(),
             change_log_delta: delta
@@ -184,8 +178,7 @@ impl FrontendHummockVersionDelta {
             id: self.id.to_u64(),
             prev_id: self.prev_id.to_u64(),
             group_deltas: Default::default(),
-            max_committed_epoch: self.max_committed_epoch,
-            safe_epoch: 0,
+            max_committed_epoch: INVALID_EPOCH,
             trivial_move: false,
             new_table_watermarks: Default::default(),
             removed_table_ids: self
@@ -222,7 +215,6 @@ impl FrontendHummockVersionDelta {
         Self {
             prev_id: HummockVersionId::new(delta.prev_id),
             id: HummockVersionId::new(delta.id),
-            max_committed_epoch: delta.max_committed_epoch,
             removed_table_id: delta
                 .removed_table_ids
                 .iter()

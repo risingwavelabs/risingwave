@@ -107,7 +107,7 @@ use crate::handler::variable::infer_show_variable;
 use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
+use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
 use crate::rpc::FrontendServiceImpl;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
@@ -152,6 +152,8 @@ pub struct FrontendEnv {
 
     pub frontend_metrics: Arc<FrontendMetrics>,
 
+    pub cursor_metrics: Arc<CursorMetrics>,
+
     source_metrics: Arc<SourceMetrics>,
 
     /// Batch spill metrics
@@ -174,7 +176,7 @@ pub struct FrontendEnv {
 }
 
 /// Session map identified by `(process_id, secret_key)`
-type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
+pub type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 /// The proportion of frontend memory used for batch processing.
 const FRONTEND_BATCH_MEMORY_PROPORTION: f64 = 0.5;
@@ -184,14 +186,17 @@ impl FrontendEnv {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
-        let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
+        let meta_client = Arc::new(MockFrontendMetaClient {});
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let catalog_writer = Arc::new(MockCatalogWriter::new(
+            catalog.clone(),
+            hummock_snapshot_manager.clone(),
+        ));
         let catalog_reader = CatalogReader::new(catalog);
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let user_info_writer = Arc::new(MockUserInfoWriter::new(user_info_manager.clone()));
         let user_info_reader = UserInfoReader::new(user_info_manager);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let meta_client = Arc::new(MockFrontendMetaClient {});
-        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let query_manager = QueryManager::new(
@@ -217,6 +222,7 @@ impl FrontendEnv {
                 .build()
                 .unwrap(),
         ));
+        let sessions_map = Arc::new(RwLock::new(HashMap::new()));
         Self {
             meta_client,
             catalog_writer,
@@ -230,8 +236,9 @@ impl FrontendEnv {
             session_params: Default::default(),
             server_addr,
             client_pool,
-            sessions_map: Arc::new(RwLock::new(HashMap::new())),
+            sessions_map: sessions_map.clone(),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
+            cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
@@ -294,19 +301,21 @@ impl FrontendEnv {
         let mut join_handles = vec![heartbeat_join_handle];
         let mut shutdown_senders = vec![heartbeat_shutdown_sender];
 
+        let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
+        let hummock_snapshot_manager =
+            Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
+
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(CatalogWriterImpl::new(
             meta_client.clone(),
             catalog_updated_rx,
+            hummock_snapshot_manager.clone(),
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
-        let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
-        let hummock_snapshot_manager =
-            Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
         let compute_client_pool = Arc::new(ComputeClientPool::new(
             config.batch_exchange_connection_pool_size(),
         ));
@@ -410,6 +419,7 @@ impl FrontendEnv {
         ));
 
         let sessions_map: SessionMapRef = Arc::new(RwLock::new(HashMap::new()));
+        let cursor_metrics = Arc::new(CursorMetrics::init(sessions_map.clone()));
         let sessions = sessions_map.clone();
 
         // Idle transaction background monitor
@@ -461,6 +471,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool: compute_client_pool,
                 frontend_metrics,
+                cursor_metrics,
                 spill_metrics,
                 sessions_map,
                 batch_config: config.batch,
@@ -620,7 +631,6 @@ impl AuthContext {
         }
     }
 }
-
 pub struct SessionImpl {
     env: FrontendEnv,
     auth_context: Arc<AuthContext>,
@@ -722,6 +732,7 @@ impl SessionImpl {
         peer_addr: AddressRef,
         session_config: SessionConfig,
     ) -> Self {
+        let cursor_metrics = env.cursor_metrics.clone();
         Self {
             env,
             auth_context,
@@ -734,13 +745,14 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::default()),
+            cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
             temporary_source_manager: Default::default(),
         }
     }
 
     #[cfg(test)]
     pub fn mock() -> Self {
+        let env = FrontendEnv::mock();
         Self {
             env: FrontendEnv::mock(),
             auth_context: Arc::new(AuthContext::new(
@@ -762,7 +774,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::default()),
+            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
             temporary_source_manager: Default::default(),
         }
     }
@@ -1597,7 +1609,6 @@ impl Session for SessionImpl {
                         self.elapse_since_last_idle_instant()
                     {
                         if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
-                            self.unpin_snapshot();
                             return Err(PsqlError::IdleInTxnTimeout);
                         }
                     }

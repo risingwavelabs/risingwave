@@ -335,7 +335,11 @@ impl LogStoreRowSerde {
     ) -> Bytes {
         let (epoch, seq_id) = offset;
         Bytes::from(next_key(&serialize_pk(
-            (self.pk_info.compute_pk)(VirtualNode::MAX, Self::encode_epoch(epoch), seq_id),
+            (self.pk_info.compute_pk)(
+                VirtualNode::MAX_REPRESENTABLE,
+                Self::encode_epoch(epoch),
+                seq_id,
+            ),
             &self.pk_serde,
         )))
     }
@@ -980,7 +984,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))),
+            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
             pk_info,
         );
 
@@ -1124,7 +1128,7 @@ mod tests {
         let table = gen_test_log_store_table(pk_info);
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))),
+            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
             pk_info,
         );
         let (ops, rows) = gen_test_data(0);
@@ -1283,7 +1287,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))),
+            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
             pk_info,
         );
 
@@ -1428,7 +1432,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))),
+            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
             pk_info,
         );
 
@@ -1538,7 +1542,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT))),
+            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
             pk_info,
         );
 

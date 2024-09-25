@@ -82,13 +82,13 @@ pub async fn handle_alter_source_column(
             )
             .into());
         }
-        SourceEncode::Invalid | SourceEncode::Native => {
+        SourceEncode::Invalid | SourceEncode::Native | SourceEncode::None => {
             return Err(RwError::from(ErrorCode::NotSupported(
                 format!("alter source with encode {:?}", encode),
-                "alter source with encode JSON | BYTES | CSV".into(),
+                "Only source with encode JSON | BYTES | CSV | PARQUET can be altered".into(),
             )));
         }
-        _ => {}
+        SourceEncode::Json | SourceEncode::Csv | SourceEncode::Bytes | SourceEncode::Parquet => {}
     }
 
     let columns = &mut catalog.columns;
@@ -117,7 +117,7 @@ pub async fn handle_alter_source_column(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_source_column(catalog.to_prost(schema_id, db_id))
+        .alter_source(catalog.to_prost(schema_id, db_id))
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))

@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -118,16 +118,6 @@ impl HummockManager {
             .collect_vec()
     }
 
-    pub async fn list_pinned_snapshot(&self) -> Vec<HummockPinnedSnapshot> {
-        self.context_info
-            .read()
-            .await
-            .pinned_snapshots
-            .values()
-            .cloned()
-            .collect_vec()
-    }
-
     pub async fn list_workers(
         &self,
         context_ids: &[HummockContextId],
@@ -156,6 +146,10 @@ impl HummockManager {
 
     pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
         f(&self.versioning.read().await.current_version)
+    }
+
+    pub async fn get_version_id(&self) -> HummockVersionId {
+        self.on_current_version(|version| version.id).await
     }
 
     /// Gets the mapping from table id to compaction group id

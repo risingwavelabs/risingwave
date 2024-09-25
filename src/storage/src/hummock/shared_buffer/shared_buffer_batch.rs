@@ -25,7 +25,6 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use prometheus::IntGauge;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
 
@@ -528,37 +527,6 @@ impl SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
         }
-    }
-
-    pub fn collect_vnodes(&self) -> Vec<usize> {
-        let mut vnodes = Vec::with_capacity(VirtualNode::COUNT);
-        let mut next_vnode_id = 0;
-        while next_vnode_id < VirtualNode::COUNT {
-            let seek_key = TableKey(
-                VirtualNode::from_index(next_vnode_id)
-                    .to_be_bytes()
-                    .to_vec(),
-            );
-            let idx = match self
-                .inner
-                .entries
-                .binary_search_by(|m| (m.key.as_ref()).cmp(seek_key.as_slice()))
-            {
-                Ok(idx) => idx,
-                Err(idx) => idx,
-            };
-            if idx >= self.inner.entries.len() {
-                break;
-            }
-            let item = &self.inner.entries[idx];
-            if item.key.len() <= VirtualNode::SIZE {
-                break;
-            }
-            let current_vnode_id = item.key.vnode_part().to_index();
-            vnodes.push(current_vnode_id);
-            next_vnode_id = current_vnode_id + 1;
-        }
-        vnodes
     }
 
     #[cfg(any(test, feature = "test"))]
