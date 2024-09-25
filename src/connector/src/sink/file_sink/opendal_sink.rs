@@ -97,6 +97,7 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
     const SINK_NAME: &'static str = S::SINK_NAME;
 
     async fn validate(&self) -> Result<()> {
+        println!("执行validate");
         if !self.is_append_only {
             return Err(SinkError::Config(anyhow!(
                 "File sink only supports append-only mode at present. \
@@ -110,7 +111,13 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
                 "File sink only supports `PARQUET` encode at present."
             )));
         }
-        Ok(())
+
+        match self.op.list(&self.path).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(anyhow!(e)
+                .context("Fail to create sink, please check your config.")
+                .into()),
+        }
     }
 
     async fn new_log_sinker(
@@ -139,6 +146,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
         let engine_type = S::get_engine_type();
+        println!("执行new_operator");
         Ok(Self {
             op,
             path,
