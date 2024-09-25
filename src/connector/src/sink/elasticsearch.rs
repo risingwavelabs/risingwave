@@ -175,7 +175,7 @@ impl EsStreamChunkConverter {
                         .into_utf8(),
                 ));
             } else {
-                index_builder.append_null();
+                routing_builder.append_null();
             }
             let json = JsonbVal::from(Value::Object(self.json_encoder.encode(row)?));
             json_builder.append(Some(json.as_scalar_ref()));
