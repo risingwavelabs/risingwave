@@ -50,7 +50,7 @@ impl RowIdGenExecutor {
 
     /// Create a new row id generator based on the assigned vnodes.
     fn new_generator(vnodes: &Bitmap) -> RowIdGenerator {
-        RowIdGenerator::new(vnodes.iter_vnodes())
+        RowIdGenerator::new(vnodes.iter_vnodes(), vnodes.len())
     }
 
     /// Generate a row ID column according to ops.

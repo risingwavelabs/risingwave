@@ -233,7 +233,7 @@ pub(crate) fn gen_create_index_plan(
         })
         .collect();
     let index_item = build_index_item(
-        index_table.table_desc().into(),
+        index_table,
         table.name(),
         table_desc,
         index_columns_ordered_expr,
@@ -269,7 +269,7 @@ pub(crate) fn gen_create_index_plan(
 }
 
 fn build_index_item(
-    index_table_desc: Rc<TableDesc>,
+    index_table: &TableCatalog,
     primary_table_name: &str,
     primary_table_desc: Rc<TableDesc>,
     index_columns: Vec<(ExprImpl, OrderType)>,
@@ -288,9 +288,10 @@ fn build_index_item(
         .into_iter()
         .map(|(expr, _)| expr.to_expr_proto())
         .chain(
-            index_table_desc
+            index_table
                 .columns
                 .iter()
+                .map(|c| &c.column_desc)
                 .skip(index_columns_len)
                 .map(|x| {
                     let name = if x.name.starts_with(&primary_table_name_prefix) {

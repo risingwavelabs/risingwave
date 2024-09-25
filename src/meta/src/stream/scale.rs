@@ -28,7 +28,7 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ActorMapping, VirtualNode};
+use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model_v2::{actor, fragment, ObjectId, StreamingParallelism};
 use risingwave_pb::common::{PbActorLocation, WorkerNode, WorkerType};
@@ -645,6 +645,7 @@ impl ScaleController {
                     stream_node,
                     state_table_ids,
                     upstream_fragment_id,
+                    vnode_count: _,
                 },
             ) in fragments
             {
@@ -1429,9 +1430,6 @@ impl ScaleController {
                 FragmentDistributionType::Hash => {
                     if !in_degree_types.contains(&DispatcherType::Hash) {
                         None
-                    } else if actors_after_reschedule.len() == 1 {
-                        let actor_id = actors_after_reschedule.keys().next().cloned().unwrap();
-                        Some(ActorMapping::new_single(actor_id))
                     } else {
                         // Changes of the bitmap must occur in the case of HashDistribution
                         Some(ActorMapping::from_bitmaps(
@@ -1900,8 +1898,7 @@ impl ScaleController {
         &self,
         policy: TableResizePolicy,
     ) -> MetaResult<HashMap<FragmentId, WorkerReschedule>> {
-        // TODO(var-vnode): use vnode count from config
-        let max_parallelism = VirtualNode::COUNT;
+        type VnodeCount = usize;
 
         let TableResizePolicy {
             worker_ids,
@@ -1940,7 +1937,7 @@ impl ScaleController {
         let mut no_shuffle_source_fragment_ids = HashSet::new();
         let mut no_shuffle_target_fragment_ids = HashSet::new();
 
-        // index for fragment_id -> distribution_type
+        // index for fragment_id -> (distribution_type, vnode_count)
         let mut fragment_distribution_map = HashMap::new();
         // index for actor -> worker id
         let mut actor_location = HashMap::new();
@@ -1953,7 +1950,10 @@ impl ScaleController {
         fn build_index(
             no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
-            fragment_distribution_map: &mut HashMap<FragmentId, FragmentDistributionType>,
+            fragment_distribution_map: &mut HashMap<
+                FragmentId,
+                (FragmentDistributionType, VnodeCount),
+            >,
             actor_location: &mut HashMap<ActorId, WorkerId>,
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
@@ -2021,7 +2021,10 @@ impl ScaleController {
                         }
                     }
 
-                    fragment_distribution_map.insert(*fragment_id, fragment.distribution_type());
+                    fragment_distribution_map.insert(
+                        *fragment_id,
+                        (fragment.distribution_type(), fragment.vnode_count()),
+                    );
 
                     table_fragment_id_map
                         .entry(table_id.table_id())
@@ -2040,7 +2043,10 @@ impl ScaleController {
         async fn build_index_v2(
             no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
-            fragment_distribution_map: &mut HashMap<FragmentId, FragmentDistributionType>,
+            fragment_distribution_map: &mut HashMap<
+                FragmentId,
+                (FragmentDistributionType, VnodeCount),
+            >,
             actor_location: &mut HashMap<ActorId, WorkerId>,
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
@@ -2073,7 +2079,10 @@ impl ScaleController {
             for (fragment_id, fragment) in fragments {
                 fragment_distribution_map.insert(
                     fragment_id as FragmentId,
-                    FragmentDistributionType::from(fragment.distribution_type),
+                    (
+                        FragmentDistributionType::from(fragment.distribution_type),
+                        fragment.vnode_count as _,
+                    ),
                 );
 
                 table_fragment_id_map
@@ -2166,7 +2175,10 @@ impl ScaleController {
                     );
                 }
 
-                match fragment_distribution_map.get(&fragment_id).unwrap() {
+                let &(dist, vnode_count) = fragment_distribution_map.get(&fragment_id).unwrap();
+                let max_parallelism = vnode_count;
+
+                match dist {
                     FragmentDistributionType::Unspecified => unreachable!(),
                     FragmentDistributionType::Single => {
                         let (single_worker_id, should_be_one) =
@@ -2232,7 +2244,8 @@ impl ScaleController {
                         }
                         TableParallelism::Fixed(mut n) => {
                             if n > max_parallelism {
-                                // This should be unreachable, but we still intercept it to prevent accidental modifications.
+                                // This should be unreachable as it was already checked and rewritten in the frontend.
+                                // We still intercept it to prevent accidental modifications.
                                 tracing::warn!("specified parallelism {n} for table {table_id} is larger than max parallelism, force limit to {max_parallelism}");
                                 n = max_parallelism
                             }

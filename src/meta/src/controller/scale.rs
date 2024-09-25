@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
     UnionType, WithClause, WithQuery,
@@ -230,7 +231,14 @@ impl CatalogController {
         // NO_SHUFFLE related multi-layer downstream fragments
         let no_shuffle_related_downstream_fragment_ids = resolve_no_shuffle_query(
             txn,
-            construct_no_shuffle_downstream_traverse_query(fragment_ids.clone()),
+            construct_no_shuffle_downstream_traverse_query(
+                no_shuffle_related_upstream_fragment_ids
+                    .iter()
+                    .map(|(src, _, _)| *src)
+                    .chain(fragment_ids.iter().cloned())
+                    .unique()
+                    .collect(),
+            ),
         )
         .await?;
 

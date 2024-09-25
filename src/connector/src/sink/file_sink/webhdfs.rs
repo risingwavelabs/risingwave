@@ -51,10 +51,9 @@ pub const WEBHDFS_SINK: &str = "webhdfs";
 impl<S: OpendalSinkBackend> FileSink<S> {
     pub fn new_webhdfs_sink(config: WebhdfsConfig) -> Result<Operator> {
         // Create webhdfs backend builder.
-        let mut builder = Webhdfs::default();
-        // Set the name node for hdfs.
-        builder.endpoint(&config.common.endpoint);
-        builder.root(&config.common.path);
+        let builder = Webhdfs::default()
+            .endpoint(&config.common.endpoint)
+            .root(&config.common.path);
 
         let operator: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())

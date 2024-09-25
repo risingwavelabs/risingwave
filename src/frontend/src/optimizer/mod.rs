@@ -29,7 +29,8 @@ pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
+    SysTableVisitor,
 };
 use risingwave_sqlparser::ast::OnConflict;
 
@@ -243,7 +244,7 @@ impl PlanRoot {
         let return_type = DataType::List(input_column_type.clone().into());
         let agg = Agg::new(
             vec![PlanAggCall {
-                agg_kind: PbAggKind::ArrayAgg.into(),
+                agg_type: PbAggKind::ArrayAgg.into(),
                 return_type: return_type.clone(),
                 inputs: vec![InputRef::new(select_idx, input_column_type.clone())],
                 distinct: false,
