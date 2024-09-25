@@ -21,13 +21,15 @@ use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use hytra::TrAdder;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::metrics::{IntGaugeExt, GLOBAL_ERROR_METRICS};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID};
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::PbStreamActor;
+use risingwave_rpc_client::MetaClient;
 use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
@@ -54,7 +56,12 @@ pub struct ActorContext {
     /// This is the number of dispatchers when the actor is created. It will not be updated during runtime when new downstreams are added.
     pub initial_dispatch_num: usize,
     // mv_table_id to subscription id
-    pub related_subscriptions: HashMap<TableId, HashSet<u32>>,
+    pub related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
+
+    // Meta client. currently used for auto schema change. `None` for test only
+    pub meta_client: Option<MetaClient>,
+
+    pub streaming_config: Arc<StreamingConfig>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -71,7 +78,9 @@ impl ActorContext {
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
             // Set 1 for test to enable sanity check on table
             initial_dispatch_num: 1,
-            related_subscriptions: HashMap::new(),
+            related_subscriptions: HashMap::new().into(),
+            meta_client: None,
+            streaming_config: Arc::new(StreamingConfig::default()),
         })
     }
 
@@ -80,7 +89,9 @@ impl ActorContext {
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         initial_dispatch_num: usize,
-        related_subscriptions: HashMap<TableId, HashSet<u32>>,
+        related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
+        meta_client: Option<MetaClient>,
+        streaming_config: Arc<StreamingConfig>,
     ) -> ActorContextRef {
         Arc::new(Self {
             id: stream_actor.actor_id,
@@ -92,6 +103,8 @@ impl ActorContext {
             streaming_metrics,
             initial_dispatch_num,
             related_subscriptions,
+            meta_client,
+            streaming_config,
         })
     }
 
@@ -185,7 +198,6 @@ where
         .into()));
 
         let id = self.actor_context.id;
-
         let span_name = format!("Actor {id}");
 
         let new_span = |epoch: Option<EpochPair>| {
@@ -199,6 +211,13 @@ where
             )
         };
         let mut span = new_span(None);
+
+        let actor_count = self
+            .actor_context
+            .streaming_metrics
+            .actor_count
+            .with_guarded_label_values(&[&self.actor_context.fragment_id.to_string()]);
+        let _actor_count_guard = actor_count.inc_guard();
 
         let mut last_epoch: Option<EpochPair> = None;
         let mut stream = Box::pin(Box::new(self.consumer).execute());

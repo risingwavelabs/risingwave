@@ -14,8 +14,9 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail;
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::meta::table_parallelism::{
-    AdaptiveParallelism, FixedParallelism, PbParallelism,
+    AdaptiveParallelism, FixedParallelism, Parallelism, PbParallelism,
 };
 use risingwave_pb::meta::{PbTableParallelism, TableParallelism};
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
@@ -92,14 +93,45 @@ pub async fn handle_alter_parallelism(
         }
     };
 
-    let target_parallelism = extract_table_parallelism(parallelism)?;
+    let mut target_parallelism = extract_table_parallelism(parallelism)?;
+
+    let available_parallelism = session
+        .env()
+        .worker_node_manager()
+        .list_worker_nodes()
+        .iter()
+        .filter(|w| w.is_streaming_schedulable())
+        .map(|w| w.parallelism)
+        .sum::<u32>();
+    // TODO(var-vnode): get max parallelism from catalogs.
+    // Although the meta service will clamp the value for us, we should still check it here for better UI.
+    let max_parallelism = VirtualNode::COUNT;
+
+    let mut builder = RwPgResponse::builder(stmt_type);
+
+    match &target_parallelism.parallelism {
+        Some(Parallelism::Adaptive(_)) | Some(Parallelism::Auto(_)) => {
+            if available_parallelism > max_parallelism as u32 {
+                builder = builder.notice(format!("Available parallelism exceeds the maximum parallelism limit, the actual parallelism will be limited to {max_parallelism}"));
+            }
+        }
+        Some(Parallelism::Fixed(FixedParallelism { parallelism })) => {
+            if *parallelism > max_parallelism as u32 {
+                builder = builder.notice(format!("Provided parallelism exceeds the maximum parallelism limit, resetting to FIXED({max_parallelism})"));
+                target_parallelism = PbTableParallelism {
+                    parallelism: Some(PbParallelism::Fixed(FixedParallelism {
+                        parallelism: max_parallelism as u32,
+                    })),
+                };
+            }
+        }
+        _ => {}
+    };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_parallelism(table_id, target_parallelism, deferred)
         .await?;
-
-    let mut builder = RwPgResponse::builder(stmt_type);
 
     if deferred {
         builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_string());

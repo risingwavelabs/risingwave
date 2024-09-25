@@ -769,7 +769,7 @@
     create table t(a int, b int);
     select avg(a) FILTER (WHERE abs(a)) AS avga from t;
   binder_error: |
-    Failed to bind expression: avg(a) FILTER(WHERE abs(a))
+    Failed to bind expression: avg(a) FILTER (WHERE abs(a))
 
     Caused by:
       argument of FILTER must be boolean, not type Int32
@@ -778,7 +778,7 @@
     create table t(a int, b int);
     select avg(a) FILTER (WHERE 0 < (select max(a) from t)) AS avga from t;
   binder_error: |
-    Failed to bind expression: avg(a) FILTER(WHERE 0 < (SELECT max(a) FROM t))
+    Failed to bind expression: avg(a) FILTER (WHERE 0 < (SELECT max(a) FROM t))
 
     Caused by:
       Feature is not yet implemented: subquery in filter clause
@@ -788,7 +788,7 @@
     create table t(a int, b int);
     select avg(a) FILTER (WHERE a < avg(b)) AS avga from t;
   binder_error: |
-    Failed to bind expression: avg(a) FILTER(WHERE a < avg(b))
+    Failed to bind expression: avg(a) FILTER (WHERE a < avg(b))
 
     Caused by:
       Feature is not yet implemented: aggregation function in filter clause
@@ -798,10 +798,10 @@
     create table t(a int, b int);
     select abs(a) FILTER (WHERE a > 0) AS avga from t;
   binder_error: |
-    Failed to bind expression: abs(a) FILTER(WHERE a > 0)
+    Failed to bind expression: abs(a) FILTER (WHERE a > 0)
 
     Caused by:
-      Invalid input syntax: DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `abs` is not an aggregation function
+      Invalid input syntax: `FILTER` is not allowed in scalar/table function call
 - name: prune column before filter
   sql: |
     create table t(v1 int, v2 int);
@@ -1096,7 +1096,7 @@
     create table a (a1 int, a2 int);
     select count(a1) filter (where (select true)) from a;
   binder_error: |
-    Failed to bind expression: count(a1) FILTER(WHERE (SELECT true))
+    Failed to bind expression: count(a1) FILTER (WHERE (SELECT true))
 
     Caused by:
       Feature is not yet implemented: subquery in filter clause
@@ -1110,10 +1110,10 @@
       select count(b1) filter (where min(a1) < 3) from b
     );
   binder_error: |
-    Failed to bind expression: EXISTS (SELECT count(b1) FILTER(WHERE min(a1) < 3) FROM b)
+    Failed to bind expression: EXISTS (SELECT count(b1) FILTER (WHERE min(a1) < 3) FROM b)
 
     Caused by these errors (recent errors listed first):
-      1: Failed to bind expression: count(b1) FILTER(WHERE min(a1) < 3)
+      1: Failed to bind expression: count(b1) FILTER (WHERE min(a1) < 3)
       2: Feature is not yet implemented: aggregation function in filter clause
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - name: agg filter - table function
@@ -1122,7 +1122,7 @@
     create table a (a1 int, a2 int);
     select count(a1) filter (where unnest(array[1]) < 1) from a;
   binder_error: |
-    Failed to bind expression: count(a1) FILTER(WHERE unnest(ARRAY[1]) < 1)
+    Failed to bind expression: count(a1) FILTER (WHERE unnest(ARRAY[1]) < 1)
 
     Caused by:
       Invalid input syntax: table functions are not allowed in FILTER
@@ -1551,7 +1551,7 @@
     create table t (x int, y int);
     select percentile_cont(x) within group (order by y) from t;
   binder_error: |
-    Failed to bind expression: percentile_cont(x)
+    Failed to bind expression: percentile_cont(x) WITHIN GROUP (ORDER BY y)
 
     Caused by:
       Feature is not yet implemented: variable as direct argument of ordered-set aggregate
@@ -1560,7 +1560,7 @@
     create table t (x int, y int);
     select percentile_cont('abc') within group (order by y) from t;
   binder_error: |
-    Failed to bind expression: percentile_cont('abc')
+    Failed to bind expression: percentile_cont('abc') WITHIN GROUP (ORDER BY y)
 
     Caused by:
       Feature is not yet implemented: variable as direct argument of ordered-set aggregate
@@ -1569,7 +1569,7 @@
     create table t (x int, y int);
     select percentile_cont(1.3) within group (order by y) from t;
   binder_error: |
-    Failed to bind expression: percentile_cont(1.3)
+    Failed to bind expression: percentile_cont(1.3) WITHIN GROUP (ORDER BY y)
 
     Caused by:
       Invalid input syntax: direct arg in `percentile_cont` must between 0.0 and 1.0
@@ -1577,7 +1577,7 @@
     create table t (x int, y int);
     select percentile_cont(0, 0) within group (order by y) from t;
   binder_error: |
-    Failed to bind expression: percentile_cont(0, 0)
+    Failed to bind expression: percentile_cont(0, 0) WITHIN GROUP (ORDER BY y)
 
     Caused by:
       Invalid input syntax: invalid direct args or within group argument for `percentile_cont` aggregation
@@ -1585,7 +1585,7 @@
     create table t (x int, y varchar);
     select percentile_cont(0) within group (order by y) from t;
   binder_error: |
-    Failed to bind expression: percentile_cont(0)
+    Failed to bind expression: percentile_cont(0) WITHIN GROUP (ORDER BY y)
 
     Caused by:
       Invalid input syntax: arg in `percentile_cont` must be castable to float64
@@ -1625,7 +1625,7 @@
     create table t (x int, y int);
     select percentile_cont(0.8 + 0.8) within group (order by y) from t;
   binder_error: |
-    Failed to bind expression: percentile_cont(0.8 + 0.8)
+    Failed to bind expression: percentile_cont(0.8 + 0.8) WITHIN GROUP (ORDER BY y)
 
     Caused by:
       Invalid input syntax: direct arg in `percentile_cont` must between 0.0 and 1.0
@@ -1633,7 +1633,7 @@
     create table t (x int, y int);
     select percentile_cont(0.2 + x) within group (order by y) from t group by x;
   binder_error: |
-    Failed to bind expression: percentile_cont(0.2 + x)
+    Failed to bind expression: percentile_cont(0.2 + x) WITHIN GROUP (ORDER BY y)
 
     Caused by:
       Feature is not yet implemented: variable as direct argument of ordered-set aggregate
@@ -1656,7 +1656,7 @@
     create table t (x int, y varchar);
     select mode(1) within group (order by y desc) from t;
   binder_error: |
-    Failed to bind expression: mode(1)
+    Failed to bind expression: mode(1) WITHIN GROUP (ORDER BY y DESC)
 
     Caused by:
       Invalid input syntax: invalid direct args or within group argument for `mode` aggregation
@@ -1888,6 +1888,11 @@
     └─LogicalAgg { aggs: [approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [approx_percentile($expr1)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1::Float64 as $expr1] }
+        └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
@@ -1904,6 +1909,11 @@
     └─LogicalAgg { aggs: [approx_percentile($expr1), sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [approx_percentile($expr1), sum(t.v1)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1::Float64 as $expr1, t.v1] }
+        └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [approx_percentile, sum], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamRowMerge { output: [approx_percentile:Float64, sum(sum(t.v1)):Int64] }
@@ -1913,7 +1923,7 @@
       │     └─StreamShare { id: 2 }
       │       └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v1, t._row_id] }
       │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count] }
+      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count], must_output_per_barrier: true }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamShare { id: 2 }
@@ -1928,6 +1938,12 @@
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count(t.v1)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+  batch_plan: |-
+    BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), sum(t.v1), count(t.v1)] }
+    └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count(t.v1)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
+          └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [s1, approx_percentile, s2, count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1)), approx_percentile, sum(sum(t.v1)), sum0(count(t.v1))] }
@@ -1938,7 +1954,7 @@
         │     └─StreamShare { id: 2 }
         │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
         │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count(t.v1)), count] }
+        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count(t.v1)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count(t.v1)] }
               └─StreamShare { id: 2 }
@@ -1970,6 +1986,11 @@
     └─LogicalAgg { aggs: [approx_percentile($expr1), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [approx_percentile($expr1), approx_percentile($expr2)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2] }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamRowMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
@@ -1988,15 +2009,125 @@
 - name: test simple approx_percentile with different approx_percentile interleaved with stateless simple aggs
   sql: |
     CREATE TABLE t (v1 int, v2 int);
-    SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, count(*), sum(v2) as s2, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v2) as y from t;
+    SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, count(*), sum(v2) + approx_percentile(0.9, 0.01) WITHIN GROUP (order by v2) as y from t;
   logical_plan: |-
-    LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
+    LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
+    └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
+          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [s1, x, count, s2, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64, sum0(count):Int64, sum(sum(t.v2)):Int64, approx_percentile:Float64] }
+    StreamMaterialize { columns: [s1, x, count, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [sum(sum(t.v1)), approx_percentile, sum0(count), (sum(sum(t.v2))::Float64 + approx_percentile) as $expr3] }
+      └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64, sum0(count):Int64, sum(sum(t.v2)):Int64, approx_percentile:Float64] }
+        ├─StreamRowMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
+        │ ├─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+        │ │ └─StreamExchange { dist: Single }
+        │ │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+        │ │     └─StreamShare { id: 2 }
+        │ │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
+        │ │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamGlobalApproxPercentile { quantile: 0.9:Float64, relative_error: 0.01:Float64 }
+        │   └─StreamExchange { dist: Single }
+        │     └─StreamLocalApproxPercentile { percentile_col: $expr2, quantile: 0.9:Float64, relative_error: 0.01:Float64 }
+        │       └─StreamShare { id: 2 }
+        │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
+        │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count], must_output_per_barrier: true }
+          └─StreamExchange { dist: Single }
+            └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count, sum(t.v2)] }
+              └─StreamShare { id: 2 }
+                └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
+                  └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test simple approx_percentile with duplicated approx_percentile interleaved with stateless simple aggs
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, count(*), sum(v2) + approx_percentile(0.5, 0.01) WITHIN GROUP (order by v2) as y from t;
+  logical_plan: |-
+    LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
+    └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
+      └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
+    └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
+          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [s1, x, count, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [sum(sum(t.v1)), approx_percentile, sum0(count), (sum(sum(t.v2))::Float64 + approx_percentile) as $expr3] }
+      └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64, sum0(count):Int64, sum(sum(t.v2)):Int64, approx_percentile:Float64] }
+        ├─StreamRowMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
+        │ ├─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+        │ │ └─StreamExchange { dist: Single }
+        │ │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+        │ │     └─StreamShare { id: 2 }
+        │ │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
+        │ │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+        │   └─StreamExchange { dist: Single }
+        │     └─StreamLocalApproxPercentile { percentile_col: $expr2, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+        │       └─StreamShare { id: 2 }
+        │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
+        │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count], must_output_per_barrier: true }
+          └─StreamExchange { dist: Single }
+            └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count, sum(t.v2)] }
+              └─StreamShare { id: 2 }
+                └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
+                  └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test simple approx_percentile with descending order
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT sum(v1) as s1, approx_percentile(0.2, 0.01) WITHIN GROUP (order by v1 desc) from t;
+  logical_plan: |-
+    LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1)] }
+    └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1)] }
+      └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
+        └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [s1, approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64] }
+      ├─StreamGlobalApproxPercentile { quantile: 0.8:Float64, relative_error: 0.01:Float64 }
+      │ └─StreamExchange { dist: Single }
+      │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.8:Float64, relative_error: 0.01:Float64 }
+      │     └─StreamShare { id: 2 }
+      │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
+      │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count], must_output_per_barrier: true }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
+            └─StreamShare { id: 2 }
+              └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
+                └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test simple approx_percentile with different approx_percentile interleaved with stateless + stateful simple aggs
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, count(*), max(v2) as m2, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v2) as y from t;
+  logical_plan: |-
+    LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
+    └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
+      └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [s1, x, count, m2, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64, sum0(count):Int64, max(max(t.v2)):Int32, approx_percentile:Float64] }
       ├─StreamRowMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
       │ ├─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
       │ │ └─StreamExchange { dist: Single }
@@ -2010,33 +2141,87 @@
       │       └─StreamShare { id: 2 }
       │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
       │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count] }
+      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), max(max(t.v2)), count], must_output_per_barrier: true }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count, sum(t.v2)] }
-            └─StreamShare { id: 2 }
-              └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
-                └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-- name: test simple approx_percentile with descending order
+          └─StreamHashAgg { group_key: [$expr5], aggs: [sum(t.v1), count, max(t.v2)] }
+            └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr3, t.v2, t.v2::Float64 as $expr4, t._row_id, Vnode(t._row_id) as $expr5] }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test hash approx_percentile
   sql: |
     CREATE TABLE t (v1 int, v2 int);
-    SELECT sum(v1) as s1, approx_percentile(0.2, 0.01) WITHIN GROUP (order by v1 desc) from t;
+    SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t group by v2;
   logical_plan: |-
-    LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1)] }
-    └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1)] }
-      └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
+    LogicalProject { exprs: [approx_percentile($expr1)] }
+    └─LogicalAgg { group_key: [t.v2], aggs: [approx_percentile($expr1)] }
+      └─LogicalProject { exprs: [t.v2, t.v1::Float64 as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [approx_percentile($expr1)] }
+      └─BatchHashAgg { group_key: [t.v2], aggs: [approx_percentile($expr1)] }
+        └─BatchExchange { order: [], dist: HashShard(t.v2) }
+          └─BatchProject { exprs: [t.v2, t.v1::Float64 as $expr1] }
+            └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [s1, approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64] }
-      ├─StreamGlobalApproxPercentile { quantile: 0.8:Float64, relative_error: 0.01:Float64 }
-      │ └─StreamExchange { dist: Single }
-      │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.8:Float64, relative_error: 0.01:Float64 }
-      │     └─StreamShare { id: 2 }
-      │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
-      │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count] }
-        └─StreamExchange { dist: Single }
-          └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
-            └─StreamShare { id: 2 }
-              └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
-                └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [approx_percentile, t.v2(hidden)], stream_key: [t.v2], pk_columns: [t.v2], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [approx_percentile($expr1), t.v2] }
+      └─StreamHashAgg { group_key: [t.v2], aggs: [approx_percentile($expr1), count] }
+        └─StreamExchange { dist: HashShard(t.v2) }
+          └─StreamProject { exprs: [t.v2, t.v1::Float64 as $expr1, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test approx_percentile hash_agg forced should use single phase agg
+  sql: |
+    SET RW_FORCE_TWO_PHASE_AGG=true;
+    create table t (v1 int, grp_col int);
+    select approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t group by grp_col;
+  stream_error: |-
+    Feature is not yet implemented: two-phase streaming approx percentile aggregation with group key, please use single phase aggregation instead
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: test approx percentile with default relative_error
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  logical_plan: |-
+    LogicalProject { exprs: [approx_percentile($expr1)] }
+    └─LogicalAgg { aggs: [approx_percentile($expr1)] }
+      └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [approx_percentile($expr1)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1::Float64 as $expr1] }
+        └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+      └─StreamExchange { dist: Single }
+        └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+          └─StreamProject { exprs: [t.v1::Float64 as $expr1, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test approx percentile with invalid relative_error
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.0) WITHIN GROUP (order by v1) from t;
+  binder_error: |
+    Failed to bind expression: approx_percentile(0.5, 0.0) WITHIN GROUP (ORDER BY v1)
+
+    Caused by:
+      relative_error=0 does not satisfy 0.0 < relative_error < 1.0
+- name: test approx percentile with invalid relative_error 0.0
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.0) WITHIN GROUP (order by v1) from t;
+  binder_error: |
+    Failed to bind expression: approx_percentile(0.5, 0.0) WITHIN GROUP (ORDER BY v1)
+
+    Caused by:
+      relative_error=0 does not satisfy 0.0 < relative_error < 1.0
+- name: test approx percentile with invalid relative_error 1.0 with group by.
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT approx_percentile(0.0, 1.0) WITHIN GROUP (order by v1) from t group by v2;
+  binder_error: |
+    Failed to bind expression: approx_percentile(0.0, 1.0) WITHIN GROUP (ORDER BY v1)
+
+    Caused by:
+      relative_error=1 does not satisfy 0.0 < relative_error < 1.0

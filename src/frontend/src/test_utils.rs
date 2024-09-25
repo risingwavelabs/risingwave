@@ -30,8 +30,10 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::{HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
@@ -70,6 +72,7 @@ use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
+use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
@@ -84,6 +87,14 @@ pub struct LocalFrontend {
 
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
+
+    fn create_dummy_session(
+        &self,
+        _database_id: u32,
+        _user_name: u32,
+    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        unreachable!()
+    }
 
     fn connect(
         &self,
@@ -224,6 +235,7 @@ pub struct MockCatalogWriter {
     id: AtomicU32,
     table_id_to_schema_id: RwLock<HashMap<u32, SchemaId>>,
     schema_id_to_database_id: RwLock<HashMap<u32, DatabaseId>>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 #[async_trait::async_trait]
@@ -270,6 +282,8 @@ impl CatalogWriter for MockCatalogWriter {
         table.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
+        self.hummock_snapshot_manager
+            .add_table_for_test(TableId::new(table.id));
         Ok(())
     }
 
@@ -309,14 +323,10 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_source(&self, source: PbSource) -> Result<()> {
-        self.create_source_inner(source).map(|_| ())
-    }
-
-    async fn create_source_with_graph(
+    async fn create_source(
         &self,
         source: PbSource,
-        _graph: StreamFragmentGraph,
+        _graph: Option<StreamFragmentGraph>,
     ) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
     }
@@ -560,12 +570,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
-        self.catalog.write().update_source(&source);
-        Ok(())
-    }
-
-    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
+    async fn alter_source(&self, source: PbSource) -> Result<()> {
         self.catalog.write().update_source(&source);
         Ok(())
     }
@@ -659,7 +664,10 @@ impl CatalogWriter for MockCatalogWriter {
 }
 
 impl MockCatalogWriter {
-    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
+    pub fn new(
+        catalog: Arc<RwLock<Catalog>>,
+        hummock_snapshot_manager: HummockSnapshotManagerRef,
+    ) -> Self {
         catalog.write().create_database(&PbDatabase {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_string(),
@@ -692,6 +700,7 @@ impl MockCatalogWriter {
             id: AtomicU32::new(3),
             table_id_to_schema_id: Default::default(),
             schema_id_to_database_id: RwLock::new(map),
+            hummock_snapshot_manager,
         }
     }
 
@@ -929,25 +938,12 @@ pub struct MockFrontendMetaClient {}
 impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
 
-    async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
-    }
-
     async fn get_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+        Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
-    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockVersionId> {
+        Ok(INVALID_VERSION_ID)
     }
 
     async fn wait(&self) -> RpcResult<()> {
@@ -981,14 +977,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
-    async fn unpin_snapshot(&self) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn unpin_snapshot_before(&self, _epoch: u64) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
         Ok(vec![])
     }
@@ -1013,7 +1001,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok("".to_string())
     }
 
-    async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
+    async fn get_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
         Ok(vec![])
     }
 
@@ -1022,10 +1010,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(u32, u64)>> {
-        unimplemented!()
-    }
-
-    async fn list_hummock_pinned_snapshots(&self) -> RpcResult<Vec<(u32, u64)>> {
         unimplemented!()
     }
 
@@ -1066,7 +1050,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_all_nodes(&self) -> RpcResult<Vec<WorkerNode>> {
-        unimplemented!()
+        Ok(vec![])
     }
 
     async fn list_compact_task_progress(&self) -> RpcResult<Vec<CompactTaskProgress>> {
@@ -1097,6 +1081,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _max_count: u32,
     ) -> RpcResult<Vec<u64>> {
         unimplemented!()
+    }
+
+    async fn get_cluster_limits(&self) -> RpcResult<Vec<ClusterLimit>> {
+        Ok(vec![])
     }
 }
 

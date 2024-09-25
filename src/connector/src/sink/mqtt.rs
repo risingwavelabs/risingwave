@@ -20,7 +20,6 @@ use anyhow::{anyhow, Context as _};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::ConnectionError;
@@ -38,7 +37,6 @@ use super::writer::AsyncTruncateSinkWriterExt;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::MqttCommon;
 use crate::deserialize_bool_from_string;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter};
 use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
@@ -164,13 +162,6 @@ impl Sink for MqttSink {
     type LogSinker = AsyncTruncateLogSinkerOf<MqttSinkWriter>;
 
     const SINK_NAME: &'static str = MQTT_SINK;
-
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {

@@ -227,9 +227,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         actor_id,
                     );
 
-                    dispatch_sink!(self.sink, sink, {
+                    let consume_log_stream_future = dispatch_sink!(self.sink, sink, {
                         let consume_log_stream = Self::execute_consume_log(
-                            sink,
+                            *sink,
                             log_reader,
                             self.input_columns,
                             self.sink_param,
@@ -239,9 +239,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         .instrument_await(format!("consume_log (sink_id {sink_id})"))
                         .map_ok(|never| match never {}); // unify return type to `Message`
 
-                        // TODO: may try to remove the boxed
-                        select(consume_log_stream.into_stream(), write_log_stream).boxed()
-                    })
+                        consume_log_stream.boxed()
+                    });
+                    select(consume_log_stream_future.into_stream(), write_log_stream)
                 })
                 .into_stream()
                 .flatten()

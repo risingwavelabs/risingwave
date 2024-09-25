@@ -15,15 +15,18 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
+use risingwave_common::types::Datum;
+use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
 use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
-    AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+    AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
 };
 
 use super::{row_id_column_desc, USER_COLUMN_ID_OFFSET};
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::DataType;
+use crate::util::value_encoding::DatumToProtoExt;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
 /// not globally unique.
@@ -137,6 +140,27 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+        }
+    }
+
+    pub fn named_with_default_value(
+        name: impl Into<String>,
+        column_id: ColumnId,
+        data_type: DataType,
+        snapshot_value: Datum,
+    ) -> ColumnDesc {
+        let default_col = DefaultColumnDesc {
+            expr: Some(ExprNode {
+                // equivalent to `Literal::to_expr_proto`
+                function_type: ExprType::Unspecified as i32,
+                return_type: Some(data_type.to_protobuf()),
+                rex_node: Some(RexNode::Constant(snapshot_value.to_protobuf())),
+            }),
+            snapshot_value: Some(snapshot_value.to_protobuf()),
+        };
+        ColumnDesc {
+            generated_or_default_column: Some(GeneratedOrDefaultColumn::DefaultColumn(default_col)),
+            ..Self::named(name, column_id, data_type)
         }
     }
 

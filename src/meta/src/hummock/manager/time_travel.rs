@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -36,7 +37,7 @@ use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    ColumnTrait, Condition, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
     TransactionTrait,
 };
 
@@ -101,6 +102,7 @@ impl HummockManager {
                     .lt(risingwave_meta_model_v2::Epoch::try_from(epoch_watermark).unwrap()),
             )
             .order_by_desc(hummock_epoch_to_version::Column::Epoch)
+            .order_by_asc(hummock_epoch_to_version::Column::VersionId)
             .one(&txn)
             .await?;
         let Some(version_watermark) = version_watermark else {
@@ -275,9 +277,19 @@ impl HummockManager {
     /// The version is retrieved from `hummock_epoch_to_version`, selecting the entry with the largest epoch that's lte `query_epoch`.
     ///
     /// The resulted version is complete, i.e. with correct `SstableInfo`.
-    pub async fn epoch_to_version(&self, query_epoch: HummockEpoch) -> Result<HummockVersion> {
+    pub async fn epoch_to_version(
+        &self,
+        query_epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<HummockVersion> {
         let sql_store = self.sql_store().ok_or_else(require_sql_meta_store_err)?;
         let epoch_to_version = hummock_epoch_to_version::Entity::find()
+            .filter(
+                Condition::any()
+                    .add(hummock_epoch_to_version::Column::TableId.eq(i64::from(table_id)))
+                    // for backward compatibility
+                    .add(hummock_epoch_to_version::Column::TableId.eq(0)),
+            )
             .filter(
                 hummock_epoch_to_version::Column::Epoch
                     .lte(risingwave_meta_model_v2::Epoch::try_from(query_epoch).unwrap()),
@@ -362,7 +374,19 @@ impl HummockManager {
         delta: HummockVersionDelta,
         group_parents: &HashMap<CompactionGroupId, CompactionGroupId>,
         skip_sst_ids: &HashSet<HummockSstableId>,
+        tables_to_commit: impl Iterator<Item = (&TableId, &CompactionGroupId)>,
+        committed_epoch: u64,
     ) -> Result<Option<HashSet<HummockSstableId>>> {
+        let select_groups = group_parents
+            .iter()
+            .filter_map(|(cg_id, _)| {
+                if should_ignore_group(find_root_group(*cg_id, group_parents)) {
+                    None
+                } else {
+                    Some(*cg_id)
+                }
+            })
+            .collect::<HashSet<_>>();
         async fn write_sstable_infos(
             sst_infos: impl Iterator<Item = &SstableInfo>,
             txn: &DatabaseTransaction,
@@ -388,27 +412,23 @@ impl HummockManager {
             Ok(count)
         }
 
-        let epoch = delta.max_committed_epoch;
-        let version_id: u64 = delta.id.to_u64();
-        let m = hummock_epoch_to_version::ActiveModel {
-            epoch: Set(epoch.try_into().unwrap()),
-            version_id: Set(version_id.try_into().unwrap()),
-        };
-        hummock_epoch_to_version::Entity::insert(m)
-            .exec(txn)
-            .await?;
+        for (table_id, cg_id) in tables_to_commit {
+            if !select_groups.contains(cg_id) {
+                continue;
+            }
+            let version_id: u64 = delta.id.to_u64();
+            let m = hummock_epoch_to_version::ActiveModel {
+                epoch: Set(committed_epoch.try_into().unwrap()),
+                table_id: Set(table_id.table_id.into()),
+                version_id: Set(version_id.try_into().unwrap()),
+            };
+            // There should be no conflict rows.
+            hummock_epoch_to_version::Entity::insert(m)
+                .exec(txn)
+                .await?;
+        }
 
         let mut version_sst_ids = None;
-        let select_groups = group_parents
-            .iter()
-            .filter_map(|(cg_id, _)| {
-                if should_ignore_group(find_root_group(*cg_id, group_parents)) {
-                    None
-                } else {
-                    Some(*cg_id)
-                }
-            })
-            .collect::<HashSet<_>>();
         if let Some(version) = version {
             version_sst_ids = Some(
                 version
@@ -483,14 +503,8 @@ fn replay_archive(
     deltas: impl Iterator<Item = PbHummockVersionDelta>,
 ) -> HummockVersion {
     let mut last_version = HummockVersion::from_persisted_protobuf(&version);
-    let mut mce = last_version.max_committed_epoch;
     for d in deltas {
         let d = HummockVersionDelta::from_persisted_protobuf(&d);
-        assert!(
-            d.max_committed_epoch > mce,
-            "time travel expects delta from commit_epoch only"
-        );
-        mce = d.max_committed_epoch;
         // Need to work around the assertion in `apply_version_delta`.
         // Because compaction deltas are not included in time travel archive.
         while last_version.id < d.prev_id {

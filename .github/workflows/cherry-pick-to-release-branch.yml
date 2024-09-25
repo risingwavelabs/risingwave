@@ -38,3 +38,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+
+  release_pull_request_2_0:
+    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-release-2.0')  &&  github.event.pull_request.merged == true"
+    runs-on: ubuntu-latest
+    name: release_pull_request
+    steps:
+      - name: checkout
+        uses: actions/checkout@v1
+      - name: Create PR to branch
+        uses: risingwavelabs/github-action-cherry-pick@master
+        with:
+          pr_branch: 'release-2.0'
+          pr_labels: 'cherry-pick'
+          pr_body: ${{ format('Cherry picking \#{0} onto branch release-2.0', github.event.number) }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: write

@@ -79,14 +79,21 @@ impl SplitReader for NatsSplitReader {
             start_position => start_position.to_owned(),
         };
 
+        let mut config = consumer::pull::Config {
+            ..Default::default()
+        };
+        properties.set_config(&mut config);
+
         let consumer = properties
             .common
             .build_consumer(
                 properties.stream.clone(),
                 split_id.to_string(),
                 start_position.clone(),
+                config,
             )
             .await?;
+
         Ok(Self {
             consumer,
             properties,

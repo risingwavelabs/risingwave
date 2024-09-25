@@ -55,7 +55,7 @@ async fn handle_declare_subscription_cursor(
     handle_args: HandlerArgs,
     sub_name: ObjectName,
     cursor_name: ObjectName,
-    rw_timestamp: Option<Since>,
+    rw_timestamp: Since,
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
     let db_name = session.database();
@@ -67,22 +67,22 @@ async fn handle_declare_subscription_cursor(
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let start_rw_timestamp = match rw_timestamp {
-        Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {
+        risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp) => {
             check_cursor_unix_millis(start_rw_timestamp, subscription.retention_seconds)?;
             Some(convert_unix_millis_to_logstore_u64(start_rw_timestamp))
         }
-        Some(risingwave_sqlparser::ast::Since::ProcessTime) => Some(Epoch::now().0),
-        Some(risingwave_sqlparser::ast::Since::Begin) => {
+        risingwave_sqlparser::ast::Since::ProcessTime => Some(Epoch::now().0),
+        risingwave_sqlparser::ast::Since::Begin => {
             let min_unix_millis =
                 Epoch::now().as_unix_millis() - subscription.retention_seconds * 1000;
             let subscription_build_millis = subscription.created_at_epoch.unwrap().as_unix_millis();
             let min_unix_millis = std::cmp::max(min_unix_millis, subscription_build_millis);
             Some(convert_unix_millis_to_logstore_u64(min_unix_millis))
         }
-        None => None,
+        risingwave_sqlparser::ast::Since::Full => None,
     };
     // Create cursor based on the response
-    session
+    if let Err(e) = session
         .get_cursor_manager()
         .add_subscription_cursor(
             cursor_name.clone(),
@@ -91,7 +91,15 @@ async fn handle_declare_subscription_cursor(
             subscription,
             &handle_args,
         )
-        .await?;
+        .await
+    {
+        session
+            .env()
+            .cursor_metrics
+            .subscription_cursor_error_count
+            .inc();
+        return Err(e);
+    }
 
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
@@ -149,6 +157,7 @@ pub async fn create_chunk_stream_for_cursor(
         plan_fragmenter,
         query_mode,
         schema,
+        read_storage_tables,
         ..
     } = plan_fragmenter_result;
 
@@ -161,10 +170,22 @@ pub async fn create_chunk_stream_for_cursor(
         match query_mode {
             QueryMode::Auto => unreachable!(),
             QueryMode::Local => CursorDataChunkStream::LocalDataChunk(Some(
-                local_execute(session.clone(), query, can_timeout_cancel).await?,
+                local_execute(
+                    session.clone(),
+                    query,
+                    can_timeout_cancel,
+                    &read_storage_tables,
+                )
+                .await?,
             )),
             QueryMode::Distributed => CursorDataChunkStream::DistributedDataChunk(Some(
-                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
+                distribute_execute(
+                    session.clone(),
+                    query,
+                    can_timeout_cancel,
+                    read_storage_tables,
+                )
+                .await?,
             )),
         },
         schema.fields.clone(),

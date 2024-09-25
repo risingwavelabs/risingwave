@@ -17,18 +17,14 @@ normal = ["workspace-hack"]
 ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
-arrow-array = { workspace = true }
-arrow-array-deltalake = { workspace = true }
-arrow-array-iceberg = { workspace = true }
-arrow-buffer = { workspace = true }
-arrow-buffer-deltalake = { workspace = true }
-arrow-buffer-iceberg = { workspace = true }
-arrow-cast = { workspace = true }
-arrow-cast-deltalake = { workspace = true }
-arrow-cast-iceberg = { workspace = true }
-arrow-schema = { workspace = true }
-arrow-schema-deltalake = { workspace = true }
-arrow-schema-iceberg = { workspace = true }
+arrow-48-array = { package = "arrow-array", version = "48" }
+arrow-48-buffer = { package = "arrow-buffer", version = "48" }
+arrow-48-cast = { package = "arrow-cast", version = "48" }
+arrow-48-schema = { package = "arrow-schema", version = "48" }
+arrow-52-array = { package = "arrow-array", version = "52" }
+arrow-52-buffer = { package = "arrow-buffer", version = "52" }
+arrow-52-cast = { package = "arrow-cast", version = "52" }
+arrow-52-schema = { package = "arrow-schema", version = "52" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -55,7 +51,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { version = "0.6", default-features = false, features = ["std"] }
 hashbrown = "0.14"
 hex = "0.4.3"
-http = "0.2"
+http = "1"
 humantime = "2.1"
 hytra = { workspace = true }
 itertools = { workspace = true }
@@ -90,6 +86,7 @@ risingwave_common_secret = { path = "./secret" }
 risingwave_error = { workspace = true }
 risingwave_license = { workspace = true }
 risingwave_pb = { workspace = true }
+risingwave_telemetry_event = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }

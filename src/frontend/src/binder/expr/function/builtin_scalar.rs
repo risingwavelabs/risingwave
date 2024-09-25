@@ -129,6 +129,15 @@ impl Binder {
             )
         }
 
+        // `CURRENT_DATABASE` is the name of the database you are currently connected to.
+        // `CURRENT_CATALOG` is a synonym for `CURRENT_DATABASE`.
+        fn current_database() -> Handle {
+            guard_by_len(
+                0,
+                raw(|binder, _inputs| Ok(ExprImpl::literal_varchar(binder.db_name.clone()))),
+            )
+        }
+
         // XXX: can we unify this with FUNC_SIG_MAP?
         // For raw_call here, it seems unnecessary to declare it again here.
         // For some functions, we have validation logic here. Is it still useful now?
@@ -390,8 +399,19 @@ impl Binder {
                 ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
                 ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
                 ("jsonb_set", raw_call(ExprType::JsonbSet)),
+                ("jsonb_populate_map", raw_call(ExprType::JsonbPopulateMap)),
                 // map
                 ("map_from_entries", raw_call(ExprType::MapFromEntries)),
+                ("map_access",raw_call(ExprType::MapAccess)),
+                ("map_keys", raw_call(ExprType::MapKeys)),
+                ("map_values", raw_call(ExprType::MapValues)),
+                ("map_entries", raw_call(ExprType::MapEntries)),
+                ("map_from_key_values", raw_call(ExprType::MapFromKeyValues)),
+                ("map_cat", raw_call(ExprType::MapCat)),
+                ("map_contains", raw_call(ExprType::MapContains)),
+                ("map_delete", raw_call(ExprType::MapDelete)),
+                ("map_insert", raw_call(ExprType::MapInsert)),
+                ("map_length", raw_call(ExprType::MapLength)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -409,9 +429,8 @@ impl Binder {
                         Ok(ExprImpl::literal_varchar(v))
                     })),
                 ),
-                ("current_database", guard_by_len(0, raw(|binder, _inputs| {
-                    Ok(ExprImpl::literal_varchar(binder.db_name.clone()))
-                }))),
+                ("current_catalog", current_database()),
+                ("current_database", current_database()),
                 ("current_schema", guard_by_len(0, raw(|binder, _inputs| {
                     return Ok(binder
                         .first_valid_schema()

@@ -21,7 +21,9 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
+use tiberius::xml::XmlData;
 use tiberius::Row;
+use uuid::Uuid;
 
 use crate::parser::util::log_error;
 
@@ -74,7 +76,7 @@ macro_rules! impl_chrono_tiberius_wrapper {
             fn from_sql(
                 value: &'a tiberius::ColumnData<'static>,
             ) -> tiberius::Result<Option<Self>> {
-                let instant = <$chrono as tiberius::FromSql>::from_sql(value)?;
+                let instant = <$chrono>::from_sql(value)?;
                 let time = instant.map($variant_name::from).map($wrapper_name::from);
                 tiberius::Result::Ok(time)
             }
@@ -101,7 +103,7 @@ impl<'a> tiberius::FromSql<'a> for DecimalTiberiusWrapper {
     // TODO(kexiang): will sql server have inf/-inf/nan for decimal?
     fn from_sql(value: &'a tiberius::ColumnData<'static>) -> tiberius::Result<Option<Self>> {
         tiberius::Result::Ok(
-            <RustDecimal as tiberius::FromSql>::from_sql(value)?
+            RustDecimal::from_sql(value)?
                 .map(Decimal::Normalized)
                 .map(DecimalTiberiusWrapper::from),
         )
@@ -116,7 +118,7 @@ impl<'a> tiberius::IntoSql<'a> for TimestamptzTiberiusWrapper {
 
 impl<'a> tiberius::FromSql<'a> for TimestamptzTiberiusWrapper {
     fn from_sql(value: &'a tiberius::ColumnData<'static>) -> tiberius::Result<Option<Self>> {
-        let instant = <DateTime<Utc> as tiberius::FromSql>::from_sql(value)?;
+        let instant = DateTime::<Utc>::from_sql(value)?;
         let time = instant
             .map(Timestamptz::from)
             .map(TimestamptzTiberiusWrapper::from);
@@ -160,68 +162,57 @@ impl<'a> tiberius::FromSql<'a> for TimestamptzTiberiusWrapper {
 impl<'a> tiberius::FromSql<'a> for ScalarImplTiberiusWrapper {
     fn from_sql(value: &'a tiberius::ColumnData<'static>) -> tiberius::Result<Option<Self>> {
         Ok(match &value {
-            tiberius::ColumnData::U8(_) => <u8 as tiberius::FromSql>::from_sql(value)?
+            tiberius::ColumnData::U8(_) => u8::from_sql(value)?
                 .map(|v| ScalarImplTiberiusWrapper::from(ScalarImpl::from(v as i16))),
-            tiberius::ColumnData::I16(_) => <i16 as tiberius::FromSql>::from_sql(value)?
+            tiberius::ColumnData::I16(_) => i16::from_sql(value)?
                 .map(ScalarImpl::from)
                 .map(ScalarImplTiberiusWrapper::from),
-            tiberius::ColumnData::I32(_) => <i32 as tiberius::FromSql>::from_sql(value)?
+            tiberius::ColumnData::I32(_) => i32::from_sql(value)?
                 .map(ScalarImpl::from)
                 .map(ScalarImplTiberiusWrapper::from),
-            tiberius::ColumnData::I64(_) => <i64 as tiberius::FromSql>::from_sql(value)?
+            tiberius::ColumnData::I64(_) => i64::from_sql(value)?
                 .map(ScalarImpl::from)
                 .map(ScalarImplTiberiusWrapper::from),
-            tiberius::ColumnData::F32(_) => <f32 as tiberius::FromSql>::from_sql(value)?
+            tiberius::ColumnData::F32(_) => f32::from_sql(value)?
                 .map(ScalarImpl::from)
                 .map(ScalarImplTiberiusWrapper::from),
-            tiberius::ColumnData::F64(_) => <f64 as tiberius::FromSql>::from_sql(value)?
+            tiberius::ColumnData::F64(_) => f64::from_sql(value)?
                 .map(ScalarImpl::from)
                 .map(ScalarImplTiberiusWrapper::from),
-            tiberius::ColumnData::Bit(_) => <bool as tiberius::FromSql>::from_sql(value)?
+            tiberius::ColumnData::Bit(_) => bool::from_sql(value)?
                 .map(ScalarImpl::from)
                 .map(ScalarImplTiberiusWrapper::from),
-            tiberius::ColumnData::String(_) => <&str as tiberius::FromSql>::from_sql(value)?
+            tiberius::ColumnData::String(_) => <&str>::from_sql(value)?
                 .map(ScalarImpl::from)
                 .map(ScalarImplTiberiusWrapper::from),
-            tiberius::ColumnData::Numeric(_) => {
-                <DecimalTiberiusWrapper as tiberius::FromSql>::from_sql(value)?
-                    .map(|w| ScalarImpl::from(w.0))
-                    .map(ScalarImplTiberiusWrapper::from)
-            }
+            tiberius::ColumnData::Numeric(_) => DecimalTiberiusWrapper::from_sql(value)?
+                .map(|w| ScalarImpl::from(w.0))
+                .map(ScalarImplTiberiusWrapper::from),
             tiberius::ColumnData::DateTime(_)
             | tiberius::ColumnData::DateTime2(_)
-            | tiberius::ColumnData::SmallDateTime(_) => {
-                <TimestampTiberiusWrapper as tiberius::FromSql>::from_sql(value)?
-                    .map(|w| ScalarImpl::from(w.0))
-                    .map(ScalarImplTiberiusWrapper::from)
-            }
-            tiberius::ColumnData::Time(_) => {
-                <TimeTiberiusWrapper as tiberius::FromSql>::from_sql(value)?
-                    .map(|w| ScalarImpl::from(w.0))
-                    .map(ScalarImplTiberiusWrapper::from)
-            }
-            tiberius::ColumnData::Date(_) => {
-                <DateTiberiusWrapper as tiberius::FromSql>::from_sql(value)?
-                    .map(|w| ScalarImpl::from(w.0))
-                    .map(ScalarImplTiberiusWrapper::from)
-            }
-            tiberius::ColumnData::DateTimeOffset(_) => {
-                <TimestamptzTiberiusWrapper as tiberius::FromSql>::from_sql(value)?
-                    .map(|w| ScalarImpl::from(w.0))
-                    .map(ScalarImplTiberiusWrapper::from)
-            }
-            tiberius::ColumnData::Binary(_) => <&[u8] as tiberius::FromSql>::from_sql(value)?
+            | tiberius::ColumnData::SmallDateTime(_) => TimestampTiberiusWrapper::from_sql(value)?
+                .map(|w| ScalarImpl::from(w.0))
+                .map(ScalarImplTiberiusWrapper::from),
+            tiberius::ColumnData::Time(_) => TimeTiberiusWrapper::from_sql(value)?
+                .map(|w| ScalarImpl::from(w.0))
+                .map(ScalarImplTiberiusWrapper::from),
+            tiberius::ColumnData::Date(_) => DateTiberiusWrapper::from_sql(value)?
+                .map(|w| ScalarImpl::from(w.0))
+                .map(ScalarImplTiberiusWrapper::from),
+            tiberius::ColumnData::DateTimeOffset(_) => TimestamptzTiberiusWrapper::from_sql(value)?
+                .map(|w| ScalarImpl::from(w.0))
+                .map(ScalarImplTiberiusWrapper::from),
+            tiberius::ColumnData::Binary(_) => <&[u8]>::from_sql(value)?
                 .map(ScalarImpl::from)
                 .map(ScalarImplTiberiusWrapper::from),
-            tiberius::ColumnData::Guid(_) | tiberius::ColumnData::Xml(_) => {
-                return Err(tiberius::error::Error::Conversion(
-                    format!(
-                        "the sql server decoding for {:?} is unsupported",
-                        value.type_name()
-                    )
-                    .into(),
-                ))
-            }
+            tiberius::ColumnData::Guid(_) => <Uuid>::from_sql(value)?
+                .map(|uuid| uuid.to_string().to_uppercase())
+                .map(ScalarImpl::from)
+                .map(ScalarImplTiberiusWrapper::from),
+            tiberius::ColumnData::Xml(_) => <&XmlData>::from_sql(value)?
+                .map(|xml| xml.clone().into_string())
+                .map(ScalarImpl::from)
+                .map(ScalarImplTiberiusWrapper::from),
         })
     }
 }

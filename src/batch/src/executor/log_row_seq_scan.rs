@@ -22,18 +22,19 @@ use prometheus::Histogram;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, TableDistribution};
+use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::error::{BatchError, Result};
-use crate::monitor::BatchMetricsWithTaskLabels;
+use crate::monitor::BatchMetrics;
 use crate::task::BatchTaskContext;
 
 pub struct LogRowSeqScanExecutor<S: StateStore> {
@@ -44,7 +45,7 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchMetricsWithTaskLabels>,
+    metrics: Option<BatchMetrics>,
 
     table: StorageTable<S>,
     old_epoch: u64,
@@ -58,11 +59,11 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         new_epoch: u64,
         chunk_size: usize,
         identity: String,
-        metrics: Option<BatchMetricsWithTaskLabels>,
+        metrics: Option<BatchMetrics>,
     ) -> Self {
         let mut schema = table.schema().clone();
         schema.fields.push(Field::with_name(
-            risingwave_common::types::DataType::Int16,
+            risingwave_common::types::DataType::Varchar,
             "op",
         ));
         Self {
@@ -106,7 +107,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
             Some(vnodes) => Some(Bitmap::from(vnodes).into()),
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            None => Some(TableDistribution::all_vnodes()),
+            None => Some(Bitmap::ones(table_desc.vnode_count()).into()),
         };
 
         let chunk_size = source.context.get_config().developer.chunk_size as u32;
@@ -158,22 +159,19 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
     async fn do_execute(self: Box<Self>) {
         let Self {
             chunk_size,
-            identity,
             metrics,
             table,
             old_epoch,
             new_epoch,
             schema,
+            ..
         } = *self;
         let table = std::sync::Arc::new(table);
 
         // Create collector.
-        let histogram = metrics.as_ref().map(|metrics| {
-            metrics
-                .executor_metrics()
-                .row_seq_scan_next_duration
-                .with_guarded_label_values(&metrics.executor_labels(&identity))
-        });
+        let histogram = metrics
+            .as_ref()
+            .map(|metrics| &metrics.executor_metrics().row_seq_scan_next_duration);
         // Range Scan
         // WARN: DO NOT use `select` to execute range scans concurrently
         //       it can consume too much memory if there're too many ranges.
@@ -182,7 +180,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             old_epoch,
             new_epoch,
             chunk_size,
-            histogram.clone(),
+            histogram,
             Arc::new(schema.clone()),
         );
         #[for_await]
@@ -212,7 +210,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
                         match r {
                             Ok(change_log_row) => {
                                 fn with_op(op: Op, row: impl Row) -> impl Row {
-                                    row.chain([Some(ScalarImpl::Int16(op.to_i16()))])
+                                    row.chain([Some(ScalarImpl::Utf8(op.to_varchar().into()))])
                                 }
                                 for (op, row) in change_log_row.into_op_value_iter() {
                                     yield Ok(with_op(op, row));

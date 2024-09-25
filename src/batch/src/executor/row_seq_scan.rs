@@ -21,6 +21,7 @@ use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -32,14 +33,13 @@ use risingwave_pb::plan_common::as_of::AsOfType;
 use risingwave_pb::plan_common::{as_of, PbAsOf, StorageTableDesc};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::TableDistribution;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::monitor::BatchMetricsWithTaskLabels;
+use crate::monitor::BatchMetrics;
 use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
@@ -49,7 +49,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchMetricsWithTaskLabels>,
+    metrics: Option<BatchMetrics>,
 
     table: StorageTable<S>,
     scan_ranges: Vec<ScanRange>,
@@ -165,7 +165,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         chunk_size: usize,
         identity: String,
         limit: Option<u64>,
-        metrics: Option<BatchMetricsWithTaskLabels>,
+        metrics: Option<BatchMetrics>,
         as_of: Option<AsOf>,
     ) -> Self {
         Self {
@@ -210,7 +210,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             Some(vnodes) => Some(Bitmap::from(vnodes).into()),
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            None => Some(TableDistribution::all_vnodes()),
+            None => Some(Bitmap::ones(table_desc.vnode_count()).into()),
         };
 
         let scan_ranges = {
@@ -237,7 +237,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         let ordered = seq_scan_node.ordered;
 
-        let epoch = source.epoch.clone();
+        let epoch = source.epoch;
         let limit = seq_scan_node.limit;
         let as_of = seq_scan_node
             .as_of
@@ -311,12 +311,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             .unwrap_or_else(|| epoch);
 
         // Create collector.
-        let histogram = metrics.as_ref().map(|metrics| {
-            metrics
-                .executor_metrics()
-                .row_seq_scan_next_duration
-                .with_guarded_label_values(&metrics.executor_labels(&identity))
-        });
+        let histogram = metrics
+            .as_ref()
+            .map(|metrics| &metrics.executor_metrics().row_seq_scan_next_duration);
 
         if ordered {
             // Currently we execute range-scans concurrently so the order is not guaranteed if
@@ -341,8 +338,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         for point_get in point_gets {
             let table = table.clone();
             if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch.clone(), histogram.clone())
-                    .await?
+                Self::execute_point_get(table, point_get, query_epoch, histogram).await?
             {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     returned += chunk.cardinality() as u64;
@@ -373,10 +369,10 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 table.clone(),
                 range,
                 ordered,
-                query_epoch.clone(),
+                query_epoch,
                 chunk_size,
                 limit,
-                histogram.clone(),
+                histogram,
             );
             #[for_await]
             for chunk in stream {

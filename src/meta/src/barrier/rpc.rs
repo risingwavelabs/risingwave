@@ -14,27 +14,25 @@
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::future::Future;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
-use futures::{pin_mut, FutureExt, StreamExt};
+use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::hash::ActorId;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
-use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};
+use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
-    BroadcastActorInfoTableRequest, BuildActorInfo, BuildActorsRequest, DropActorsRequest,
     InjectBarrierRequest, StreamingControlStreamRequest, StreamingControlStreamResponse,
-    UpdateActorsRequest,
 };
-use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::StreamClient;
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
@@ -44,9 +42,9 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::command::CommandContext;
-use super::GlobalBarrierManagerContext;
+use super::{BarrierKind, GlobalBarrierManagerContext, InflightSubscriptionInfo, TracedEpoch};
 use crate::barrier::info::InflightGraphInfo;
-use crate::manager::{MetaSrvEnv, WorkerId};
+use crate::manager::WorkerId;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -56,33 +54,47 @@ struct ControlStreamNode {
     sender: UnboundedSender<StreamingControlStreamRequest>,
 }
 
-fn into_future(
-    worker_id: WorkerId,
-    stream: BoxStream<
-        'static,
-        risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
-    >,
-) -> ResponseStreamFuture {
-    stream.into_future().map(move |(opt, stream)| {
-        (
-            worker_id,
-            stream,
-            opt.ok_or_else(|| anyhow!("end of stream").into())
-                .and_then(|result| result.map_err(|e| e.into())),
-        )
-    })
+mod response_stream_future {
+    use std::future::Future;
+
+    use anyhow::anyhow;
+    use futures::stream::BoxStream;
+    use futures::{FutureExt, StreamExt};
+    use risingwave_pb::stream_service::StreamingControlStreamResponse;
+
+    use crate::manager::WorkerId;
+    use crate::MetaResult;
+
+    pub(super) fn into_future(
+        worker_id: WorkerId,
+        stream: BoxStream<
+            'static,
+            risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
+        >,
+    ) -> ResponseStreamFuture {
+        stream.into_future().map(move |(opt, stream)| {
+            (
+                worker_id,
+                stream,
+                opt.ok_or_else(|| anyhow!("end of stream").into())
+                    .and_then(|result| result.map_err(|e| e.into())),
+            )
+        })
+    }
+
+    pub(super) type ResponseStreamFuture = impl Future<
+            Output = (
+                WorkerId,
+                BoxStream<
+                    'static,
+                    risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
+                >,
+                MetaResult<StreamingControlStreamResponse>,
+            ),
+        > + 'static;
 }
 
-type ResponseStreamFuture = impl Future<
-        Output = (
-            WorkerId,
-            BoxStream<
-                'static,
-                risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
-            >,
-            MetaResult<StreamingControlStreamResponse>,
-        ),
-    > + 'static;
+use response_stream_future::*;
 
 pub(super) struct ControlStreamManager {
     context: GlobalBarrierManagerContext,
@@ -99,16 +111,20 @@ impl ControlStreamManager {
         }
     }
 
-    pub(super) async fn add_worker(&mut self, node: WorkerNode) {
+    pub(super) async fn add_worker(
+        &mut self,
+        node: WorkerNode,
+        subscription: &InflightSubscriptionInfo,
+    ) {
         if self.nodes.contains_key(&node.id) {
             warn!(id = node.id, host = ?node.host, "node already exists");
             return;
         }
-        let prev_epoch = self
+        let version_id = self
             .context
             .hummock_manager
-            .latest_snapshot()
-            .committed_epoch;
+            .on_current_version(|version| version.id)
+            .await;
         let node_id = node.id;
         let node_host = node.host.clone().unwrap();
         let mut backoff = ExponentialBackoff::from_millis(100)
@@ -118,7 +134,11 @@ impl ControlStreamManager {
         for i in 1..=MAX_RETRY {
             match self
                 .context
-                .new_control_stream_node(node.clone(), prev_epoch)
+                .new_control_stream_node(
+                    node.clone(),
+                    version_id,
+                    &subscription.mv_depended_subscriptions,
+                )
                 .await
             {
                 Ok((stream_node, response_stream)) => {
@@ -142,13 +162,18 @@ impl ControlStreamManager {
 
     pub(super) async fn reset(
         &mut self,
-        prev_epoch: u64,
+        version_id: HummockVersionId,
+        subscriptions: &InflightSubscriptionInfo,
         nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async {
             let node = self
                 .context
-                .new_control_stream_node(node.clone(), prev_epoch)
+                .new_control_stream_node(
+                    node.clone(),
+                    version_id,
+                    &subscriptions.mv_depended_subscriptions,
+                )
                 .await?;
             Result::<_, MetaError>::Ok((*worker_id, node))
         }))
@@ -244,41 +269,98 @@ impl ControlStreamManager {
 }
 
 impl ControlStreamManager {
-    /// Send inject-barrier-rpc to stream service and wait for its response before returns.
-    pub(super) fn inject_barrier(
+    pub(super) fn inject_command_ctx_barrier(
         &mut self,
-        command_context: &CommandContext,
+        command_ctx: &CommandContext,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
+    ) -> MetaResult<HashSet<WorkerId>> {
+        let mutation = command_ctx.to_mutation();
+        let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
+            add.subscriptions_to_add.clone()
+        } else {
+            vec![]
+        };
+        let subscriptions_to_remove = if let Some(Mutation::DropSubscriptions(drop)) = &mutation {
+            drop.info.clone()
+        } else {
+            vec![]
+        };
+        self.inject_barrier(
+            None,
+            mutation,
+            (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
+            &command_ctx.kind,
+            pre_applied_graph_info,
+            applied_graph_info,
+            command_ctx.command.actors_to_create(),
+            subscriptions_to_add,
+            subscriptions_to_remove,
+        )
+    }
+
+    pub(super) fn inject_barrier(
+        &mut self,
+        creating_table_id: Option<TableId>,
+        mutation: Option<Mutation>,
+        (curr_epoch, prev_epoch): (&TracedEpoch, &TracedEpoch),
+        kind: &BarrierKind,
+        pre_applied_graph_info: &InflightGraphInfo,
+        applied_graph_info: Option<&InflightGraphInfo>,
+        mut new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
+        subscriptions_to_add: Vec<SubscriptionUpstreamInfo>,
+        subscriptions_to_remove: Vec<SubscriptionUpstreamInfo>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
         ));
-        let mutation = command_context.to_mutation();
-        let mut node_need_collect = HashSet::new();
 
-        for worker_id in pre_applied_graph_info.worker_ids().chain(
-            applied_graph_info
-                .into_iter()
-                .flat_map(|info| info.worker_ids()),
-        ) {
+        let partial_graph_id = creating_table_id
+            .map(|table_id| table_id.table_id)
+            .unwrap_or(u32::MAX);
+
+        for worker_id in pre_applied_graph_info
+            .worker_ids()
+            .chain(
+                applied_graph_info
+                    .into_iter()
+                    .flat_map(|info| info.worker_ids()),
+            )
+            .chain(
+                new_actors
+                    .iter()
+                    .flat_map(|new_actors| new_actors.keys().cloned()),
+            )
+        {
             if !self.nodes.contains_key(&worker_id) {
                 return Err(anyhow!("unconnected worker node {}", worker_id).into());
             }
         }
 
+        let mut node_need_collect = HashSet::new();
+        let new_actors_location_to_broadcast = new_actors
+            .iter()
+            .flatten()
+            .flat_map(|(worker_id, actor_infos)| {
+                actor_infos.iter().map(|actor_info| ActorInfo {
+                    actor_id: actor_info.actor_id,
+                    host: self
+                        .nodes
+                        .get(worker_id)
+                        .expect("have checked exist previously")
+                        .worker
+                        .host
+                        .clone(),
+                })
+            })
+            .collect_vec();
+
         self.nodes
             .iter_mut()
-            .map(|(node_id, node)| {
-                let actor_ids_to_send: Vec<_> =
-                    pre_applied_graph_info.actor_ids_to_send(*node_id).collect();
+            .try_for_each(|(node_id, node)| {
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
                     .actor_ids_to_collect(*node_id)
                     .collect();
-                if actor_ids_to_collect.is_empty() {
-                    // No need to send or collect barrier for this node.
-                    assert!(actor_ids_to_send.is_empty());
-                }
                 let table_ids_to_sync = if let Some(graph_info) = applied_graph_info {
                     graph_info
                         .existing_table_ids()
@@ -292,15 +374,12 @@ impl ControlStreamManager {
                     let mutation = mutation.clone();
                     let barrier = Barrier {
                         epoch: Some(risingwave_pb::data::Epoch {
-                            curr: command_context.curr_epoch.value().0,
-                            prev: command_context.prev_epoch.value().0,
+                            curr: curr_epoch.value().0,
+                            prev: prev_epoch.value().0,
                         }),
                         mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
-                        tracing_context: TracingContext::from_span(
-                            command_context.curr_epoch.span(),
-                        )
-                        .to_protobuf(),
-                        kind: command_context.kind.to_protobuf() as i32,
+                        tracing_context: TracingContext::from_span(curr_epoch.span()).to_protobuf(),
+                        kind: kind.to_protobuf() as i32,
                         passed_actors: vec![],
                     };
 
@@ -309,12 +388,21 @@ impl ControlStreamManager {
                             request: Some(
                                 streaming_control_stream_request::Request::InjectBarrier(
                                     InjectBarrierRequest {
-                                        request_id: StreamRpcManager::new_request_id(),
+                                        request_id: Uuid::new_v4().to_string(),
                                         barrier: Some(barrier),
-                                        actor_ids_to_send,
                                         actor_ids_to_collect,
                                         table_ids_to_sync,
-                                        partial_graph_id: u32::MAX,
+                                        partial_graph_id,
+                                        broadcast_info: new_actors_location_to_broadcast.clone(),
+                                        actors_to_build: new_actors
+                                            .as_mut()
+                                            .map(|new_actors| new_actors.remove(node_id))
+                                            .into_iter()
+                                            .flatten()
+                                            .flatten()
+                                            .collect(),
+                                        subscriptions_to_add: subscriptions_to_add.clone(),
+                                        subscriptions_to_remove: subscriptions_to_remove.clone(),
                                     },
                                 ),
                             ),
@@ -331,13 +419,12 @@ impl ControlStreamManager {
                     Result::<_, MetaError>::Ok(())
                 }
             })
-            .try_collect()
             .inspect_err(|e| {
                 // Record failure in event log.
                 use risingwave_pb::meta::event_log;
                 let event = event_log::EventInjectBarrierFail {
-                    prev_epoch: command_context.prev_epoch.value().0,
-                    cur_epoch: command_context.curr_epoch.value().0,
+                    prev_epoch: prev_epoch.value().0,
+                    cur_epoch: curr_epoch.value().0,
                     error: e.to_report_string(),
                 };
                 self.context
@@ -347,13 +434,35 @@ impl ControlStreamManager {
             })?;
         Ok(node_need_collect)
     }
+
+    pub(super) fn remove_partial_graph(&mut self, partial_graph_ids: Vec<u32>) {
+        self.nodes.retain(|_, node| {
+            if node
+                .sender
+                .send(StreamingControlStreamRequest {
+                    request: Some(
+                        streaming_control_stream_request::Request::RemovePartialGraph(
+                            RemovePartialGraphRequest { partial_graph_ids: partial_graph_ids.clone() },
+                        ),
+                    ),
+                })
+                .is_ok()
+            {
+                true
+            } else {
+                warn!(id = node.worker.id, host = ?node.worker.host, ?partial_graph_ids, "fail to remove_partial_graph request, node removed");
+                false
+            }
+        })
+    }
 }
 
 impl GlobalBarrierManagerContext {
     async fn new_control_stream_node(
         &self,
         node: WorkerNode,
-        prev_epoch: u64,
+        initial_version_id: HummockVersionId,
+        mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
     ) -> MetaResult<(
         ControlStreamNode,
         BoxStream<'static, risingwave_rpc_client::error::Result<StreamingControlStreamResponse>>,
@@ -363,7 +472,7 @@ impl GlobalBarrierManagerContext {
             .stream_client_pool()
             .get(&node)
             .await?
-            .start_streaming_control(prev_epoch)
+            .start_streaming_control(initial_version_id, mv_depended_subscriptions)
             .await?;
         Ok((
             ControlStreamNode {
@@ -391,162 +500,6 @@ impl GlobalBarrierManagerContext {
             .event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
     }
-}
-
-#[derive(Clone)]
-pub struct StreamRpcManager {
-    env: MetaSrvEnv,
-}
-
-impl StreamRpcManager {
-    pub fn new(env: MetaSrvEnv) -> Self {
-        Self { env }
-    }
-
-    async fn make_request<REQ, RSP, Fut: Future<Output = Result<RSP, RpcError>> + 'static>(
-        &self,
-        request: impl Iterator<Item = (&WorkerNode, REQ)>,
-        f: impl Fn(StreamClient, REQ) -> Fut,
-    ) -> MetaResult<Vec<RSP>> {
-        let pool = self.env.stream_client_pool();
-        let f = &f;
-        let iters = request.map(|(node, input)| async move {
-            let client = pool.get(node).await.map_err(|e| (node.id, e))?;
-            f(client, input).await.map_err(|e| (node.id, e))
-        });
-        let result = try_join_all_with_error_timeout(iters, COLLECT_ERROR_TIMEOUT).await;
-        result.map_err(|results_err| merge_node_rpc_errors("merged RPC Error", results_err))
-    }
-
-    fn new_request_id() -> String {
-        Uuid::new_v4().to_string()
-    }
-
-    pub async fn build_actors(
-        &self,
-        node_map: &HashMap<WorkerId, WorkerNode>,
-        node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
-    ) -> MetaResult<()> {
-        self.make_request(
-            node_actors.map(|(worker_id, actors)| (node_map.get(&worker_id).unwrap(), actors)),
-            |client, actors| async move {
-                let request_id = Self::new_request_id();
-                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
-                client
-                    .build_actors(BuildActorsRequest {
-                        request_id,
-                        actor_id: actors,
-                    })
-                    .await
-            },
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Broadcast and update actor info in CN.
-    /// `node_actors_to_create` must be a subset of `broadcast_worker_ids`.
-    pub async fn broadcast_update_actor_info(
-        &self,
-        worker_nodes: &HashMap<WorkerId, WorkerNode>,
-        broadcast_worker_ids: impl Iterator<Item = WorkerId>,
-        actor_infos_to_broadcast: impl Iterator<Item = ActorInfo>,
-        node_actors_to_create: impl Iterator<Item = (WorkerId, Vec<BuildActorInfo>)>,
-    ) -> MetaResult<()> {
-        let actor_infos = actor_infos_to_broadcast.collect_vec();
-        let mut node_actors_to_create = node_actors_to_create.collect::<HashMap<_, _>>();
-        self.make_request(
-            broadcast_worker_ids
-                .map(|worker_id| {
-                    let node = worker_nodes.get(&worker_id).unwrap();
-                    let actors = node_actors_to_create.remove(&worker_id);
-                    (node, actors)
-                }),
-            |client, actors| {
-                let info = actor_infos.clone();
-                async move {
-                    client
-                        .broadcast_actor_info_table(BroadcastActorInfoTableRequest { info })
-                        .await?;
-                    if let Some(actors) = actors {
-                        let request_id = Self::new_request_id();
-                        let actor_ids = actors.iter().map(|actor| actor.actor.as_ref().unwrap().actor_id).collect_vec();
-                        tracing::debug!(request_id = request_id.as_str(), actors = ?actor_ids, "update actors");
-                        client
-                            .update_actors(UpdateActorsRequest { request_id, actors })
-                            .await?;
-                    }
-                    Ok(())
-                }
-            },
-        )
-        .await?;
-        assert!(
-            node_actors_to_create.is_empty(),
-            "remaining uncreated actors: {:?}",
-            node_actors_to_create
-        );
-        Ok(())
-    }
-
-    pub async fn drop_actors(
-        &self,
-        node_map: &HashMap<WorkerId, WorkerNode>,
-        node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
-    ) -> MetaResult<()> {
-        self.make_request(
-            node_actors
-                .map(|(worker_id, actor_ids)| (node_map.get(&worker_id).unwrap(), actor_ids)),
-            |client, actor_ids| async move {
-                client
-                    .drop_actors(DropActorsRequest {
-                        request_id: Self::new_request_id(),
-                        actor_ids,
-                    })
-                    .await
-            },
-        )
-        .await?;
-        Ok(())
-    }
-}
-
-/// This function is similar to `try_join_all`, but it attempts to collect as many error as possible within `error_timeout`.
-async fn try_join_all_with_error_timeout<I, RSP, E, F>(
-    iters: I,
-    error_timeout: Duration,
-) -> Result<Vec<RSP>, Vec<E>>
-where
-    I: IntoIterator<Item = F>,
-    F: Future<Output = Result<RSP, E>>,
-{
-    let stream = FuturesUnordered::from_iter(iters);
-    pin_mut!(stream);
-    let mut results_ok = vec![];
-    let mut results_err = vec![];
-    while let Some(result) = stream.next().await {
-        match result {
-            Ok(rsp) => {
-                results_ok.push(rsp);
-            }
-            Err(err) => {
-                results_err.push(err);
-                break;
-            }
-        }
-    }
-    if results_err.is_empty() {
-        return Ok(results_ok);
-    }
-    let _ = timeout(error_timeout, async {
-        while let Some(result) = stream.next().await {
-            if let Err(err) = result {
-                results_err.push(err);
-            }
-        }
-    })
-    .await;
-    Err(results_err)
 }
 
 pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(

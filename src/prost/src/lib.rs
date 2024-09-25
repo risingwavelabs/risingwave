@@ -15,12 +15,14 @@
 // for derived code of `Message`
 #![expect(clippy::all)]
 #![expect(clippy::doc_markdown)]
-#![feature(lint_reasons)]
 
 use std::str::FromStr;
 
+use plan_common::AdditionalColumn;
+pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
+
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -82,6 +84,9 @@ pub mod monitor_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/backup_service.rs")]
 pub mod backup_service;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/frontend_service.rs")]
+pub mod frontend_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/java_binding.rs")]
 pub mod java_binding;
@@ -184,7 +189,7 @@ impl FromStr for crate::expr::table_function::PbType {
     }
 }
 
-impl FromStr for crate::expr::agg_call::PbType {
+impl FromStr for crate::expr::agg_call::PbKind {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -238,6 +243,14 @@ impl meta::table_fragments::ActorStatus {
             .as_ref()
             .expect("actor location should be exist")
             .worker_node_id
+    }
+}
+
+impl common::WorkerNode {
+    pub fn is_streaming_schedulable(&self) -> bool {
+        let property = self.property.as_ref();
+        property.map_or(false, |p| p.is_streaming)
+            && !property.map_or(false, |p| p.is_unschedulable)
     }
 }
 
@@ -313,6 +326,103 @@ impl std::fmt::Debug for meta::SystemParams {
     /// Use `SystemParamsReader` instead.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SystemParams").finish_non_exhaustive()
+    }
+}
+
+// More compact formats for debugging
+
+impl std::fmt::Debug for data::DataType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let data::DataType {
+            precision,
+            scale,
+            interval_type,
+            field_type,
+            field_names,
+            type_name,
+            // currently all data types are nullable
+            is_nullable: _,
+        } = self;
+
+        let type_name = data::data_type::TypeName::try_from(*type_name)
+            .map(|t| t.as_str_name())
+            .unwrap_or("Unknown");
+
+        let mut s = f.debug_struct(type_name);
+        if self.precision != 0 {
+            s.field("precision", precision);
+        }
+        if self.scale != 0 {
+            s.field("scale", scale);
+        }
+        if self.interval_type != 0 {
+            s.field("interval_type", interval_type);
+        }
+        if !self.field_type.is_empty() {
+            s.field("field_type", field_type);
+        }
+        if !self.field_names.is_empty() {
+            s.field("field_names", field_names);
+        }
+        s.finish()
+    }
+}
+
+impl std::fmt::Debug for plan_common::column_desc::GeneratedOrDefaultColumn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GeneratedColumn(arg0) => f.debug_tuple("GeneratedColumn").field(arg0).finish(),
+            Self::DefaultColumn(arg0) => f.debug_tuple("DefaultColumn").field(arg0).finish(),
+        }
+    }
+}
+
+impl std::fmt::Debug for plan_common::ColumnDesc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // destruct here to avoid missing new fields in the future.
+        let plan_common::ColumnDesc {
+            column_type,
+            column_id,
+            name,
+            field_descs,
+            type_name,
+            description,
+            additional_column_type,
+            additional_column,
+            generated_or_default_column,
+            version,
+        } = self;
+
+        let mut s = f.debug_struct("ColumnDesc");
+        if let Some(column_type) = column_type {
+            s.field("column_type", column_type);
+        } else {
+            s.field("column_type", &"Unknown");
+        }
+        s.field("column_id", column_id).field("name", name);
+        if !self.field_descs.is_empty() {
+            s.field("field_descs", field_descs);
+        }
+        if !self.type_name.is_empty() {
+            s.field("type_name", type_name);
+        }
+        if let Some(description) = description {
+            s.field("description", description);
+        }
+        if self.additional_column_type != 0 {
+            s.field("additional_column_type", additional_column_type);
+        }
+        s.field("version", version);
+        if let Some(AdditionalColumn { column_type }) = additional_column {
+            // AdditionalColumn { None } means a normal column
+            if let Some(column_type) = column_type {
+                s.field("additional_column", &column_type);
+            }
+        }
+        if let Some(generated_or_default_column) = generated_or_default_column {
+            s.field("generated_or_default_column", &generated_or_default_column);
+        }
+        s.finish()
     }
 }
 

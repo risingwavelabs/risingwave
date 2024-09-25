@@ -94,11 +94,20 @@ message TableFragments {
     // so we pre-generate and store it here, this member will only be initialized when creating the Fragment
     // and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
+
+    // Total vnode count of the fragment (then all internal tables).
+    // Duplicated from the length of the vnode bitmap in any actor of the fragment.
+    //
+    // Can be unset if the fragment is created in older versions where variable vnode count is not
+    // supported, in which case a default value of 256 should be used.
+    // Use `VnodeCountCompat::vnode_count` to access it.
+    optional uint32 maybe_vnode_count = 8;
   }
   uint32 table_id = 1;
   State state = 2;
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
   stream_plan.StreamContext ctx = 6;
@@ -144,7 +153,7 @@ message FlushRequest {
 
 message FlushResponse {
   common.Status status = 1;
-  hummock.HummockSnapshot snapshot = 2;
+  uint64 hummock_version_id = 2;
 }
 
 // The reason why the data sources in the cluster are paused.
@@ -159,17 +168,11 @@ enum PausedReason {
 
 message PauseRequest {}
 
-message PauseResponse {
-  optional PausedReason prev = 1;
-  optional PausedReason curr = 2;
-}
+message PauseResponse {}
 
 message ResumeRequest {}
 
-message ResumeResponse {
-  optional PausedReason prev = 1;
-  optional PausedReason curr = 2;
-}
+message ResumeResponse {}
 
 message CancelCreatingJobsRequest {
   message CreatingJobInfo {
@@ -273,6 +276,7 @@ enum ThrottleTarget {
   SOURCE = 1;
   MV = 2;
   TABLE_WITH_SOURCE = 3;
+  CDC_TABLE = 4;
 }
 
 message ApplyThrottleRequest {
@@ -311,6 +315,8 @@ message AddWorkerNodeRequest {
     bool is_streaming = 2;
     bool is_serving = 3;
     bool is_unschedulable = 4;
+    // This is used for frontend node to register its rpc address
+    string internal_rpc_host_addr = 5;
   }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
@@ -320,9 +326,6 @@ message AddWorkerNodeRequest {
 }
 
 message AddWorkerNodeResponse {
-  reserved 3;
-  reserved "system_params";
-  common.Status status = 1;
   optional uint32 node_id = 2;
   string cluster_id = 4;
 }
@@ -432,7 +435,6 @@ message MetaSnapshot {
   GetSessionParamsResponse session_params = 20;
   repeated catalog.Secret secrets = 23;
   repeated common.WorkerNode nodes = 10;
-  hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
   backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
   hummock.WriteLimits hummock_write_limits = 16;
@@ -484,7 +486,6 @@ message SubscribeResponse {
     user.UserInfo user = 11;
     SetSessionParamRequest session_param = 26;
     common.WorkerNode node = 13;
-    hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
     MetaSnapshot snapshot = 16;
     backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
@@ -513,6 +514,7 @@ message GetClusterInfoRequest {}
 message GetClusterInfoResponse {
   repeated common.WorkerNode worker_nodes = 1;
   repeated TableFragments table_fragments = 2;
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 3;
   map<uint32, catalog.Source> source_infos = 4;
   uint64 revision = 5;
@@ -731,6 +733,12 @@ message EventLog {
     common.HostAddress host_addr = 3;
     string panic_info = 4;
   }
+  message EventAutoSchemaChangeFail {
+    uint32 table_id = 1;
+    string table_name = 2;
+    string cdc_table_id = 3;
+    string upstream_ddl = 4;
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -743,6 +751,7 @@ message EventLog {
     EventInjectBarrierFail inject_barrier_fail = 7;
     EventCollectBarrierFail collect_barrier_fail = 8;
     EventLog.EventWorkerNodePanic worker_node_panic = 9;
+    EventLog.EventAutoSchemaChangeFail auto_schema_change_fail = 10;
   }
 }
 
@@ -764,4 +773,54 @@ message AddEventLogResponse {}
 service EventLogService {
   rpc ListEventLog(ListEventLogRequest) returns (ListEventLogResponse);
   rpc AddEventLog(AddEventLogRequest) returns (AddEventLogResponse);
+}
+
+message ActorIds {
+  repeated uint32 ids = 1;
+}
+
+message FragmentIdToActorIdMap {
+  map<uint32, ActorIds> map = 1;
+}
+
+/// Provides all the ids: relation_id, fragment_id, actor_id
+/// in an hierarchical format.
+/// relation_id -> [fragment_id]
+/// fragment_id -> [actor_id]
+message RelationIdInfos {
+  // relation_id -> FragmentIdToActorIdMap
+  map<uint32, FragmentIdToActorIdMap> map = 1;
+}
+
+message FragmentVertexToRelationMap {
+  // fragment_id -> relation_id
+  map<uint32, uint32> in_map = 1;
+  map<uint32, uint32> out_map = 2;
+}
+
+message ActorCountPerParallelism {
+  message WorkerActorCount {
+    uint64 actor_count = 1;
+    uint64 parallelism = 2;
+  }
+  map<uint32, WorkerActorCount> worker_id_to_actor_count = 1;
+  uint64 hard_limit = 2;
+  uint64 soft_limit = 3;
+}
+
+message ClusterLimit {
+  oneof limit {
+    ActorCountPerParallelism actor_count = 1;
+    // TODO: limit DDL using compaction pending bytes
+  }
+}
+
+message GetClusterLimitsRequest {}
+
+message GetClusterLimitsResponse {
+  repeated ClusterLimit active_limits = 1;
+}
+
+service ClusterLimitService {
+  rpc GetClusterLimits(GetClusterLimitsRequest) returns (GetClusterLimitsResponse);
 }

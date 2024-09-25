@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{
     DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
+    ToOwnedDatum,
 };
 use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
@@ -25,6 +26,7 @@ use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
 use crate::parser::schema_change::TableChangeType;
 use crate::parser::TransactionControl;
+use crate::source::cdc::build_cdc_table_id;
 use crate::source::cdc::external::mysql::{mysql_type_to_rw_type, type_name_to_mysql_type};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
@@ -70,6 +72,7 @@ pub struct DebeziumChangeEvent<A> {
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
 
+const UPSTREAM_DDL: &str = "ddl";
 const SOURCE: &str = "source";
 const SOURCE_TS_MS: &str = "ts_ms";
 const SOURCE_DB: &str = "db";
@@ -152,11 +155,22 @@ macro_rules! jsonb_access_field {
     };
 }
 
+/// Parse the schema change message from Debezium.
+/// The layout of MySQL schema change message can refer to
+/// <https://debezium.io/documentation/reference/2.6/connectors/mysql.html#mysql-schema-change-topic>
 pub fn parse_schema_change(
     accessor: &impl Access,
+    source_id: u32,
     connector_props: &ConnectorProperties,
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
+
+    let upstream_ddl: String = accessor
+        .access(&[UPSTREAM_DDL], &DataType::Varchar)?
+        .to_owned_datum()
+        .unwrap()
+        .as_utf8()
+        .to_string();
 
     if let Some(ScalarRefImpl::List(table_changes)) = accessor
         .access(&[TABLE_CHANGES], &DataType::List(Box::new(DataType::Jsonb)))?
@@ -207,11 +221,38 @@ pub fn parse_schema_change(
                         }
                     };
 
-                    column_descs.push(ColumnDesc::named(name, ColumnId::placeholder(), data_type));
+                    // handle default value expression, currently we only support constant expression
+                    let column_desc = match col.access_object_field("defaultValueExpression") {
+                        Some(default_val_expr_str) if !default_val_expr_str.is_jsonb_null() => {
+                            let value_text = default_val_expr_str.as_string().unwrap();
+                            let snapshot_value: Datum = Some(
+                                ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
+                                    |err| {
+                                        tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to parse default value expression");
+                                        AccessError::TypeError {
+                                        expected: "constant expression".into(),
+                                        got: data_type.to_string(),
+                                        value: value_text,
+                                    }},
+                                )?,
+                            );
+                            ColumnDesc::named_with_default_value(
+                                name,
+                                ColumnId::placeholder(),
+                                data_type,
+                                snapshot_value,
+                            )
+                        }
+                        _ => ColumnDesc::named(name, ColumnId::placeholder(), data_type),
+                    };
+                    column_descs.push(column_desc);
                 }
             }
+
+            // concatenate the source_id to the cdc_table_id
+            let cdc_table_id = build_cdc_table_id(source_id, id.replace('"', "").as_str());
             schema_changes.push(TableSchemaChange {
-                cdc_table_name: id.replace('"', ""), // remove the double quotes
+                cdc_table_id,
                 columns: column_descs
                     .into_iter()
                     .map(|column_desc| ColumnCatalog {
@@ -220,6 +261,7 @@ pub fn parse_schema_change(
                     })
                     .collect_vec(),
                 change_type: ty.as_str().into(),
+                upstream_ddl: upstream_ddl.clone(),
             });
         }
 

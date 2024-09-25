@@ -1291,5 +1291,5 @@ fn parse_variadic_argument() {
     assert!(parse_sql_statements(sql)
         .unwrap_err()
         .to_string()
-        .contains("VARIADIC argument must be last"),);
+        .contains("VARIADIC argument must be the last"),);
 }

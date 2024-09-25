@@ -20,7 +20,6 @@ use bytes::Bytes;
 use futures_async_stream::try_stream;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -35,6 +34,7 @@ use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 use risingwave_pb::data::DataChunk as PbDataChunk;
+use risingwave_pb::Message;
 
 use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
@@ -755,7 +755,7 @@ mod tests {
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::PbDataType;
-    use risingwave_pb::expr::agg_call::Type;
+    use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
     use risingwave_pb::expr::{AggCall, InputRef};
 
     use super::*;
@@ -788,7 +788,7 @@ mod tests {
             ));
 
             let agg_call = AggCall {
-                r#type: Type::Sum as i32,
+                kind: PbAggKind::Sum as i32,
                 args: vec![InputRef {
                     index: 2,
                     r#type: Some(PbDataType {
@@ -873,7 +873,7 @@ mod tests {
         );
 
         let agg_call = AggCall {
-            r#type: Type::Count as i32,
+            kind: PbAggKind::Count as i32,
             args: vec![],
             return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
@@ -985,7 +985,7 @@ mod tests {
         );
 
         let agg_call = AggCall {
-            r#type: Type::Sum as i32,
+            kind: PbAggKind::Sum as i32,
             args: vec![InputRef {
                 index: 2,
                 r#type: Some(PbDataType {
@@ -1078,7 +1078,7 @@ mod tests {
         ));
 
         let agg_call = AggCall {
-            r#type: Type::Sum as i32,
+            kind: PbAggKind::Sum as i32,
             args: vec![InputRef {
                 index: 2,
                 r#type: Some(PbDataType {

@@ -88,10 +88,13 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         _request: Request<GetCurrentVersionRequest>,
     ) -> Result<Response<GetCurrentVersionResponse>, Status> {
-        let current_version = self.hummock_manager.get_current_version().await;
+        let current_version = self
+            .hummock_manager
+            .on_current_version(|version| version.into())
+            .await;
         Ok(Response::new(GetCurrentVersionResponse {
             status: None,
-            current_version: Some(current_version.into()),
+            current_version: Some(current_version),
         }))
     }
 
@@ -158,53 +161,6 @@ impl HummockManagerService for HummockServiceImpl {
             }),
         };
         Ok(Response::new(resp))
-    }
-
-    async fn pin_specific_snapshot(
-        &self,
-        request: Request<PinSpecificSnapshotRequest>,
-    ) -> Result<Response<PinSnapshotResponse>, Status> {
-        let req = request.into_inner();
-        let hummock_snapshot = self
-            .hummock_manager
-            .pin_specific_snapshot(req.context_id, req.epoch)
-            .await?;
-        Ok(Response::new(PinSnapshotResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
-        }))
-    }
-
-    async fn pin_snapshot(
-        &self,
-        request: Request<PinSnapshotRequest>,
-    ) -> Result<Response<PinSnapshotResponse>, Status> {
-        let req = request.into_inner();
-        let hummock_snapshot = self.hummock_manager.pin_snapshot(req.context_id).await?;
-        Ok(Response::new(PinSnapshotResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
-        }))
-    }
-
-    async fn unpin_snapshot(
-        &self,
-        request: Request<UnpinSnapshotRequest>,
-    ) -> Result<Response<UnpinSnapshotResponse>, Status> {
-        let req = request.into_inner();
-        self.hummock_manager.unpin_snapshot(req.context_id).await?;
-        Ok(Response::new(UnpinSnapshotResponse { status: None }))
-    }
-
-    async fn unpin_snapshot_before(
-        &self,
-        request: Request<UnpinSnapshotBeforeRequest>,
-    ) -> Result<Response<UnpinSnapshotBeforeResponse>, Status> {
-        let req = request.into_inner();
-        self.hummock_manager
-            .unpin_snapshot_before(req.context_id, req.min_snapshot.unwrap())
-            .await?;
-        Ok(Response::new(UnpinSnapshotBeforeResponse { status: None }))
     }
 
     async fn get_new_sst_ids(
@@ -360,23 +316,6 @@ impl HummockManagerService for HummockServiceImpl {
         }))
     }
 
-    async fn rise_ctl_get_pinned_snapshots_summary(
-        &self,
-        _request: Request<RiseCtlGetPinnedSnapshotsSummaryRequest>,
-    ) -> Result<Response<RiseCtlGetPinnedSnapshotsSummaryResponse>, Status> {
-        let pinned_snapshots = self.hummock_manager.list_pinned_snapshot().await;
-        let workers = self
-            .hummock_manager
-            .list_workers(&pinned_snapshots.iter().map(|p| p.context_id).collect_vec())
-            .await?;
-        Ok(Response::new(RiseCtlGetPinnedSnapshotsSummaryResponse {
-            summary: Some(PinnedSnapshotsSummary {
-                pinned_snapshots,
-                workers,
-            }),
-        }))
-    }
-
     async fn get_assigned_compact_task_num(
         &self,
         _request: Request<GetAssignedCompactTaskNumRequest>,
@@ -454,7 +393,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let new_group_id = self
             .hummock_manager
-            .split_compaction_group(req.group_id, &req.table_ids)
+            .split_compaction_group(req.group_id, &req.table_ids, req.partition_vnode_count)
             .await?;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
@@ -605,7 +544,7 @@ impl HummockManagerService for HummockServiceImpl {
             periodic_space_reclaim_compaction_interval_sec,
             periodic_ttl_reclaim_compaction_interval_sec,
             periodic_tombstone_reclaim_compaction_interval_sec,
-            periodic_split_compact_group_interval_sec,
+            periodic_scheduling_compaction_group_interval_sec,
             split_group_size_limit,
             min_table_split_size,
             do_not_config_object_storage_lifecycle,
@@ -707,11 +646,25 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<GetVersionByEpochRequest>,
     ) -> Result<Response<GetVersionByEpochResponse>, Status> {
-        let GetVersionByEpochRequest { epoch } = request.into_inner();
-        let version = self.hummock_manager.epoch_to_version(epoch).await?;
+        let GetVersionByEpochRequest { epoch, table_id } = request.into_inner();
+        let version = self
+            .hummock_manager
+            .epoch_to_version(epoch, table_id)
+            .await?;
         Ok(Response::new(GetVersionByEpochResponse {
             version: Some(version.to_protobuf()),
         }))
+    }
+
+    async fn merge_compaction_group(
+        &self,
+        request: Request<MergeCompactionGroupRequest>,
+    ) -> Result<Response<MergeCompactionGroupResponse>, Status> {
+        let req = request.into_inner();
+        self.hummock_manager
+            .merge_compaction_group(req.left_group_id, req.right_group_id)
+            .await?;
+        Ok(Response::new(MergeCompactionGroupResponse {}))
     }
 }
 

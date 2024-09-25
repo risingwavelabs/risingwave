@@ -91,7 +91,7 @@ pub type HummockSstableObjectId = i64;
 pub type FragmentId = i32;
 pub type ActorId = i32;
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum JobStatus {
     #[sea_orm(string_value = "INITIAL")]
@@ -258,6 +258,12 @@ macro_rules! derive_array_from_blob {
         impl Default for $struct_name {
             fn default() -> Self {
                 Self(vec![])
+            }
+        }
+
+        impl sea_orm::sea_query::Nullable for $struct_name {
+            fn null() -> Value {
+                Value::Bytes(None)
             }
         }
     };

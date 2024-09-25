@@ -7,6 +7,10 @@ SET QUERY_MODE TO local;
 statement ok
 CREATE TABLE t (k INT);
 
+query I
+SELECT *  FROM t;
+----
+
 query error
 SELECT * FROM t FOR SYSTEM_TIME AS OF 963716300;
 ----

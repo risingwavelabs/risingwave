@@ -24,7 +24,9 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
-use crate::barrier::{Command, CreateStreamingJobCommandInfo, EpochNode, ReplaceTablePlan};
+use crate::barrier::{
+    Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, EpochNode, ReplaceTablePlan,
+};
 use crate::manager::{
     DdlType, MetadataManager, MetadataManagerV1, MetadataManagerV2, StreamingJob,
 };
@@ -53,6 +55,7 @@ pub(super) struct Progress {
     upstream_mv_count: HashMap<TableId, usize>,
 
     /// Total key count in the upstream materialized view
+    /// TODO: implement this for source backfill
     upstream_total_key_count: u64,
 
     /// Consumed rows
@@ -120,6 +123,12 @@ impl Progress {
 
     /// Returns whether all backfill executors are done.
     fn is_done(&self) -> bool {
+        tracing::trace!(
+            "Progress::is_done? {}, {}, {:?}",
+            self.done_count,
+            self.states.len(),
+            self.states
+        );
         self.done_count == self.states.len()
     }
 
@@ -159,8 +168,9 @@ pub enum TrackingJob {
 }
 
 impl TrackingJob {
-    pub(crate) async fn pre_finish(&self, metadata_manager: &MetadataManager) -> MetaResult<()> {
-        match &self {
+    /// Notify metadata manager that the job is finished.
+    pub(crate) async fn finish(self, metadata_manager: &MetadataManager) -> MetaResult<()> {
+        match self {
             TrackingJob::New(command) => {
                 let CreateStreamingJobCommandInfo {
                     table_fragments,
@@ -269,16 +279,17 @@ pub(super) struct TrackingCommand {
 /// 2. For each stream job, there are several actors which run its tasks.
 /// 3. With `progress_map` we can use the ID of the `StreamJob` to view its progress.
 /// 4. With `actor_map` we can use an actor's `ActorId` to find the ID of the `StreamJob`.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct CreateMviewProgressTracker {
+    // TODO: add a specialized progress for source
     /// Progress of the create-mview DDL indicated by the `TableId`.
     progress_map: HashMap<TableId, (Progress, TrackingJob)>,
 
-    /// Find the epoch of the create-mview DDL by the actor containing the backfill executors.
+    /// Find the epoch of the create-mview DDL by the actor containing the MV/source backfill executors.
     actor_map: HashMap<ActorId, TableId>,
 
-    /// Get notified when we finished Create MV and collect a barrier(checkpoint = true)
-    finished_jobs: Vec<TrackingJob>,
+    /// Stash of finished jobs. They will be finally finished on checkpoint.
+    pending_finished_jobs: Vec<TrackingJob>,
 }
 
 impl CreateMviewProgressTracker {
@@ -329,7 +340,7 @@ impl CreateMviewProgressTracker {
         Self {
             progress_map,
             actor_map,
-            finished_jobs: Vec::new(),
+            pending_finished_jobs: Vec::new(),
         }
     }
 
@@ -363,7 +374,7 @@ impl CreateMviewProgressTracker {
         Self {
             progress_map,
             actor_map,
-            finished_jobs: Vec::new(),
+            pending_finished_jobs: Vec::new(),
         }
     }
 
@@ -416,15 +427,21 @@ impl CreateMviewProgressTracker {
         version_stats: &HummockVersionStats,
     ) -> Vec<TrackingJob> {
         let command_ctx = &epoch_node.command_ctx;
-        let new_tracking_job_info = if let Command::CreateStreamingJob {
-            info,
-            replace_table,
-        } = &command_ctx.command
-        {
-            Some((info, replace_table.as_ref()))
-        } else {
-            None
-        };
+        let new_tracking_job_info =
+            if let Command::CreateStreamingJob { info, job_type } = &command_ctx.command {
+                match job_type {
+                    CreateStreamingJobType::Normal => Some((info, None)),
+                    CreateStreamingJobType::SinkIntoTable(replace_table) => {
+                        Some((info, Some(replace_table)))
+                    }
+                    CreateStreamingJobType::SnapshotBackfill(_) => {
+                        // The progress of SnapshotBackfill won't be tracked here
+                        None
+                    }
+                }
+            } else {
+                None
+            };
         assert!(epoch_node.state.node_to_collect.is_empty());
         self.update_tracking_jobs(
             new_tracking_job_info,
@@ -449,33 +466,30 @@ impl CreateMviewProgressTracker {
 
     /// Stash a command to finish later.
     pub(super) fn stash_command_to_finish(&mut self, finished_job: TrackingJob) {
-        self.finished_jobs.push(finished_job);
+        self.pending_finished_jobs.push(finished_job);
     }
 
-    /// Finish stashed jobs.
-    /// If checkpoint, means all jobs can be finished.
-    /// If not checkpoint, jobs which do not require checkpoint can be finished.
-    ///
-    /// Returns whether there are still remaining stashed jobs to finish.
+    /// Finish stashed jobs on checkpoint.
     pub(super) fn take_finished_jobs(&mut self) -> Vec<TrackingJob> {
-        tracing::trace!(finished_jobs=?self.finished_jobs, progress_map=?self.progress_map, "finishing jobs");
-        take(&mut self.finished_jobs)
+        tracing::trace!(finished_jobs=?self.pending_finished_jobs, progress_map=?self.progress_map, "finishing jobs");
+        take(&mut self.pending_finished_jobs)
     }
 
     pub(super) fn has_pending_finished_jobs(&self) -> bool {
-        !self.finished_jobs.is_empty()
+        !self.pending_finished_jobs.is_empty()
     }
 
     pub(super) fn cancel_command(&mut self, id: TableId) {
         let _ = self.progress_map.remove(&id);
-        self.finished_jobs.retain(|x| x.table_to_create() != id);
+        self.pending_finished_jobs
+            .retain(|x| x.table_to_create() != id);
         self.actor_map.retain(|_, table_id| *table_id != id);
     }
 
     /// Notify all tracked commands that error encountered and clear them.
     pub fn abort_all(&mut self) {
         self.actor_map.clear();
-        self.finished_jobs.clear();
+        self.pending_finished_jobs.clear();
         self.progress_map.clear();
     }
 
@@ -488,6 +502,7 @@ impl CreateMviewProgressTracker {
         replace_table: Option<&ReplaceTablePlan>,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
+        tracing::trace!(?info, "add job to track");
         let (info, actors, replace_table_info) = {
             let CreateStreamingJobCommandInfo {
                 table_fragments, ..
@@ -590,6 +605,7 @@ impl CreateMviewProgressTracker {
         progress: &CreateMviewProgress,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
+        tracing::trace!(?progress, "update progress");
         let actor = progress.backfill_actor_id;
         let Some(table_id) = self.actor_map.get(&actor).copied() else {
             // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,

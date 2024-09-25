@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -118,16 +118,6 @@ impl HummockManager {
             .collect_vec()
     }
 
-    pub async fn list_pinned_snapshot(&self) -> Vec<HummockPinnedSnapshot> {
-        self.context_info
-            .read()
-            .await
-            .pinned_snapshots
-            .values()
-            .cloned()
-            .collect_vec()
-    }
-
     pub async fn list_workers(
         &self,
         context_ids: &[HummockContextId],
@@ -149,16 +139,17 @@ impl HummockManager {
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
     ///
     /// Note: this method can hurt performance because it will clone a large object.
+    #[cfg(any(test, feature = "test"))]
     pub async fn get_current_version(&self) -> HummockVersion {
-        self.versioning.read().await.current_version.clone()
+        self.on_current_version(|version| version.clone()).await
     }
 
-    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
-        self.versioning
-            .read()
-            .await
-            .current_version
-            .max_committed_epoch
+    pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
+        f(&self.versioning.read().await.current_version)
+    }
+
+    pub async fn get_version_id(&self) -> HummockVersionId {
+        self.on_current_version(|version| version.id).await
     }
 
     /// Gets the mapping from table id to compaction group id
@@ -181,7 +172,7 @@ impl HummockManager {
             .hummock_version_deltas
             .range(start_id..)
             .map(|(_id, delta)| delta)
-            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
+            .filter(|delta| delta.visible_table_committed_epoch() <= committed_epoch_limit)
             .take(num_limit as _)
             .cloned()
             .collect();
@@ -284,22 +275,6 @@ impl HummockManager {
         HummockSnapshot::clone(&snapshot)
     }
 
-    /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
-    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> HummockSnapshot {
-        // We only update `max_current_epoch`!
-        let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
-            committed_epoch: snapshot.committed_epoch,
-            current_epoch: max_current_epoch,
-        });
-        assert!(prev_snapshot.current_epoch < max_current_epoch);
-
-        tracing::trace!("new current epoch {}", max_current_epoch);
-        HummockSnapshot {
-            committed_epoch: prev_snapshot.committed_epoch,
-            current_epoch: max_current_epoch,
-        }
-    }
-
     pub async fn list_change_log_epochs(
         &self,
         table_id: u32,
@@ -313,7 +288,7 @@ impl HummockManager {
             .get(&TableId::new(table_id))
         {
             let table_change_log = table_change_log.clone();
-            table_change_log.get_epochs(min_epoch, max_count as usize)
+            table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
         } else {
             vec![]
         }

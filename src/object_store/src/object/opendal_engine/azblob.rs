@@ -19,7 +19,7 @@ use opendal::services::Azblob;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{MediaType, OpendalObjectStore};
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
 
@@ -33,21 +33,19 @@ impl OpendalObjectStore {
         metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
         // Create azblob backend builder.
-        let mut builder = Azblob::default();
-        builder.root(&root);
-        builder.container(&container_name);
+        let mut builder = Azblob::default().root(&root).container(&container_name);
 
         let endpoint = std::env::var(AZBLOB_ENDPOINT)
             .unwrap_or_else(|_| panic!("AZBLOB_ENDPOINT not found from environment variables"));
 
-        builder.endpoint(&endpoint);
+        builder = builder.endpoint(&endpoint);
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::Azblob,
+            media_type: MediaType::Azblob,
             config,
             metrics,
         })

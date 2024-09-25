@@ -29,7 +29,8 @@ pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
+    SysTableVisitor,
 };
 use risingwave_sqlparser::ast::OnConflict;
 
@@ -243,7 +244,7 @@ impl PlanRoot {
         let return_type = DataType::List(input_column_type.clone().into());
         let agg = Agg::new(
             vec![PlanAggCall {
-                agg_kind: PbAggKind::ArrayAgg.into(),
+                agg_type: PbAggKind::ArrayAgg.into(),
                 return_type: return_type.clone(),
                 inputs: vec![InputRef::new(select_idx, input_column_type.clone())],
                 distinct: false,
@@ -449,10 +450,16 @@ impl PlanRoot {
     }
 
     /// Generate optimized stream plan
-    fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
+    fn gen_optimized_stream_plan(
+        &mut self,
+        emit_on_window_close: bool,
+        allow_snapshot_backfill: bool,
+    ) -> Result<PlanRef> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
-        let stream_scan_type = if self.should_use_arrangement_backfill() {
+        let stream_scan_type = if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
+            StreamScanType::SnapshotBackfill
+        } else if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
@@ -631,10 +638,12 @@ impl PlanRoot {
         version: Option<TableVersion>,
         with_external_source: bool,
         retention_seconds: Option<NonZeroU32>,
+        cdc_table_id: Option<String>,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
-        let stream_plan = self.gen_optimized_stream_plan(false)?;
+        // Snapshot backfill is not allowed for create table
+        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
 
@@ -860,6 +869,7 @@ impl PlanRoot {
             row_id_index,
             version,
             retention_seconds,
+            cdc_table_id,
         )
     }
 
@@ -873,7 +883,7 @@ impl PlanRoot {
         let cardinality = self.compute_cardinality();
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
-        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
+        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close, true)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
         StreamMaterialize::create(
@@ -900,7 +910,7 @@ impl PlanRoot {
         let cardinality = self.compute_cardinality();
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
-        let stream_plan = self.gen_optimized_stream_plan(false)?;
+        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
 
@@ -935,6 +945,9 @@ impl PlanRoot {
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
+        } else if target_table.is_none() && self.should_use_snapshot_backfill() {
+            // Snapshot backfill on sink-into-table is not allowed
+            StreamScanType::SnapshotBackfill
         } else if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
@@ -972,6 +985,14 @@ impl PlanRoot {
             .developer
             .enable_arrangement_backfill;
         arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
+    }
+
+    pub fn should_use_snapshot_backfill(&self) -> bool {
+        self.plan
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_use_snapshot_backfill()
     }
 }
 

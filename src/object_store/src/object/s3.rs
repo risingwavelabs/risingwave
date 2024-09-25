@@ -103,6 +103,8 @@ pub struct S3StreamingUploader {
 }
 
 impl S3StreamingUploader {
+    const MEDIA_TYPE: &'static str = "s3";
+
     pub fn new(
         client: Client,
         bucket: String,
@@ -159,6 +161,7 @@ impl S3StreamingUploader {
                 &self.config,
                 OperationType::StreamingUploadInit,
                 self.metrics.clone(),
+                Self::MEDIA_TYPE,
             )
             .await;
 
@@ -221,7 +224,14 @@ impl S3StreamingUploader {
                     })
             };
 
-            let res = retry_request(builder, &config, operation_type, metrics.clone()).await;
+            let res = retry_request(
+                builder,
+                &config,
+                operation_type,
+                metrics.clone(),
+                Self::MEDIA_TYPE,
+            )
+            .await;
             try_update_failure_metric(&metrics, &res, operation_type_str);
             Ok((part_id, res?))
         }));
@@ -280,7 +290,14 @@ impl S3StreamingUploader {
                 })
         };
 
-        let res = retry_request(builder, &self.config, operation_type, self.metrics.clone()).await;
+        let res = retry_request(
+            builder,
+            &self.config,
+            operation_type,
+            self.metrics.clone(),
+            Self::MEDIA_TYPE,
+        )
+        .await;
         try_update_failure_metric(&self.metrics, &res, operation_type.as_str());
         let _res = res?;
 
@@ -353,9 +370,14 @@ impl StreamingUploader for S3StreamingUploader {
                         })
                 };
 
-                let res =
-                    retry_request(builder, &self.config, operation_type, self.metrics.clone())
-                        .await;
+                let res = retry_request(
+                    builder,
+                    &self.config,
+                    operation_type,
+                    self.metrics.clone(),
+                    Self::MEDIA_TYPE,
+                )
+                .await;
                 try_update_failure_metric(&self.metrics, &res, operation_type.as_str());
                 res?;
                 Ok(())

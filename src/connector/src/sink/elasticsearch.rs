@@ -24,7 +24,7 @@ use risingwave_common::types::{JsonbVal, Scalar, ToText};
 use serde_json::Value;
 
 use super::encoder::{JsonEncoder, RowEncoder};
-use super::remote::{ElasticSearchSink, OpensearchSink};
+use super::remote::{ElasticSearchSink, OpenSearchSink};
 use crate::sink::{Result, Sink};
 pub const ES_OPTION_DELIMITER: &str = "delimiter";
 pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
@@ -172,5 +172,5 @@ impl EsStreamChunkConverter {
 }
 
 pub fn is_es_sink(sink_name: &str) -> bool {
-    sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpensearchSink::SINK_NAME
+    sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpenSearchSink::SINK_NAME
 }

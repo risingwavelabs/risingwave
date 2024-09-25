@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use arrow_schema_iceberg::SchemaRef;
 use icelake::io_v2::{
     FanoutPartitionedWriter, FanoutPartitionedWriterBuilder, FanoutPartitionedWriterMetrics,
     IcebergWriter, IcebergWriterBuilder,
 };
 use icelake::Result;
+use risingwave_common::array::arrow::arrow_array_iceberg;
+use risingwave_common::array::arrow::arrow_schema_iceberg::SchemaRef;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
@@ -27,7 +28,6 @@ pub struct MonitoredFanoutPartitionedWriterBuilder<B: IcebergWriterBuilder> {
 }
 
 impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriterBuilder<B> {
-    #[expect(dead_code)]
     pub fn new(
         inner: FanoutPartitionedWriterBuilder<B>,
         partition_num: LabelGuardedIntGauge<2>,

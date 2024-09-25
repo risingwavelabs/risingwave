@@ -19,7 +19,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::*;
-use risingwave_pb::expr::agg_call::PbType as PbAggKind;
+use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 
 use super::{align_types, cast_ok_base, CastContext};
@@ -31,6 +31,7 @@ use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, Funct
 /// is not supported on backend.
 ///
 /// It also mutates the `inputs` by adding necessary casts.
+#[tracing::instrument(level = "trace", skip(sig_map))]
 pub fn infer_type_with_sigmap(
     func_name: FuncName,
     inputs: &mut [ExprImpl],
@@ -65,6 +66,7 @@ pub fn infer_type_with_sigmap(
         })
         .collect_vec();
     let sig = infer_type_name(sig_map, func_name, &actuals)?;
+    tracing::trace!(?actuals, ?sig, "infer_type_name");
 
     // add implicit casts to inputs
     for (expr, t) in inputs.iter_mut().zip_eq_fast(&sig.inputs_type) {
@@ -82,6 +84,7 @@ pub fn infer_type_with_sigmap(
 
     let input_types = inputs.iter().map(|expr| expr.return_type()).collect_vec();
     let return_type = (sig.type_infer)(&input_types)?;
+    tracing::trace!(?input_types, ?return_type, "finished type inference");
     Ok(return_type)
 }
 
@@ -606,6 +609,55 @@ fn infer_type_for_special(
                 }
                 // any other condition cannot determine polymorphic type
                 _ => Ok(None),
+            }
+        }
+        ExprType::MapAccess => {
+            ensure_arity!("map_access", | inputs | == 2);
+            let map_type = inputs[0].try_into_map_type()?;
+            // We do not align the map's key type with the input type here, but cast the latter to the former instead.
+            // e.g., for {1:'a'}[1.0], if we align them, we will get "numeric" as the key type, which violates the map type's restriction.
+            match inputs[1].cast_implicit_mut(map_type.key().clone()) {
+                Ok(()) => Ok(Some(map_type.value().clone())),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot access {} in {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
+            }
+        }
+        ExprType::MapCat => {
+            ensure_arity!("map_contains", | inputs | == 2);
+            Ok(Some(align_types(inputs.iter_mut())?))
+        }
+        ExprType::MapInsert => {
+            ensure_arity!("map_insert", | inputs | == 3);
+            let map_type = inputs[0].try_into_map_type()?;
+            let rk = inputs[1].cast_implicit_mut(map_type.key().clone());
+            let rv = inputs[2].cast_implicit_mut(map_type.value().clone());
+            match (rk, rv) {
+                (Ok(()), Ok(())) => Ok(Some(map_type.into())),
+                _ => Err(ErrorCode::BindError(format!(
+                    "Cannot insert ({},{}) to {}",
+                    inputs[1].return_type(),
+                    inputs[2].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
+            }
+        }
+        ExprType::MapDelete => {
+            ensure_arity!("map_delete", | inputs | == 2);
+            let map_type = inputs[0].try_into_map_type()?;
+            let rk = inputs[1].cast_implicit_mut(map_type.key().clone());
+            match rk {
+                Ok(()) => Ok(Some(map_type.into())),
+                _ => Err(ErrorCode::BindError(format!(
+                    "Cannot delete {} from {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
             }
         }
         ExprType::Vnode => {

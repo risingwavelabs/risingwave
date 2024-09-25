@@ -18,9 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::{
-    DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker, RuntimeConfigBuilder,
-};
+use foyer::{DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -588,14 +586,6 @@ pub mod verify {
             }
         }
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.actual.seal_epoch(epoch, is_checkpoint)
-        }
-
-        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-            self.actual.clear_shared_buffer(prev_epoch)
-        }
-
         async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
             let expected = if let Some(expected) = &self.expected {
                 Some(expected.new_local(option.clone()).await)
@@ -607,10 +597,6 @@ pub mod verify {
                 expected,
                 _phantom: PhantomData::<()>,
             }
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.actual.validate_read_epoch(epoch)
         }
     }
 
@@ -673,18 +659,10 @@ impl StateStoreImpl {
                     .with_clean_region_threshold(
                         opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                     )
+                    .with_recover_mode(opts.meta_file_cache_recover_mode)
                     .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                    .with_compression(
-                        opts.meta_file_cache_compression
-                            .as_str()
-                            .try_into()
-                            .map_err(HummockError::foyer_error)?,
-                    )
-                    .with_runtime_config(
-                        RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.meta.runtime")
-                            .build(),
-                    );
+                    .with_compression(opts.meta_file_cache_compression)
+                    .with_runtime_config(opts.meta_file_cache_runtime_config.clone());
                 if opts.meta_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
                         opts.meta_file_cache_insert_rate_limit_mb * MB,
@@ -726,18 +704,10 @@ impl StateStoreImpl {
                     .with_clean_region_threshold(
                         opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                     )
+                    .with_recover_mode(opts.data_file_cache_recover_mode)
                     .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                    .with_compression(
-                        opts.data_file_cache_compression
-                            .as_str()
-                            .try_into()
-                            .map_err(HummockError::foyer_error)?,
-                    )
-                    .with_runtime_config(
-                        RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.data.runtime")
-                            .build(),
-                    );
+                    .with_compression(opts.data_file_cache_compression)
+                    .with_runtime_config(opts.data_file_cache_runtime_config.clone());
                 if opts.data_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
                         opts.data_file_cache_insert_rate_limit_mb * MB,
@@ -1172,13 +1142,7 @@ pub mod boxed_state_store {
             table_ids: HashSet<TableId>,
         ) -> BoxFuture<'static, StorageResult<SyncResult>>;
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
-
-        async fn clear_shared_buffer(&self, prev_epoch: u64);
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -1195,20 +1159,8 @@ pub mod boxed_state_store {
             self.sync(epoch, table_ids).boxed()
         }
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.seal_epoch(epoch, is_checkpoint);
-        }
-
-        async fn clear_shared_buffer(&self, prev_epoch: u64) {
-            self.clear_shared_buffer(prev_epoch).await
-        }
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
             Box::new(self.new_local(option).await)
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.validate_read_epoch(epoch)
         }
     }
 
@@ -1293,23 +1245,11 @@ pub mod boxed_state_store {
             self.deref().sync(epoch, table_ids)
         }
 
-        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-            self.deref().clear_shared_buffer(prev_epoch)
-        }
-
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.deref().seal_epoch(epoch, is_checkpoint)
-        }
-
         fn new_local(
             &self,
             option: NewLocalOptions,
         ) -> impl Future<Output = Self::Local> + Send + '_ {
             self.deref().new_local(option)
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.deref().validate_read_epoch(epoch)
         }
     }
 }

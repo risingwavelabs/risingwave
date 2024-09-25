@@ -19,6 +19,7 @@ use risingwave_common::catalog::{
     TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 
 /// `SourceColumnDesc` is used to describe a column in the Source.
@@ -137,11 +138,14 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             version: _,
         }: &ColumnDesc,
     ) -> Self {
-        debug_assert!(
-            generated_or_default_column.is_none(),
-            "source column should not be generated or default: {:?}",
-            generated_or_default_column.as_ref().unwrap()
-        );
+        if let Some(option) = generated_or_default_column {
+            debug_assert!(
+                matches!(option, GeneratedOrDefaultColumn::DefaultColumn(_)),
+                "source column should not be generated: {:?}",
+                generated_or_default_column.as_ref().unwrap()
+            )
+        }
+
         Self {
             name: name.clone(),
             data_type: data_type.clone(),

@@ -25,13 +25,12 @@ pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::default();
     writeln!(
         s,
-        "Compaction task id: {:?}, group-id: {:?}, type: {:?}, target level: {:?}, target sub level: {:?} watermark: {:?}, target_file_size: {:?}, splits: {:?}, status: {:?}",
+        "Compaction task id: {:?}, group-id: {:?}, type: {:?}, target level: {:?}, target sub level: {:?} target_file_size: {:?}, splits: {:?}, status: {:?}",
         compact_task.task_id,
         compact_task.compaction_group_id,
         compact_task.task_type,
         compact_task.target_level,
         compact_task.target_sub_level_id,
-        compact_task.watermark,
         compact_task.target_file_size,
         compact_task.splits.len(),
         compact_task.task_status
@@ -50,13 +49,12 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::new();
     writeln!(
         s,
-        "Compaction task id: {:?}, group-id: {:?}, type: {:?}, target level: {:?}, target sub level: {:?} watermark: {:?}, target_file_size: {:?}, splits: {:?}",
+        "Compaction task id: {:?}, group-id: {:?}, type: {:?}, target level: {:?}, target sub level: {:?} target_file_size: {:?}, splits: {:?}",
         compact_task.task_id,
         compact_task.compaction_group_id,
         compact_task.task_type,
         compact_task.target_level,
         compact_task.target_sub_level_id,
-        compact_task.watermark,
         compact_task.target_file_size,
         compact_task.splits.len(),
     )
@@ -83,18 +81,20 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                 }
                 if table.total_key_count != 0 {
                     format!(
-                        "[id: {}, obj_id: {} {}KB stale_ratio {}]",
+                        "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {}]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
+                        table.sst_size / 1024,
                         (table.stale_key_count * 100 / table.total_key_count),
                     )
                 } else {
                     format!(
-                        "[id: {}, obj_id: {} {}KB]",
+                        "[id: {}, obj_id: {} object_size {}KB sst_size {}KB]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
+                        table.sst_size / 1024,
                     )
                 }
             })
@@ -138,13 +138,14 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         .unwrap_or(0);
     writeln!(
         s,
-        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, stale_ratio={}%, bloom_filter_kind {:?}",
+        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, object_size={}KB, sst_size={}KB stale_ratio={}%, bloom_filter_kind {:?}",
         sstable_info.object_id,
         sstable_info.sst_id,
         left_str,
         right_str,
         sstable_info.table_ids,
         sstable_info.file_size / 1024,
+        sstable_info.sst_size / 1024,
         stale_ratio,
         sstable_info.bloom_filter_kind,
     )

@@ -21,7 +21,7 @@ use risingwave_expr::expr::NonStrictExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::prelude::*;
-use crate::task::CreateMviewProgress;
+use crate::task::CreateMviewProgressReporter;
 
 const DEFAULT_CHUNK_SIZE: usize = 1024;
 
@@ -33,7 +33,7 @@ pub struct ValuesExecutor {
     schema: Schema,
     // Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
-    progress: CreateMviewProgress,
+    progress: CreateMviewProgressReporter,
 
     rows: vec::IntoIter<Vec<NonStrictExpression>>,
 }
@@ -43,7 +43,7 @@ impl ValuesExecutor {
     pub fn new(
         ctx: ActorContextRef,
         schema: Schema,
-        progress: CreateMviewProgress,
+        progress: CreateMviewProgressReporter,
         rows: Vec<Vec<NonStrictExpression>>,
         barrier_receiver: UnboundedReceiver<Barrier>,
     ) -> Self {
@@ -150,12 +150,12 @@ mod tests {
     use super::ValuesExecutor;
     use crate::executor::test_utils::StreamExecutorTestExt;
     use crate::executor::{ActorContext, AddMutation, Barrier, Execute, Mutation};
-    use crate::task::{CreateMviewProgress, LocalBarrierManager};
+    use crate::task::{CreateMviewProgressReporter, LocalBarrierManager};
 
     #[tokio::test]
     async fn test_values() {
         let barrier_manager = LocalBarrierManager::for_test();
-        let progress = CreateMviewProgress::for_test(barrier_manager);
+        let progress = CreateMviewProgressReporter::for_test(barrier_manager);
         let actor_id = progress.actor_id();
         let (tx, barrier_receiver) = unbounded_channel();
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);

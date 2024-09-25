@@ -15,9 +15,9 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use arrow_array::ArrayRef;
-use arrow_schema::{Field, Fields, Schema, SchemaRef};
-use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
+use risingwave_common::array::arrow::arrow_array_udf::ArrayRef;
+use risingwave_common::array::arrow::arrow_schema_udf::{Field, Fields, Schema, SchemaRef};
+use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::expr::PbUserDefinedFunctionMetadata;
@@ -154,7 +154,11 @@ pub fn new_user_defined(
 
     Ok(Box::new(UserDefinedAggregateFunction {
         return_field: arrow_convert.to_arrow_field("", return_type)?,
-        state_field: Field::new("state", arrow_schema::DataType::Binary, true),
+        state_field: Field::new(
+            "state",
+            risingwave_common::array::arrow::arrow_schema_udf::DataType::Binary,
+            true,
+        ),
         return_type: return_type.clone(),
         arg_schema,
         runtime,

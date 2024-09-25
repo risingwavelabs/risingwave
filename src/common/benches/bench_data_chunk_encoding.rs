@@ -55,7 +55,7 @@ fn bench_data_chunk_encoding(c: &mut Criterion) {
         for null_ratio in NULL_RATIOS {
             for chunk_size in CHUNK_SIZES {
                 let chunk = rand_chunk::gen_chunk(&case.data_types, *chunk_size, SEED, *null_ratio);
-                let mut group = c.benchmark_group(&format!(
+                let mut group = c.benchmark_group(format!(
                     "data chunk encoding: {}, {} rows, Pr[null]={}",
                     case.name, chunk_size, null_ratio
                 ));

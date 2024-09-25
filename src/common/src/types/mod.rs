@@ -42,8 +42,7 @@ pub use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructVa
 use crate::cast::{str_to_bool, str_to_bytea};
 use crate::error::BoxedError;
 use crate::{
-    dispatch_data_types, dispatch_scalar_ref_variants, dispatch_scalar_variants,
-    for_all_scalar_variants, for_all_type_pairs,
+    dispatch_data_types, dispatch_scalar_ref_variants, dispatch_scalar_variants, for_all_variants,
 };
 
 mod cow;
@@ -252,7 +251,7 @@ impl From<&PbDataType> for DataType {
                 // Map is physically the same as a list.
                 // So the first (and only) item is the list element type.
                 let list_entries_type: DataType = (&proto.field_type[0]).into();
-                DataType::Map(MapType::from_list_entries(list_entries_type))
+                DataType::Map(MapType::from_entries(list_entries_type))
             }
             PbTypeName::Int256 => DataType::Int256,
         }
@@ -345,8 +344,7 @@ impl DataType {
             }
             DataType::Map(datatype) => {
                 // Same as List<Struct<K,V>>
-                pb.field_type =
-                    vec![DataType::Struct(datatype.clone().into_struct()).to_protobuf()];
+                pb.field_type = vec![datatype.clone().into_struct().to_protobuf()];
             }
             DataType::Boolean
             | DataType::Int16
@@ -553,7 +551,7 @@ pub trait ScalarRef<'a>: private::ScalarBounds<ScalarRefImpl<'a>> + 'a + Copy {
 
 /// Define `ScalarImpl` and `ScalarRefImpl` with macro.
 macro_rules! scalar_impl_enum {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+    ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
         /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
         ///
         /// Note: `ScalarImpl` doesn't contain all information of its `DataType`,
@@ -581,7 +579,7 @@ macro_rules! scalar_impl_enum {
     };
 }
 
-for_all_scalar_variants! { scalar_impl_enum }
+for_all_variants! { scalar_impl_enum }
 
 // We MUST NOT implement `Ord` for `ScalarImpl` because that will make `Datum` derive an incorrect
 // default `Ord`. To get a default-ordered `ScalarImpl`/`ScalarRefImpl`/`Datum`/`DatumRef`, you can
@@ -687,7 +685,7 @@ macro_rules! for_all_native_types {
 /// * `&ScalarImpl -> &Scalar` with `impl.as_int16()`.
 /// * `ScalarImpl -> Scalar` with `impl.into_int16()`.
 macro_rules! impl_convert {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+    ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
         $(
             impl From<$scalar> for ScalarImpl {
                 fn from(val: $scalar) -> Self {
@@ -759,7 +757,7 @@ macro_rules! impl_convert {
     };
 }
 
-for_all_scalar_variants! { impl_convert }
+for_all_variants! { impl_convert }
 
 // Implement `From<raw float>` for `ScalarImpl::Float` as a sugar.
 impl From<f32> for ScalarImpl {
@@ -851,6 +849,12 @@ impl From<Bytes> for ScalarImpl {
     }
 }
 
+impl From<ListRef<'_>> for ScalarImpl {
+    fn from(list: ListRef<'_>) -> Self {
+        Self::List(list.to_owned_scalar())
+    }
+}
+
 impl ScalarImpl {
     /// Creates a scalar from pgwire "BINARY" format.
     ///
@@ -913,12 +917,17 @@ impl ScalarImpl {
             DataType::Time => Time::from_str(s)?.into(),
             DataType::Interval => Interval::from_str(s)?.into(),
             DataType::List(_) => ListValue::from_str(s, data_type)?.into(),
-            DataType::Struct(_) => StructValue::from_str(s, data_type)?.into(),
+            DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
-            DataType::Map(_) => {
-                todo!()
-            }
+            DataType::Map(_m) => return Err("map from text is not supported".into()),
+        })
+    }
+
+    pub fn from_text_for_test(s: &str, data_type: &DataType) -> Result<Self, BoxedError> {
+        Ok(match data_type {
+            DataType::Map(map_type) => MapValue::from_str_for_test(s, map_type)?.into(),
+            _ => ScalarImpl::from_text(s, data_type)?,
         })
     }
 }
@@ -1093,16 +1102,16 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
     match literal {
         Some(scalar) => {
             macro_rules! matches {
-                ($( { $DataType:ident, $PhysicalType:ident }),*) => {
+                ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty }),*) => {
                     match (data_type, scalar) {
                         $(
-                            (DataType::$DataType { .. }, ScalarImpl::$PhysicalType(_)) => true,
-                            (DataType::$DataType { .. }, _) => false, // so that we won't forget to match a new logical type
+                            (DataType::$data_type { .. }, ScalarImpl::$variant_name(_)) => true,
+                            (DataType::$data_type { .. }, _) => false, // so that we won't forget to match a new logical type
                         )*
                     }
                 }
             }
-            for_all_type_pairs! { matches }
+            for_all_variants! { matches }
         }
         None => true,
     }

@@ -54,6 +54,8 @@ message WorkerNode {
     bool is_streaming = 1;
     bool is_serving = 2;
     bool is_unschedulable = 3;
+    // This is used for frontend node to register its rpc address
+    string internal_rpc_host_addr = 4;
   }
   message Resource {
     string rw_version = 1;

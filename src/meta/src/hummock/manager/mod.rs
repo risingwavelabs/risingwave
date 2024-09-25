@@ -29,12 +29,12 @@ use risingwave_hummock_sdk::{
     HummockContextId, HummockVersionId,
 };
 use risingwave_meta_model_v2::{
-    compaction_status, compaction_task, hummock_pinned_snapshot, hummock_pinned_version,
-    hummock_version_delta, hummock_version_stats,
+    compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
+    hummock_version_stats,
 };
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats,
-    PbCompactTaskAssignment, PbCompactionGroupInfo, SubscribeCompactionEventRequest,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, PbCompactTaskAssignment,
+    PbCompactionGroupInfo, SubscribeCompactionEventRequest,
 };
 use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
@@ -50,7 +50,6 @@ use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager};
 use crate::model::{ClusterId, MetadataModel, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
 
-mod compaction_group_manager;
 mod context;
 mod gc;
 mod tests;
@@ -67,9 +66,7 @@ mod transaction;
 mod utils;
 mod worker;
 
-pub(crate) use commit_epoch::*;
-#[cfg(any(test, feature = "test"))]
-pub use commit_epoch::{BatchCommitForNewCg, CommitEpochInfo};
+pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 use compaction::*;
 pub use compaction::{check_cg_write_limit, WriteLimitType};
 pub(crate) use utils::*;
@@ -278,7 +275,6 @@ impl HummockManager {
             compactor_manager,
             latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
                 committed_epoch: INVALID_EPOCH,
-                current_epoch: INVALID_EPOCH,
             }),
             event_sender: tx,
             delete_object_tracker: Default::default(),
@@ -433,8 +429,7 @@ impl HummockManager {
 
         self.latest_snapshot.store(
             HummockSnapshot {
-                committed_epoch: redo_state.max_committed_epoch,
-                current_epoch: redo_state.max_committed_epoch,
+                committed_epoch: redo_state.visible_table_committed_epoch(),
             }
             .into(),
         );
@@ -448,21 +443,6 @@ impl HummockManager {
                 .map(|p| (p.context_id, p))
                 .collect(),
             MetaStoreImpl::Sql(sql_meta_store) => hummock_pinned_version::Entity::find()
-                .all(&sql_meta_store.conn)
-                .await
-                .map_err(MetadataModelError::from)?
-                .into_iter()
-                .map(|m| (m.context_id as HummockContextId, m.into()))
-                .collect(),
-        };
-
-        context_info.pinned_snapshots = match &meta_store {
-            MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store)
-                .await?
-                .into_iter()
-                .map(|p| (p.context_id, p))
-                .collect(),
-            MetaStoreImpl::Sql(sql_meta_store) => hummock_pinned_snapshot::Entity::find()
                 .all(&sql_meta_store.conn)
                 .await
                 .map_err(MetadataModelError::from)?

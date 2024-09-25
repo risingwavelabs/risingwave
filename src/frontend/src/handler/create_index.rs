@@ -25,7 +25,6 @@ use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbStreamJobStatus, PbTable};
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
@@ -234,7 +233,7 @@ pub(crate) fn gen_create_index_plan(
         })
         .collect();
     let index_item = build_index_item(
-        index_table.table_desc().into(),
+        index_table,
         table.name(),
         table_desc,
         index_columns_ordered_expr,
@@ -270,7 +269,7 @@ pub(crate) fn gen_create_index_plan(
 }
 
 fn build_index_item(
-    index_table_desc: Rc<TableDesc>,
+    index_table: &TableCatalog,
     primary_table_name: &str,
     primary_table_desc: Rc<TableDesc>,
     index_columns: Vec<(ExprImpl, OrderType)>,
@@ -289,9 +288,10 @@ fn build_index_item(
         .into_iter()
         .map(|(expr, _)| expr.to_expr_proto())
         .chain(
-            index_table_desc
+            index_table
                 .columns
                 .iter()
+                .map(|c| &c.column_desc)
                 .skip(index_columns_len)
                 .map(|x| {
                     let name = if x.name.starts_with(&primary_table_name_prefix) {
@@ -448,14 +448,8 @@ pub async fn handle_create_index(
             include,
             distributed_by,
         )?;
-        let mut graph = build_graph(plan)?;
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
+        let graph = build_graph(plan)?;
+
         (graph, index_table, index)
     };
 

@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Formatter;
 
 use futures::future::try_join_all;
-use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
@@ -42,7 +41,7 @@ use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
 use tracing::warn;
 
-use super::info::CommandFragmentChanges;
+use super::info::{CommandFragmentChanges, InflightGraphInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
 use crate::manager::{DdlType, InflightFragmentInfo, MetadataManager, StreamingJob, WorkerId};
@@ -76,6 +75,7 @@ pub struct Reschedule {
 
     /// Reassigned splits for source actors.
     /// It becomes the `actor_splits` in [`UpdateMutation`].
+    /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// Whether this fragment is injectable. The injectable means whether the fragment contains
@@ -144,8 +144,10 @@ impl ReplaceTablePlan {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(educe::Educe, Clone)]
+#[educe(Debug)]
 pub struct CreateStreamingJobCommandInfo {
+    #[educe(Debug(ignore))]
     pub table_fragments: TableFragments,
     /// Refer to the doc on [`MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
     pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
@@ -159,7 +161,9 @@ pub struct CreateStreamingJobCommandInfo {
 }
 
 impl CreateStreamingJobCommandInfo {
-    fn new_fragment_info(&self) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
+    pub(super) fn new_fragment_info(
+        &self,
+    ) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
         self.table_fragments.fragments.values().map(|fragment| {
             (
                 fragment.fragment_id,
@@ -188,6 +192,18 @@ impl CreateStreamingJobCommandInfo {
             )
         })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SnapshotBackfillInfo {
+    pub upstream_mv_table_ids: HashSet<TableId>,
+}
+
+#[derive(Debug, Clone)]
+pub enum CreateStreamingJobType {
+    Normal,
+    SinkIntoTable(ReplaceTablePlan),
+    SnapshotBackfill(SnapshotBackfillInfo),
 }
 
 /// [`Command`] is the input of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -234,9 +250,9 @@ pub enum Command {
     /// will be set to `Created`.
     CreateStreamingJob {
         info: CreateStreamingJobCommandInfo,
-        /// This is for create SINK into table.
-        replace_table: Option<ReplaceTablePlan>,
+        job_type: CreateStreamingJobType,
     },
+    MergeSnapshotBackfillStreamingJobs(HashMap<TableId, (SnapshotBackfillInfo, InflightGraphInfo)>),
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
     ///
@@ -315,10 +331,11 @@ impl Command {
                     .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
                     .collect(),
             ),
-            Command::CreateStreamingJob {
-                info,
-                replace_table,
-            } => {
+            Command::CreateStreamingJob { info, job_type } => {
+                assert!(
+                    !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)),
+                    "should handle fragment changes separately for snapshot backfill"
+                );
                 let mut changes: HashMap<_, _> = info
                     .new_fragment_info()
                     .map(|(fragment_id, info)| {
@@ -326,7 +343,7 @@ impl Command {
                     })
                     .collect();
 
-                if let Some(plan) = replace_table {
+                if let CreateStreamingJobType::SinkIntoTable(plan) = job_type {
                     let extra_change = plan.fragment_changes();
                     changes.extend(extra_change);
                 }
@@ -361,6 +378,7 @@ impl Command {
                     .collect(),
             ),
             Command::ReplaceTable(plan) => Some(plan.fragment_changes()),
+            Command::MergeSnapshotBackfillStreamingJobs(_) => None,
             Command::SourceSplitAssignment(_) => None,
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
@@ -384,7 +402,7 @@ impl Command {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BarrierKind {
     Initial,
     Barrier,
@@ -420,7 +438,6 @@ pub struct CommandContext {
     /// Resolved info in this barrier loop.
     pub node_map: HashMap<WorkerId, PbWorkerNode>,
     pub subscription_info: InflightSubscriptionInfo,
-    pub table_ids_to_commit: HashSet<TableId>,
 
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
@@ -457,7 +474,6 @@ impl CommandContext {
     pub(super) fn new(
         node_map: HashMap<WorkerId, PbWorkerNode>,
         subscription_info: InflightSubscriptionInfo,
-        table_ids_to_commit: HashSet<TableId>,
         prev_epoch: TracedEpoch,
         curr_epoch: TracedEpoch,
         current_paused_reason: Option<PausedReason>,
@@ -469,7 +485,6 @@ impl CommandContext {
         Self {
             node_map,
             subscription_info,
-            table_ids_to_commit,
             prev_epoch,
             curr_epoch,
             current_paused_reason,
@@ -481,16 +496,16 @@ impl CommandContext {
     }
 }
 
-impl CommandContext {
+impl Command {
     /// Generate a mutation for the given command.
-    pub fn to_mutation(&self) -> Option<Mutation> {
+    pub fn to_mutation(&self, current_paused_reason: Option<&PausedReason>) -> Option<Mutation> {
         let mutation =
-            match &self.command {
+            match self {
                 Command::Plain(mutation) => mutation.clone(),
 
                 Command::Pause(_) => {
                     // Only pause when the cluster is not already paused.
-                    if self.current_paused_reason.is_none() {
+                    if current_paused_reason.is_none() {
                         Some(Mutation::Pause(PauseMutation {}))
                     } else {
                         None
@@ -499,7 +514,7 @@ impl CommandContext {
 
                 Command::Resume(reason) => {
                     // Only resume when the cluster is paused with the same reason.
-                    if self.current_paused_reason == Some(*reason) {
+                    if current_paused_reason == Some(reason) {
                         Some(Mutation::Resume(ResumeMutation {}))
                     } else {
                         None
@@ -543,7 +558,7 @@ impl CommandContext {
                             init_split_assignment: split_assignment,
                             ..
                         },
-                    replace_table,
+                    job_type,
                 } => {
                     let actor_dispatchers = dispatchers
                         .iter()
@@ -561,23 +576,38 @@ impl CommandContext {
                         .values()
                         .flat_map(build_actor_connector_splits)
                         .collect();
+                    let subscriptions_to_add =
+                        if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) =
+                            job_type
+                        {
+                            snapshot_backfill_info
+                                .upstream_mv_table_ids
+                                .iter()
+                                .map(|table_id| SubscriptionUpstreamInfo {
+                                    subscriber_id: table_fragments.table_id().table_id,
+                                    upstream_mv_table_id: table_id.table_id,
+                                })
+                                .collect()
+                        } else {
+                            Default::default()
+                        };
                     let add = Some(Mutation::Add(AddMutation {
                         actor_dispatchers,
                         added_actors,
                         actor_splits,
                         // If the cluster is already paused, the new actors should be paused too.
-                        pause: self.current_paused_reason.is_some(),
-                        subscriptions_to_add: Default::default(),
+                        pause: current_paused_reason.is_some(),
+                        subscriptions_to_add,
                     }));
 
-                    if let Some(ReplaceTablePlan {
+                    if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
                         old_table_fragments,
                         new_table_fragments: _,
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
                         ..
-                    }) = replace_table
+                    }) = job_type
                     {
                         // TODO: support in v2.
                         let update = Self::generate_update_mutation_for_replace_table(
@@ -596,6 +626,21 @@ impl CommandContext {
                     } else {
                         add
                     }
+                }
+                Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) => {
+                    Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
+                        info: jobs_to_merge
+                            .iter()
+                            .flat_map(|(table_id, (backfill_info, _))| {
+                                backfill_info.upstream_mv_table_ids.iter().map(
+                                    move |upstream_table_id| SubscriptionUpstreamInfo {
+                                        subscriber_id: table_id.table_id,
+                                        upstream_mv_table_id: upstream_table_id.table_id,
+                                    },
+                                )
+                            })
+                            .collect(),
+                    }))
                 }
 
                 Command::CancelStreamingJob(table_fragments) => {
@@ -786,6 +831,42 @@ impl CommandContext {
         mutation
     }
 
+    pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActor>>> {
+        match self {
+            Command::CreateStreamingJob { info, job_type } => {
+                let mut map = match job_type {
+                    CreateStreamingJobType::Normal => HashMap::new(),
+                    CreateStreamingJobType::SinkIntoTable(replace_table) => {
+                        replace_table.new_table_fragments.actors_to_create()
+                    }
+                    CreateStreamingJobType::SnapshotBackfill(_) => {
+                        // for snapshot backfill, the actors to create is measured separately
+                        return None;
+                    }
+                };
+                for (worker_id, new_actors) in info.table_fragments.actors_to_create() {
+                    map.entry(worker_id).or_default().extend(new_actors)
+                }
+                Some(map)
+            }
+            Command::RescheduleFragment { reschedules, .. } => {
+                let mut map: HashMap<WorkerId, Vec<_>> = HashMap::new();
+                for (actor, status) in reschedules
+                    .values()
+                    .flat_map(|reschedule| reschedule.newly_created_actors.iter())
+                {
+                    let worker_id = status.location.as_ref().unwrap().worker_node_id;
+                    map.entry(worker_id).or_default().push(actor.clone());
+                }
+                Some(map)
+            }
+            Command::ReplaceTable(replace_table) => {
+                Some(replace_table.new_table_fragments.actors_to_create())
+            }
+            _ => None,
+        }
+    }
+
     fn generate_update_mutation_for_replace_table(
         old_table_fragments: &TableFragments,
         merge_updates: &[MergeUpdate],
@@ -818,6 +899,13 @@ impl CommandContext {
             actor_splits,
             ..Default::default()
         }))
+    }
+}
+
+impl CommandContext {
+    pub fn to_mutation(&self) -> Option<Mutation> {
+        self.command
+            .to_mutation(self.current_paused_reason.as_ref())
     }
 
     /// Returns the paused reason after executing the current command.
@@ -857,19 +945,6 @@ impl Command {
 }
 
 impl CommandContext {
-    /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
-    async fn clean_up(&self, actors: Vec<ActorId>) -> MetaResult<()> {
-        self.barrier_manager_context
-            .stream_rpc_manager
-            .drop_actors(
-                &self.node_map,
-                self.node_map
-                    .keys()
-                    .map(|worker_id| (*worker_id, actors.clone())),
-            )
-            .await
-    }
-
     pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
         let futures = self.node_map.values().map(|worker_node| async {
             let client = self
@@ -919,13 +994,9 @@ impl CommandContext {
             }
 
             Command::DropStreamingJobs {
-                actors,
                 unregistered_state_table_ids,
                 ..
             } => {
-                // Tell compute nodes to drop actors.
-                self.clean_up(actors.clone()).await?;
-
                 self.barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
@@ -934,7 +1005,6 @@ impl CommandContext {
 
             Command::CancelStreamingJob(table_fragments) => {
                 tracing::debug!(id = ?table_fragments.table_id(), "cancelling stream job");
-                self.clean_up(table_fragments.actor_ids()).await?;
 
                 // NOTE(kwannoel): At this point, meta has already registered the table ids.
                 // We should unregister them.
@@ -997,10 +1067,7 @@ impl CommandContext {
                 }
             }
 
-            Command::CreateStreamingJob {
-                info,
-                replace_table,
-            } => {
+            Command::CreateStreamingJob { info, job_type } => {
                 let CreateStreamingJobCommandInfo {
                     table_fragments,
                     dispatchers,
@@ -1028,17 +1095,15 @@ impl CommandContext {
                             )
                             .await?;
 
-                        if let Some(ReplaceTablePlan {
+                        if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
                             old_table_fragments,
                             new_table_fragments,
                             merge_updates,
                             dispatchers,
                             init_split_assignment,
                             ..
-                        }) = replace_table
+                        }) = job_type
                         {
-                            self.clean_up(old_table_fragments.actor_ids()).await?;
-
                             // Drop fragment info in meta store.
                             mgr.fragment_manager
                                 .post_replace_table(
@@ -1061,17 +1126,13 @@ impl CommandContext {
                             )
                             .await?;
 
-                        if let Some(ReplaceTablePlan {
+                        if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
                             new_table_fragments,
                             dispatchers,
                             init_split_assignment,
-                            old_table_fragments,
                             ..
-                        }) = replace_table
+                        }) = job_type
                         {
-                            // Tell compute nodes to drop actors.
-                            self.clean_up(old_table_fragments.actor_ids()).await?;
-
                             mgr.catalog_controller
                                 .post_collect_table_fragments(
                                     new_table_fragments.table_id().table_id as _,
@@ -1097,17 +1158,11 @@ impl CommandContext {
                     )
                     .await;
             }
-
             Command::RescheduleFragment {
                 reschedules,
                 table_parallelism,
                 ..
             } => {
-                let removed_actors = reschedules
-                    .values()
-                    .flat_map(|reschedule| reschedule.removed_actors.clone().into_iter())
-                    .collect_vec();
-                self.clean_up(removed_actors).await?;
                 self.barrier_manager_context
                     .scale_controller
                     .post_apply_reschedule(reschedules, table_parallelism)
@@ -1122,8 +1177,6 @@ impl CommandContext {
                 init_split_assignment,
                 ..
             }) => {
-                self.clean_up(old_table_fragments.actor_ids()).await?;
-
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {
                         // Drop fragment info in meta store.
@@ -1184,6 +1237,7 @@ impl CommandContext {
                 }
             },
             Command::DropSubscription { .. } => {}
+            Command::MergeSnapshotBackfillStreamingJobs(_) => {}
         }
 
         Ok(())

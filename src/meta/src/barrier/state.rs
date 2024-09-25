@@ -15,7 +15,7 @@
 use risingwave_pb::meta::PausedReason;
 
 use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
-use crate::barrier::{Command, TracedEpoch};
+use crate::barrier::{Command, CreateStreamingJobType, TracedEpoch};
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
 pub struct BarrierManagerState {
@@ -28,7 +28,7 @@ pub struct BarrierManagerState {
     /// Inflight running actors info.
     pub(crate) inflight_graph_info: InflightGraphInfo,
 
-    inflight_subscription_info: InflightSubscriptionInfo,
+    pub(crate) inflight_subscription_info: InflightSubscriptionInfo,
 
     /// Whether the cluster is paused and the reason.
     paused_reason: Option<PausedReason>,
@@ -79,7 +79,13 @@ impl BarrierManagerState {
         command: &Command,
     ) -> (InflightGraphInfo, InflightSubscriptionInfo) {
         // update the fragment_infos outside pre_apply
-        let fragment_changes = if let Some(fragment_changes) = command.fragment_changes() {
+        let fragment_changes = if let Command::CreateStreamingJob {
+            job_type: CreateStreamingJobType::SnapshotBackfill(_),
+            ..
+        } = command
+        {
+            None
+        } else if let Some(fragment_changes) = command.fragment_changes() {
             self.inflight_graph_info.pre_apply(&fragment_changes);
             Some(fragment_changes)
         } else {

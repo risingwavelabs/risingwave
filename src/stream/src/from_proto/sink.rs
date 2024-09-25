@@ -20,6 +20,7 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{
     SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };

@@ -180,7 +180,7 @@ macro_rules! impl_system_params_to_kv {
             check_missing_params(params)?;
             let mut ret = Vec::new();
             $(ret.push((
-                key_of!($field).to_string(),
+                key_of!($field).to_owned(),
                 params.$field.as_ref().unwrap().to_string(),
             ));)*
             Ok(ret)
@@ -230,8 +230,8 @@ macro_rules! impl_system_params_from_kv {
             if !kvs.is_empty() {
                 let unrecognized_params = kvs.into_iter().map(|(k, v)| {
                     (
-                        std::str::from_utf8(k.as_ref()).unwrap().to_string(),
-                        std::str::from_utf8(v.as_ref()).unwrap().to_string()
+                        std::str::from_utf8(k.as_ref()).unwrap().to_owned(),
+                        std::str::from_utf8(v.as_ref()).unwrap().to_owned(),
                     )
                 }).collect::<Vec<_>>();
                 tracing::warn!("unrecognized system params {:?}", unrecognized_params);
@@ -331,12 +331,12 @@ macro_rules! impl_set_system_param {
 
                         let changed = SystemParamsReader::new(&*params).$field() != v;
                         if changed {
-                            let new_value = v.to_string();
                             let diff = SystemParamsDiff {
                                 $field: Some(v.to_owned()),
                                 ..Default::default()
                             };
-                            params.$field = Some(v.into());
+                            params.$field = Some(v.into());                                 // do not use `to_string` to avoid writing redacted values
+                            let new_value = params.$field.as_ref().unwrap().to_string();    // can now use `to_string` on protobuf primitive types
                             Ok(Some((new_value, diff)))
                         } else {
                             Ok(None)
@@ -377,8 +377,8 @@ macro_rules! impl_system_params_for_test {
                 )*
                 ..Default::default() // `None` for deprecated params
             };
-            ret.data_directory = Some("hummock_001".to_string());
-            ret.state_store = Some("hummock+memory".to_string());
+            ret.data_directory = Some("hummock_001".to_owned());
+            ret.state_store = Some("hummock+memory".to_owned());
             ret.backup_storage_url = Some("memory".into());
             ret.backup_storage_directory = Some("backup".into());
             ret.use_new_object_prefix_strategy = Some(false);
@@ -472,19 +472,40 @@ mod tests {
     fn test_set() {
         let mut p = system_params_for_test();
         // Unrecognized param.
-        assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
+        assert!(set_system_param(&mut p, "?", Some("?".to_owned())).is_err());
         // Value out of range.
-        assert!(
-            set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("-1".to_string())).is_err()
-        );
+        assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("-1".to_owned())).is_err());
         // Set immutable.
-        assert!(set_system_param(&mut p, STATE_STORE_KEY, Some("?".to_string())).is_err());
+        assert!(set_system_param(&mut p, STATE_STORE_KEY, Some("?".to_owned())).is_err());
         // Parse error.
-        assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("?".to_string())).is_err());
+        assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("?".to_owned())).is_err());
         // Normal set.
-        assert!(
-            set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("500".to_string())).is_ok()
-        );
+        assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("500".to_owned())).is_ok());
         assert_eq!(p.checkpoint_frequency, Some(500));
+    }
+
+    // Test that we always redact the value of the license key when displaying it, but when it comes to
+    // persistency, we still write and get the real value.
+    #[test]
+    fn test_redacted_type() {
+        let mut p = system_params_for_test();
+
+        let new_license_key_value = "new_license_key_value";
+        assert_ne!(p.license_key(), new_license_key_value);
+
+        let (new_string_value, diff) =
+            set_system_param(&mut p, LICENSE_KEY_KEY, Some(new_license_key_value))
+                .expect("should succeed")
+                .expect("should changed");
+
+        // New string value should be the same as what we set.
+        // This should not be redacted.
+        assert_eq!(new_string_value, new_license_key_value);
+
+        let new_value = diff.license_key.unwrap();
+        // `to_string` repr will be redacted.
+        assert_eq!(new_value.to_string(), "<redacted>");
+        // while `Into<String>` still shows the real value.
+        assert_eq!(String::from(new_value.as_ref()), new_license_key_value);
     }
 }

@@ -19,7 +19,7 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::hash::{VnodeCountCompat, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
@@ -47,8 +47,8 @@ use risingwave_pb::stream_plan::{
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter, QuerySelect,
-    RelationTrait, TransactionTrait, Value,
+    ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
+    QuerySelect, RelationTrait, TransactionTrait, Value,
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
@@ -177,6 +177,7 @@ impl CatalogController {
         Vec<actor::Model>,
         HashMap<ActorId, Vec<actor_dispatcher::Model>>,
     )> {
+        let vnode_count = pb_fragment.vnode_count();
         let PbFragment {
             fragment_id: pb_fragment_id,
             fragment_type_mask: pb_fragment_type_mask,
@@ -294,6 +295,7 @@ impl CatalogController {
             stream_node,
             state_table_ids,
             upstream_fragment_id,
+            vnode_count: vnode_count as _,
         };
 
         Ok((fragment, actors, actor_dispatchers))
@@ -365,6 +367,7 @@ impl CatalogController {
             stream_node,
             state_table_ids,
             upstream_fragment_id,
+            vnode_count,
         } = fragment;
 
         let stream_node_template = stream_node.to_protobuf();
@@ -463,6 +466,7 @@ impl CatalogController {
             actors: pb_actors,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            maybe_vnode_count: Some(vnode_count as _),
         };
 
         Ok((pb_fragment, pb_actor_status, pb_actor_splits))
@@ -1099,19 +1103,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
         for assignments in split_assignment.values() {
             for (actor_id, splits) in assignments {
-                let actor_splits: Option<ConnectorSplits> = Actor::find_by_id(*actor_id as ActorId)
-                    .select_only()
-                    .column(actor::Column::Splits)
-                    .into_tuple()
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("actor_id", actor_id))?;
-
-                let mut actor_splits = actor_splits
-                    .map(|splits| splits.to_protobuf().splits)
-                    .unwrap_or_default();
-                actor_splits.extend(splits.iter().map(Into::into));
-
+                let actor_splits = splits.iter().map(Into::into).collect_vec();
                 Actor::update(actor::ActiveModel {
                     actor_id: Set(*actor_id as _),
                     splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
@@ -1120,7 +1112,14 @@ impl CatalogController {
                     ..Default::default()
                 })
                 .exec(&txn)
-                .await?;
+                .await
+                .map_err(|err| {
+                    if err == DbErr::RecordNotUpdated {
+                        MetaError::catalog_id_not_found("actor_id", actor_id)
+                    } else {
+                        err.into()
+                    }
+                })?;
             }
         }
         txn.commit().await?;
@@ -1416,7 +1415,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use itertools::Itertools;
-    use risingwave_common::hash::ActorMapping;
+    use risingwave_common::hash::{ActorMapping, VirtualNode};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
     use risingwave_meta_model_v2::actor::ActorStatus;
@@ -1502,8 +1501,11 @@ mod tests {
             })
             .collect();
 
-        let actor_bitmaps =
-            ActorMapping::new_uniform((0..actor_count).map(|i| i as _)).to_bitmaps();
+        let actor_bitmaps = ActorMapping::new_uniform(
+            (0..actor_count).map(|i| i as _),
+            VirtualNode::COUNT_FOR_TEST,
+        )
+        .to_bitmaps();
 
         let pb_actors = (0..actor_count)
             .map(|actor_id| {
@@ -1543,6 +1545,7 @@ mod tests {
                 .values()
                 .flat_map(|m| m.keys().map(|x| *x as _))
                 .collect(),
+            maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as _),
         };
 
         let pb_actor_status = (0..actor_count)
@@ -1615,8 +1618,11 @@ mod tests {
             })
             .collect();
 
-        let mut actor_bitmaps =
-            ActorMapping::new_uniform((0..actor_count).map(|i| i as _)).to_bitmaps();
+        let mut actor_bitmaps = ActorMapping::new_uniform(
+            (0..actor_count).map(|i| i as _),
+            VirtualNode::COUNT_FOR_TEST,
+        )
+        .to_bitmaps();
 
         let actors = (0..actor_count)
             .map(|actor_id| {
@@ -1683,6 +1689,7 @@ mod tests {
             stream_node: StreamNode::from(&stream_node),
             state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: I32Array::default(),
+            vnode_count: VirtualNode::COUNT_FOR_TEST as _,
         };
 
         let (pb_fragment, pb_actor_status, pb_actor_splits) = CatalogController::compose_fragment(
@@ -1792,6 +1799,7 @@ mod tests {
             actors: _,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            maybe_vnode_count: _,
         } = pb_fragment;
 
         assert_eq!(fragment_id, TEST_FRAGMENT_ID as u32);
