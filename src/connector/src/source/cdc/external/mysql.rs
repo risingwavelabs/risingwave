@@ -137,22 +137,7 @@ impl MySqlExternalTable {
                         // mysql timestamp is mapped to timestamptz, we use UTC timezone to
                         // interpret its value
                         if data_type == DataType::Timestamptz {
-                            let format = "%Y-%m-%d %H:%M:%S";
-                            let naive_datetime = NaiveDateTime::parse_from_str(
-                                val.as_str(),
-                                format,
-                            )
-                            .map_err(|err| {
-                                anyhow!("failed to parse mysql timestamp value").context(err)
-                            })?;
-                            let postgres_timestamptz: DateTime<chrono::Utc> =
-                                DateTime::<chrono::Utc>::from_naive_utc_and_offset(
-                                    naive_datetime,
-                                    chrono::Utc,
-                                );
-                            val = postgres_timestamptz
-                                .format("%Y-%m-%d %H:%M:%S%:z")
-                                .to_string();
+                            val = timestamp_val_to_timestamptz(val.as_str())?;
                         }
                         match ScalarImpl::from_text(val.as_str(), &data_type) {
                             Ok(scalar) => Some(scalar),
@@ -203,6 +188,17 @@ impl MySqlExternalTable {
     }
 }
 
+pub fn timestamp_val_to_timestamptz(value_text: &str) -> ConnectorResult<String> {
+    let format = "%Y-%m-%d %H:%M:%S";
+    let naive_datetime = NaiveDateTime::parse_from_str(value_text, format)
+        .map_err(|err| anyhow!("failed to parse mysql timestamp value").context(err))?;
+    let postgres_timestamptz: DateTime<chrono::Utc> =
+        DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive_datetime, chrono::Utc);
+    Ok(postgres_timestamptz
+        .format("%Y-%m-%d %H:%M:%S%:z")
+        .to_string())
+}
+
 pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
     macro_rules! column_type {
         ($($name:literal => $variant:ident),* $(,)?) => {
@@ -211,6 +207,11 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
                     $name => Some(ColumnType::$variant(Default::default())),
                 )*
                 "json" => Some(ColumnType::Json),
+                "date" => Some(ColumnType::Date),
+                "bool" => Some(ColumnType::Bool),
+                "tinyblob" => Some(ColumnType::TinyBlob),
+                "mediumblob" => Some(ColumnType::MediumBlob),
+                "longblob" => Some(ColumnType::LongBlob),
                 _ => None,
             }
         };
