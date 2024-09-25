@@ -18,10 +18,7 @@ use risingwave_pb::telemetry::{
     TelemetryNodeType as PbTelemetryNodeType,
 };
 
-use crate::telemetry::{
-    get_telemetry_risingwave_cloud_uuid, Cpu, Memory, Os, SystemData, TelemetryNodeType,
-    TelemetryReportBase,
-};
+use crate::telemetry::{Cpu, Memory, Os, SystemData, TelemetryNodeType, TelemetryReportBase};
 
 pub trait TelemetryToProtobuf {
     fn to_pb_bytes(self) -> Vec<u8>;
