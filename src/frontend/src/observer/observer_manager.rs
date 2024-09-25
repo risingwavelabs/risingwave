@@ -98,7 +98,7 @@ impl ObserverState for FrontendObserverNode {
                             let new_value_empty = new_log.new_value.is_empty();
                             let old_value_empty = new_log.old_value.is_empty();
                             if !new_value_empty || !old_value_empty {
-                                Some(TableId::new(table_id.clone()))
+                                Some(TableId::new(*table_id))
                             } else {
                                 None
                             }
@@ -219,7 +219,7 @@ impl ObserverState for FrontendObserverNode {
                 if change_log.get_non_empty_epochs(0, usize::MAX).is_empty() {
                     None
                 } else {
-                    Some(table_id.clone())
+                    Some(*table_id)
                 }
             })
             .collect_vec();
@@ -283,7 +283,7 @@ impl FrontendObserverNode {
             Info::Database(database) => match resp.operation() {
                 Operation::Add => catalog_guard.create_database(database),
                 Operation::Delete => {
-                    let table_ids = catalog_guard.get_all_tables_id_in_database(database.id);
+                    let table_ids = catalog_guard.get_all_table_ids_in_database(database.id);
                     catalog_guard.drop_database(database.id);
                     self.handle_cursor_remove_table_ids(table_ids);
                 }
@@ -294,7 +294,7 @@ impl FrontendObserverNode {
                 Operation::Add => catalog_guard.create_schema(schema),
                 Operation::Delete => {
                     let table_ids =
-                        catalog_guard.get_all_tables_id_in_schema(schema.database_id, schema.id);
+                        catalog_guard.get_all_table_ids_in_schema(schema.database_id, schema.id);
                     catalog_guard.drop_schema(schema.database_id, schema.id);
                     self.handle_cursor_remove_table_ids(table_ids);
                 }
@@ -519,8 +519,8 @@ impl FrontendObserverNode {
         for session in self.sessions_map.read().values() {
             session
                 .get_cursor_manager()
-                .get_cursor_notifies()
-                .notify_cursors(&table_ids);
+                .get_cursor_notifier()
+                .notify_cursors_by_table_ids(&table_ids);
         }
     }
 
@@ -531,8 +531,8 @@ impl FrontendObserverNode {
         for session in self.sessions_map.read().values() {
             session
                 .get_cursor_manager()
-                .get_cursor_notifies()
-                .remove_tables_ids(&table_ids);
+                .get_cursor_notifier()
+                .remove_table_ids(&table_ids);
         }
     }
 

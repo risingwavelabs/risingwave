@@ -287,7 +287,7 @@ impl Catalog {
         }
     }
 
-    pub fn get_all_tables_id_in_database(&self, db_id: DatabaseId) -> Vec<TableId> {
+    pub fn get_all_table_ids_in_database(&self, db_id: DatabaseId) -> Vec<TableId> {
         if let Ok(database) = self.get_database_by_id(&db_id) {
             database.iter_all_table_ids().collect()
         } else {
@@ -303,7 +303,7 @@ impl Catalog {
         });
     }
 
-    pub fn get_all_tables_id_in_schema(
+    pub fn get_all_table_ids_in_schema(
         &self,
         db_id: DatabaseId,
         schema_id: SchemaId,
