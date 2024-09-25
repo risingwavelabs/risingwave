@@ -102,11 +102,7 @@ setup_old_cluster() {
     set -e
     echo "Failed to download ${OLD_VERSION} from github releases, build from source later during \`risedev d\`"
     configure_rw "$OLD_VERSION" true
-  elif [[ $OLD_VERSION = '1.10.0' || $OLD_VERSION = '1.10.1' || $OLD_VERSION = '1.10.2' || $OLD_VERSION = '2.0.0' ]]; then
-    set -e
-    echo "1.10.x, 2.0.0 have dynamically linked openssl, build from source later during \`risedev d\`"
-    configure_rw "$OLD_VERSION" true
-  else
+  elif version_le "$OLD_VERSION" '1.9.3'; then
     set -e
     tar -xvf risingwave-v"${OLD_VERSION}"-x86_64-unknown-linux.tar.gz
     mv risingwave target/debug/risingwave
@@ -114,6 +110,11 @@ setup_old_cluster() {
     echo "--- Start cluster on tag $OLD_VERSION"
     git config --global --add safe.directory /risingwave
     configure_rw "$OLD_VERSION" false
+  else
+    # >= 1.10.x onwards.
+    set -e
+    echo ">=1.10.x have dynamically linked openssl, build from source later during \`risedev d\`"
+    configure_rw "$OLD_VERSION" true
   fi
 }
 

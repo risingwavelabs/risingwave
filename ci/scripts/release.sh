@@ -73,6 +73,7 @@ if [ "${ARCH}" == "aarch64" ]; then
   export JEMALLOC_SYS_WITH_LG_PAGE=16
 fi
 
+# FIXME: Do static linking for openssl. That requires us to build it from source, because dnf doesn't have the static libraries.
 cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --profile production
 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile production
 
