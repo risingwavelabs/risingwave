@@ -13,6 +13,9 @@ ignored = ["workspace-hack"]
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
 
+[features]
+static-openssl = ["openssl/vendored"]
+
 [dependencies]
 anyhow = "1"
 apache-avro = { workspace = true }

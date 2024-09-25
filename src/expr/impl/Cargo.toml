@@ -20,6 +20,7 @@ external-udf = ["arrow-udf-flight", "arrow-flight", "tonic"]
 js-udf = ["arrow-udf-js"]
 python-udf = ["arrow-udf-python"]
 wasm-udf = ["arrow-udf-wasm", "zstd"]
+static-openssl = ["openssl/vendored"]
 
 [dependencies]
 aho-corasick = "1"

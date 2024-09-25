@@ -23,23 +23,6 @@ ld.lld --version
 echo "--- Install dependencies"
 dnf install -y perl-core wget python3 python3-devel cyrus-sasl-devel rsync openssl-devel
 
-echo "--- Install static openssl from source"
-wget https://www.openssl.org/source/openssl-1.1.1k.tar.gz
-tar -zxvf openssl-1.1.1k.tar.gz
-cd openssl-1.1.1k
-./config --prefix=/usr/local --openssldir=/usr/local/ssl no-shared
-make -j"$(nproc)"
-make install
-cd ..
-export OPENSSL_STATIC=1
-export OPENSSL_LIB_DIR=/usr/local/lib
-export OPENSSL_INCLUDE_DIR=/usr/local/include
-echo "OPENSSL_STATIC: $OPENSSL_STATIC"
-echo "OPENSSL_LIB_DIR: $OPENSSL_LIB_DIR"
-ls $OPENSSL_LIB_DIR
-echo "OPENSSL_INCLUDE_DIR: $OPENSSL_INCLUDE_DIR"
-ls $OPENSSL_INCLUDE_DIR
-
 echo "--- Install java and maven"
 dnf install -y java-17-openjdk java-17-openjdk-devel
 pip3 install toml-cli
@@ -90,8 +73,8 @@ if [ "${ARCH}" == "aarch64" ]; then
   export JEMALLOC_SYS_WITH_LG_PAGE=16
 fi
 
-cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --profile production
-cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile production
+cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --features openssl-vendored --profile production
+cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --features openssl-vendored --profile production
 
 echo "--- check link info"
 check_link_info production
