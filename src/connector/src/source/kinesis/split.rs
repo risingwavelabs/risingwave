@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
-/// See https://docs.aws.amazon.com/kinesis/latest/APIReference/API_StartingPosition.html for more details.
+/// See <https://docs.aws.amazon.com/kinesis/latest/APIReference/API_StartingPosition.html> for more details.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum KinesisOffset {
     /// Corresponds to `TRIM_HORIZON`. Points the oldest record in the shard.
