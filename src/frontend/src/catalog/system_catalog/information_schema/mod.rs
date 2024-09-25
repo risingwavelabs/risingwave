@@ -13,6 +13,6 @@
 // limitations under the License.
 
 mod columns;
+mod schemata;
 mod tables;
 mod views;
-mod schemata;
