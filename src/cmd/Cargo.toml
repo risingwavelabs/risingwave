@@ -8,7 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [features]
-rw-static-link = ["workspace-config/rw-static-link"]
+rw-static-link = ["workspace-config/rw-static-link", "risingwave_expr_impl/static-openssl"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
 default = ["rw-static-link"]
 
