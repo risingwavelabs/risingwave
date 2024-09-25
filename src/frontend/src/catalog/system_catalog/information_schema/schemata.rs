@@ -29,6 +29,7 @@ use risingwave_frontend_macro::system_catalog;
             NULL
         FROM rw_catalog.rw_schemas s
         JOIN rw_catalog.rw_users u ON s.owner = u.id
+        WHERE has_schema_privilege(s.name, 'CREATE, USAGE')
         ORDER BY catalog_name, schema_name"
 )]
 #[derive(Fields)]
