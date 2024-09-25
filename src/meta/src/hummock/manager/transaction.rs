@@ -23,10 +23,12 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{
     GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, FrontendHummockVersionDelta, HummockEpoch, HummockVersionId,
+};
 use risingwave_pb::hummock::{
-    CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionStats,
-    StateTableInfoDelta,
+    CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionDeltas,
+    HummockVersionStats, StateTableInfoDelta,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -47,9 +49,6 @@ fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion)
     metrics
         .version_size
         .set(current_version.estimated_encode_len() as i64);
-    metrics
-        .safe_epoch
-        .set(current_version.visible_table_safe_epoch() as i64);
     metrics
         .current_version_id
         .set(current_version.id.to_u64() as i64);
@@ -186,7 +185,6 @@ impl<'a> HummockVersionTransaction<'a> {
                     *table_id,
                     StateTableInfoDelta {
                         committed_epoch,
-                        safe_epoch: committed_epoch,
                         compaction_group_id: *cg_id,
                     },
                 );
@@ -205,7 +203,6 @@ impl<'a> HummockVersionTransaction<'a> {
                         *table_id,
                         StateTableInfoDelta {
                             committed_epoch,
-                            safe_epoch: info.safe_epoch,
                             compaction_group_id: info.compaction_group_id,
                         }
                     )
@@ -229,6 +226,17 @@ impl<'a> InMemValTransaction for HummockVersionTransaction<'a> {
                     Operation::Add,
                     Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                         version_deltas: pb_deltas,
+                    }),
+                );
+                self.notification_manager.notify_frontend_without_version(
+                    Operation::Update,
+                    Info::HummockVersionDeltas(HummockVersionDeltas {
+                        version_deltas: deltas
+                            .iter()
+                            .map(|delta| {
+                                FrontendHummockVersionDelta::from_delta(delta).to_protobuf()
+                            })
+                            .collect(),
                     }),
                 );
             }

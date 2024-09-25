@@ -1229,6 +1229,8 @@ fn derive_partitions(
     vnode_mapping: &WorkerSlotMapping,
 ) -> SchedulerResult<HashMap<WorkerSlotId, TablePartitionInfo>> {
     let vnode_count = vnode_mapping.len();
+    assert_eq!(vnode_count, table_desc.vnode_count);
+
     let mut partitions: HashMap<WorkerSlotId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 
     if scan_ranges.is_empty() {

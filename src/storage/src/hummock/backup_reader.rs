@@ -196,10 +196,10 @@ impl BackupReader {
             .iter()
             .find(|v| {
                 if v.state_table_info.is_empty() {
-                    return epoch >= v.safe_epoch && epoch <= v.max_committed_epoch;
+                    return epoch == v.max_committed_epoch;
                 }
                 if let Some(m) = v.state_table_info.get(&table_id) {
-                    return epoch >= m.safe_epoch && epoch <= m.committed_epoch;
+                    return epoch == m.committed_epoch;
                 }
                 false
             })

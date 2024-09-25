@@ -193,7 +193,6 @@ impl HummockManager {
                         table_id,
                         PbStateTableInfoDelta {
                             committed_epoch: info.committed_epoch,
-                            safe_epoch: info.safe_epoch,
                             compaction_group_id: target_compaction_group_id,
                         }
                     )
@@ -692,6 +691,11 @@ impl HummockManager {
             cg_id_to_table_ids.insert(cg_id, table_ids);
         }
         check_table_ids_valid(&cg_id_to_table_ids);
+
+        self.metrics
+            .move_state_table_count
+            .with_label_values(&[&parent_group_id.to_string()])
+            .inc();
 
         Ok((target_compaction_group_id, cg_id_to_table_ids))
     }

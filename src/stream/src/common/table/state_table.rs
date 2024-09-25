@@ -1006,21 +1006,21 @@ where
             "commit state table"
         );
 
-        if !self.is_dirty() {
-            // If the state table is not modified, go fast path.
-            self.local_store.seal_current_epoch(
-                new_epoch.curr,
-                SealCurrentEpochOptions {
-                    table_watermarks: None,
-                    switch_op_consistency_level,
-                },
-            );
-            return Ok(());
-        } else {
-            self.seal_current_epoch(new_epoch.curr, switch_op_consistency_level)
-                .instrument(tracing::info_span!("state_table_commit"))
+        let mut table_watermarks = None;
+        if self.is_dirty() {
+            self.local_store
+                .flush()
+                .instrument(tracing::info_span!("state_table_flush"))
                 .await?;
+            table_watermarks = self.commit_pending_watermark();
         }
+        self.local_store.seal_current_epoch(
+            new_epoch.curr,
+            SealCurrentEpochOptions {
+                table_watermarks,
+                switch_op_consistency_level,
+            },
+        );
 
         // Refresh watermark cache if it is out of sync.
         if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
@@ -1073,12 +1073,8 @@ where
         Ok(())
     }
 
-    /// Write to state store.
-    async fn seal_current_epoch(
-        &mut self,
-        next_epoch: u64,
-        switch_op_consistency_level: Option<OpConsistencyLevel>,
-    ) -> StreamExecutorResult<()> {
+    /// Commit pending watermark and return vnode bitmap-watermark pairs to seal.
+    fn commit_pending_watermark(&mut self) -> Option<(WatermarkDirection, Vec<VnodeWatermark>)> {
         let watermark = self.pending_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
@@ -1164,18 +1160,7 @@ where
             self.watermark_cache.clear();
         }
 
-        self.local_store.flush().await?;
-        let table_watermarks =
-            seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]));
-
-        self.local_store.seal_current_epoch(
-            next_epoch,
-            SealCurrentEpochOptions {
-                table_watermarks,
-                switch_op_consistency_level,
-            },
-        );
-        Ok(())
+        seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]))
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {

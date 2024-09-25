@@ -94,6 +94,14 @@ message TableFragments {
     // so we pre-generate and store it here, this member will only be initialized when creating the Fragment
     // and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
+
+    // Total vnode count of the fragment (then all internal tables).
+    // Duplicated from the length of the vnode bitmap in any actor of the fragment.
+    //
+    // Can be unset if the fragment is created in older versions where variable vnode count is not
+    // supported, in which case a default value of 256 should be used.
+    // Use `VnodeCountCompat::vnode_count` to access it.
+    optional uint32 maybe_vnode_count = 8;
   }
   uint32 table_id = 1;
   State state = 2;
@@ -145,7 +153,7 @@ message FlushRequest {
 
 message FlushResponse {
   common.Status status = 1;
-  hummock.HummockSnapshot snapshot = 2;
+  uint64 hummock_version_id = 2;
 }
 
 // The reason why the data sources in the cluster are paused.
@@ -160,17 +168,11 @@ enum PausedReason {
 
 message PauseRequest {}
 
-message PauseResponse {
-  optional PausedReason prev = 1;
-  optional PausedReason curr = 2;
-}
+message PauseResponse {}
 
 message ResumeRequest {}
 
-message ResumeResponse {
-  optional PausedReason prev = 1;
-  optional PausedReason curr = 2;
-}
+message ResumeResponse {}
 
 message CancelCreatingJobsRequest {
   message CreatingJobInfo {
@@ -433,7 +435,6 @@ message MetaSnapshot {
   GetSessionParamsResponse session_params = 20;
   repeated catalog.Secret secrets = 23;
   repeated common.WorkerNode nodes = 10;
-  hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
   backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
   hummock.WriteLimits hummock_write_limits = 16;
@@ -485,7 +486,6 @@ message SubscribeResponse {
     user.UserInfo user = 11;
     SetSessionParamRequest session_param = 26;
     common.WorkerNode node = 13;
-    hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
     MetaSnapshot snapshot = 16;
     backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
@@ -790,6 +790,12 @@ message FragmentIdToActorIdMap {
 message RelationIdInfos {
   // relation_id -> FragmentIdToActorIdMap
   map<uint32, FragmentIdToActorIdMap> map = 1;
+}
+
+message FragmentVertexToRelationMap {
+  // fragment_id -> relation_id
+  map<uint32, uint32> in_map = 1;
+  map<uint32, uint32> out_map = 2;
 }
 
 message ActorCountPerParallelism {

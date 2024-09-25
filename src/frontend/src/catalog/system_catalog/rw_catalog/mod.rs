@@ -29,7 +29,6 @@ mod rw_hummock_compact_task_assignment;
 mod rw_hummock_compact_task_progress;
 mod rw_hummock_compaction_group_configs;
 mod rw_hummock_meta_configs;
-mod rw_hummock_pinned_snapshots;
 mod rw_hummock_pinned_versions;
 mod rw_hummock_version;
 mod rw_hummock_version_deltas;

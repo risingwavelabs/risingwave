@@ -18,8 +18,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use either::Either;
-use minitrace_opentelemetry::OpenTelemetryReporter;
-use opentelemetry::trace::SpanKind;
+use fastrace_opentelemetry::OpenTelemetryReporter;
+use opentelemetry::trace::{SpanKind, TracerProvider};
 use opentelemetry::InstrumentationLibrary;
 use opentelemetry_sdk::Resource;
 use risingwave_common::metrics::MetricsLayer;
@@ -444,6 +444,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             // Installing the exporter requires a tokio runtime.
             let _entered = runtime.enter();
 
+            // TODO(bugen): better service name
+            // https://github.com/jaegertracing/jaeger-ui/issues/336
+            let service_name = format!("{}-{}", settings.name, id);
             let otel_tracer = opentelemetry_otlp::new_pipeline()
                 .tracing()
                 .with_exporter(
@@ -451,19 +454,17 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                         .tonic()
                         .with_endpoint(&endpoint),
                 )
-                .with_trace_config(sdk::trace::config().with_resource(sdk::Resource::new([
-                    KeyValue::new(
-                        resource::SERVICE_NAME,
-                        // TODO(bugen): better service name
-                        // https://github.com/jaegertracing/jaeger-ui/issues/336
-                        format!("{}-{}", settings.name, id),
-                    ),
-                    KeyValue::new(resource::SERVICE_INSTANCE_ID, id.clone()),
-                    KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-                    KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
-                ])))
+                .with_trace_config(
+                    sdk::trace::Config::default().with_resource(sdk::Resource::new([
+                        KeyValue::new(resource::SERVICE_NAME, service_name.clone()),
+                        KeyValue::new(resource::SERVICE_INSTANCE_ID, id.clone()),
+                        KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+                        KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
+                    ])),
+                )
                 .install_batch(sdk::runtime::Tokio)
-                .unwrap();
+                .unwrap()
+                .tracer(service_name);
 
             let exporter = opentelemetry_otlp::new_exporter()
                 .tonic()
@@ -512,7 +513,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         layers.push(layer.boxed());
 
-        // The reporter is used by minitrace in foyer for dynamically tail-based tracing.
+        // The reporter is used by fastrace in foyer for dynamically tail-based tracing.
         //
         // Code here only setup the OpenTelemetry reporter. To enable/disable the function, please use risectl.
         //
@@ -526,12 +527,12 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             SpanKind::Server,
             Cow::Owned(Resource::new([KeyValue::new(
                 resource::SERVICE_NAME,
-                format!("minitrace-{id}"),
+                format!("fastrace-{id}"),
             )])),
             InstrumentationLibrary::builder("opentelemetry-instrumentation-foyer").build(),
         );
-        minitrace::set_reporter(reporter, minitrace::collector::Config::default());
-        tracing::info!("opentelemetry exporter for minitrace is set at {endpoint}");
+        fastrace::set_reporter(reporter, fastrace::collector::Config::default());
+        tracing::info!("opentelemetry exporter for fastrace is set at {endpoint}");
     }
 
     // Metrics layer

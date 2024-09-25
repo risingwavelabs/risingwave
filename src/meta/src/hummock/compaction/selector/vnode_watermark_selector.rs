@@ -42,8 +42,8 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
             level_handlers,
             developer_config,
             table_watermarks,
-            member_table_ids,
             state_table_info,
+            member_table_ids,
             ..
         } = context;
         let dynamic_level_core =

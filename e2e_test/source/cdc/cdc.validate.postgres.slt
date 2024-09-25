@@ -243,3 +243,22 @@ create table shipments (
 
 statement ok
 drop table shipments;
+
+statement error Table 'partitioned_timestamp_table' has partitions, which requires publication 'rw_publication_pubviaroot_false' to be created with `publish_via_partition_root = true`.
+CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
+  c_int int,
+  c_boolean boolean,
+  c_timestamp timestamp,
+  PRIMARY KEY (c_int, c_timestamp)
+) WITH (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ schema.name = 'public',
+ table.name = 'partitioned_timestamp_table',
+ publication.name = 'rw_publication_pubviaroot_false',
+ slot.name = 'my_slot_partition'
+);

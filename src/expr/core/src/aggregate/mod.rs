@@ -146,17 +146,17 @@ pub fn build_retractable(agg: &AggCall) -> Result<BoxedAggregateFunction> {
 /// `AggCall`. Such operations should be done in batch or streaming executors.
 pub fn build(agg: &AggCall, prefer_append_only: bool) -> Result<BoxedAggregateFunction> {
     // handle special kinds
-    let kind = match &agg.kind {
-        AggKind::UserDefined(udf) => {
+    let kind = match &agg.agg_type {
+        AggType::UserDefined(udf) => {
             return user_defined::new_user_defined(&agg.return_type, udf);
         }
-        AggKind::WrapScalar(scalar) => {
+        AggType::WrapScalar(scalar) => {
             return Ok(Box::new(scalar_wrapper::ScalarWrapper::new(
                 agg.args.arg_types()[0].clone(),
                 build_from_prost(scalar)?,
             )));
         }
-        AggKind::Builtin(kind) => kind,
+        AggType::Builtin(kind) => kind,
     };
 
     // find the signature for builtin aggregation

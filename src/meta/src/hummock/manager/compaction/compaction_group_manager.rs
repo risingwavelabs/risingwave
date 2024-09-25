@@ -265,7 +265,6 @@ impl HummockManager {
                     TableId::new(*table_id),
                     PbStateTableInfoDelta {
                         committed_epoch: epoch,
-                        safe_epoch: epoch,
                         compaction_group_id: *raw_group_id,
                     }
                 )
