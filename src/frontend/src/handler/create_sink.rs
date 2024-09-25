@@ -277,7 +277,7 @@ pub async fn gen_sink_plan(
             }
         }
 
-        let user_defined_primary_key_table = !table_catalog.row_id_index.is_some();
+        let user_defined_primary_key_table = table_catalog.row_id_index.is_none();
         let sink_is_append_only = sink_catalog.sink_type == SinkType::AppendOnly
             || sink_catalog.sink_type == SinkType::ForceAppendOnly;
 
