@@ -645,8 +645,8 @@ impl HummockManager {
         // move [3,4,5,6]
         // [1,2,3,4,5,6,7,8,9,10] -> [1,2] [3,4,5,6] [7,8,9,10]
         // split key
-        // 1. table_id = 3, vnode = 0, epoch = 0
-        // 2. table_id = 7, vnode = 0, epoch = 0
+        // 1. table_id = 3, vnode = 0, epoch = MAX
+        // 2. table_id = 7, vnode = 0, epoch = MAX
 
         // The new compaction group id is always generate on the right side
         // Hence, we return the first compaction group id as the result

@@ -59,14 +59,14 @@ pub mod group_split {
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels};
     use crate::sstable_info::SstableInfo;
-    use crate::{can_concat, HummockEpoch};
+    use crate::{can_concat, HummockEpoch, KeyComparator};
 
     /// The split will follow the following rules:
     /// 1. Ssts with `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.right`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`].
     /// 2. Currently only `vnode` 0 and `vnode` max is supported.
     /// 3. Due to the above rule, `vnode` max will be rewritten as `table_id` + 1, vnode 0
 
-    // By default, the split key is constructed with vnode = 0 and epoch = 0, so that we can split table_id to the right group
+    // By default, the split key is constructed with vnode = 0 and epoch = MAX, so that we can split table_id to the right group
     pub fn build_split_key(table_id: StateTableId, vnode: VirtualNode) -> Bytes {
         build_split_full_key(table_id, vnode).encode().into()
     }
@@ -85,7 +85,7 @@ pub mod group_split {
         FullKey::new(
             TableId::from(table_id),
             TableKey(vnode.to_be_bytes().to_vec()),
-            HummockEpoch::MIN,
+            HummockEpoch::MAX,
         )
     }
 
@@ -100,16 +100,16 @@ pub mod group_split {
     pub fn need_to_split(sst: &SstableInfo, split_key: Bytes) -> SstSplitType {
         let key_range = &sst.key_range;
         // 1. compare left
-        if split_key.le(&key_range.left) {
+        if KeyComparator::compare_encoded_full_key(&split_key, &key_range.left).is_le() {
             return SstSplitType::Right;
         }
 
         // 2. compare right
         if key_range.right_exclusive {
-            if split_key.ge(&key_range.right) {
+            if KeyComparator::compare_encoded_full_key(&split_key, &key_range.right).is_ge() {
                 return SstSplitType::Left;
             }
-        } else if split_key.gt(&key_range.right) {
+        } else if KeyComparator::compare_encoded_full_key(&split_key, &key_range.right).is_gt() {
             return SstSplitType::Left;
         }
 
@@ -250,7 +250,9 @@ pub mod group_split {
 
     pub fn get_split_pos(sstables: &Vec<SstableInfo>, split_key: Bytes) -> usize {
         sstables
-            .partition_point(|sst| sst.key_range.left.lt(&split_key))
+            .partition_point(|sst| {
+                KeyComparator::compare_encoded_full_key(&sst.key_range.left, &split_key).is_lt()
+            })
             .saturating_sub(1)
     }
 
@@ -407,6 +409,7 @@ pub mod group_split {
                     level.table_infos = level.table_infos[0..=pos].to_vec();
                 }
                 SstSplitType::Right => {
+                    assert_eq!(0, pos);
                     insert_table_infos.extend_from_slice(&level.table_infos[pos..]); // the sst at pos has been split to the right
                     level.table_infos = level.table_infos[0..pos].to_vec();
                 }
