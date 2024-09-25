@@ -15,3 +15,4 @@
 mod columns;
 mod tables;
 mod views;
+mod schemata;
