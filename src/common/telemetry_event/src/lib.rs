@@ -16,6 +16,7 @@
 /// Keep the stats report module in the common/ module
 mod util;
 
+use std::env;
 use std::sync::OnceLock;
 
 use prost::Message;
@@ -33,6 +34,13 @@ pub type TelemetryError = String;
 pub static TELEMETRY_TRACKING_ID: OnceLock<String> = OnceLock::new();
 
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
+
+// the UUID of the RisingWave Cloud (if the cluster is hosted on RisingWave Cloud)
+pub const TELEMETRY_RISINGWAVE_CLOUD_UUID: &str = "RISINGWAVE_CLOUD_UUID";
+
+pub fn get_telemetry_risingwave_cloud_uuid() -> Option<String> {
+    env::var(TELEMETRY_RISINGWAVE_CLOUD_UUID).ok()
+}
 
 pub fn report_event_common(
     event_stage: PbTelemetryEventStage,
@@ -86,6 +94,7 @@ pub fn request_to_telemetry_event(
         attributes: attributes.map(|a| a.to_string()),
         node,
         is_test,
+        cloud_uuid: get_telemetry_risingwave_cloud_uuid(),
     };
     let report_bytes = event.encode_to_vec();
 

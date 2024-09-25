@@ -39,12 +39,7 @@ pub const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
 pub const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
 pub const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
 
-// the UUID of the RisingWave Cloud (if the cluster is hosted on RisingWave Cloud)
-pub const TELEMETRY_RISINGWAVE_CLOUD_UUID: &str = "RISINGWAVE_CLOUD_UUID";
-
-pub fn get_telemetry_risingwave_cloud_uuid() -> Option<String> {
-    env::var(TELEMETRY_RISINGWAVE_CLOUD_UUID).ok()
-}
+pub use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
 
 pub fn telemetry_cluster_type_from_env_var() -> PbTelemetryClusterType {
     let cluster_type = match env::var(TELEMETRY_CLUSTER_TYPE) {

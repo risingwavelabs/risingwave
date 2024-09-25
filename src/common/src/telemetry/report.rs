@@ -14,11 +14,6 @@
 
 use std::sync::Arc;
 
-use prost::Message;
-use risingwave_common::telemetry::get_telemetry_risingwave_cloud_uuid;
-use risingwave_pb::telemetry::{
-    EventMessage as PbEventMessage, PbTelemetryDatabaseObject,
-    TelemetryEventStage as PbTelemetryEventStage,
 pub use risingwave_telemetry_event::{
     current_timestamp, post_telemetry_report_pb, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
 };
