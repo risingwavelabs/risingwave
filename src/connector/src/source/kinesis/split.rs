@@ -58,11 +58,7 @@ impl SplitMetaData for KinesisSplit {
     }
 
     fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        self.next_offset = if last_seen_offset.is_empty() {
-            KinesisOffset::Earliest
-        } else {
-            KinesisOffset::AfterSequenceNumber(last_seen_offset)
-        };
+        self.next_offset = KinesisOffset::AfterSequenceNumber(last_seen_offset);
         Ok(())
     }
 }
