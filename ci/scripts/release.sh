@@ -72,7 +72,12 @@ if [ "${ARCH}" == "aarch64" ]; then
   export JEMALLOC_SYS_WITH_LG_PAGE=16
 fi
 
-configure_static_openssl
+export OPENSSL_STATIC=1
+export OPENSSL_LIB_DIR="$(rpm -ql openssl-devel | grep libssl.a | xargs dirname)"
+export OPENSSL_INCLUDE_DIR="$(dpkg -ql openssl-devel | grep openssl/ssl.h | xargs dirname)"
+echo "OPENSSL_STATIC: $OPENSSL_STATIC"
+echo "OPENSSL_LIB_DIR: $OPENSSL_LIB_DIR"
+echo "OPENSSL_INCLUDE_DIR: $OPENSSL_INCLUDE_DIR"
 
 cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --profile production
 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile production
