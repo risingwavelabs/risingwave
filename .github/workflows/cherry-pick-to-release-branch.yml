@@ -54,3 +54,6 @@ jobs:
           pr_body: ${{ format('Cherry picking \#{0} onto branch release-2.0', github.event.number) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: write
