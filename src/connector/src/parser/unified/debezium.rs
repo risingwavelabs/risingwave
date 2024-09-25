@@ -27,7 +27,9 @@ use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaCh
 use crate::parser::schema_change::TableChangeType;
 use crate::parser::TransactionControl;
 use crate::source::cdc::build_cdc_table_id;
-use crate::source::cdc::external::mysql::{mysql_type_to_rw_type, type_name_to_mysql_type};
+use crate::source::cdc::external::mysql::{
+    mysql_type_to_rw_type, timestamp_val_to_timestamptz, type_name_to_mysql_type,
+};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
 // Example of Debezium JSON value:
@@ -224,7 +226,18 @@ pub fn parse_schema_change(
                     // handle default value expression, currently we only support constant expression
                     let column_desc = match col.access_object_field("defaultValueExpression") {
                         Some(default_val_expr_str) if !default_val_expr_str.is_jsonb_null() => {
-                            let value_text = default_val_expr_str.as_string().unwrap();
+                            let mut value_text = default_val_expr_str.as_string().unwrap();
+                            // mysql timestamp is mapped to timestamptz, we use UTC timezone to
+                            // interpret its value
+                            if data_type == DataType::Timestamptz {
+                                value_text = timestamp_val_to_timestamptz(value_text.as_str()).map_err(|err| {
+                                    tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
+                                    AccessError::TypeError {
+                                        expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
+                                        got: data_type.to_string(),
+                                        value: value_text,
+                                    }})?;
+                            }
                             let snapshot_value: Datum = Some(
                                 ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
                                     |err| {
