@@ -18,20 +18,30 @@ use serde::{Deserialize, Serialize};
 use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
+/// See https://docs.aws.amazon.com/kinesis/latest/APIReference/API_StartingPosition.html for more details.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum KinesisOffset {
+    /// Corresponds to `TRIM_HORIZON`. Points the oldest record in the shard.
     Earliest,
+    /// Corresponds to `LATEST`. Points to the (still-nonexisting) record just after the most recent one in the shard.
     Latest,
-    SequenceNumber(String),
+    /// Corresponds to `AFTER_SEQUENCE_NUMBER`. Points the record just after the one with the given sequence number.
+    #[serde(alias = "SequenceNumber")] // for backward compatibility
+    AfterSequenceNumber(String),
+    /// Corresponds to `AT_TIMESTAMP`. Points to the (first) record right at or after the given timestamp.
     Timestamp(i64),
+
     None,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Hash)]
 pub struct KinesisSplit {
     pub(crate) shard_id: SplitId,
-    pub(crate) start_position: KinesisOffset,
-    pub(crate) end_position: KinesisOffset,
+
+    #[serde(alias = "start_position")] // for backward compatibility
+    pub(crate) next_offset: KinesisOffset,
+    #[serde(alias = "end_position")] // for backward compatibility
+    pub(crate) end_offset: KinesisOffset,
 }
 
 impl SplitMetaData for KinesisSplit {
@@ -48,13 +58,11 @@ impl SplitMetaData for KinesisSplit {
     }
 
     fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        let start_offset = if last_seen_offset.is_empty() {
+        self.next_offset = if last_seen_offset.is_empty() {
             KinesisOffset::Earliest
         } else {
-            KinesisOffset::SequenceNumber(last_seen_offset)
+            KinesisOffset::AfterSequenceNumber(last_seen_offset)
         };
-
-        self.start_position = start_offset;
         Ok(())
     }
 }
@@ -62,13 +70,13 @@ impl SplitMetaData for KinesisSplit {
 impl KinesisSplit {
     pub fn new(
         shard_id: SplitId,
-        start_position: KinesisOffset,
-        end_position: KinesisOffset,
+        next_offset: KinesisOffset,
+        end_offset: KinesisOffset,
     ) -> KinesisSplit {
         KinesisSplit {
             shard_id,
-            start_position,
-            end_position,
+            next_offset,
+            end_offset,
         }
     }
 }
