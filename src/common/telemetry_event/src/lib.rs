@@ -84,11 +84,7 @@ pub fn request_to_telemetry_event(
     is_test: bool,
 ) {
     let event = PbEventMessage {
-        tracking_id: if let Some(uuid) = get_telemetry_risingwave_cloud_uuid() {
-            uuid
-        } else {
-            tracking_id
-        },
+        tracking_id,
         event_time_sec: current_timestamp(),
         event_stage: event_stage as i32,
         event_name: event_name.to_string(),
