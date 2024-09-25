@@ -352,7 +352,7 @@ async fn start_replay(
     // The new meta should not have any data at this time
     for level in latest_version.levels.values() {
         level.levels.iter().for_each(|lvl| {
-            assert!(lvl.table_infos.is_empty());
+            assert!(lvl.sstable_infos.is_empty());
             assert_eq!(0, lvl.total_file_size);
         });
     }

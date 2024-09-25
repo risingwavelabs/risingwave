@@ -440,11 +440,11 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let base_level = &version
         .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
         .levels[4];
-    assert_eq!(base_level.table_infos.len(), 3);
-    assert!(base_level.table_infos[0].key_range.right_exclusive);
+    assert_eq!(base_level.sstable_infos.len(), 3);
+    assert!(base_level.sstable_infos[0].key_range.right_exclusive);
     assert_eq!(
-        user_key(&base_level.table_infos[0].key_range.right),
-        user_key(&base_level.table_infos[1].key_range.left),
+        user_key(&base_level.sstable_infos[0].key_range.right),
+        user_key(&base_level.sstable_infos[1].key_range.left),
     );
     storage.wait_version(version).await;
     let read_options = ReadOptions {

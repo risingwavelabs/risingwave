@@ -114,7 +114,7 @@ impl OverlappingLevel {
 pub struct LevelCommon<T> {
     pub level_idx: u32,
     pub level_type: PbLevelType,
-    pub table_infos: Vec<T>,
+    pub sstable_infos: Vec<T>,
     pub total_file_size: u64,
     pub sub_level_id: u64,
     pub uncompressed_file_size: u64,
@@ -131,7 +131,7 @@ where
         Self {
             level_idx: pb_level.level_idx,
             level_type: PbLevelType::try_from(pb_level.level_type).unwrap(),
-            table_infos: pb_level.table_infos.iter().map(Into::into).collect_vec(),
+            sstable_infos: pb_level.sstable_infos.iter().map(Into::into).collect_vec(),
             total_file_size: pb_level.total_file_size,
             sub_level_id: pb_level.sub_level_id,
             uncompressed_file_size: pb_level.uncompressed_file_size,
@@ -148,7 +148,7 @@ where
         Self {
             level_idx: level.level_idx,
             level_type: level.level_type.into(),
-            table_infos: level.table_infos.iter().map(Into::into).collect_vec(),
+            sstable_infos: level.sstable_infos.iter().map(Into::into).collect_vec(),
             total_file_size: level.total_file_size,
             sub_level_id: level.sub_level_id,
             uncompressed_file_size: level.uncompressed_file_size,
@@ -165,7 +165,11 @@ where
         Self {
             level_idx: level.level_idx,
             level_type: level.level_type.into(),
-            table_infos: level.table_infos.into_iter().map(Into::into).collect_vec(),
+            sstable_infos: level
+                .sstable_infos
+                .into_iter()
+                .map(Into::into)
+                .collect_vec(),
             total_file_size: level.total_file_size,
             sub_level_id: level.sub_level_id,
             uncompressed_file_size: level.uncompressed_file_size,
@@ -182,8 +186,8 @@ where
         Self {
             level_idx: pb_level.level_idx,
             level_type: PbLevelType::try_from(pb_level.level_type).unwrap(),
-            table_infos: pb_level
-                .table_infos
+            sstable_infos: pb_level
+                .sstable_infos
                 .into_iter()
                 .map(Into::into)
                 .collect_vec(),
@@ -200,7 +204,7 @@ impl Level {
         size_of::<u32>()
             + size_of::<u32>()
             + self
-                .table_infos
+                .sstable_infos
                 .iter()
                 .map(|sst| sst.estimated_encode_len())
                 .sum::<usize>()
@@ -249,7 +253,7 @@ impl Levels {
             .sub_levels
             .iter()
             .chain(self.levels.iter())
-            .map(|level| level.table_infos.len())
+            .map(|level| level.sstable_infos.len())
             .sum()
     }
 }
@@ -360,7 +364,7 @@ where
 pub struct InputLevel {
     pub level_idx: u32,
     pub level_type: PbLevelType,
-    pub table_infos: Vec<SstableInfo>,
+    pub sstable_infos: Vec<SstableInfo>,
 }
 
 impl InputLevel {
@@ -368,7 +372,7 @@ impl InputLevel {
         size_of::<u32>()
             + size_of::<i32>()
             + self
-                .table_infos
+                .sstable_infos
                 .iter()
                 .map(|sst| sst.estimated_encode_len())
                 .sum::<usize>()
@@ -380,8 +384,8 @@ impl From<PbInputLevel> for InputLevel {
         Self {
             level_idx: pb_input_level.level_idx,
             level_type: PbLevelType::try_from(pb_input_level.level_type).unwrap(),
-            table_infos: pb_input_level
-                .table_infos
+            sstable_infos: pb_input_level
+                .sstable_infos
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
@@ -394,8 +398,8 @@ impl From<&PbInputLevel> for InputLevel {
         Self {
             level_idx: pb_input_level.level_idx,
             level_type: PbLevelType::try_from(pb_input_level.level_type).unwrap(),
-            table_infos: pb_input_level
-                .table_infos
+            sstable_infos: pb_input_level
+                .sstable_infos
                 .iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
@@ -408,8 +412,8 @@ impl From<InputLevel> for PbInputLevel {
         Self {
             level_idx: input_level.level_idx,
             level_type: input_level.level_type.into(),
-            table_infos: input_level
-                .table_infos
+            sstable_infos: input_level
+                .sstable_infos
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
@@ -422,8 +426,8 @@ impl From<&InputLevel> for PbInputLevel {
         Self {
             level_idx: input_level.level_idx,
             level_type: input_level.level_type.into(),
-            table_infos: input_level
-                .table_infos
+            sstable_infos: input_level
+                .sstable_infos
                 .iter()
                 .map(|sst| sst.into())
                 .collect_vec(),

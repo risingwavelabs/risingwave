@@ -308,7 +308,7 @@ pub(crate) mod tests {
             .get_compaction_group_levels(compaction_group_id)
             .levels
             .iter()
-            .flat_map(|level| level.table_infos.clone())
+            .flat_map(|level| level.sstable_infos.clone())
             .collect_vec();
         for output_table in &output_tables {
             let table = storage
@@ -616,7 +616,7 @@ pub(crate) mod tests {
                 .input_ssts
                 .iter()
                 .filter(|level| level.level_idx != compact_task.target_level)
-                .map(|level| level.table_infos.len())
+                .map(|level| level.sstable_infos.len())
                 .sum::<usize>(),
             kv_count
         );
@@ -645,7 +645,7 @@ pub(crate) mod tests {
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
         let mut tables_from_version = vec![];
         version.level_iter(compaction_group_id, |level| {
-            tables_from_version.extend(level.table_infos.iter().cloned());
+            tables_from_version.extend(level.sstable_infos.iter().cloned());
             true
         });
 
@@ -818,7 +818,7 @@ pub(crate) mod tests {
             compact_task
                 .input_ssts
                 .iter()
-                .map(|level| level.table_infos.len())
+                .map(|level| level.sstable_infos.len())
                 .sum::<usize>(),
             kv_count,
         );
@@ -848,7 +848,7 @@ pub(crate) mod tests {
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
         let mut tables_from_version = vec![];
         version.level_iter(compaction_group_id, |level| {
-            tables_from_version.extend(level.table_infos.iter().cloned());
+            tables_from_version.extend(level.sstable_infos.iter().cloned());
             true
         });
 
@@ -1007,7 +1007,7 @@ pub(crate) mod tests {
             compact_task
                 .input_ssts
                 .iter()
-                .map(|level| level.table_infos.len())
+                .map(|level| level.sstable_infos.len())
                 .sum::<usize>(),
             kv_count,
         );
@@ -1046,7 +1046,7 @@ pub(crate) mod tests {
             .get_compaction_group_levels(compaction_group_id)
             .levels
             .iter()
-            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|level| level.sstable_infos.iter())
             .collect::<Vec<_>>();
 
         let mut key_count = 0;
@@ -1188,7 +1188,7 @@ pub(crate) mod tests {
             compact_task
                 .input_ssts
                 .iter()
-                .map(|level| level.table_infos.len())
+                .map(|level| level.sstable_infos.len())
                 .sum::<usize>(),
             129
         );
@@ -1221,8 +1221,8 @@ pub(crate) mod tests {
             .levels
             .last()
             .unwrap();
-        assert_eq!(1, output_level_info.table_infos.len());
-        assert_eq!(252, output_level_info.table_infos[0].total_key_count);
+        assert_eq!(1, output_level_info.sstable_infos.len());
+        assert_eq!(252, output_level_info.sstable_infos[0].total_key_count);
     }
 
     type KeyValue = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>);
@@ -1381,12 +1381,12 @@ pub(crate) mod tests {
                 InputLevel {
                     level_idx: 5,
                     level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
-                    table_infos: ssts.drain(..select_file_count).collect_vec(),
+                    sstable_infos: ssts.drain(..select_file_count).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
                     level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
-                    table_infos: ssts,
+                    sstable_infos: ssts,
                 },
             ],
             existing_table_ids: vec![1],
@@ -1602,12 +1602,12 @@ pub(crate) mod tests {
                 InputLevel {
                     level_idx: 5,
                     level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
-                    table_infos: sst_infos.drain(..1).collect_vec(),
+                    sstable_infos: sst_infos.drain(..1).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
                     level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
-                    table_infos: sst_infos,
+                    sstable_infos: sst_infos,
                 },
             ],
             existing_table_ids: vec![1],
@@ -1747,12 +1747,12 @@ pub(crate) mod tests {
                 InputLevel {
                     level_idx: 5,
                     level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
-                    table_infos: sst_infos.drain(..1).collect_vec(),
+                    sstable_infos: sst_infos.drain(..1).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
                     level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
-                    table_infos: sst_infos,
+                    sstable_infos: sst_infos,
                 },
             ],
             existing_table_ids: vec![1],

@@ -87,7 +87,7 @@ fn remove_key_range_from_version(mut version: HummockVersion) -> HummockVersion 
     // Because key range is too verbose for manual analysis, just don't expose it.
     for cg in version.levels.values_mut() {
         for level in cg.levels.iter_mut().chain(cg.l0.sub_levels.iter_mut()) {
-            for sst in &mut level.table_infos {
+            for sst in &mut level.sstable_infos {
                 sst.remove_key_range();
             }
         }
@@ -111,7 +111,7 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
     let mut sstables = vec![];
     for cg in version.levels.into_values() {
         for level in cg.levels.into_iter().chain(cg.l0.sub_levels) {
-            for sst in level.table_infos {
+            for sst in level.sstable_infos {
                 let key_range = sst.key_range;
                 sstables.push(RwHummockSstable {
                     sstable_id: sst.sst_id as _,

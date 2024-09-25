@@ -232,7 +232,7 @@ async fn test_hummock_table() {
             .sub_levels
             .iter()
             .chain(levels.levels.iter())
-            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|level| level.sstable_infos.iter())
             .map(|info| info.object_id)
             .sorted()
             .cmp(original_tables.iter().map(|ot| ot.object_id).sorted())
@@ -1875,7 +1875,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     let compaction_task =
         get_manual_compact_task(hummock_manager.clone(), compaction_group_id, 0).await;
     let base_level: usize = 6;
-    assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 1);
+    assert_eq!(compaction_task.input_ssts[0].sstable_infos.len(), 1);
     assert_eq!(compaction_task.target_level, base_level as u32);
 
     assert!(hummock_manager
@@ -1924,7 +1924,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         current_version
             .get_compaction_group_levels(compaction_group_id)
             .levels[base_level - 1]
-            .table_infos
+            .sstable_infos
             .len(),
         2
     );
@@ -1942,7 +1942,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         current_version
             .get_compaction_group_levels(old_compaction_group_id)
             .levels[base_level - 1]
-            .table_infos
+            .sstable_infos
             .len(),
         1
     );
@@ -1951,7 +1951,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         current_version
             .get_compaction_group_levels(old_compaction_group_id)
             .levels[base_level - 1]
-            .table_infos[0]
+            .sstable_infos[0]
             .object_id,
         sst_1.sst_info.object_id + 1,
     );
@@ -1959,7 +1959,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         current_version
             .get_compaction_group_levels(old_compaction_group_id)
             .levels[base_level - 1]
-            .table_infos[0]
+            .sstable_infos[0]
             .table_ids,
         vec![101]
     );
@@ -1967,7 +1967,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         current_version
             .get_compaction_group_levels(new_compaction_group_id)
             .levels[base_level - 1]
-            .table_infos
+            .sstable_infos
             .len(),
         2
     );
@@ -1975,7 +1975,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         current_version
             .get_compaction_group_levels(new_compaction_group_id)
             .levels[base_level - 1]
-            .table_infos[0]
+            .sstable_infos[0]
             .table_ids,
         vec![100]
     );
@@ -1983,7 +1983,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         current_version
             .get_compaction_group_levels(new_compaction_group_id)
             .levels[base_level - 1]
-            .table_infos[1]
+            .sstable_infos[1]
             .table_ids,
         vec![100]
     );
@@ -2054,7 +2054,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let compaction_task =
         get_manual_compact_task(hummock_manager.clone(), compaction_group_id, 0).await;
-    assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
+    assert_eq!(compaction_task.input_ssts[0].sstable_infos.len(), 2);
     hummock_manager
         .split_compaction_group(compaction_group_id, &[100], 0)
         .await
@@ -2073,7 +2073,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
 
     let compaction_task =
         get_manual_compact_task(hummock_manager.clone(), compaction_group_id, 0).await;
-    assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
+    assert_eq!(compaction_task.input_ssts[0].sstable_infos.len(), 2);
     hummock_manager
         .report_compact_task(compaction_task.task_id, TaskStatus::Success, vec![], None)
         .await
@@ -2311,7 +2311,7 @@ async fn test_partition_level() {
                 .iter()
                 .map(|level| {
                     level
-                        .table_infos
+                        .sstable_infos
                         .iter()
                         .map(|sst| sst.sst_size)
                         .sum::<u64>()

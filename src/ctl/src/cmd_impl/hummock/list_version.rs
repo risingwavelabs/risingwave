@@ -33,7 +33,7 @@ pub async fn list_version(
             {
                 let l0 = &mut levels.l0;
                 for sub_level in &mut l0.sub_levels {
-                    for t in &mut sub_level.table_infos {
+                    for t in &mut sub_level.sstable_infos {
                         t.remove_key_range();
                     }
                 }
@@ -41,7 +41,7 @@ pub async fn list_version(
 
             // l1 ~ lmax
             for level in &mut levels.levels {
-                for t in &mut level.table_infos {
+                for t in &mut level.sstable_infos {
                     t.remove_key_range();
                 }
             }
@@ -65,7 +65,7 @@ pub async fn list_version(
                         "sub_level_id {} type {} sst_num {} size {}",
                         sub_level.sub_level_id,
                         sub_level.level_type.as_str_name(),
-                        sub_level.table_infos.len(),
+                        sub_level.sstable_infos.len(),
                         sub_level.total_file_size
                     )
                 }
@@ -76,7 +76,7 @@ pub async fn list_version(
                     "level_idx {} type {} sst_num {} size {}",
                     level.level_idx,
                     level.level_type.as_str_name(),
-                    level.table_infos.len(),
+                    level.sstable_infos.len(),
                     level.total_file_size
                 )
             }

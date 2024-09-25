@@ -205,7 +205,7 @@ impl IntraCompactionPicker {
                     select_level_inputs.push(InputLevel {
                         level_idx: 0,
                         level_type: LevelType::Nonoverlapping,
-                        table_infos: level_select_sst,
+                        sstable_infos: level_select_sst,
                     });
 
                     select_input_size += input.total_file_size;
@@ -270,8 +270,8 @@ impl IntraCompactionPicker {
             let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone(), 0);
 
             let select_sst = trivial_move_picker.pick_trivial_move_sst(
-                &l0.sub_levels[idx + 1].table_infos,
-                &level.table_infos,
+                &l0.sub_levels[idx + 1].sstable_infos,
+                &level.sstable_infos,
                 level_handlers,
                 stats,
             );
@@ -288,7 +288,7 @@ impl IntraCompactionPicker {
             overlap.update(&select_sst);
 
             assert!(overlap
-                .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
+                .check_multiple_overlap(&l0.sub_levels[idx].sstable_infos)
                 .is_empty());
 
             let select_input_size = select_sst.sst_size;
@@ -296,12 +296,12 @@ impl IntraCompactionPicker {
                 InputLevel {
                     level_idx: 0,
                     level_type: LevelType::Nonoverlapping,
-                    table_infos: vec![select_sst],
+                    sstable_infos: vec![select_sst],
                 },
                 InputLevel {
                     level_idx: 0,
                     level_type: LevelType::Nonoverlapping,
-                    table_infos: vec![],
+                    sstable_infos: vec![],
                 },
             ];
             return Some(CompactionInput {
@@ -376,12 +376,12 @@ impl WholeLevelCompactionPicker {
                 }
 
                 select_input_size += next_level.total_file_size;
-                total_file_count += next_level.table_infos.len() as u64;
+                total_file_count += next_level.sstable_infos.len() as u64;
 
                 select_level_inputs.push(InputLevel {
                     level_idx: 0,
                     level_type: next_level.level_type,
-                    table_infos: next_level.table_infos.clone(),
+                    sstable_infos: next_level.sstable_infos.clone(),
                 });
             }
             if select_level_inputs.len() > 1 {
@@ -445,7 +445,7 @@ pub mod tests {
         let levels = vec![Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping,
-            table_infos: vec![],
+            sstable_infos: vec![],
             ..Default::default()
         }];
         let mut levels = Levels {
@@ -492,7 +492,7 @@ pub mod tests {
             levels: vec![Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping,
-                table_infos: vec![generate_table(3, 1, 200, 300, 2)],
+                sstable_infos: vec![generate_table(3, 1, 200, 300, 2)],
                 ..Default::default()
             }],
             l0: generate_l0_nonoverlapping_sublevels(vec![
@@ -539,7 +539,7 @@ pub mod tests {
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-            levels_handler[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
+            levels_handler[1].add_pending_task(100, 1, &levels.levels[0].sstable_infos);
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
@@ -558,7 +558,7 @@ pub mod tests {
             assert_eq!(
                 ret.input_levels
                     .iter()
-                    .map(|i| i.table_infos.len())
+                    .map(|i| i.sstable_infos.len())
                     .sum::<usize>(),
                 3
             );
@@ -587,7 +587,7 @@ pub mod tests {
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-            levels_handler[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
+            levels_handler[1].add_pending_task(100, 1, &levels.levels[0].sstable_infos);
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
@@ -606,14 +606,14 @@ pub mod tests {
             assert_eq!(
                 ret.input_levels
                     .iter()
-                    .map(|i| i.table_infos.len())
+                    .map(|i| i.sstable_infos.len())
                     .sum::<usize>(),
                 3
             );
 
-            assert_eq!(4, ret.input_levels[0].table_infos[0].sst_id);
-            assert_eq!(3, ret.input_levels[1].table_infos[0].sst_id);
-            assert_eq!(1, ret.input_levels[2].table_infos[0].sst_id);
+            assert_eq!(4, ret.input_levels[0].sstable_infos[0].sst_id);
+            assert_eq!(3, ret.input_levels[1].sstable_infos[0].sst_id);
+            assert_eq!(1, ret.input_levels[2].sstable_infos[0].sst_id);
 
             // will pick sst [2, 6]
             let ret2 = picker
@@ -623,13 +623,13 @@ pub mod tests {
             assert_eq!(
                 ret2.input_levels
                     .iter()
-                    .map(|i| i.table_infos.len())
+                    .map(|i| i.sstable_infos.len())
                     .sum::<usize>(),
                 2
             );
 
-            assert_eq!(6, ret2.input_levels[0].table_infos[0].sst_id);
-            assert_eq!(2, ret2.input_levels[1].table_infos[0].sst_id);
+            assert_eq!(6, ret2.input_levels[0].sstable_infos[0].sst_id);
+            assert_eq!(2, ret2.input_levels[1].sstable_infos[0].sst_id);
         }
 
         {
@@ -658,7 +658,7 @@ pub mod tests {
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-            levels_handler[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
+            levels_handler[1].add_pending_task(100, 1, &levels.levels[0].sstable_infos);
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
@@ -677,14 +677,14 @@ pub mod tests {
             assert_eq!(
                 ret.input_levels
                     .iter()
-                    .map(|i| i.table_infos.len())
+                    .map(|i| i.sstable_infos.len())
                     .sum::<usize>(),
                 3
             );
 
-            assert_eq!(11, ret.input_levels[0].table_infos[0].sst_id);
-            assert_eq!(9, ret.input_levels[1].table_infos[0].sst_id);
-            assert_eq!(7, ret.input_levels[2].table_infos[0].sst_id);
+            assert_eq!(11, ret.input_levels[0].sstable_infos[0].sst_id);
+            assert_eq!(9, ret.input_levels[1].sstable_infos[0].sst_id);
+            assert_eq!(7, ret.input_levels[2].sstable_infos[0].sst_id);
 
             let ret2 = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -693,21 +693,21 @@ pub mod tests {
             assert_eq!(
                 ret2.input_levels
                     .iter()
-                    .map(|i| i.table_infos.len())
+                    .map(|i| i.sstable_infos.len())
                     .sum::<usize>(),
                 3
             );
 
-            assert_eq!(5, ret2.input_levels[0].table_infos[0].sst_id);
-            assert_eq!(10, ret2.input_levels[1].table_infos[0].sst_id);
-            assert_eq!(2, ret2.input_levels[2].table_infos[0].sst_id);
+            assert_eq!(5, ret2.input_levels[0].sstable_infos[0].sst_id);
+            assert_eq!(10, ret2.input_levels[1].sstable_infos[0].sst_id);
+            assert_eq!(2, ret2.input_levels[2].sstable_infos[0].sst_id);
         }
     }
 
     fn is_l0_trivial_move(compaction_input: &CompactionInput) -> bool {
         compaction_input.input_levels.len() == 2
-            && !compaction_input.input_levels[0].table_infos.is_empty()
-            && compaction_input.input_levels[1].table_infos.is_empty()
+            && !compaction_input.input_levels[0].sstable_infos.is_empty()
+            && compaction_input.input_levels[1].sstable_infos.is_empty()
     }
 
     #[test]
@@ -733,7 +733,7 @@ pub mod tests {
             levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
             ..Default::default()
         };
-        levels_handler[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
+        levels_handler[1].add_pending_task(100, 1, &levels.levels[0].sstable_infos);
         let mut local_stats = LocalPickerStatistic::default();
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
@@ -776,7 +776,7 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert!(is_l0_trivial_move(&ret));
-        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
+        assert_eq!(ret.input_levels[0].sstable_infos.len(), 1);
     }
     #[test]
     fn test_pick_whole_level() {
@@ -831,7 +831,7 @@ pub mod tests {
         let mut l0 = generate_l0_nonoverlapping_multi_sublevels(table_infos);
         // trivial-move
         l0.sub_levels[1]
-            .table_infos
+            .sstable_infos
             .push(generate_table(9999, 900000000, 0, 100, 1));
 
         l0.sub_levels[0].total_file_size = 1;
@@ -861,12 +861,12 @@ pub mod tests {
         let input = ret.as_ref().unwrap();
         assert_eq!(input.input_levels.len(), 2);
         assert_ne!(
-            levels.l0.sub_levels[0].table_infos.len(),
-            input.input_levels[0].table_infos.len()
+            levels.l0.sub_levels[0].sstable_infos.len(),
+            input.input_levels[0].sstable_infos.len()
         );
         assert_ne!(
-            levels.l0.sub_levels[1].table_infos.len(),
-            input.input_levels[1].table_infos.len()
+            levels.l0.sub_levels[1].sstable_infos.len(),
+            input.input_levels[1].sstable_infos.len()
         );
     }
 }

@@ -82,7 +82,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         let version = hummock.inner().get_pinned_version().version().clone();
         let sstable_store = hummock.sstable_store();
         for level in version.get_combined_levels() {
-            for sstable_info in &level.table_infos {
+            for sstable_info in &level.sstable_infos {
                 if let Some(object_id) = &args.object_id {
                     if *object_id == sstable_info.object_id {
                         print_level(level, sstable_info);

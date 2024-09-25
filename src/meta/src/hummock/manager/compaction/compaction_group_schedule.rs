@@ -140,12 +140,12 @@ impl HummockManager {
             for level_idx in 1..=max_level {
                 let left_level = left_levels.get_level(level_idx);
                 let right_level = right_levels.get_level(level_idx);
-                if left_level.table_infos.is_empty() || right_level.table_infos.is_empty() {
+                if left_level.sstable_infos.is_empty() || right_level.sstable_infos.is_empty() {
                     continue;
                 }
 
-                let left_last_sst = left_level.table_infos.last().unwrap().clone();
-                let right_first_sst = right_level.table_infos.first().unwrap().clone();
+                let left_last_sst = left_level.sstable_infos.last().unwrap().clone();
+                let right_first_sst = right_level.sstable_infos.first().unwrap().clone();
                 let left_sst_id = left_last_sst.sst_id;
                 let right_sst_id = right_first_sst.sst_id;
                 let left_obj_id = left_last_sst.object_id;

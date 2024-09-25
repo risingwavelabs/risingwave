@@ -157,8 +157,11 @@ impl<'a> HummockVersionTransaction<'a> {
 
         for level in &compact_task.input_ssts {
             let level_idx = level.level_idx;
-            let mut removed_table_ids =
-                level.table_infos.iter().map(|sst| sst.sst_id).collect_vec();
+            let mut removed_table_ids = level
+                .sstable_infos
+                .iter()
+                .map(|sst| sst.sst_id)
+                .collect_vec();
 
             removed_table_ids_map
                 .entry(level_idx)
@@ -799,7 +802,7 @@ impl HummockManager {
                     if !is_trivial_reclaim {
                         compact_task
                             .sorted_output_ssts
-                            .clone_from(&compact_task.input_ssts[0].table_infos);
+                            .clone_from(&compact_task.input_ssts[0].sstable_infos);
                     }
                     self.metrics
                         .compact_frequency
@@ -1077,12 +1080,12 @@ impl HummockManager {
             for input_level in &compact_task.input_ssts {
                 let input_level: &InputLevel = input_level;
                 let mut sst_ids: HashSet<_> = input_level
-                    .table_infos
+                    .sstable_infos
                     .iter()
                     .map(|sst| sst.sst_id)
                     .collect();
                 fn filter_ssts(levels: &Level, sst_ids: &mut HashSet<u64>) {
-                    for sst in &levels.table_infos {
+                    for sst in &levels.sstable_infos {
                         sst_ids.remove(&sst.sst_id);
                     }
                 }
@@ -1196,7 +1199,7 @@ impl HummockManager {
             let input_sst_ids: HashSet<u64> = compact_task
                 .input_ssts
                 .iter()
-                .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
+                .flat_map(|level| level.sstable_infos.iter().map(|sst| sst.sst_id))
                 .collect();
             let input_level_ids: Vec<u32> = compact_task
                 .input_ssts
@@ -1461,7 +1464,7 @@ impl HummockManager {
             let mut table_size_info: HashMap<u32, u64> = HashMap::default();
             let mut existing_table_ids: HashSet<u32> = HashSet::default();
             for input_ssts in &compact_task.input_ssts {
-                for sst in &input_ssts.table_infos {
+                for sst in &input_ssts.sstable_infos {
                     existing_table_ids.extend(sst.table_ids.iter());
                     for table_id in &sst.table_ids {
                         *table_size_info.entry(*table_id).or_default() +=

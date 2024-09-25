@@ -342,7 +342,7 @@ fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
         table_stats: Default::default(),
     };
     for level in version.get_combined_levels() {
-        for sst in &level.table_infos {
+        for sst in &level.sstable_infos {
             let changes = estimate_table_stats(sst);
             add_prost_table_stats_map(&mut stats.table_stats, &changes);
         }
@@ -537,7 +537,7 @@ mod tests {
                 cg,
                 Levels {
                     levels: vec![Level {
-                        table_infos: vec![sst.clone()],
+                        sstable_infos: vec![sst.clone()],
                         ..Default::default()
                     }],
                     ..Default::default()

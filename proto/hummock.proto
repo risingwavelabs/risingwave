@@ -50,7 +50,7 @@ message OverlappingLevel {
 message Level {
   uint32 level_idx = 1;
   LevelType level_type = 2;
-  repeated SstableInfo table_infos = 3;
+  repeated SstableInfo sstable_infos = 3;
   uint64 total_file_size = 4;
   uint64 sub_level_id = 5;
   uint64 uncompressed_file_size = 6;
@@ -60,14 +60,14 @@ message Level {
 message InputLevel {
   uint32 level_idx = 1;
   LevelType level_type = 2;
-  repeated SstableInfo table_infos = 3;
+  repeated SstableInfo sstable_infos = 3;
 }
 
 message IntraLevelDelta {
   uint32 level_idx = 1;
   uint64 l0_sub_level_id = 2;
   repeated uint64 removed_table_ids = 3;
-  repeated SstableInfo inserted_table_infos = 4;
+  repeated SstableInfo inserted_sstable_infos = 4;
   uint32 vnode_partition_count = 5;
 }
 

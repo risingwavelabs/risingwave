@@ -139,7 +139,7 @@ pub fn trigger_sst_stat(
         let mut sst_num = 0;
         current_version.level_iter(compaction_group_id, |level| {
             if level.level_idx == level_idx as u32 {
-                sst_num += level.table_infos.len();
+                sst_num += level.sstable_infos.len();
             }
             true
         });

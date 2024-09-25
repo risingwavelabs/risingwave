@@ -71,7 +71,7 @@ impl CompactionInput {
                 level_handlers[level.level_idx as usize].add_pending_task(
                     task_id,
                     self.target_level,
-                    &level.table_infos,
+                    &level.sstable_infos,
                 );
             } else {
                 has_l0 = true;
@@ -82,7 +82,7 @@ impl CompactionInput {
                 .input_levels
                 .iter()
                 .filter(|level| level.level_idx == 0)
-                .flat_map(|level| level.table_infos.iter());
+                .flat_map(|level| level.sstable_infos.iter());
             level_handlers[0].add_pending_task(task_id, self.target_level, table_infos);
         }
     }

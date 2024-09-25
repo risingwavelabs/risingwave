@@ -89,7 +89,7 @@ impl CompactorRunner {
         let kv_count = task
             .input_ssts
             .iter()
-            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|level| level.sstable_infos.iter())
             .map(|sst| sst.total_key_count)
             .sum::<u64>() as usize;
         let use_block_based_filter =
@@ -165,12 +165,12 @@ impl CompactorRunner {
             .compactor_iter_max_io_retry_times;
         let mut table_iters = Vec::new();
         for level in &self.compact_task.input_ssts {
-            if level.table_infos.is_empty() {
+            if level.sstable_infos.is_empty() {
                 continue;
             }
 
             let tables = level
-                .table_infos
+                .sstable_infos
                 .iter()
                 .filter(|table_info| {
                     let table_ids = &table_info.table_ids;
@@ -184,7 +184,7 @@ impl CompactorRunner {
                 .collect_vec();
             // Do not need to filter the table because manager has done it.
             if level.level_type == LevelType::Nonoverlapping {
-                debug_assert!(can_concat(&level.table_infos));
+                debug_assert!(can_concat(&level.sstable_infos));
                 table_iters.push(ConcatSstableIterator::new(
                     self.compact_task.existing_table_ids.clone(),
                     tables,
@@ -197,7 +197,7 @@ impl CompactorRunner {
                 let sst_groups = partition_overlapping_sstable_infos(tables);
                 tracing::warn!(
                     "COMPACT A LARGE OVERLAPPING LEVEL: try to partition {} ssts with {} groups",
-                    level.table_infos.len(),
+                    level.sstable_infos.len(),
                     sst_groups.len()
                 );
                 for table_infos in sst_groups {
@@ -322,7 +322,7 @@ pub async fn compact(
         compact_task
             .input_ssts
             .iter()
-            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|level| level.sstable_infos.iter())
             .flat_map(|sst| sst.table_ids.clone())
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );

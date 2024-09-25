@@ -75,7 +75,7 @@ pub mod group_split {
                 &mut left_levels.l0,
                 right_sub_level.sub_level_id,
                 right_sub_level.level_type,
-                right_sub_level.table_infos,
+                right_sub_level.sstable_infos,
                 None,
             );
         }
@@ -98,11 +98,11 @@ pub mod group_split {
             .for_each(|sub_level| sub_level.vnode_partition_count = 0);
 
         for (idx, level) in right_levels.levels.into_iter().enumerate() {
-            if level.table_infos.is_empty() {
+            if level.sstable_infos.is_empty() {
                 continue;
             }
 
-            let insert_table_infos = level.table_infos;
+            let insert_table_infos = level.sstable_infos;
             left_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
                 .map(|sst| sst.sst_size)
@@ -113,20 +113,20 @@ pub mod group_split {
                 .sum::<u64>();
 
             left_levels.levels[idx]
-                .table_infos
+                .sstable_infos
                 .extend(insert_table_infos);
             left_levels.levels[idx]
-                .table_infos
+                .sstable_infos
                 .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
             assert!(
-                can_concat(&left_levels.levels[idx].table_infos),
+                can_concat(&left_levels.levels[idx].sstable_infos),
                 "{}",
                 format!(
-                    "left-group {} right-group {} left_levels.levels[{}].table_infos: {:?} level_idx {:?}",
+                    "left-group {} right-group {} left_levels.levels[{}].sstable_infos: {:?} level_idx {:?}",
                     left_levels.group_id,
                     right_levels.group_id,
                     idx,
-                    left_levels.levels[idx].table_infos,
+                    left_levels.levels[idx].sstable_infos,
                     left_levels.levels[idx].level_idx
                 )
             );

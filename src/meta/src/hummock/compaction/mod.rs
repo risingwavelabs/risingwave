@@ -163,7 +163,7 @@ impl CompactStatus {
         }
 
         if task.input_ssts[1].level_idx == task.target_level
-            && task.input_ssts[1].table_infos.is_empty()
+            && task.input_ssts[1].sstable_infos.is_empty()
         {
             return true;
         }
@@ -178,7 +178,7 @@ impl CompactStatus {
         }
         let exist_table_ids = HashSet::<u32>::from_iter(task.existing_table_ids.clone());
         task.input_ssts.iter().all(|level| {
-            level.table_infos.iter().all(|sst| {
+            level.sstable_infos.iter().all(|sst| {
                 sst.table_ids
                     .iter()
                     .all(|table_id| !exist_table_ids.contains(table_id))

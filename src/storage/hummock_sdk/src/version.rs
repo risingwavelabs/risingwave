@@ -517,7 +517,7 @@ impl HummockVersionDelta {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
                     static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
                     let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
-                        &level_delta.inserted_table_infos
+                        &level_delta.inserted_sstable_infos
                     } else {
                         &EMPTY_VEC
                     };
@@ -540,7 +540,7 @@ impl HummockVersionDelta {
             group_deltas.group_deltas.iter().flat_map(|group_delta| {
                 static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
                 let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
-                    &level_delta.inserted_table_infos
+                    &level_delta.inserted_sstable_infos
                 } else {
                     &EMPTY_VEC
                 };
@@ -576,7 +576,7 @@ impl HummockVersionDelta {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
                     static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
                     let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
-                        &level_delta.inserted_table_infos
+                        &level_delta.inserted_sstable_infos
                     } else {
                         &EMPTY_VEC
                     };
@@ -784,7 +784,7 @@ pub struct IntraLevelDeltaCommon<T> {
     pub level_idx: u32,
     pub l0_sub_level_id: u64,
     pub removed_table_ids: Vec<u64>,
-    pub inserted_table_infos: Vec<T>,
+    pub inserted_sstable_infos: Vec<T>,
     pub vnode_partition_count: u32,
 }
 
@@ -796,7 +796,7 @@ impl IntraLevelDelta {
             + size_of::<u64>()
             + self.removed_table_ids.len() * size_of::<u32>()
             + self
-                .inserted_table_infos
+                .inserted_sstable_infos
                 .iter()
                 .map(|sst| sst.estimated_encode_len())
                 .sum::<usize>()
@@ -813,8 +813,8 @@ where
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
             removed_table_ids: pb_intra_level_delta.removed_table_ids,
-            inserted_table_infos: pb_intra_level_delta
-                .inserted_table_infos
+            inserted_sstable_infos: pb_intra_level_delta
+                .inserted_sstable_infos
                 .into_iter()
                 .map(Into::into)
                 .collect_vec(),
@@ -832,8 +832,8 @@ where
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
             removed_table_ids: intra_level_delta.removed_table_ids,
-            inserted_table_infos: intra_level_delta
-                .inserted_table_infos
+            inserted_sstable_infos: intra_level_delta
+                .inserted_sstable_infos
                 .into_iter()
                 .map(Into::into)
                 .collect_vec(),
@@ -851,8 +851,8 @@ where
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
             removed_table_ids: intra_level_delta.removed_table_ids.clone(),
-            inserted_table_infos: intra_level_delta
-                .inserted_table_infos
+            inserted_sstable_infos: intra_level_delta
+                .inserted_sstable_infos
                 .iter()
                 .map(Into::into)
                 .collect_vec(),
@@ -870,8 +870,8 @@ where
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
             removed_table_ids: pb_intra_level_delta.removed_table_ids.clone(),
-            inserted_table_infos: pb_intra_level_delta
-                .inserted_table_infos
+            inserted_sstable_infos: pb_intra_level_delta
+                .inserted_sstable_infos
                 .iter()
                 .map(Into::into)
                 .collect_vec(),
@@ -892,7 +892,7 @@ impl IntraLevelDelta {
             level_idx,
             l0_sub_level_id,
             removed_table_ids,
-            inserted_table_infos,
+            inserted_sstable_infos: inserted_table_infos,
             vnode_partition_count,
         }
     }

@@ -68,7 +68,7 @@ impl SpaceReclaimCompactionPicker {
             let l0 = &levels.l0;
             // only pick trivial reclaim sstables because this kind of task could be optimized and do not need send to compactor.
             for level in &l0.sub_levels {
-                for sst in &level.table_infos {
+                for sst in &level.sstable_infos {
                     let exist_count = self.exist_table_count(sst);
                     if exist_count == sst.table_ids.len()
                         || level_handlers[0].is_pending_compact(&sst.sst_id)
@@ -90,12 +90,12 @@ impl SpaceReclaimCompactionPicker {
                             InputLevel {
                                 level_idx: level.level_idx,
                                 level_type: level.level_type,
-                                table_infos: select_input_ssts,
+                                sstable_infos: select_input_ssts,
                             },
                             InputLevel {
                                 level_idx: 0,
                                 level_type: level.level_type,
-                                table_infos: vec![],
+                                sstable_infos: vec![],
                             },
                         ],
                         target_level: level.level_idx as usize,
@@ -108,7 +108,7 @@ impl SpaceReclaimCompactionPicker {
         }
         while state.last_level <= levels.levels.len() {
             let mut is_trivial_task = true;
-            for sst in &levels.levels[state.last_level - 1].table_infos {
+            for sst in &levels.levels[state.last_level - 1].sstable_infos {
                 let exist_count = self.exist_table_count(sst);
                 let need_reclaim = exist_count < sst.table_ids.len();
                 let is_trivial_sst = exist_count == 0;
@@ -146,12 +146,12 @@ impl SpaceReclaimCompactionPicker {
                         InputLevel {
                             level_idx: state.last_level as u32,
                             level_type: levels.levels[state.last_level - 1].level_type,
-                            table_infos: select_input_ssts,
+                            sstable_infos: select_input_ssts,
                         },
                         InputLevel {
                             level_idx: state.last_level as u32,
                             level_type: levels.levels[state.last_level - 1].level_type,
-                            table_infos: vec![],
+                            sstable_infos: vec![],
                         },
                     ],
                     target_level: state.last_level,
@@ -215,7 +215,7 @@ mod test {
             Level {
                 level_idx: 4,
                 level_type: LevelType::Nonoverlapping,
-                table_infos: vec![
+                sstable_infos: vec![
                     generate_table_with_ids_and_epochs(2, 1, 0, 100, 1, vec![2], 0, 0),
                     generate_table_with_ids_and_epochs(3, 1, 101, 200, 1, vec![3], 0, 0),
                     generate_table_with_ids_and_epochs(4, 1, 222, 300, 1, vec![4], 0, 0),
@@ -232,7 +232,7 @@ mod test {
         ];
 
         {
-            let sst_10 = levels[3].table_infos.get_mut(8).unwrap();
+            let sst_10 = levels[3].sstable_infos.get_mut(8).unwrap();
             assert_eq!(10, sst_10.sst_id);
             sst_10.key_range.right_exclusive = true;
         }
@@ -271,8 +271,8 @@ mod test {
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 3);
-            assert_eq!(task.input.input_levels[0].table_infos.len(), 2);
-            levels_handler[4].add_pending_task(0, 4, &levels.levels[3].table_infos[5..6]);
+            assert_eq!(task.input.input_levels[0].sstable_infos.len(), 2);
+            levels_handler[4].add_pending_task(0, 4, &levels.levels[3].sstable_infos[5..6]);
             let task = selector
                 .pick_compaction(
                     1,
@@ -291,16 +291,16 @@ mod test {
                 .unwrap();
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 4);
-            assert_eq!(task.input.input_levels[0].table_infos.len(), 5);
+            assert_eq!(task.input.input_levels[0].sstable_infos.len(), 5);
 
             let mut start_id = 2;
-            for sst in &task.input.input_levels[0].table_infos {
+            for sst in &task.input.input_levels[0].sstable_infos {
                 assert_eq!(start_id, sst.sst_id);
                 start_id += 1;
             }
 
             assert_eq!(task.input.input_levels[1].level_idx, 4);
-            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+            assert_eq!(task.input.input_levels[1].sstable_infos.len(), 0);
             assert_eq!(task.input.target_level, 4);
             assert!(matches!(
                 task.compaction_task_type,
@@ -309,7 +309,7 @@ mod test {
 
             // in this case, no files is pending, so it limit by max_space_reclaim_bytes
             let select_file_size: u64 = task.input.input_levels[0]
-                .table_infos
+                .sstable_infos
                 .iter()
                 .map(|sst| sst.sst_size)
                 .sum();
@@ -337,14 +337,14 @@ mod test {
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 4);
-            assert_eq!(task.input.input_levels[0].table_infos.len(), 4);
+            assert_eq!(task.input.input_levels[0].sstable_infos.len(), 4);
             assert_eq!(task.input.target_level, 4);
             assert!(matches!(
                 task.compaction_task_type,
                 compact_task::TaskType::SpaceReclaim
             ));
             let mut start_id = 8;
-            for sst in &task.input.input_levels[0].table_infos {
+            for sst in &task.input.input_levels[0].sstable_infos {
                 assert_eq!(start_id, sst.sst_id);
                 start_id += 1;
             }
@@ -428,7 +428,7 @@ mod test {
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 3);
-            assert_eq!(task.input.input_levels[0].table_infos.len(), 2);
+            assert_eq!(task.input.input_levels[0].sstable_infos.len(), 2);
             assert_eq!(task.input.target_level, 3);
             assert!(matches!(
                 task.compaction_task_type,
@@ -473,9 +473,9 @@ mod test {
                 assert_eq!(task.input.input_levels.len(), 2);
                 assert_eq!(task.input.input_levels[0].level_idx, 4);
 
-                assert_eq!(task.input.input_levels[0].table_infos.len(), *x);
+                assert_eq!(task.input.input_levels[0].sstable_infos.len(), *x);
                 let select_sst = &task.input.input_levels[0]
-                    .table_infos
+                    .sstable_infos
                     .iter()
                     .map(|sst| sst.sst_id)
                     .collect_vec();
@@ -483,7 +483,7 @@ mod test {
                 assert_eq!(expect_task_sst_id_range[index], *select_sst);
 
                 assert_eq!(task.input.input_levels[1].level_idx, 4);
-                assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+                assert_eq!(task.input.input_levels[1].sstable_infos.len(), 0);
                 assert_eq!(task.input.target_level, 4);
                 assert!(matches!(
                     task.compaction_task_type,
@@ -534,9 +534,9 @@ mod test {
                 assert_eq!(task.input.input_levels.len(), 2);
                 assert_eq!(task.input.input_levels[0].level_idx, 4);
 
-                assert_eq!(task.input.input_levels[0].table_infos.len(), *x);
+                assert_eq!(task.input.input_levels[0].sstable_infos.len(), *x);
                 let select_sst = &task.input.input_levels[0]
-                    .table_infos
+                    .sstable_infos
                     .iter()
                     .map(|sst| sst.sst_id)
                     .collect_vec();
@@ -544,7 +544,7 @@ mod test {
                 assert_eq!(expect_task_sst_id_range[index], *select_sst);
 
                 assert_eq!(task.input.input_levels[1].level_idx, 4);
-                assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+                assert_eq!(task.input.input_levels[1].sstable_infos.len(), 0);
                 assert_eq!(task.input.target_level, 4);
                 assert!(matches!(
                     task.compaction_task_type,

@@ -102,7 +102,7 @@ pub async fn add_test_tables(
         compact_task
             .input_ssts
             .iter()
-            .map(|i| i.table_infos.len())
+            .map(|i| i.sstable_infos.len())
             .sum::<usize>(),
         3
     );
@@ -283,7 +283,7 @@ pub fn get_sorted_committed_object_ids(
         .levels
         .iter()
         .chain(levels.l0.sub_levels.iter())
-        .flat_map(|levels| levels.table_infos.iter().map(|info| info.object_id))
+        .flat_map(|levels| levels.sstable_infos.iter().map(|info| info.object_id))
         .sorted()
         .collect_vec()
 }

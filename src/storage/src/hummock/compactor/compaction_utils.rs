@@ -311,7 +311,7 @@ pub fn estimate_task_output_capacity(context: CompactorContext, task: &CompactTa
     let total_input_uncompressed_file_size = task
         .input_ssts
         .iter()
-        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|level| level.sstable_infos.iter())
         .map(|table| table.uncompressed_file_size)
         .sum::<u64>();
 
@@ -332,7 +332,7 @@ pub async fn check_compaction_result(
     let mut compact_table_ids = compact_task
         .input_ssts
         .iter()
-        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|level| level.sstable_infos.iter())
         .flat_map(|sst| sst.table_ids.clone())
         .collect_vec();
     compact_table_ids.sort();
@@ -349,24 +349,24 @@ pub async fn check_compaction_result(
 
     let mut table_iters = Vec::new();
     for level in &compact_task.input_ssts {
-        if level.table_infos.is_empty() {
+        if level.sstable_infos.is_empty() {
             continue;
         }
 
         // Do not need to filter the table because manager has done it.
         if level.level_type == PbLevelType::Nonoverlapping {
-            debug_assert!(can_concat(&level.table_infos));
+            debug_assert!(can_concat(&level.sstable_infos));
 
             table_iters.push(ConcatSstableIterator::new(
                 compact_task.existing_table_ids.clone(),
-                level.table_infos.clone(),
+                level.sstable_infos.clone(),
                 KeyRange::inf(),
                 context.sstable_store.clone(),
                 Arc::new(TaskProgress::default()),
                 context.storage_opts.compactor_iter_max_io_retry_times,
             ));
         } else {
-            for table_info in &level.table_infos {
+            for table_info in &level.sstable_infos {
                 table_iters.push(ConcatSstableIterator::new(
                     compact_task.existing_table_ids.clone(),
                     vec![table_info.clone()],
@@ -487,7 +487,7 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
     let sstable_infos = compact_task
         .input_ssts
         .iter()
-        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|level| level.sstable_infos.iter())
         .filter(|table_info| {
             let table_ids = &table_info.table_ids;
             table_ids
@@ -517,7 +517,7 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
     let has_tombstone = compact_task
         .input_ssts
         .iter()
-        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|level| level.sstable_infos.iter())
         .any(|sst| sst.range_tombstone_count > 0);
     let has_ttl = compact_task
         .table_options
@@ -527,14 +527,14 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
     let has_split_sst = compact_task
         .input_ssts
         .iter()
-        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|level| level.sstable_infos.iter())
         .any(|sst| sst.sst_id != sst.object_id);
 
     let compact_table_ids: HashSet<u32> = HashSet::from_iter(
         compact_task
             .input_ssts
             .iter()
-            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|level| level.sstable_infos.iter())
             .flat_map(|sst| sst.table_ids.clone()),
     );
     let single_table = compact_table_ids.len() == 1;
@@ -561,7 +561,7 @@ pub async fn generate_splits_for_task(
     let sstable_infos = compact_task
         .input_ssts
         .iter()
-        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|level| level.sstable_infos.iter())
         .filter(|table_info| {
             let table_ids = &table_info.table_ids;
             table_ids
@@ -599,13 +599,13 @@ pub fn metrics_report_for_task(compact_task: &CompactTask, context: &CompactorCo
         .input_ssts
         .iter()
         .filter(|level| level.level_idx != compact_task.target_level)
-        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|level| level.sstable_infos.iter())
         .collect_vec();
     let target_table_infos = compact_task
         .input_ssts
         .iter()
         .filter(|level| level.level_idx == compact_task.target_level)
-        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|level| level.sstable_infos.iter())
         .collect_vec();
     let select_size = select_table_infos
         .iter()
@@ -646,7 +646,7 @@ pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &Compacto
     let sstable_infos = compact_task
         .input_ssts
         .iter()
-        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|level| level.sstable_infos.iter())
         .filter(|table_info| {
             let table_ids = &table_info.table_ids;
             table_ids

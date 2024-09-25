@@ -143,7 +143,7 @@ pub mod tests {
             total_file_size: sst.sst_size,
             uncompressed_file_size: sst.uncompressed_file_size,
             sub_level_id: sst.sst_id,
-            table_infos: vec![sst],
+            sstable_infos: vec![sst],
             ..Default::default()
         });
     }
@@ -166,7 +166,7 @@ pub mod tests {
             level_type: LevelType::Nonoverlapping,
             total_file_size,
             sub_level_id,
-            table_infos,
+            sstable_infos: table_infos,
             uncompressed_file_size,
             ..Default::default()
         });
@@ -255,7 +255,7 @@ pub mod tests {
         Level {
             level_idx,
             level_type: LevelType::Nonoverlapping,
-            table_infos,
+            sstable_infos: table_infos,
             total_file_size,
             sub_level_id: 0,
             uncompressed_file_size,
@@ -281,7 +281,7 @@ pub mod tests {
                     total_file_size: table.sst_size,
                     uncompressed_file_size: table.uncompressed_file_size,
                     sub_level_id: idx as u64,
-                    table_infos: vec![table],
+                    sstable_infos: vec![table],
                     ..Default::default()
                 })
                 .collect_vec(),
@@ -306,7 +306,7 @@ pub mod tests {
                         .map(|sst| sst.uncompressed_file_size)
                         .sum::<u64>(),
                     sub_level_id: idx as u64,
-                    table_infos: table,
+                    sstable_infos: table,
                     ..Default::default()
                 })
                 .collect_vec(),
@@ -337,7 +337,7 @@ pub mod tests {
                     level_type: LevelType::Overlapping,
                     total_file_size: table.iter().map(|table| table.sst_size).sum::<u64>(),
                     sub_level_id: idx as u64,
-                    table_infos: table.clone(),
+                    sstable_infos: table.clone(),
                     uncompressed_file_size: table
                         .iter()
                         .map(|sst| sst.uncompressed_file_size)
@@ -359,7 +359,7 @@ pub mod tests {
 
     pub fn assert_compaction_task(compact_task: &CompactionTask, level_handlers: &[LevelHandler]) {
         for i in &compact_task.input.input_levels {
-            for t in &i.table_infos {
+            for t in &i.sstable_infos {
                 assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.sst_id));
             }
         }
