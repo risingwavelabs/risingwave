@@ -21,7 +21,6 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
-use mysql_async::Conn;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
