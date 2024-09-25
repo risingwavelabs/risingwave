@@ -11,7 +11,8 @@ repository = { workspace = true }
 [features]
 # some crates opt-in static linking, while some opt-in dynamic linking,
 # so they are two features :)
-rw-static-link = ["static-libz-sys", "static-lzma-sys", "static-openssl-sys", "static-sasl2-sys"]
+openssl-static-link = ["static-openssl-sys"]
+rw-static-link = ["static-libz-sys", "static-lzma-sys", "static-sasl2-sys"]
 rw-dynamic-link = ["dynamic-zstd-sys"]
 
 [dependencies]
