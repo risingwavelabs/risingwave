@@ -76,7 +76,7 @@ test!(q9);
 
 // Self made queries.
 test!(q101);
-// test!(q102);
+test!(q102);
 test!(q103);
 test!(q104);
 test!(q105);
