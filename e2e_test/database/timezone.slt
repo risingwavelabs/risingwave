@@ -72,7 +72,7 @@ set time zone 12.3;
 statement error
 set time zone interval '1' hour;
 
-# support a special case for connectors which would send when initializing the connection
+# support a special case for clients which would send when initializing the connection
 statement ok
 SET TIME ZONE INTERVAL '+00:00' HOUR TO MINUTE;
 

@@ -4292,7 +4292,7 @@ impl Parser<'_> {
                 preceded(
                     Keyword::INTERVAL,
                     cut_err(Self::parse_literal_interval.try_map(|e| match e {
-                        // support a special case for connectors which would send when initializing the connection
+                        // support a special case for clients which would send when initializing the connection
                         // like: SET TIME ZONE INTERVAL '+00:00' HOUR TO MINUTE;
                         Expr::Value(v) => match v {
                             Value::Interval { value, .. } => {
