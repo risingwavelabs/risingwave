@@ -21,7 +21,7 @@ use risingwave_frontend_macro::system_catalog;
 /// This view assume the constraint schema is the same as the table schema, since `pg_clatalog`.`pg_constraint` only support primrary key.
 #[system_catalog(
     view,
-    "information_schema.table_constrains",
+    "information_schema.table_constraints",
     "SELECT CURRENT_DATABASE() AS constraint_catalog,
             pg_namespace.nspname AS constraint_schema,
             pg_constraint.conname AS constraint_name,

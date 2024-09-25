@@ -3,7 +3,7 @@ SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 
 ----
 2147478647 columns 1 v
 2147478648 schemata 1 v
-2147478649 table_constrains 1 v
+2147478649 table_constraints 1 v
 2147478650 tables 1 v
 2147478651 views 1 v
 2147478652 pg_am 1 v
