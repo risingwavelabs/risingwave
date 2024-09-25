@@ -217,6 +217,7 @@ mod tests {
 
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::local_version::recent_versions::RecentVersions;
+    use crate::monitor::HummockStateStoreMetrics;
 
     const TEST_TABLE_ID1: TableId = TableId::new(233);
     const TEST_TABLE_ID2: TableId = TableId::new(234);
@@ -271,7 +272,11 @@ mod tests {
         let epoch4 = epoch3 + 1;
         let version1 = gen_pin_version(1, [(TEST_TABLE_ID1, epoch1)]);
         // with at most 2 historical versions
-        let recent_versions = RecentVersions::new(version1.clone(), 2);
+        let recent_versions = RecentVersions::new(
+            version1.clone(),
+            2,
+            HummockStateStoreMetrics::unused().into(),
+        );
         assert!(recent_versions.recent_versions.is_empty());
         assert!(recent_versions.is_latest_committed);
         assert_query_equal(
