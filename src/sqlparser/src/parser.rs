@@ -4286,9 +4286,30 @@ impl Parser<'_> {
     pub fn parse_set(&mut self) -> PResult<Statement> {
         let modifier = self.parse_one_of_keywords(&[Keyword::SESSION, Keyword::LOCAL]);
         if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
+            // add support for SET TIME ZONE INTERVAL '+00:00' HOUR TO MINUTE;
             let value = alt((
                 Keyword::DEFAULT.value(SetTimeZoneValue::Default),
                 Keyword::LOCAL.value(SetTimeZoneValue::Local),
+                preceded(
+                    Keyword::INTERVAL,
+                    cut_err(Self::parse_literal_interval.try_map(|e| match e {
+                        // support a special case for connectors which would send when initializing the connection
+                        // like: SET TIME ZONE INTERVAL '+00:00' HOUR TO MINUTE;
+                        Expr::Value(v) => match v {
+                            Value::Interval { value, .. } => {
+                                if value != "+00:00" {
+                                    return Err(StrError("only support \"+00:00\" ".into()));
+                                }
+                                Ok(SetTimeZoneValue::Ident(Ident::with_quote_unchecked(
+                                    '\'',
+                                    "UTC".to_string(),
+                                )))
+                            }
+                            _ => Err(StrError("expect Value::Interval".into())),
+                        },
+                        _ => Err(StrError("expect Expr::Value".into())),
+                    })),
+                ),
                 Self::parse_identifier.map(SetTimeZoneValue::Ident),
                 Self::parse_value.map(SetTimeZoneValue::Literal),
             ))
