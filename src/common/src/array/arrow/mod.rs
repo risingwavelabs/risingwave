@@ -16,6 +16,7 @@
 // and the default From/To implementations.
 mod arrow_48;
 mod arrow_52;
+mod arrow_53;
 // These mods import mods above and may override some methods.
 mod arrow_deltalake;
 mod arrow_iceberg;

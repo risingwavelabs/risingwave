@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
 use anyhow::{anyhow, Context};
@@ -241,6 +241,12 @@ impl Deref for BuildingFragment {
     }
 }
 
+impl DerefMut for BuildingFragment {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
 /// The ID of an edge in the fragment graph. For different types of edges, the ID will be in
 /// different variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
@@ -319,6 +325,16 @@ pub struct StreamFragmentGraph {
     /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
     /// variable. If not specified, all active worker slots will be used.
     specified_parallelism: Option<NonZeroUsize>,
+
+    /// Expected vnode count for the graph.
+    /// The scheduler on the meta service will use this as a hint to decide the vnode count
+    /// for each fragment.
+    ///
+    /// Note that the actual vnode count may be different from this value.
+    /// For example, a no-shuffle exchange between current fragment graph and an existing
+    /// upstream fragment graph requires two fragments to be in the same distribution,
+    /// thus the same vnode count.
+    expected_vnode_count: usize,
 }
 
 impl StreamFragmentGraph {
@@ -394,12 +410,15 @@ impl StreamFragmentGraph {
             None
         };
 
+        let expected_vnode_count = proto.expected_vnode_count as usize;
+
         Ok(Self {
             fragments,
             downstreams,
             upstreams,
             dependent_table_ids,
             specified_parallelism,
+            expected_vnode_count,
         })
     }
 
@@ -497,6 +516,11 @@ impl StreamFragmentGraph {
     /// Get the parallelism of the job, if specified by the user.
     pub fn specified_parallelism(&self) -> Option<NonZeroUsize> {
         self.specified_parallelism
+    }
+
+    /// Get the expected vnode count of the graph. See documentation of the field for more details.
+    pub fn expected_vnode_count(&self) -> usize {
+        self.expected_vnode_count
     }
 
     /// Get downstreams of a fragment.
@@ -1069,6 +1093,8 @@ impl CompleteStreamFragmentGraph {
         } = building_fragment;
 
         let distribution_type = distribution.to_distribution_type() as i32;
+        let vnode_count = distribution.vnode_count();
+
         let materialized_fragment_id =
             if inner.fragment_type_mask & FragmentTypeFlag::Mview as u32 != 0 {
                 table_id
@@ -1094,6 +1120,7 @@ impl CompleteStreamFragmentGraph {
             actors,
             state_table_ids,
             upstream_fragment_ids,
+            maybe_vnode_count: Some(vnode_count as _),
         }
     }
 
@@ -1147,5 +1174,17 @@ impl CompleteStreamFragmentGraph {
     /// Returns all building fragments in the graph.
     pub(super) fn building_fragments(&self) -> &HashMap<GlobalFragmentId, BuildingFragment> {
         &self.building_graph.fragments
+    }
+
+    /// Returns all building fragments in the graph, mutable.
+    pub(super) fn building_fragments_mut(
+        &mut self,
+    ) -> &mut HashMap<GlobalFragmentId, BuildingFragment> {
+        &mut self.building_graph.fragments
+    }
+
+    /// Get the expected vnode count of the building graph. See documentation of the field for more details.
+    pub(super) fn expected_vnode_count(&self) -> usize {
+        self.building_graph.expected_vnode_count()
     }
 }

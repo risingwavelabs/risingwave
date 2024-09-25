@@ -1631,13 +1631,12 @@ impl CatalogController {
 
                     let mut dispatcher = dispatcher.into_active_model();
 
+                    // Only hash dispatcher needs mapping
                     if dispatcher.dispatcher_type.as_ref() == &DispatcherType::Hash {
                         dispatcher.hash_mapping =
                             Set(upstream_dispatcher_mapping.as_ref().map(|m| {
                                 risingwave_meta_model_v2::ActorMapping::from(&m.to_protobuf())
                             }));
-                    } else {
-                        debug_assert!(upstream_dispatcher_mapping.is_none());
                     }
 
                     let mut new_downstream_actor_ids =

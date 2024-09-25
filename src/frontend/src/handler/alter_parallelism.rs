@@ -103,7 +103,8 @@ pub async fn handle_alter_parallelism(
         .filter(|w| w.is_streaming_schedulable())
         .map(|w| w.parallelism)
         .sum::<u32>();
-    // TODO(var-vnode): use vnode count from config
+    // TODO(var-vnode): get max parallelism from catalogs.
+    // Although the meta service will clamp the value for us, we should still check it here for better UI.
     let max_parallelism = VirtualNode::COUNT;
 
     let mut builder = RwPgResponse::builder(stmt_type);
