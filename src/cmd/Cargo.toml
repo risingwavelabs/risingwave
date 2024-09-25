@@ -10,7 +10,7 @@ repository = { workspace = true }
 [features]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
-openssl-static-link = ["workspace-config/openssl-static-link"]
+openssl-vendored = ["workspace-config/openssl-vendored"]
 default = ["rw-static-link"]
 
 [package.metadata.cargo-machete]
