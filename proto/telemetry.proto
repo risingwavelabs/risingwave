@@ -80,8 +80,6 @@ message ReportBase {
   // mark the report is a test message
   // if so, the backend do validations but not store it
   bool is_test = 7;
-  // cloud_uuid is the unique identifier of clusters hosted on RisingWave Cloud
-  optional string cloud_uuid = 8;
 }
 
 message MetaReport {
@@ -167,6 +165,4 @@ message EventMessage {
   string node = 9;
   // mark the event is a test message
   bool is_test = 11;
-  // cloud_uuid is the unique identifier of clusters hosted on RisingWave Cloud
-  optional string cloud_uuid = 12;
 }
