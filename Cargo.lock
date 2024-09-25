@@ -1549,12 +1549,11 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-kinesis"
-version = "1.3.0"
+version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbcd6e94c56f1b4881b405c0953a82d50e110311100cf2355e50fdab79d73f44"
+checksum = "83accbe1b477c73d9935f5024e87143822bfe9a2dc01c94643b8425258f1002e"
 dependencies = [
  "aws-credential-types",
- "aws-http",
  "aws-runtime",
  "aws-smithy-async",
  "aws-smithy-http",
@@ -1565,7 +1564,8 @@ dependencies = [
  "aws-types",
  "bytes",
  "http 0.2.9",
- "regex",
+ "once_cell",
+ "regex-lite",
  "tracing",
 ]
 
