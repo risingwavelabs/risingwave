@@ -681,9 +681,32 @@ profile:
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
+  
+  ci-backfill-3cn-1fe:
+    config-path: src/config/ci-longer-streaming-upload-timeout.toml
+    steps:
+      - use: minio
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+        meta-backend: etcd
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
 
   ci-3cn-1fe-with-monitoring:
-    config-path: src/config/ci.toml
+    config-path:  src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
       - use: etcd
@@ -708,7 +731,7 @@ profile:
       - use: grafana
 
   ci-3cn-1fe-with-minio-rate-limit:
-    config-path: src/config/ci.toml
+    config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
         api-requests-max: 30
@@ -733,7 +756,7 @@ profile:
       - use: compactor
 
   ci-3cn-1fe-with-monitoring-and-minio-rate-limit:
-    config-path: src/config/ci.toml
+    config-path: ci-3cn-1fe-with-monitoring-and-minio-rate-limit
     steps:
       - use: minio
         api-requests-max: 30
