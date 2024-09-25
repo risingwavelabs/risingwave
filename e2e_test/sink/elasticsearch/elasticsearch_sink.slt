@@ -51,7 +51,7 @@ CREATE SINK s8 from t7 WITH (
 );
 
 statement ok
-INSERT INTO test_route VALUES 
+INSERT INTO test_route VALUES
   (1,1,'test1'),
   (2,2,'test2'),
   (3,3,'test3');
