@@ -21,7 +21,7 @@ dnf install -y lld
 ld.lld --version
 
 echo "--- Install dependencies"
-dnf install -y perl-core wget python3 python3-devel cyrus-sasl-devel rsync openssl-devel
+dnf install -y perl-core wget python3 python3-devel cyrus-sasl-devel rsync openssl-devel openssl-static
 
 echo "--- Install java and maven"
 dnf install -y java-17-openjdk java-17-openjdk-devel
@@ -74,7 +74,7 @@ if [ "${ARCH}" == "aarch64" ]; then
 fi
 
 export OPENSSL_STATIC=1
-export OPENSSL_LIB_DIR="$(rpm -ql openssl-devel | grep libssl.so | xargs dirname)"
+export OPENSSL_LIB_DIR="$(rpm -ql openssl-static | grep libssl.a | xargs dirname)"
 export OPENSSL_INCLUDE_DIR="$(rpm -ql openssl-devel | grep openssl/ssl.h | xargs dirname)"
 echo "OPENSSL_STATIC: $OPENSSL_STATIC"
 echo "OPENSSL_LIB_DIR: $OPENSSL_LIB_DIR"
