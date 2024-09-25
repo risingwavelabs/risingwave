@@ -229,7 +229,9 @@ pub fn parse_schema_change(
                             let mut value_text = default_val_expr_str.as_string().unwrap();
                             // mysql timestamp is mapped to timestamptz, we use UTC timezone to
                             // interpret its value
-                            if data_type == DataType::Timestamptz {
+                            if data_type == DataType::Timestamptz
+                                && matches!(*connector_props, ConnectorProperties::MysqlCdc(_))
+                            {
                                 value_text = timestamp_val_to_timestamptz(value_text.as_str()).map_err(|err| {
                                     tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
                                     AccessError::TypeError {
