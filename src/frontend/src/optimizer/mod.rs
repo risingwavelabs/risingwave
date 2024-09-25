@@ -828,8 +828,8 @@ impl PlanRoot {
 
         let conflict_behavior = match on_conflict {
             Some(on_conflict) => match on_conflict {
-                OnConflict::OverWrite => ConflictBehavior::Overwrite,
-                OnConflict::Ignore => ConflictBehavior::IgnoreConflict,
+                OnConflict::DoUpdateFull => ConflictBehavior::Overwrite,
+                OnConflict::DoNothing => ConflictBehavior::IgnoreConflict,
                 OnConflict::DoUpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
             },
             None => match append_only {

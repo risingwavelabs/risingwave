@@ -2735,16 +2735,16 @@ impl fmt::Display for EmitMode {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum OnConflict {
-    OverWrite,
-    Ignore,
+    DoUpdateFull,
+    DoNothing,
     DoUpdateIfNotNull,
 }
 
 impl fmt::Display for OnConflict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            OnConflict::OverWrite => "OVERWRITE",
-            OnConflict::Ignore => "IGNORE",
+            OnConflict::DoUpdateFull => "OVERWRITE",
+            OnConflict::DoNothing => "IGNORE",
             OnConflict::DoUpdateIfNotNull => "DO UPDATE IF NOT NULL",
         })
     }

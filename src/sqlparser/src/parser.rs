@@ -2793,9 +2793,9 @@ impl Parser<'_> {
 
     pub fn parse_handle_conflict_behavior(&mut self) -> PResult<Option<OnConflict>> {
         if self.parse_keyword(Keyword::OVERWRITE) {
-            Ok(Some(OnConflict::OverWrite))
+            Ok(Some(OnConflict::DoUpdateFull))
         } else if self.parse_keyword(Keyword::IGNORE) {
-            Ok(Some(OnConflict::Ignore))
+            Ok(Some(OnConflict::DoNothing))
         } else if self.parse_keywords(&[
             Keyword::DO,
             Keyword::UPDATE,
