@@ -3,6 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+SKIP_RELEASE=${SKIP_RELEASE:-0}
 REPO_ROOT=${PWD}
 ARCH="$(uname -m)"
 
@@ -86,13 +87,17 @@ check_link_info production
 
 cd target/production && chmod +x risingwave risectl
 
-echo "--- Upload nightly binary to s3"
-if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
-  tar -czvf risingwave-"$(date '+%Y%m%d')"-"${ARCH}"-unknown-linux.tar.gz risingwave
-  aws s3 cp risingwave-"$(date '+%Y%m%d')"-"${ARCH}"-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
-elif [[ -n "${BINARY_NAME+x}" ]]; then
-  tar -czvf risingwave-"${BINARY_NAME}"-"${ARCH}"-unknown-linux.tar.gz risingwave
-  aws s3 cp risingwave-"${BINARY_NAME}"-"${ARCH}"-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
+if [ "${SKIP_RELEASE}" -ne 1 ]; then
+  echo "--- Upload nightly binary to s3"
+  if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
+    tar -czvf risingwave-"$(date '+%Y%m%d')"-"${ARCH}"-unknown-linux.tar.gz risingwave
+    aws s3 cp risingwave-"$(date '+%Y%m%d')"-"${ARCH}"-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
+  elif [[ -n "${BINARY_NAME+x}" ]]; then
+    tar -czvf risingwave-"${BINARY_NAME}"-"${ARCH}"-unknown-linux.tar.gz risingwave
+    aws s3 cp risingwave-"${BINARY_NAME}"-"${ARCH}"-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
+  fi
+else
+  echo "--- Skipped upload nightly binary"
 fi
 
 echo "--- Build connector node"
@@ -111,30 +116,34 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
   dnf install -y gh
 
-  echo "--- Release create"
-  set +e
-  response=$(gh release view -R risingwavelabs/risingwave "${BUILDKITE_TAG}" 2>&1)
-  set -euo pipefail
-  if [[ $response == *"not found"* ]]; then
-    echo "Tag ${BUILDKITE_TAG} does not exist. Creating release..."
-    gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
+  if [ "${SKIP_RELEASE}" -ne 1 ]; then
+    echo "--- Release create"
+    set +e
+    response=$(gh release view -R risingwavelabs/risingwave "${BUILDKITE_TAG}" 2>&1)
+    set -euo pipefail
+    if [[ $response == *"not found"* ]]; then
+      echo "Tag ${BUILDKITE_TAG} does not exist. Creating release..."
+      gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
+    else
+      echo "Tag ${BUILDKITE_TAG} already exists. Skipping release creation."
+    fi
+
+    echo "--- Release upload risingwave asset"
+    tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz risingwave
+    gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
+
+    echo "--- Release upload risingwave debug info"
+    tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz risingwave.dwp
+    gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz
+
+    echo "--- Release upload risectl asset"
+    tar -czvf risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz risectl
+    gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
+
+    echo "--- Release upload risingwave-all-in-one asset"
+    tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux-all-in-one.tar.gz risingwave libs
+    gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux-all-in-one.tar.gz
   else
-    echo "Tag ${BUILDKITE_TAG} already exists. Skipping release creation."
+    echo "--- Skipped upload RW assets"
   fi
-
-  echo "--- Release upload risingwave asset"
-  tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz risingwave
-  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
-
-  echo "--- Release upload risingwave debug info"
-  tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz risingwave.dwp
-  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz
-
-  echo "--- Release upload risectl asset"
-  tar -czvf risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz risectl
-  gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
-
-  echo "--- Release upload risingwave-all-in-one asset"
-  tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux-all-in-one.tar.gz risingwave libs
-  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux-all-in-one.tar.gz
 fi
