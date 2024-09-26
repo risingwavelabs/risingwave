@@ -554,8 +554,6 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 }
 
 pub struct CoordinatedRemoteSinkWriter {
-    #[expect(dead_code)]
-    properties: BTreeMap<String, String>,
     epoch: Option<u64>,
     batch_id: u64,
     stream_handle: SinkWriterStreamHandle<JniSinkWriterStreamRequest>,
@@ -570,7 +568,6 @@ impl CoordinatedRemoteSinkWriter {
             .await?;
 
         Ok(Self {
-            properties: param.properties,
             epoch: None,
             batch_id: 0,
             stream_handle,
