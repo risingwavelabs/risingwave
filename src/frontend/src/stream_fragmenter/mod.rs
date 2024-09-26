@@ -144,7 +144,7 @@ pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphPro
                 .map(|parallelism| Parallelism {
                     parallelism: parallelism.get(),
                 });
-        fragment_graph.expected_vnode_count = config.streaming_max_parallelism() as _;
+        fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
     }
 
     // Set timezone.

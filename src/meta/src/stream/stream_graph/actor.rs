@@ -666,7 +666,7 @@ impl ActorGraphBuilder {
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
     ) -> MetaResult<Self> {
-        let expected_vnode_count = fragment_graph.expected_vnode_count();
+        let expected_vnode_count = fragment_graph.max_parallelism();
         let existing_distributions = fragment_graph.existing_distribution();
 
         // Schedule the distribution of all building fragments.
