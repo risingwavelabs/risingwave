@@ -16,10 +16,11 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_connector::source::SplitMetaData;
 use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
-use risingwave_meta::stream::ThrottleConfig;
+use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta_model_v2::{SourceId, StreamingParallelism};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -419,5 +420,88 @@ impl StreamManagerService for StreamServiceImpl {
             .notify_local_subscribers(LocalNotification::AdhocRecovery)
             .await;
         Ok(Response::new(RecoverResponse {}))
+    }
+
+    async fn list_actor_splits(
+        &self,
+        request: Request<ListActorSplitsRequest>,
+    ) -> Result<Response<ListActorSplitsResponse>, Status> {
+        match &self.metadata_manager {
+            MetadataManager::V1(_) => Ok(Response::new(ListActorSplitsResponse {
+                actor_splits: vec![],
+            })),
+            MetadataManager::V2(mgr) => {
+                let SourceManagerRunningInfo {
+                    source_fragments,
+                    backfill_fragments,
+                    mut actor_splits,
+                } = self.stream_manager.source_manager.get_running_info().await;
+
+                let mut fragment_to_source = HashMap::new();
+
+                let fragment_sources =
+                    source_fragments
+                        .into_iter()
+                        .flat_map(|(source_id, fragment_ids)| {
+                            fragment_ids
+                                .into_iter()
+                                .map(|fragment_id| (fragment_id, source_id))
+                        })
+                        .chain(backfill_fragments.into_iter().flat_map(
+                            |(source_id, fragment_ids)| {
+                                fragment_ids.into_iter().flat_map(
+                                    |(fragment_id, upstream_fragment_id)| {
+                                        [
+                                            (fragment_id, source_id),
+                                            (upstream_fragment_id, source_id),
+                                        ]
+                                    },
+                                )
+                            },
+                        ))
+                        .collect_vec();
+
+                for (fragment_id, source_id) in fragment_sources {
+                    if let Some(prev_source_id) = fragment_to_source.insert(fragment_id, source_id)
+                    {
+                        tracing::warn!(
+                            "fragment {} has multiple sources: {} and {}",
+                            fragment_id,
+                            prev_source_id,
+                            source_id
+                        );
+                    }
+                }
+
+                let source_actors = mgr.catalog_controller.list_source_actors().await?;
+
+                let actor_splits = source_actors
+                    .into_iter()
+                    .flat_map(|(actor_id, fragment_id)| {
+                        let splits = actor_splits
+                            .remove(&(actor_id as _))
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|split| split.id())
+                            .collect_vec();
+
+                        splits
+                            .into_iter()
+                            .map(|split| list_actor_splits_response::ActorSplit {
+                                actor_id: actor_id as _,
+                                source_id: fragment_to_source
+                                    .get(&(fragment_id as _))
+                                    .copied()
+                                    .map(|id| id as _)
+                                    .unwrap_or_default(),
+                                fragment_id: fragment_id as _,
+                                split_id: split.to_string(),
+                            })
+                    })
+                    .collect_vec();
+
+                Ok(Response::new(ListActorSplitsResponse { actor_splits }))
+            }
+        }
     }
 }

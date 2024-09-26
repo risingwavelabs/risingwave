@@ -52,6 +52,7 @@ use risingwave_pb::hummock::{
     HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
+use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
@@ -970,6 +971,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_actor_states(&self) -> RpcResult<Vec<ActorState>> {
+        Ok(vec![])
+    }
+
+    async fn list_actor_splits(&self) -> RpcResult<Vec<ActorSplit>> {
         Ok(vec![])
     }
 

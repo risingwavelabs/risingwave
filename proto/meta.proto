@@ -261,6 +261,18 @@ message ListActorStatesResponse {
   repeated ActorState states = 1;
 }
 
+message ListActorSplitsRequest {}
+
+message ListActorSplitsResponse {
+  message ActorSplit {
+    uint32 actor_id = 1;
+    uint32 fragment_id = 2;
+    uint32 source_id = 3;
+    string split_id = 4;
+  }
+  repeated ActorSplit actor_splits = 1;
+}
+
 message ListObjectDependenciesRequest {}
 
 message ListObjectDependenciesResponse {
@@ -302,6 +314,7 @@ service StreamManagerService {
   rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
+  rpc ListActorSplits(ListActorSplitsRequest) returns (ListActorSplitsResponse);
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);

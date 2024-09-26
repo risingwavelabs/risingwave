@@ -47,14 +47,14 @@ use risingwave_pb::stream_plan::{
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
-    QuerySelect, RelationTrait, TransactionTrait, Value,
+    ColumnTrait, DbErr, EntityOrSelect, EntityTrait, JoinType, ModelTrait, PaginatorTrait,
+    QueryFilter, QuerySelect, RelationTrait, TransactionTrait, Value,
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
-    FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
+    FragmentDesc, PartialActorLocation, PartialActorSplits, PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
 use crate::model::{TableFragments, TableParallelism};
@@ -765,6 +765,20 @@ impl CatalogController {
         let actor_locations: Vec<PartialActorLocation> =
             Actor::find().into_partial_model().all(&inner.db).await?;
         Ok(actor_locations)
+    }
+
+    pub async fn list_source_actors(&self) -> MetaResult<Vec<(ActorId, FragmentId)>> {
+        let inner = self.inner.read().await;
+
+        let source_actors: Vec<(ActorId, FragmentId)> = Actor::find()
+            .select_only()
+            .filter(actor::Column::Splits.is_not_null())
+            .columns([actor::Column::ActorId, actor::Column::FragmentId])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(source_actors)
     }
 
     pub async fn list_fragment_descs(&self) -> MetaResult<Vec<FragmentDesc>> {
