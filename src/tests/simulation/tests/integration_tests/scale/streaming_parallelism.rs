@@ -190,13 +190,14 @@ async fn test_parallelism_exceed_virtual_node_max_alter_fixed() -> Result<()> {
         .await?
         .assert_result_eq("FIXED(1)");
 
-    session
+    let result = session
         .run(format!("alter table t set parallelism = {}", vnode_max + 1))
-        .await?;
-    session
-        .run("select parallelism from rw_streaming_parallelism where name = 't'")
-        .await?
-        .assert_result_eq(format!("FIXED({})", vnode_max));
+        .await;
+
+    // This should be rejected.
+    // TODO(var-vnode): showing that it's rejected for different vnode counts.
+    assert!(result.is_err(), "{result:?}");
+
     Ok(())
 }
 
