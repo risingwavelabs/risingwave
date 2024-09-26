@@ -31,11 +31,11 @@ def do_test(config, file_num, item_num_per_file, prefix):
     cur.execute(f'''CREATE sink test_file_sink_batching as select
         v1, v2 from t WITH (
         connector = 's3',
-        s3.region_name = '{config['S3_REGION']}',
-        s3.bucket_name = '{config['S3_BUCKET']}',
-        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
-        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
+        s3.region_name = 'custom',
+        s3.bucket_name = 'hummock001',
+        s3.credentials.access = 'hummockadmin',
+        s3.credentials.secret = 'hummockadmin',
+        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_sink/',
         s3.file_type = 'parquet',
         type = 'append-only',
@@ -51,11 +51,11 @@ def do_test(config, file_num, item_num_per_file, prefix):
         connector = 's3',
         match_pattern = 'test_sink/*.parquet',
         refresh.interval.sec = 1,
-        s3.region_name = '{config['S3_REGION']}',
-        s3.bucket_name = '{config['S3_BUCKET']}',
-        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
-        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
+        s3.region_name = 'custom',
+        s3.bucket_name = 'hummock001',
+        s3.credentials.access = 'hummockadmin',
+        s3.credentials.secret = 'hummockadmin',
+        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
     ) FORMAT PLAIN ENCODE PARQUET;''')
 
     cur.execute(f'''ALTER SINK test_file_sink_batching SET PARALLELISM = 2;''')
@@ -112,6 +112,9 @@ def do_test(config, file_num, item_num_per_file, prefix):
     _assert_greater('count(*)', result[0], 1)
     print('the rollover_seconds has reached, count(*) = ', result[0])
 
+    cur.execute(f'drop sink test_file_sink_batching;')
+    cur.execute(f'drop table t;')
+    cur.execute(f'drop table test_sink_table;')
     cur.close()
     conn.close()
 
@@ -121,10 +124,10 @@ if __name__ == "__main__":
 
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
-        config["S3_ENDPOINT"],
-        access_key=config["S3_ACCESS_KEY"],
-        secret_key=config["S3_SECRET_KEY"],
-        secure=True,
+        "127.0.0.1:9301",
+        "hummockadmin",
+        "hummockadmin",
+        secure=False,
     )
     run_id = str(random.randint(1000, 9999))
     _local = lambda idx: f'data_{idx}.parquet'
