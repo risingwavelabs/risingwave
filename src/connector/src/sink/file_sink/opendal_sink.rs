@@ -110,7 +110,11 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
                 "File sink only supports `PARQUET` encode at present."
             )));
         }
-        Ok(())
+
+        match self.op.list(&self.path).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(anyhow!(e).into()),
+        }
     }
 
     async fn new_log_sinker(
@@ -139,6 +143,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
         let engine_type = S::get_engine_type();
+
         Ok(Self {
             op,
             path,
