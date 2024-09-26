@@ -4195,7 +4195,7 @@ def section_sink_metrics(outer_panels):
                     [
                         panels.target(
                             f"{metric('log_store_latest_write_epoch')}",
-                            "latest write epoch @ {{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}}",
+                            "latest write epoch @ {{sink_id}} {{sink_name}} @ actor {{actor_id}}",
                         ),
                         panels.target(
                             f"{metric('log_store_latest_read_epoch')}",
@@ -4203,7 +4203,7 @@ def section_sink_metrics(outer_panels):
                         ),
                         panels.target(
                             f"{metric('kv_log_store_buffer_unconsumed_min_epoch')}",
-                            "Kv log store uncomsuned min epoch @ {{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}}",
+                            "Kv log store unconsumed min epoch @ {{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4212,9 +4212,9 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"(max({metric('log_store_latest_write_epoch')}) by (connector, sink_id, actor_id, sink_name)"
-                            + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, actor_id, sink_name)) / (2^16) / 1000",
-                            "Consume lag @ {{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}}",
+                            f"(max({metric('log_store_latest_write_epoch')}) by (sink_id, actor_id, sink_name)"
+                            + f"- max({metric('log_store_latest_read_epoch')}) by (sink_id, actor_id, sink_name)) / (2^16) / 1000",
+                            "{{sink_id}} {{sink_name}} @ actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4233,9 +4233,9 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"clamp_min((max({metric('log_store_first_write_epoch')}) by (connector, sink_id, actor_id, sink_name)"
-                            + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, actor_id, sink_name)) / (2^16) / 1000, 0)",
-                            "Consume persistent log lag @ {{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}}",
+                            f"clamp_min((max({metric('log_store_first_write_epoch')}) by (sink_id, actor_id, sink_name)"
+                            + f"- max({metric('log_store_latest_read_epoch')}) by (sink_id, actor_id, sink_name)) / (2^16) / 1000, 0)",
+                            "{{sink_id}} {{sink_name}} @ actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4265,19 +4265,12 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by (connector, sink_id, sink_name)",
-                            "sink={{sink_id}} {{sink_name}} ({{connector}})",
+                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by (sink_id, sink_name)",
+                            "{{sink_id}} {{sink_name}}",
                         ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Executor Log Store Write Throughput(rows)",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, actor_id, sink_name)",
-                            "{{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}} {{%s}}"
-                            % NODE_LABEL,
+                        panels.target_hidden(
+                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by ({NODE_LABEL}, sink_id, actor_id, sink_name)",
+                            "{{sink_id}} {{sink_name}} @ actor {{actor_id}} {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),

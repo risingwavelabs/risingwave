@@ -305,10 +305,12 @@ pub struct SinkMetrics {
     pub sink_commit_duration: LabelGuardedHistogramVec<4>,
     pub connector_sink_rows_received: LabelGuardedIntCounterVec<4>,
 
-    // Log store metrics
-    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<4>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<4>,
-    pub log_store_write_rows: LabelGuardedIntCounterVec<4>,
+    // Log store writer metrics
+    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<3>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<3>,
+    pub log_store_write_rows: LabelGuardedIntCounterVec<3>,
+
+    // Log store reader metrics
     pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
     pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
     pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
@@ -342,7 +344,7 @@ impl SinkMetrics {
         let log_store_first_write_epoch = register_guarded_int_gauge_vec_with_registry!(
             "log_store_first_write_epoch",
             "The first write epoch of log store",
-            &["actor_id", "connector", "sink_id", "sink_name"],
+            &["actor_id", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -350,7 +352,7 @@ impl SinkMetrics {
         let log_store_latest_write_epoch = register_guarded_int_gauge_vec_with_registry!(
             "log_store_latest_write_epoch",
             "The latest write epoch of log store",
-            &["actor_id", "connector", "sink_id", "sink_name"],
+            &["actor_id", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -358,7 +360,7 @@ impl SinkMetrics {
         let log_store_write_rows = register_guarded_int_counter_vec_with_registry!(
             "log_store_write_rows",
             "The write rate of rows",
-            &["actor_id", "connector", "sink_id", "sink_name"],
+            &["actor_id", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
