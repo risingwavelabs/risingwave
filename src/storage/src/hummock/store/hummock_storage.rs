@@ -660,7 +660,7 @@ impl StateStore for HummockStorage {
                 wait_for_update(
                     &self.version_update_notifier_tx,
                     |version| {
-                        if wait_version_id < version.id() {
+                        if wait_version_id > version.id() {
                             return Ok(false);
                         }
                         let committed_epoch = version
