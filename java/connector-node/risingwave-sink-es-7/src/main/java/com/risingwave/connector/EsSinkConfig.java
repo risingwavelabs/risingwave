@@ -53,6 +53,9 @@ public class EsSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "concurrent_requests")
     private Integer concurrentRequests;
 
+    @JsonProperty(value = "routing_column")
+    private String routingColumn;
+
     @JsonCreator
     public EsSinkConfig(@JsonProperty(value = "url") String url) {
         this.url = url;
@@ -140,6 +143,15 @@ public class EsSinkConfig extends CommonSinkConfig {
 
     public EsSinkConfig withConcurrentRequests(Integer concurrentRequests) {
         this.concurrentRequests = concurrentRequests;
+        return this;
+    }
+
+    public String getRoutingColumn() {
+        return routingColumn;
+    }
+
+    public EsSinkConfig withRoutingColumn(String routingColumn) {
+        this.routingColumn = routingColumn;
         return this;
     }
 }

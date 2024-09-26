@@ -88,6 +88,16 @@ public
 rw_catalog
 user_for_authorization
 
+query T rowsort
+select schema_name from information_schema.schemata;
+----
+information_schema
+myschema
+pg_catalog
+public
+rw_catalog
+user_for_authorization
+
 statement error Permission denied
 drop user user_for_authorization;
 

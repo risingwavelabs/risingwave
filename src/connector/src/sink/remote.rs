@@ -271,6 +271,7 @@ impl RemoteLogSinker {
                 ColumnDesc::unnamed(ColumnId::from(0), DataType::Varchar).to_protobuf(),
                 ColumnDesc::unnamed(ColumnId::from(1), DataType::Varchar).to_protobuf(),
                 ColumnDesc::unnamed(ColumnId::from(2), DataType::Jsonb).to_protobuf(),
+                ColumnDesc::unnamed(ColumnId::from(2), DataType::Varchar).to_protobuf(),
             ];
             Some(TableSchema {
                 columns,
