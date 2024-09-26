@@ -76,7 +76,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
     print('the rollover_seconds has not reached, count(*) = 0')
 
 
-    time.sleep(10)
+    time.sleep(11)
 
     cur.execute(f'select count(*) from test_sink_table')
     result = cur.fetchone()
@@ -133,5 +133,10 @@ if __name__ == "__main__":
     _local = lambda idx: f'data_{idx}.parquet'
     _s3 = lambda idx: f"{run_id}_data_{idx}.parquet"
 
-    # do test
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
+    
+    objects = client.list_objects("hummock001", prefix="test_sink/", recursive=True)
+    
+    for obj in objects:
+        client.remove_object("hummock001", obj.object_name)
+        print(f"Deleted: {obj.object_name}")
