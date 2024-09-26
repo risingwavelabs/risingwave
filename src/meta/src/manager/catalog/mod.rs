@@ -2632,7 +2632,7 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+    pub async fn alter_source(&self, source: Source) -> MetaResult<NotificationVersion> {
         let source_id = source.get_id();
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -4215,6 +4215,14 @@ impl CatalogManager {
                         referenced_object_id: *incoming_sinks,
                     });
                 }
+            }
+        }
+        for view in core.views.values() {
+            for referenced in &view.dependent_relations {
+                dependencies.push(PbObjectDependencies {
+                    object_id: view.id,
+                    referenced_object_id: *referenced,
+                });
             }
         }
         for sink in core.sinks.values() {

@@ -39,7 +39,7 @@ backend = "Mem"
 periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
 periodic_tombstone_reclaim_compaction_interval_sec = 600
-periodic_split_compact_group_interval_sec = 10
+periodic_scheduling_compaction_group_interval_sec = 10
 move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 cut_table_size_limit = 1073741824
@@ -173,8 +173,12 @@ reclaimers = 4
 recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
-compression = "none"
+compression = "None"
 recover_mode = "None"
+
+[storage.data_file_cache.runtime_config.Unified]
+worker_threads = 0
+max_blocking_threads = 0
 
 [storage.meta_file_cache]
 dir = ""
@@ -185,8 +189,12 @@ reclaimers = 4
 recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
-compression = "none"
+compression = "None"
 recover_mode = "None"
+
+[storage.meta_file_cache.runtime_config.Unified]
+worker_threads = 0
+max_blocking_threads = 0
 
 [storage.cache_refill]
 data_refill_levels = []
@@ -199,7 +207,7 @@ recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
 set_atomic_write_dir = false
-opendal_upload_concurrency = 8
+opendal_upload_concurrency = 256
 opendal_writer_abort_on_err = false
 upload_part_size = 16777216
 

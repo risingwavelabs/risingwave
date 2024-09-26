@@ -22,8 +22,6 @@ pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
 pub mod elasticsearch;
-pub mod elasticsearch_opensearch_common;
-pub mod elasticsearch_rust;
 pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
@@ -36,7 +34,6 @@ pub mod mock_coordination_client;
 pub mod mongodb;
 pub mod mqtt;
 pub mod nats;
-pub mod opensearch;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
@@ -108,8 +105,8 @@ macro_rules! for_all_sinks {
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Opensearch, $crate::sink::remote::OpenSearchSink },
-                { ElasticSearchRust, $crate::sink::elasticsearch_rust::ElasticSearchSink },
-                { OpensearchRust, $crate::sink::opensearch::OpenSearchSink },
+                { ElasticSearchRust, $crate::sink::elasticsearch::elasticsearch::ElasticSearchSink },
+                { OpensearchRust, $crate::sink::elasticsearch::opensearch::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
@@ -655,7 +652,7 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
-    #[error("Internal error: {0}")]
+    #[error(transparent)]
     Internal(
         #[from]
         #[backtrace]

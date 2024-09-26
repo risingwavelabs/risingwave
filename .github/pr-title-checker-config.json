@@ -4,10 +4,10 @@
     "color": "B60205"
   },
   "CHECKS": {
-    "regexp": "^(cherrypick|cherry pick|cherry-pick)?(| |:|: )+(feat|fix|test|refactor|chore|style|doc|perf|build|ci|revert|deprecate)(\\(.*\\))?:.*",
+    "regexp": "^(cherrypick|cherry pick|cherry-pick)?(| |:|: )+(feat|fix|test|refactor|chore|style|doc|perf|build|ci|revert|deprecate)(\\(.*\\))?:[^']*",
     "ignoreLabels" : ["ignore-title"]
   },
   "MESSAGES": {
-    "failure": "The PR title is invalid. Please refer to https://github.com/risingwavelabs/risingwave/blob/main/CONTRIBUTING.md#pull-request-title for the convention."
+    "failure": "The PR title is invalid. Please refer to https://github.com/risingwavelabs/risingwave/blob/main/CONTRIBUTING.md#pull-request-title and https://github.com/risingwavelabs/risingwave/blob/main/.github/pr-title-checker-config.json for the convention."
   }
 }

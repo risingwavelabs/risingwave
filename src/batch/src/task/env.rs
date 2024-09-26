@@ -22,9 +22,7 @@ use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::monitor::{
-    BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics, BatchTaskMetrics,
-};
+use crate::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics};
 use crate::task::BatchManager;
 
 /// The global environment for task execution.
@@ -45,9 +43,6 @@ pub struct BatchEnvironment {
 
     /// State store for table scanning.
     state_store: StateStoreImpl,
-
-    /// Task level metrics.
-    task_metrics: Arc<BatchTaskMetrics>,
 
     /// Executor level metrics.
     executor_metrics: Arc<BatchExecutorMetrics>,
@@ -75,7 +70,6 @@ impl BatchEnvironment {
         config: Arc<BatchConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
-        task_metrics: Arc<BatchTaskMetrics>,
         executor_metrics: Arc<BatchExecutorMetrics>,
         client_pool: ComputeClientPoolRef,
         dml_manager: DmlManagerRef,
@@ -89,7 +83,6 @@ impl BatchEnvironment {
             config,
             worker_id,
             state_store,
-            task_metrics,
             executor_metrics,
             client_pool,
             dml_manager,
@@ -118,11 +111,10 @@ impl BatchEnvironment {
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 MonitoredStorageMetrics::unused(),
             )),
-            task_metrics: Arc::new(BatchTaskMetrics::for_test()),
             client_pool: Arc::new(ComputeClientPool::for_test()),
             dml_manager: Arc::new(DmlManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
-            executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),
+            executor_metrics: BatchExecutorMetrics::for_test(),
             spill_metrics: BatchSpillMetrics::for_test(),
             metric_level: MetricLevel::Debug,
         }
@@ -150,10 +142,6 @@ impl BatchEnvironment {
 
     pub fn manager_metrics(&self) -> Arc<BatchManagerMetrics> {
         self.task_manager.metrics()
-    }
-
-    pub fn task_metrics(&self) -> Arc<BatchTaskMetrics> {
-        self.task_metrics.clone()
     }
 
     pub fn executor_metrics(&self) -> Arc<BatchExecutorMetrics> {

@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use arrow_array_iceberg::RecordBatch;
-use arrow_schema_iceberg::SchemaRef;
 use icelake::io_v2::{
     BaseFileWriter, BaseFileWriterBuilder, BaseFileWriterMetrics, CurrentFileStatus, FileWriter,
     FileWriterBuilder,
 };
 use icelake::Result;
+use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
+use risingwave_common::array::arrow::arrow_schema_iceberg::SchemaRef;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]

@@ -119,34 +119,8 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(self.hummock_manager.get_current_version().await)
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.hummock_manager
-            .pin_snapshot(self.context_id)
-            .await
-            .map_err(mock_err)
-    }
-
     async fn get_snapshot(&self) -> Result<HummockSnapshot> {
         Ok(self.hummock_manager.latest_snapshot())
-    }
-
-    async fn unpin_snapshot(&self) -> Result<()> {
-        self.hummock_manager
-            .unpin_snapshot(self.context_id)
-            .await
-            .map_err(mock_err)
-    }
-
-    async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()> {
-        self.hummock_manager
-            .unpin_snapshot_before(
-                self.context_id,
-                HummockSnapshot {
-                    committed_epoch: pinned_epochs,
-                },
-            )
-            .await
-            .map_err(mock_err)
     }
 
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {

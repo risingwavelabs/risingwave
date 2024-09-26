@@ -1,6 +1,6 @@
 ---
 x-image: &image
-  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.0.0-rc.1}
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.0.0}
 services:
   risingwave-standalone:
     <<: *image
@@ -177,7 +177,7 @@ services:
     restart: always
 
   message_queue:
-    image: "docker.vectorized.io/vectorized/redpanda:latest"
+    image: "redpandadata/redpanda:latest"
     command:
       - redpanda
       - start

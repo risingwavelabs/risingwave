@@ -186,9 +186,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
         null_safe: Vec<bool>,
         output_indices: Vec<usize>,
         state_table_l: StateTable<S>,
-        degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
-        degree_state_table_r: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
@@ -219,21 +217,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
         let state_pk_indices_l = input_l.pk_indices().to_vec();
         let state_pk_indices_r = input_r.pk_indices().to_vec();
 
-        let state_order_key_indices_l = state_table_l.pk_indices();
-        let state_order_key_indices_r = state_table_r.pk_indices();
-
         let state_join_key_indices_l = params_l.join_key_indices;
         let state_join_key_indices_r = params_r.join_key_indices;
-
-        let degree_join_key_indices_l = (0..state_join_key_indices_l.len()).collect_vec();
-        let degree_join_key_indices_r = (0..state_join_key_indices_r.len()).collect_vec();
-
-        let degree_pk_indices_l = (state_join_key_indices_l.len()
-            ..state_join_key_indices_l.len() + params_l.deduped_pk_indices.len())
-            .collect_vec();
-        let degree_pk_indices_r = (state_join_key_indices_r.len()
-            ..state_join_key_indices_r.len() + params_r.deduped_pk_indices.len())
-            .collect_vec();
 
         // If pk is contained in join key.
         let pk_contained_in_jk_l =
@@ -253,19 +238,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
 
         assert_eq!(join_key_data_types_l, join_key_data_types_r);
 
-        let degree_all_data_types_l = state_order_key_indices_l
-            .iter()
-            .map(|idx| state_all_data_types_l[*idx].clone())
-            .collect_vec();
-        let degree_all_data_types_r = state_order_key_indices_r
-            .iter()
-            .map(|idx| state_all_data_types_r[*idx].clone())
-            .collect_vec();
-
         let null_matched = K::Bitmap::from_bool_vec(null_safe);
-
-        let need_degree_table_l = false;
-        let need_degree_table_r = false;
 
         let (left_to_output, right_to_output) = {
             let (left_len, right_len) = if is_left_semi_or_anti(T) {
@@ -303,12 +276,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                     state_all_data_types_l.clone(),
                     state_table_l,
                     params_l.deduped_pk_indices,
-                    degree_join_key_indices_l,
-                    degree_all_data_types_l,
-                    degree_state_table_l,
-                    degree_pk_indices_l,
+                    None,
                     null_matched.clone(),
-                    need_degree_table_l,
                     pk_contained_in_jk_l,
                     inequal_key_idx_l,
                     metrics.clone(),
@@ -321,7 +290,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 i2o_mapping: left_to_output,
                 i2o_mapping_indexed: l2o_indexed,
                 start_pos: 0,
-                need_degree_table: need_degree_table_l,
+                need_degree_table: false,
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
@@ -331,12 +300,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                     state_all_data_types_r.clone(),
                     state_table_r,
                     params_r.deduped_pk_indices,
-                    degree_join_key_indices_r,
-                    degree_all_data_types_r,
-                    degree_state_table_r,
-                    degree_pk_indices_r,
+                    None,
                     null_matched,
-                    need_degree_table_r,
                     pk_contained_in_jk_r,
                     inequal_key_idx_r,
                     metrics.clone(),
@@ -349,7 +314,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,
-                need_degree_table: need_degree_table_r,
+                need_degree_table: false,
             },
             metrics,
             chunk_size,
@@ -675,7 +640,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                         {
                             yield chunk;
                         }
-                        side_update.ht.insert_row(key, row).await?;
+                        side_update.ht.insert_row(key, row)?;
                     }
                     Op::Delete | Op::UpdateDelete => {
                         if let Some(matched_row_by_inequality) = matched_row_by_inequality {
@@ -924,7 +889,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
 
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        side_update.ht.insert_row(key, row).await?;
+                        side_update.ht.insert_row(key, row)?;
                     }
                     Op::Delete | Op::UpdateDelete => {
                         side_update.ht.delete_row(key, row)?;
@@ -977,13 +942,13 @@ mod tests {
         order_types: &[OrderType],
         pk_indices: &[usize],
         table_id: u32,
-    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
+    ) -> StateTable<MemoryStateStore> {
         let column_descs = data_types
             .iter()
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table = StateTable::from_table_catalog(
+        StateTable::from_table_catalog(
             &gen_pbtable(
                 TableId::new(table_id),
                 column_descs,
@@ -994,33 +959,7 @@ mod tests {
             mem_state.clone(),
             None,
         )
-        .await;
-
-        // Create degree table
-        let mut degree_table_column_descs = vec![];
-        pk_indices.iter().enumerate().for_each(|(pk_id, idx)| {
-            degree_table_column_descs.push(ColumnDesc::unnamed(
-                ColumnId::new(pk_id as i32),
-                data_types[*idx].clone(),
-            ))
-        });
-        degree_table_column_descs.push(ColumnDesc::unnamed(
-            ColumnId::new(pk_indices.len() as i32),
-            DataType::Int64,
-        ));
-        let degree_state_table = StateTable::from_table_catalog(
-            &gen_pbtable(
-                TableId::new(table_id + 1),
-                degree_table_column_descs,
-                order_types.to_vec(),
-                pk_indices.to_vec(),
-                0,
-            ),
-            mem_state,
-            None,
-        )
-        .await;
-        (state_table, degree_state_table)
+        .await
     }
 
     async fn create_executor<const T: AsOfJoinTypePrimitive>(
@@ -1042,7 +981,7 @@ mod tests {
 
         let mem_state = MemoryStateStore::new();
 
-        let (state_l, degree_state_l) = create_in_memory_state_table(
+        let state_l = create_in_memory_state_table(
             mem_state.clone(),
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
@@ -1055,7 +994,7 @@ mod tests {
         )
         .await;
 
-        let (state_r, degree_state_r) = create_in_memory_state_table(
+        let state_r = create_in_memory_state_table(
             mem_state,
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
@@ -1064,7 +1003,7 @@ mod tests {
                 OrderType::ascending(),
             ],
             &[0, asof_desc.right_idx, 1],
-            2,
+            1,
         )
         .await;
 
@@ -1089,9 +1028,7 @@ mod tests {
             vec![false],
             (0..schema_len).collect_vec(),
             state_l,
-            degree_state_l,
             state_r,
-            degree_state_r,
             Arc::new(AtomicU64::new(0)),
             Arc::new(StreamingMetrics::unused()),
             1024,

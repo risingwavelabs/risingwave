@@ -16,11 +16,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
-use arrow_schema_iceberg::DataType as ArrowDataType;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId,
@@ -277,15 +277,19 @@ pub async fn gen_sink_plan(
             }
         }
 
-        let user_defined_primary_key_table =
-            !(table_catalog.append_only || table_catalog.row_id_index.is_some());
+        let user_defined_primary_key_table = table_catalog.row_id_index.is_none();
+        let sink_is_append_only = sink_catalog.sink_type == SinkType::AppendOnly
+            || sink_catalog.sink_type == SinkType::ForceAppendOnly;
 
-        if !(user_defined_primary_key_table
-            || sink_catalog.sink_type == SinkType::AppendOnly
-            || sink_catalog.sink_type == SinkType::ForceAppendOnly)
-        {
+        if !user_defined_primary_key_table && !sink_is_append_only {
             return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a table without primary keys.".to_string(),
+                "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
+            )));
+        }
+
+        if table_catalog.append_only && !sink_is_append_only {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
             )));
         }
 

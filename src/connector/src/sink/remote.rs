@@ -57,7 +57,9 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::elasticsearch::{is_es_sink, StreamChunkConverter, ES_OPTION_DELIMITER};
+use super::elasticsearch::elasticsearch_converter::{
+    is_es_sink, StreamChunkConverter, ES_OPTION_DELIMITER,
+};
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
@@ -70,8 +72,8 @@ use crate::sink::{
 macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
-            { ElasticSearch, ElasticSearchSink, "elasticsearch" }
-            { Opensearch, OpenSearchSink, "opensearch"}
+            { ElasticSearch, ElasticSearchSink, "elasticsearch_v1" }
+            { Opensearch, OpenSearchSink, "opensearch_v1"}
             { Cassandra, CassandraSink, "cassandra" }
             { Jdbc, JdbcSink, "jdbc" }
             { DeltaLake, DeltaLakeSink, "deltalake" }
@@ -271,6 +273,7 @@ impl RemoteLogSinker {
                 ColumnDesc::unnamed(ColumnId::from(0), DataType::Varchar).to_protobuf(),
                 ColumnDesc::unnamed(ColumnId::from(1), DataType::Varchar).to_protobuf(),
                 ColumnDesc::unnamed(ColumnId::from(2), DataType::Jsonb).to_protobuf(),
+                ColumnDesc::unnamed(ColumnId::from(2), DataType::Varchar).to_protobuf(),
             ];
             Some(TableSchema {
                 columns,

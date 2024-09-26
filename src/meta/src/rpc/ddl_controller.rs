@@ -23,7 +23,7 @@ use itertools::Itertools;
 use rand::Rng;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::{ActorMapping, VirtualNode};
+use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::secret::SecretEncryption;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -51,7 +51,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
+    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType, WaitVersion,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
@@ -131,7 +131,7 @@ pub enum DdlCommand {
     DropDatabase(DatabaseId),
     CreateSchema(Schema),
     DropSchema(SchemaId),
-    CreateSource(Source),
+    CreateSourceWithoutStreamingJob(Source),
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
     DropFunction(FunctionId),
@@ -278,7 +278,9 @@ impl DdlController {
     /// has been interrupted during executing, the request will be cancelled by tonic. Since we have
     /// a lot of logic for revert, status management, notification and so on, ensuring consistency
     /// would be a huge hassle and pain if we don't spawn here.
-    pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
+    ///
+    /// Though returning `Option`, it's always `Some`, to simplify the handling logic
+    pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
         }
@@ -289,7 +291,9 @@ impl DdlController {
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
                 DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).await,
                 DdlCommand::DropSchema(schema_id) => ctrl.drop_schema(schema_id).await,
-                DdlCommand::CreateSource(source) => ctrl.create_source(source).await,
+                DdlCommand::CreateSourceWithoutStreamingJob(source) => {
+                    ctrl.create_source_without_streaming_job(source).await
+                }
                 DdlCommand::DropSource(source_id, drop_mode) => {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
@@ -340,7 +344,7 @@ impl DdlController {
                 }
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
                 DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
-                DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
+                DdlCommand::AlterSourceColumn(source) => ctrl.alter_source(source).await,
                 DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
                 DdlCommand::CreateSubscription(subscription) => {
                     ctrl.create_subscription(subscription).await
@@ -351,7 +355,16 @@ impl DdlController {
             }
         }
         .in_current_span();
-        tokio::spawn(fut).await.unwrap()
+        let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
+        Ok(Some(WaitVersion {
+            catalog_version: notification_version,
+            hummock_version_id: self
+                .barrier_manager
+                .hummock_manager()
+                .get_version_id()
+                .await
+                .to_u64(),
+        }))
     }
 
     pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
@@ -458,7 +471,11 @@ impl DdlController {
         }
     }
 
-    async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
+    /// Shared source is handled in [`Self::create_streaming_job`]
+    async fn create_source_without_streaming_job(
+        &self,
+        mut source: Source,
+    ) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 source.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
@@ -523,11 +540,12 @@ impl DdlController {
         Ok(version)
     }
 
-    // Maybe we can unify `alter_source_column` and `alter_source_name`.
-    async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+    /// This replaces the source in the catalog.
+    /// Note: `StreamSourceInfo` in downstream MVs' `SourceExecutor`s are not updated.
+    async fn alter_source(&self, source: Source) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.alter_source_column(source).await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.alter_source_column(source).await,
+            MetadataManager::V1(mgr) => mgr.catalog_manager.alter_source(source).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.alter_source(source).await,
         }
     }
 
@@ -1566,6 +1584,7 @@ impl DdlController {
         let specified_parallelism = fragment_graph.specified_parallelism();
         let internal_tables = fragment_graph.internal_tables();
         let expr_context = stream_ctx.to_expr_context();
+        let max_parallelism = NonZeroUsize::new(fragment_graph.expected_vnode_count()).unwrap();
 
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
@@ -1613,16 +1632,11 @@ impl DdlController {
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
         let parallelism = self.resolve_stream_parallelism(specified_parallelism, &cluster_info)?;
-
-        // TODO(var-vnode): use vnode count from config
-        const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
-
-        let parallelism_limited = parallelism > MAX_PARALLELISM;
+        let parallelism_limited = parallelism > max_parallelism;
         if parallelism_limited {
-            tracing::warn!("Too many parallelism, use {} instead", MAX_PARALLELISM);
+            tracing::warn!("Too many parallelism, use {} instead", max_parallelism);
         }
-
-        let parallelism = parallelism.min(MAX_PARALLELISM);
+        let parallelism = parallelism.min(max_parallelism);
 
         let actor_graph_builder =
             ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
@@ -1646,7 +1660,7 @@ impl DdlController {
         // Otherwise, it defaults to FIXED based on deduction.
         let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
             (None, DefaultParallelism::Full) if parallelism_limited => {
-                tracing::warn!("Parallelism limited to {MAX_PARALLELISM} in ADAPTIVE mode");
+                tracing::warn!("Parallelism limited to {max_parallelism} in ADAPTIVE mode");
                 TableParallelism::Adaptive
             }
             (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
@@ -1660,6 +1674,10 @@ impl DdlController {
             stream_ctx.clone(),
             table_parallelism,
         );
+
+        if let Some(mview_fragment) = table_fragments.mview_fragment() {
+            stream_job.set_table_vnode_count(mview_fragment.vnode_count());
+        }
 
         let replace_table_job_info = match affected_table_replace_info {
             Some((streaming_job, fragment_graph)) => {
@@ -2141,6 +2159,9 @@ impl DdlController {
             stream_ctx,
             old_table_fragments.assigned_parallelism,
         );
+
+        // Note: no need to set `vnode_count` as it's already set by the frontend.
+        // See `get_replace_table_plan`.
 
         let ctx = ReplaceTableContext {
             old_table_fragments,

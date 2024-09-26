@@ -309,9 +309,9 @@ impl HummockStorage {
         epoch: u64,
         table_id: TableId,
     ) -> StorageResult<PinnedVersion> {
-        let fetch = async {
-            let pb_version = self
-                .hummock_meta_client
+        let meta_client = self.hummock_meta_client.clone();
+        let fetch = async move {
+            let pb_version = meta_client
                 .get_version_by_epoch(epoch, table_id.table_id())
                 .await
                 .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
@@ -322,7 +322,7 @@ impl HummockStorage {
         };
         let version = self
             .simple_time_travel_version_cache
-            .get_or_insert(epoch, fetch)
+            .get_or_insert(table_id.table_id, epoch, fetch)
             .await?;
         Ok(version)
     }
@@ -406,8 +406,10 @@ impl HummockStorage {
         let ret = if let Some(info) = info
             && epoch <= info.committed_epoch
         {
-            if epoch < info.safe_epoch {
-                return Err(HummockError::expired_epoch(table_id, info.safe_epoch, epoch).into());
+            if epoch < info.committed_epoch {
+                return Err(
+                    HummockError::expired_epoch(table_id, info.committed_epoch, epoch).into(),
+                );
             }
             // read committed_version directly without build snapshot
             get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)

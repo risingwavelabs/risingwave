@@ -41,7 +41,6 @@ use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -55,7 +54,6 @@ use self::command::CommandContext;
 use self::notifier::Notifier;
 use crate::barrier::creating_job::CreatingStreamingJobControl;
 use crate::barrier::info::InflightGraphInfo;
-use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::state::BarrierManagerState;
@@ -1076,16 +1074,9 @@ impl GlobalBarrierManager {
         };
 
         // Notify about the injection.
-        let prev_paused_reason = self.state.paused_reason();
         let curr_paused_reason = command_ctx.next_paused_reason();
 
-        let info = BarrierInfo {
-            prev_epoch: prev_epoch.value(),
-            curr_epoch: curr_epoch.value(),
-            prev_paused_reason,
-            curr_paused_reason,
-        };
-        notifiers.iter_mut().for_each(|n| n.notify_started(info));
+        notifiers.iter_mut().for_each(|n| n.notify_started());
 
         // Update the paused state after the barrier is injected.
         self.state.set_paused_reason(curr_paused_reason);
@@ -1273,13 +1264,6 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<Option<HummockVersionStats>> {
         {
             {
-                // We must ensure all epochs are committed in ascending order,
-                // because the storage engine will query from new to old in the order in which
-                // the L0 layer files are generated.
-                // See https://github.com/risingwave-labs/risingwave/issues/1251
-                // hummock_manager commit epoch.
-                let mut new_snapshot = None;
-
                 match &command_ctx.kind {
                     BarrierKind::Initial => {}
                     BarrierKind::Checkpoint(epochs) => {
@@ -1290,7 +1274,7 @@ impl GlobalBarrierManagerContext {
                             backfill_pinned_log_epoch,
                             tables_to_commit,
                         );
-                        new_snapshot = self.hummock_manager.commit_epoch(commit_info).await?;
+                        self.hummock_manager.commit_epoch(commit_info).await?;
                     }
                     BarrierKind::Barrier => {
                         // if we collect a barrier(checkpoint = false),
@@ -1301,16 +1285,6 @@ impl GlobalBarrierManagerContext {
                 }
 
                 command_ctx.post_collect().await?;
-                // Notify new snapshot after fragment_mapping changes have been notified in
-                // `post_collect`.
-                if let Some(snapshot) = new_snapshot {
-                    self.env
-                        .notification_manager()
-                        .notify_frontend_without_version(
-                            Operation::Update, // Frontends don't care about operation.
-                            Info::HummockSnapshot(snapshot),
-                        );
-                }
                 Ok(if command_ctx.kind.is_checkpoint() {
                     Some(self.hummock_manager.get_version_stats().await)
                 } else {
@@ -1318,6 +1292,10 @@ impl GlobalBarrierManagerContext {
                 })
             }
         }
+    }
+
+    pub fn hummock_manager(&self) -> &HummockManagerRef {
+        &self.hummock_manager
     }
 }
 

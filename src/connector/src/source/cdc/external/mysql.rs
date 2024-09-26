@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Context};
+use chrono::{DateTime, NaiveDateTime};
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -25,15 +26,16 @@ use mysql_common::value::Value;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, OFFSET_COLUMN_NAME};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Decimal, ScalarImpl, F32};
 use risingwave_common::util::iter_util::ZipEqFast;
-use sea_schema::mysql::def::{ColumnKey, ColumnType};
+use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
 use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
 use serde_derive::{Deserialize, Serialize};
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::MySqlPool;
+use thiserror_ext::AsReport;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::cdc::external::{
@@ -112,11 +114,56 @@ impl MySqlExternalTable {
             let data_type = mysql_type_to_rw_type(&col.col_type)?;
             // column name in mysql is case-insensitive, convert to lowercase
             let col_name = col.name.to_lowercase();
-            column_descs.push(ColumnDesc::named(
-                col_name.clone(),
-                ColumnId::placeholder(),
-                data_type,
-            ));
+            let column_desc = if let Some(default) = col.default {
+                let snapshot_value = match default {
+                    ColumnDefault::Null => None,
+                    ColumnDefault::Int(val) => match data_type {
+                        DataType::Int16 => Some(ScalarImpl::Int16(val as _)),
+                        DataType::Int32 => Some(ScalarImpl::Int32(val as _)),
+                        DataType::Int64 => Some(ScalarImpl::Int64(val)),
+                        _ => Err(anyhow!("unexpected default value type for integer column"))?,
+                    },
+                    ColumnDefault::Real(val) => match data_type {
+                        DataType::Float32 => Some(ScalarImpl::Float32(F32::from(val as f32))),
+                        DataType::Float64 => Some(ScalarImpl::Float64(val.into())),
+                        DataType::Decimal => Some(ScalarImpl::Decimal(
+                            Decimal::try_from(val).map_err(|err| {
+                                anyhow!("failed to convert default value to decimal").context(err)
+                            })?,
+                        )),
+                        _ => Err(anyhow!("unexpected default value type for float column"))?,
+                    },
+                    ColumnDefault::String(mut val) => {
+                        // mysql timestamp is mapped to timestamptz, we use UTC timezone to
+                        // interpret its value
+                        if data_type == DataType::Timestamptz {
+                            val = timestamp_val_to_timestamptz(val.as_str())?;
+                        }
+                        match ScalarImpl::from_text(val.as_str(), &data_type) {
+                            Ok(scalar) => Some(scalar),
+                            Err(err) => {
+                                tracing::warn!(error=%err.as_report(), "failed to parse mysql default value expression, only constant is supported");
+                                None
+                            }
+                        }
+                    }
+                    ColumnDefault::CurrentTimestamp | ColumnDefault::CustomExpr(_) => {
+                        tracing::warn!("MySQL CURRENT_TIMESTAMP and custom expression default value not supported");
+                        None
+                    }
+                };
+
+                ColumnDesc::named_with_default_value(
+                    col_name.clone(),
+                    ColumnId::placeholder(),
+                    data_type.clone(),
+                    snapshot_value,
+                )
+            } else {
+                ColumnDesc::named(col_name.clone(), ColumnId::placeholder(), data_type)
+            };
+
+            column_descs.push(column_desc);
             if matches!(col.key, ColumnKey::Primary) {
                 pk_names.push(col_name);
             }
@@ -141,6 +188,17 @@ impl MySqlExternalTable {
     }
 }
 
+pub fn timestamp_val_to_timestamptz(value_text: &str) -> ConnectorResult<String> {
+    let format = "%Y-%m-%d %H:%M:%S";
+    let naive_datetime = NaiveDateTime::parse_from_str(value_text, format)
+        .map_err(|err| anyhow!("failed to parse mysql timestamp value").context(err))?;
+    let postgres_timestamptz: DateTime<chrono::Utc> =
+        DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive_datetime, chrono::Utc);
+    Ok(postgres_timestamptz
+        .format("%Y-%m-%d %H:%M:%S%:z")
+        .to_string())
+}
+
 pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
     macro_rules! column_type {
         ($($name:literal => $variant:ident),* $(,)?) => {
@@ -149,6 +207,11 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
                     $name => Some(ColumnType::$variant(Default::default())),
                 )*
                 "json" => Some(ColumnType::Json),
+                "date" => Some(ColumnType::Date),
+                "bool" => Some(ColumnType::Bool),
+                "tinyblob" => Some(ColumnType::TinyBlob),
+                "mediumblob" => Some(ColumnType::MediumBlob),
+                "longblob" => Some(ColumnType::LongBlob),
                 _ => None,
             }
         };
