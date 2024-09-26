@@ -682,7 +682,7 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-backfill-3cn-1fe:
+  ci-backfill-backfill-3cn-1fe:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
@@ -705,8 +705,8 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-3cn-1fe-with-monitoring:
-    config-path:  src/config/ci-longer-streaming-upload-timeout.toml
+  ci-backfill-3cn-1fe-with-monitoring:
+    config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
       - use: etcd
@@ -730,7 +730,7 @@ profile:
       - use: prometheus
       - use: grafana
 
-  ci-3cn-1fe-with-minio-rate-limit:
+  ci-backfill-3cn-1fe-with-minio-rate-limit:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
@@ -755,8 +755,8 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-3cn-1fe-with-monitoring-and-minio-rate-limit:
-    config-path: ci-3cn-1fe-with-monitoring-and-minio-rate-limit
+  ci-backfill-3cn-1fe-with-monitoring-and-minio-rate-limit:
+    config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
         api-requests-max: 30

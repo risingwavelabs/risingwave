@@ -28,11 +28,11 @@ echo "--- Configuring cluster profiles"
 if [[ -n "${BUILDKITE:-}" ]]; then
   echo "Running in buildkite"
   RUNTIME_CLUSTER_PROFILE='ci-backfill-3cn-1fe'
-  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-3cn-1fe-with-minio-rate-limit'
+  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-minio-rate-limit'
 else
   echo "Running locally"
-  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
-  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring-and-minio-rate-limit'
+  RUNTIME_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-monitoring'
+  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-monitoring-and-minio-rate-limit'
 fi
 export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 
