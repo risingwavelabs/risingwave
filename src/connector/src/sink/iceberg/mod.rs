@@ -787,11 +787,11 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         tracing::info!("Starting iceberg commit in epoch {epoch}.");
-
         let write_results = metadata
             .iter()
             .map(|meta| WriteResult::try_from(meta, &self.partition_type))
             .collect::<Result<Vec<WriteResult>>>()?;
+
         if write_results.is_empty()
             || write_results
                 .iter()

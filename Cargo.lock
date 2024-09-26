@@ -6032,7 +6032,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=84bf51c9d0d5886e4ee306ca4f383f029e1767a4#84bf51c9d0d5886e4ee306ca4f383f029e1767a4"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=8e6e80a388edb23bbf34957c301dc08a4e8b495c#8e6e80a388edb23bbf34957c301dc08a4e8b495c"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6076,7 +6076,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=84bf51c9d0d5886e4ee306ca4f383f029e1767a4#84bf51c9d0d5886e4ee306ca4f383f029e1767a4"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=8e6e80a388edb23bbf34957c301dc08a4e8b495c#8e6e80a388edb23bbf34957c301dc08a4e8b495c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6093,7 +6093,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=84bf51c9d0d5886e4ee306ca4f383f029e1767a4#84bf51c9d0d5886e4ee306ca4f383f029e1767a4"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=8e6e80a388edb23bbf34957c301dc08a4e8b495c#8e6e80a388edb23bbf34957c301dc08a4e8b495c"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6106,6 +6106,19 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tokio",
+ "typed-builder 0.20.0",
+ "uuid",
+]
+
+[[package]]
+name = "iceberg-catalog-sql"
+version = "0.3.0"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=8e6e80a388edb23bbf34957c301dc08a4e8b495c#8e6e80a388edb23bbf34957c301dc08a4e8b495c"
+dependencies = [
+ "async-trait",
+ "iceberg",
+ "serde_json",
+ "sqlx",
  "typed-builder 0.20.0",
  "uuid",
 ]
@@ -10668,6 +10681,7 @@ dependencies = [
  "iceberg",
  "iceberg-catalog-glue",
  "iceberg-catalog-rest",
+ "iceberg-catalog-sql",
  "icelake",
  "indexmap 2.2.6",
  "itertools 0.12.1",

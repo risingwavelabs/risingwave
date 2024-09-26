@@ -210,7 +210,6 @@ impl IcebergSplitEnumerator {
         }
 
         let table = self.config.load_table_v2().await?;
-
         let current_snapshot = table.metadata().current_snapshot();
         if current_snapshot.is_none() {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
@@ -258,7 +257,6 @@ impl IcebergSplitEnumerator {
                 current_snapshot.unwrap().snapshot_id()
             }
         };
-
         let require_names = Self::get_require_field_names(&table, snapshot_id, &schema).await?;
 
         let mut position_delete_files = vec![];
