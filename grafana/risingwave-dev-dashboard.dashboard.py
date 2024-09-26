@@ -1037,16 +1037,6 @@ def section_streaming_cdc(outer_panels):
             "Streaming CDC",
             [
                 panels.timeseries_rowsps(
-                    "CDC Source Throughput",
-                    "The rows received by the CDC source",
-                    [
-                        panels.target(
-                            f"rate({metric('cdc_source_rows_received')}[$__rate_interval])",
-                            "source={{source_type}} @ {{source_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
                     "CDC Backfill Snapshot Read Throughput(rows)",
                     "Total number of rows that have been read from the cdc backfill snapshot",
                     [

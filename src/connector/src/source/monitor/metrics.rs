@@ -68,8 +68,6 @@ pub struct SourceMetrics {
     pub latest_message_id: LabelGuardedIntGaugeVec<3>,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
 
-    pub cdc_source_rows_received: LabelGuardedIntCounterVec<2>,
-
     pub direct_cdc_event_lag_latency: LabelGuardedHistogramVec<1>,
 }
 
@@ -112,14 +110,6 @@ impl SourceMetrics {
         )
         .unwrap();
 
-        let cdc_source_rows_received = register_guarded_int_counter_vec_with_registry!(
-            "cdc_source_rows_received",
-            "Number of rows received by CDC source",
-            &["source_type", "source_id"],
-            registry
-        )
-        .unwrap();
-
         let opts = histogram_opts!(
             "source_cdc_event_lag_duration_milliseconds",
             "source_cdc_lag_latency",
@@ -134,7 +124,6 @@ impl SourceMetrics {
             partition_input_bytes,
             latest_message_id,
             rdkafka_native_metric,
-            cdc_source_rows_received,
             direct_cdc_event_lag_latency,
         }
     }
