@@ -133,12 +133,7 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
             self.engine_type.clone(),
             self.batching_strategy.clone(),
         )?;
-        let no_batching_strategy_defined = writer.no_batching_strategy_defined();
-        Ok(BatchingLogSinkerOf::new(
-            writer,
-            no_batching_strategy_defined,
-            writer_param.sink_metrics,
-        ))
+        Ok(BatchingLogSinkerOf::new(writer))
     }
 }
 
@@ -150,7 +145,12 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let config = S::from_btreemap(param.properties)?;
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
-        let batching_strategy = S::get_batching_strategy(config.clone());
+        let mut batching_strategy = S::get_batching_strategy(config.clone());
+        // If no batching strategy is defined, the default batching strategy will be used, which writes a file every 10 seconds.
+        if batching_strategy.max_row_count.is_none() && batching_strategy.rollover_seconds.is_none()
+        {
+            batching_strategy.rollover_seconds = Some(10);
+        }
         let engine_type = S::get_engine_type();
         Ok(Self {
             op,
@@ -179,7 +179,6 @@ pub struct OpenDalSinkWriter {
     engine_type: EngineType,
     pub(crate) batching_strategy: BatchingStrategy,
     current_bached_row_num: usize,
-    current_writer_idx: usize,
     created_time: SystemTime,
     written_chunk_id: Option<usize>,
 }
@@ -213,13 +212,8 @@ impl OpenDalSinkWriter {
         chunk: StreamChunk,
         chunk_id: usize,
     ) -> Result<Option<usize>> {
-        let epoch = self.epoch.ok_or_else(|| {
-            SinkError::File("epoch has not been initialize, call `begin_epoch`".to_string())
-        })?;
-
         if self.sink_writer.is_none() {
-            self.create_sink_writer(self.current_writer_idx, epoch)
-                .await?;
+            self.create_sink_writer().await?;
         };
 
         // While writing this chunk (via `append_only`), it checks if the maximum row count
@@ -264,18 +258,7 @@ impl SinkWriter for OpenDalSinkWriter {
 
     /// Currently, if no batching strategy is defined, the system will still forcibly finish writing the file when the checkpoint barrier arrives.
     /// If a batching strategy is defined, it effectively enables sink decoupling, the file is no longer forcibly written when the checkpoint barrier arrive.
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        if self.no_batching_strategy_defined()
-            && is_checkpoint
-            && let Some(sink_writer) = self.sink_writer.take()
-        {
-            match sink_writer {
-                FileWriterEnum::ParquetFileWriter(w) => {
-                    let _ = w.close().await?;
-                }
-            };
-        }
-
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<Self::CommitMetadata> {
         Ok(())
     }
 }
@@ -303,7 +286,6 @@ impl OpenDalSinkWriter {
             engine_type,
             batching_strategy,
             current_bached_row_num: 0,
-            current_writer_idx: 0,
             created_time: SystemTime::now(),
             written_chunk_id: None,
         })
@@ -325,12 +307,6 @@ impl OpenDalSinkWriter {
             }
             Err(_) => "Invalid time".to_string(),
         }
-    }
-
-    /// If no batching conditions are defined, continue to write to the file when the checkpoint barrier has not yet arrived.
-    pub fn no_batching_strategy_defined(&self) -> bool {
-        self.batching_strategy.max_row_count.is_none()
-            && self.batching_strategy.rollover_seconds.is_none()
     }
 
     /// Attempts to finalize the writing process based on a specified rollover interval.
@@ -361,17 +337,15 @@ impl OpenDalSinkWriter {
                     if w.bytes_written() > 0 {
                         let metadata = w.close().await?;
                         tracing::info!(
-                            "The duration {:?}s of writing to this file has exceeded the rollover_interval, writer {:?}_{:?}_{:?} finish write file, metadata: {:?}",
+                            "The duration {:?}s of writing to this file has exceeded the rollover_interval, writer {:?}_{:?}finish write file, metadata: {:?}",
                             self.duration_seconds_since_writer_created(),
                             self.created_time
                             .duration_since(UNIX_EPOCH)
                             .expect("Time went backwards")
                             .as_secs(),
                             self.executor_id,
-                            self.current_writer_idx,
                             metadata
                         );
-                        self.current_writer_idx += 1;
                         return Ok(true);
                     }
                 }
@@ -408,20 +382,18 @@ impl OpenDalSinkWriter {
                 FileWriterEnum::ParquetFileWriter(w) => {
                     let metadata = w.close().await?;
                     tracing::info!(
-                                "The number of written rows {} has reached the preset max_row_count, writer {:?}_{:?}_{:?} finish write file, metadata: {:?}",
+                                "The number of written rows {} has reached the preset max_row_count, writer {:?}_{:?} finish write file, metadata: {:?}",
                                 self.current_bached_row_num,
                                 self.created_time
                                 .duration_since(UNIX_EPOCH)
                                 .expect("Time went backwards")
                                 .as_secs(),
                                 self.executor_id,
-                                self.current_writer_idx,
                                 metadata
                             );
                     self.current_bached_row_num = 0;
                 }
             };
-            self.current_writer_idx += 1;
 
             return Ok(true);
         }
@@ -435,11 +407,7 @@ impl OpenDalSinkWriter {
             .as_secs() as usize
     }
 
-    async fn create_object_writer(
-        &mut self,
-        writer_idx: usize,
-        epoch: u64,
-    ) -> Result<OpendalWriter> {
+    async fn create_object_writer(&mut self) -> Result<OpendalWriter> {
         // Todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
             SinkEncode::Parquet => "parquet",
@@ -450,50 +418,33 @@ impl OpenDalSinkWriter {
         // The current file naming convention is as follows:
         // 1. A subdirectory is defined based on `partition_granularity` (e.g., by day、hour or month or none.).
         // 2. The file name includes the `executor_id` and the creation time in seconds since the UNIX epoch.
-        // 3. Finally, the name is suffixed with a `writer_idx` to distinguish between multiple writers.
         // If the engine type is `Fs`, the path is automatically handled, and the filename does not include a path prefix.
-        let object_name = if self.no_batching_strategy_defined() {
-            match self.engine_type {
-                // For the local fs sink, the data will be automatically written to the defined path.
-                // Therefore, there is no need to specify the path in the file name.
-                EngineType::Fs => {
-                    format!("{}_{}.{}", epoch, self.executor_id, suffix,)
-                }
-                _ => format!(
-                    "{}/{}_{}.{}",
-                    self.write_path, epoch, self.executor_id, suffix,
-                ),
-            }
-        } else {
-            match self.engine_type {
-                // For the local fs sink, the data will be automatically written to the defined path.
-                // Therefore, there is no need to specify the path in the file name.
-                EngineType::Fs => {
-                    format!(
-                        "{}{}_{}_{}.{}",
-                        self.partition_granularity(),
-                        self.executor_id,
-                        self.created_time
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Time went backwards")
-                            .as_secs(),
-                        writer_idx,
-                        suffix
-                    )
-                }
-                _ => format!(
-                    "{}/{}{}_{}_{}.{}",
-                    self.write_path,
+        let object_name = match self.engine_type {
+            // For the local fs sink, the data will be automatically written to the defined path.
+            // Therefore, there is no need to specify the path in the file name.
+            EngineType::Fs => {
+                format!(
+                    "{}{}_{}.{}",
                     self.partition_granularity(),
                     self.executor_id,
                     self.created_time
                         .duration_since(UNIX_EPOCH)
                         .expect("Time went backwards")
                         .as_secs(),
-                    writer_idx,
-                    suffix,
-                ),
+                    suffix
+                )
             }
+            _ => format!(
+                "{}/{}{}_{}.{}",
+                self.write_path,
+                self.partition_granularity(),
+                self.executor_id,
+                self.created_time
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_secs(),
+                suffix,
+            ),
         };
 
         tracing::info!("create new writer, file name: {:?}", object_name);
@@ -504,8 +455,8 @@ impl OpenDalSinkWriter {
             .await?)
     }
 
-    async fn create_sink_writer(&mut self, writer_idx: usize, epoch: u64) -> Result<()> {
-        let object_writer = self.create_object_writer(writer_idx, epoch).await?;
+    async fn create_sink_writer(&mut self) -> Result<()> {
+        let object_writer = self.create_object_writer().await?;
         match self.encode_type {
             SinkEncode::Parquet => {
                 let props = WriterProperties::builder();
