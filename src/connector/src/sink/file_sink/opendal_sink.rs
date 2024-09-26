@@ -31,6 +31,7 @@ use crate::sink::catalog::SinkEncode;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam, SinkWriter,
+    SinkWriterMetrics,
 };
 use crate::source::TryFromBTreeMap;
 use crate::with_options::WithOptions;
@@ -130,7 +131,7 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
             self.format_desc.encode.clone(),
             self.engine_type.clone(),
         )?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
     }
 }
 
