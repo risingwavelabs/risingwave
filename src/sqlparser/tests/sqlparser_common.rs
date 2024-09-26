@@ -3348,7 +3348,7 @@ fn parse_create_materialized_view_emit_immediately() {
 
 #[test]
 fn parse_create_table_on_conflict() {
-    let sql = "CREATE TABLE myschema.myview ON CONFLICT OVERWRITE AS SELECT foo FROM bar";
+    let sql = "CREATE TABLE myschema.myview ON CONFLICT DO UPDATE FULL AS SELECT foo FROM bar";
     match verified_stmt(sql) {
         Statement::CreateTable {
             name,
@@ -3363,7 +3363,7 @@ fn parse_create_table_on_conflict() {
         _ => unreachable!(),
     }
 
-    let sql = "CREATE TABLE myschema.myview ON CONFLICT IGNORE AS SELECT foo FROM bar";
+    let sql = "CREATE TABLE myschema.myview ON CONFLICT DO NOTHING AS SELECT foo FROM bar";
     match verified_stmt(sql) {
         Statement::CreateTable {
             name,
@@ -3396,7 +3396,7 @@ fn parse_create_table_on_conflict() {
 
 #[test]
 fn parse_create_table_on_conflict_with_version_column() {
-    let sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN(v2)";
+    let sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(v2)";
     match verified_stmt(sql1) {
         Statement::CreateTable {
             name,
@@ -3411,15 +3411,15 @@ fn parse_create_table_on_conflict_with_version_column() {
         _ => unreachable!(),
     }
 
-    let invalid_sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN(v2";
+    let invalid_sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(v2";
     let res = parse_sql_statements(invalid_sql1);
     assert!(res.is_err());
 
-    let invalid_sql2 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN";
+    let invalid_sql2 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN";
     let res = parse_sql_statements(invalid_sql2);
     assert!(res.is_err());
 
-    let invalid_sql3 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH COLUMN";
+    let invalid_sql3 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH COLUMN";
     let res = parse_sql_statements(invalid_sql3);
     assert!(res.is_err());
 }
