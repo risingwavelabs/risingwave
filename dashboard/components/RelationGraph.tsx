@@ -57,7 +57,7 @@ const rowMargin = 50
 export const nodeRadius = 12
 const layoutMargin = 50
 
-export default function RelationDependencyGraph({
+export default function RelationGraph({
   nodes,
   selectedId,
   setSelectedId,

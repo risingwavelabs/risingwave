@@ -712,12 +712,20 @@ fn gen_table_plan_inner(
         vec![],
     );
 
-    if append_only && row_id_index.is_none() {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "PRIMARY KEY constraint can not be applied to an append-only table.".to_owned(),
-        )
-        .into());
-    }
+    let pk_on_append_only = append_only && row_id_index.is_none();
+
+    let on_conflict = if pk_on_append_only {
+        let on_conflict = on_conflict.unwrap_or(OnConflict::Ignore);
+        if on_conflict != OnConflict::Ignore {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "When PRIMARY KEY constraint applied to an APPEND ONLY table, the ON CONFLICT behavior must be IGNORE.".to_owned(),
+            )
+            .into());
+        }
+        Some(on_conflict)
+    } else {
+        on_conflict
+    };
 
     if !append_only && !watermark_descs.is_empty() {
         return Err(ErrorCode::NotSupported(

@@ -14,6 +14,23 @@ CREATE TABLE t7 (
 );
 
 statement ok
+CREATE TABLE test_route (
+  v1 int primary key,
+  v2 int,
+  v3 varchar,
+);
+
+statement ok
+CREATE SINK test_route_sink from test_route WITH (
+    connector = 'elasticsearch',
+    index = 'test_route',
+    url = 'http://elasticsearch:9200',
+    username = 'elastic',
+    password = 'risingwave',
+    routing_column = 'v3'
+);
+
+statement ok
 CREATE SINK s7 from t7 WITH (
     connector = 'elasticsearch',
     index = 'test',
@@ -32,6 +49,12 @@ CREATE SINK s8 from t7 WITH (
     password = 'risingwave',
     delimiter = '_'
 );
+
+statement ok
+INSERT INTO test_route VALUES
+  (1,1,'test1'),
+  (2,2,'test2'),
+  (3,3,'test3');
 
 statement ok
 INSERT INTO t7 VALUES
@@ -56,6 +79,12 @@ DROP SINK s7;
 
 statement ok
 DROP SINK s8;
+
+statement ok
+DROP SINK test_route_sink;
+
+statement ok
+DROP TABLE test_route;
 
 statement ok
 DROP TABLE t7;

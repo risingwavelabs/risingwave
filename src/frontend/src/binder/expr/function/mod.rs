@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_sqlparser::ast::{self, Function, FunctionArg, FunctionArgExpr, Ident};
 use risingwave_sqlparser::parser::ParserError;
@@ -153,7 +153,7 @@ impl Binder {
             .flatten_ok()
             .try_collect()?;
 
-        let wrapped_agg_kind = if scalar_as_agg {
+        let wrapped_agg_type = if scalar_as_agg {
             // Let's firstly try to apply the `AGGREGATE:` prefix.
             // We will reject functions that are not able to be wrapped as aggregate function.
             let mut array_args = args
@@ -182,12 +182,12 @@ impl Binder {
             };
 
             // now this is either an aggregate/window function call
-            Some(AggKind::WrapScalar(scalar_func_expr.to_expr_proto()))
+            Some(AggType::WrapScalar(scalar_func_expr.to_expr_proto()))
         } else {
             None
         };
 
-        let udf = if wrapped_agg_kind.is_none()
+        let udf = if wrapped_agg_type.is_none()
             && let Ok(schema) = self.first_valid_schema()
             && let Some(func) = schema
                 .get_function_by_name_inputs(&func_name, &mut args)
@@ -227,15 +227,15 @@ impl Binder {
             None
         };
 
-        let agg_kind = if let Some(wrapped_agg_kind) = wrapped_agg_kind {
-            Some(wrapped_agg_kind)
+        let agg_type = if wrapped_agg_type.is_some() {
+            wrapped_agg_type
         } else if let Some(ref udf) = udf
             && udf.kind.is_aggregate()
         {
             assert_ne!(udf.language, "sql", "SQL UDAF is not supported yet");
-            Some(AggKind::UserDefined(udf.as_ref().into()))
-        } else if let Ok(kind) = AggKind::from_str(&func_name) {
-            Some(kind)
+            Some(AggType::UserDefined(udf.as_ref().into()))
+        } else if let Ok(agg_type) = AggType::from_str(&func_name) {
+            Some(agg_type)
         } else {
             None
         };
@@ -259,9 +259,9 @@ impl Binder {
                 "`WITHIN GROUP` is not allowed in window function call"
             );
 
-            let kind = if let Some(agg_kind) = agg_kind {
+            let kind = if let Some(agg_type) = agg_type {
                 // aggregate as window function
-                WindowFuncKind::Aggregate(agg_kind)
+                WindowFuncKind::Aggregate(agg_type)
             } else if let Ok(kind) = WindowFuncKind::from_str(&func_name) {
                 kind
             } else {
@@ -277,13 +277,13 @@ impl Binder {
         );
 
         // try to bind it as an aggregate function call
-        if let Some(agg_kind) = agg_kind {
+        if let Some(agg_type) = agg_type {
             reject_syntax!(
                 arg_list.variadic,
                 "`VARIADIC` is not allowed in aggregate function call"
             );
             return self.bind_aggregate_function(
-                agg_kind,
+                agg_type,
                 arg_list.distinct,
                 args,
                 arg_list.order_by,

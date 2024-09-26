@@ -15,27 +15,17 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::SysCatalogReaderImpl;
-use crate::error::Result;
-
+/// The catalog `pg_sequence` contains information about sequences.
+/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-sequence.html`]
+#[system_catalog(view, "pg_catalog.pg_sequence")]
 #[derive(Fields)]
-struct RwHummockPinnedSnapshot {
-    #[primary_key]
-    worker_node_id: i32,
-    min_pinned_snapshot_id: i64,
-}
-
-#[system_catalog(table, "rw_catalog.rw_hummock_pinned_snapshots")]
-async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockPinnedSnapshot>> {
-    let pinned_snapshots = reader
-        .meta_client
-        .list_hummock_pinned_snapshots()
-        .await?
-        .into_iter()
-        .map(|s| RwHummockPinnedSnapshot {
-            worker_node_id: s.0 as _,
-            min_pinned_snapshot_id: s.1 as _,
-        })
-        .collect();
-    Ok(pinned_snapshots)
+struct PgSequenceColumn {
+    seqrelid: i32,
+    seqtypid: i32,
+    seqstart: i64,
+    seqincrement: i64,
+    seqmax: i64,
+    seqmin: i64,
+    seqcache: i64,
+    seqcycle: bool,
 }

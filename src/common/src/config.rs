@@ -2168,7 +2168,7 @@ pub mod default {
         }
 
         pub fn opendal_upload_concurrency() -> usize {
-            8
+            256
         }
 
         pub fn upload_part_size() -> usize {
