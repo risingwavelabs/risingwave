@@ -21,8 +21,10 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use super::opendal_sink::FileSink;
-use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
+use super::opendal_sink::{BatchingStrategy, FileSink, FileSinkBatchingStrategyConfig};
+use crate::sink::file_sink::opendal_sink::{
+    parse_partition_granularity, OpendalSinkBackend, PartitionGranularity,
+};
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -49,6 +51,9 @@ pub struct S3Common {
 pub struct S3Config {
     #[serde(flatten)]
     pub common: S3Common,
+
+    #[serde(flatten)]
+    pub batching_strategy: FileSinkBatchingStrategyConfig,
 
     pub r#type: String, // accept "append-only"
 
@@ -138,5 +143,32 @@ impl OpendalSinkBackend for S3Sink {
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
         super::opendal_sink::EngineType::S3
+    }
+
+    fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy {
+        let partition_granularity = if let Some(partition_granularity) =
+            properties.batching_strategy.partition_granularity
+        {
+            parse_partition_granularity(&partition_granularity)
+        } else {
+            PartitionGranularity::None
+        };
+        let max_row_count: Option<usize> =
+            if let Some(s) = properties.batching_strategy.max_row_count {
+                s.parse().ok()
+            } else {
+                None
+            };
+        let rollover_seconds: Option<usize> =
+            if let Some(s) = properties.batching_strategy.rollover_seconds {
+                s.parse().ok()
+            } else {
+                None
+            };
+        BatchingStrategy {
+            max_row_count,
+            rollover_seconds,
+            partition_granularity,
+        }
     }
 }

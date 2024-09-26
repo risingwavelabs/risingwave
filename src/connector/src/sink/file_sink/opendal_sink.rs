@@ -15,9 +15,11 @@
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono::{TimeZone, Utc};
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties;
@@ -25,10 +27,12 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use serde::Deserialize;
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
+use with_options::WithOptions;
 
+use crate::sink::batching_log_sink::BatchingLogSinkerOf;
 use crate::sink::catalog::SinkEncode;
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam, SinkWriter,
 };
@@ -48,6 +52,8 @@ pub struct FileSink<S: OpendalSinkBackend> {
     /// The schema describing the structure of the data being written to the file sink.
     pub(crate) schema: Schema,
     pub(crate) is_append_only: bool,
+    /// The batching strategy for sinking data to files.
+    pub(crate) batching_strategy: BatchingStrategy,
 
     /// The description of the sink's format.
     pub(crate) format_desc: SinkFormatDesc,
@@ -79,6 +85,7 @@ pub trait OpendalSinkBackend: Send + Sync + 'static + Clone + PartialEq {
     fn new_operator(properties: Self::Properties) -> Result<Operator>;
     fn get_path(properties: Self::Properties) -> String;
     fn get_engine_type() -> EngineType;
+    fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy;
 }
 
 #[derive(Clone, Debug)]
@@ -92,7 +99,7 @@ pub enum EngineType {
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<OpenDalSinkWriter>;
+    type LogSinker = BatchingLogSinkerOf;
 
     const SINK_NAME: &'static str = S::SINK_NAME;
 
@@ -121,16 +128,16 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
         &self,
         writer_param: crate::sink::SinkWriterParam,
     ) -> Result<Self::LogSinker> {
-        Ok(OpenDalSinkWriter::new(
+        let writer = OpenDalSinkWriter::new(
             self.op.clone(),
             &self.path,
             self.schema.clone(),
-            self.is_append_only,
             writer_param.executor_id,
             self.format_desc.encode.clone(),
             self.engine_type.clone(),
-        )?
-        .into_log_sinker(writer_param.sink_metrics))
+            self.batching_strategy.clone(),
+        )?;
+        Ok(BatchingLogSinkerOf::new(writer))
     }
 }
 
@@ -142,6 +149,12 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let config = S::from_btreemap(param.properties)?;
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
+        let mut batching_strategy = S::get_batching_strategy(config.clone());
+        // If no batching strategy is defined, the default batching strategy will be used, which writes a file every 10 seconds.
+        if batching_strategy.max_row_count.is_none() && batching_strategy.rollover_seconds.is_none()
+        {
+            batching_strategy.rollover_seconds = Some(10);
+        }
         let engine_type = S::get_engine_type();
 
         Ok(Self {
@@ -149,6 +162,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
             path,
             schema,
             is_append_only: param.sink_type.is_append_only(),
+            batching_strategy,
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
@@ -158,16 +172,20 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
     }
 }
 
+impl<S: OpendalSinkBackend> FileSink<S> {}
 pub struct OpenDalSinkWriter {
     schema: SchemaRef,
     operator: Operator,
     sink_writer: Option<FileWriterEnum>,
-    is_append_only: bool,
     write_path: String,
     epoch: Option<u64>,
     executor_id: u64,
     encode_type: SinkEncode,
     engine_type: EngineType,
+    pub(crate) batching_strategy: BatchingStrategy,
+    current_bached_row_num: usize,
+    created_time: SystemTime,
+    written_chunk_id: Option<usize>,
 }
 
 /// The `FileWriterEnum` enum represents different types of file writers used for various sink
@@ -183,24 +201,59 @@ pub struct OpenDalSinkWriter {
 enum FileWriterEnum {
     ParquetFileWriter(AsyncArrowWriter<Compat<FuturesAsyncWriter>>),
 }
+impl OpenDalSinkWriter {
+    // Writes a stream chunk to the sink and tries to close the writer
+    /// according to the batching strategy.
+    ///
+    /// This method writes a chunk and attempts to complete the file write
+    /// based on the writer's internal batching strategy. If the write is
+    /// successful, it returns the last `chunk_id` that was written;
+    /// otherwise, it returns None.
+    ///
+    ///
+    /// This method is currently intended for use by the file sink's writer.
+    pub async fn write_batch_and_try_finish(
+        &mut self,
+        chunk: StreamChunk,
+        chunk_id: usize,
+    ) -> Result<Option<usize>> {
+        if self.sink_writer.is_none() {
+            self.create_sink_writer().await?;
+        };
 
+        // While writing this chunk (via `append_only`), it checks if the maximum row count
+        // has been reached to determine if the file should be finalized.
+        // Then, it checks the rollover interval to see if the time-based batching threshold
+        // has been met. If either condition results in a successful write, the write is marked as complete.
+        let finish_write =
+            self.append_only(chunk).await? || self.try_finish_write_via_rollover_interval().await?;
+        self.written_chunk_id = Some(chunk_id);
+        if finish_write {
+            Ok(Some(chunk_id))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Attempts to complete the file write using the writer's internal batching strategy.
+    ///
+    /// If the write is completed, returns the last `chunk_id` that was written;
+    /// otherwise, returns None.
+    ///
+    /// For the file sink, currently, the sink decoupling feature is not enabled.
+    /// When a checkpoint arrives, the force commit is performed to write the data to the file.
+    /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
+    pub async fn try_finish(&mut self) -> Result<Option<usize>> {
+        match self.try_finish_write_via_rollover_interval().await? {
+            true => Ok(self.written_chunk_id),
+            false => Ok(None),
+        }
+    }
+}
 #[async_trait]
 impl SinkWriter for OpenDalSinkWriter {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        // Note: epoch is used to name the output files.
-        // Todo: after enabling sink decouple, use the new naming convention.
-        let epoch = self.epoch.ok_or_else(|| {
-            SinkError::File("epoch has not been initialize, call `begin_epoch`".to_string())
-        })?;
-        if self.sink_writer.is_none() {
-            self.create_sink_writer(epoch).await?;
-        }
-        if self.is_append_only {
-            self.append_only(chunk).await
-        } else {
-            // currently file sink only supports append only mode.
-            unimplemented!()
-        }
+    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
+        unreachable!()
     }
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
@@ -208,18 +261,9 @@ impl SinkWriter for OpenDalSinkWriter {
         Ok(())
     }
 
-    /// For the file sink, currently, the sink decoupling feature is not enabled.
-    /// When a checkpoint arrives, the force commit is performed to write the data to the file.
-    /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint && let Some(sink_writer) = self.sink_writer.take() {
-            match sink_writer {
-                FileWriterEnum::ParquetFileWriter(w) => {
-                    let _ = w.close().await?;
-                }
-            };
-        }
-
+    /// Currently, if no batching strategy is defined, the system will still forcibly finish writing the file when the checkpoint barrier arrives.
+    /// If a batching strategy is defined, it effectively enables sink decoupling, the file is no longer forcibly written when the checkpoint barrier arrive.
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<Self::CommitMetadata> {
         Ok(())
     }
 }
@@ -229,10 +273,10 @@ impl OpenDalSinkWriter {
         operator: Operator,
         write_path: &str,
         rw_schema: Schema,
-        is_append_only: bool,
         executor_id: u64,
         encode_type: SinkEncode,
         engine_type: EngineType,
+        batching_strategy: BatchingStrategy,
     ) -> Result<Self> {
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
         Ok(Self {
@@ -240,36 +284,175 @@ impl OpenDalSinkWriter {
             write_path: write_path.to_string(),
             operator,
             sink_writer: None,
-            is_append_only,
             epoch: None,
             executor_id,
 
             encode_type,
             engine_type,
+            batching_strategy,
+            current_bached_row_num: 0,
+            created_time: SystemTime::now(),
+            written_chunk_id: None,
         })
     }
 
-    async fn create_object_writer(&mut self, epoch: u64) -> Result<OpendalWriter> {
+    pub fn partition_granularity(&self) -> String {
+        match self.created_time.duration_since(UNIX_EPOCH) {
+            Ok(duration) => {
+                let datetime = Utc
+                    .timestamp_opt(duration.as_secs() as i64, 0)
+                    .single()
+                    .expect("Failed to convert timestamp to DateTime<Utc>");
+                match self.batching_strategy.partition_granularity {
+                    PartitionGranularity::None => "".to_string(),
+                    PartitionGranularity::Day => datetime.format("%Y-%m-%d/").to_string(),
+                    PartitionGranularity::Month => datetime.format("/%Y-%m/").to_string(),
+                    PartitionGranularity::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
+                }
+            }
+            Err(_) => "Invalid time".to_string(),
+        }
+    }
+
+    /// Attempts to finalize the writing process based on a specified rollover interval.
+    ///
+    /// This asynchronous function checks if the duration since the writer was
+    /// created exceeds the configured rollover interval (`rollover_seconds`).
+    /// If the duration condition is met and a sink writer is available, it
+    /// closes the current writer (e.g., a Parquet file writer) if any bytes
+    /// have been written. The function logs the completion message and
+    /// increments the writer index for subsequent writes.
+    ///
+    /// Returns:
+    /// - `Ok(true)` if the write was finalized successfully due to the
+    ///   rollover interval being exceeded.
+    /// - `Ok(false)` if the rollover interval has not been met, indicating that
+    ///   no action was taken.
+    async fn try_finish_write_via_rollover_interval(&mut self) -> Result<bool> {
+        if self.duration_seconds_since_writer_created()
+            >= self
+                .batching_strategy
+                .clone()
+                .rollover_seconds
+                .unwrap_or(usize::MAX)
+            && let Some(sink_writer) = self.sink_writer.take()
+        {
+            match sink_writer {
+                FileWriterEnum::ParquetFileWriter(w) => {
+                    if w.bytes_written() > 0 {
+                        let metadata = w.close().await?;
+                        tracing::info!(
+                            "The duration {:?}s of writing to this file has exceeded the rollover_interval, writer {:?}_{:?}finish write file, metadata: {:?}",
+                            self.duration_seconds_since_writer_created(),
+                            self.created_time
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Time went backwards")
+                            .as_secs(),
+                            self.executor_id,
+                            metadata
+                        );
+                        return Ok(true);
+                    }
+                }
+            };
+        }
+
+        Ok(false)
+    }
+
+    /// Attempts to finalize the writing process if the current number of
+    /// batched rows has reached the specified threshold.
+    ///
+    /// This asynchronous function checks if the number of rows accumulated
+    /// (`current_bached_row_num`) meets or exceeds the maximum row count
+    /// defined in the `batching_strategy`. If the threshold is met, it
+    /// closes the current writer (e.g., a Parquet file writer), logs the
+    /// completion message, and resets the row count. It also increments
+    /// the writer index for subsequent writes.
+    ///
+    /// Returns:
+    /// - `Ok(true)` if the write was finalized successfully.
+    /// - `Ok(false)` if the threshold has not been met, indicating that
+    ///   no action was taken.
+    async fn try_finish_write_via_batched_rows(&mut self) -> Result<bool> {
+        if self.current_bached_row_num
+            >= self
+                .batching_strategy
+                .clone()
+                .max_row_count
+                .unwrap_or(usize::MAX)
+            && let Some(sink_writer) = self.sink_writer.take()
+        {
+            match sink_writer {
+                FileWriterEnum::ParquetFileWriter(w) => {
+                    let metadata = w.close().await?;
+                    tracing::info!(
+                                "The number of written rows {} has reached the preset max_row_count, writer {:?}_{:?} finish write file, metadata: {:?}",
+                                self.current_bached_row_num,
+                                self.created_time
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_secs(),
+                                self.executor_id,
+                                metadata
+                            );
+                    self.current_bached_row_num = 0;
+                }
+            };
+
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn duration_seconds_since_writer_created(&self) -> usize {
+        let now = SystemTime::now();
+        now.duration_since(self.created_time)
+            .expect("Time went backwards")
+            .as_secs() as usize
+    }
+
+    async fn create_object_writer(&mut self) -> Result<OpendalWriter> {
         // Todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
             SinkEncode::Parquet => "parquet",
             _ => unimplemented!(),
         };
 
-        // Note: sink decoupling is not currently supported, which means that output files will not be batched across checkpoints.
-        // The current implementation writes files every time a checkpoint arrives, so the naming convention is `epoch + executor_id + .suffix`.
+        // With batching in place, the file writing process is decoupled from checkpoints.
+        // The current file naming convention is as follows:
+        // 1. A subdirectory is defined based on `partition_granularity` (e.g., by day、hour or month or none.).
+        // 2. The file name includes the `executor_id` and the creation time in seconds since the UNIX epoch.
+        // If the engine type is `Fs`, the path is automatically handled, and the filename does not include a path prefix.
         let object_name = match self.engine_type {
             // For the local fs sink, the data will be automatically written to the defined path.
             // Therefore, there is no need to specify the path in the file name.
             EngineType::Fs => {
-                format!("{}_{}.{}", epoch, self.executor_id, suffix,)
+                format!(
+                    "{}{}_{}.{}",
+                    self.partition_granularity(),
+                    self.executor_id,
+                    self.created_time
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_secs(),
+                    suffix
+                )
             }
             _ => format!(
-                "{}/{}_{}.{}",
-                self.write_path, epoch, self.executor_id, suffix,
+                "{}/{}{}_{}.{}",
+                self.write_path,
+                self.partition_granularity(),
+                self.executor_id,
+                self.created_time
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_secs(),
+                suffix,
             ),
         };
 
+        tracing::info!("create new writer, file name: {:?}", object_name);
         Ok(self
             .operator
             .writer_with(&object_name)
@@ -277,8 +460,8 @@ impl OpenDalSinkWriter {
             .await?)
     }
 
-    async fn create_sink_writer(&mut self, epoch: u64) -> Result<()> {
-        let object_writer = self.create_object_writer(epoch).await?;
+    async fn create_sink_writer(&mut self) -> Result<()> {
+        let object_writer = self.create_object_writer().await?;
         match self.encode_type {
             SinkEncode::Parquet => {
                 let props = WriterProperties::builder();
@@ -291,6 +474,9 @@ impl OpenDalSinkWriter {
                         Some(props.build()),
                     )?,
                 ));
+                self.current_bached_row_num = 0;
+
+                self.created_time = SystemTime::now();
             }
             _ => unimplemented!(),
         }
@@ -298,9 +484,8 @@ impl OpenDalSinkWriter {
         Ok(())
     }
 
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+    async fn append_only(&mut self, chunk: StreamChunk) -> Result<bool> {
         let (data_chunk, _) = chunk.compact().into_parts();
-
         match self
             .sink_writer
             .as_mut()
@@ -309,11 +494,13 @@ impl OpenDalSinkWriter {
             FileWriterEnum::ParquetFileWriter(w) => {
                 let batch =
                     IcebergArrowConvert.to_record_batch(self.schema.clone(), &data_chunk)?;
+                let batch_row_nums = batch.num_rows();
                 w.write(&batch).await?;
+                self.current_bached_row_num += batch_row_nums;
+                let res = self.try_finish_write_via_batched_rows().await?;
+                Ok(res)
             }
         }
-
-        Ok(())
     }
 }
 
@@ -335,4 +522,60 @@ fn convert_rw_schema_to_arrow_schema(
     }
 
     Ok(arrow_schema_iceberg::Schema::new(arrow_fields))
+}
+
+/// `BatchingStrategy` represents the strategy for batching data before writing to files.
+///
+/// This struct contains settings that control how data is collected and
+/// partitioned based on specified criteria:
+///
+/// - `max_row_count`: Optional maximum number of rows to accumulate before writing.
+/// - `rollover_seconds`: Optional time interval (in seconds) to trigger a write,
+///   regardless of the number of accumulated rows.
+/// - `partition_granularity`: Specifies how files are organized into directories
+///   based on creation time (e.g., by day, month, or hour).
+#[derive(Deserialize, Debug, Clone)]
+pub struct BatchingStrategy {
+    pub max_row_count: Option<usize>,
+    pub rollover_seconds: Option<usize>,
+    pub partition_granularity: PartitionGranularity,
+}
+
+/// `PartitionGranularity` defines the granularity of file partitions based on creation time.
+///
+/// Each variant specifies how files are organized into directories:
+/// - `None`: No partitioning.
+/// - `Day`: Files are written in a directory for each day.
+/// - `Month`: Files are written in a directory for each month.
+/// - `Hour`: Files are written in a directory for each hour.
+#[derive(Deserialize, Debug, Clone)]
+pub enum PartitionGranularity {
+    None,
+    Day,
+    Month,
+    Hour,
+}
+
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct FileSinkBatchingStrategyConfig {
+    #[serde(rename = "max_row_count")]
+    pub max_row_count: Option<String>,
+    #[serde(rename = "rollover_seconds")]
+    pub rollover_seconds: Option<String>,
+    #[serde(rename = "partition_granularity")]
+    pub partition_granularity: Option<String>,
+}
+
+pub fn parse_partition_granularity(granularity: &str) -> PartitionGranularity {
+    let granularity = granularity.trim().to_lowercase();
+    if matches!(&granularity[..], "day" | "month" | "hour") {
+        match granularity.as_str() {
+            "day" => PartitionGranularity::Day,
+            "month" => PartitionGranularity::Month,
+            "hour" => PartitionGranularity::Hour,
+            _ => PartitionGranularity::None,
+        }
+    } else {
+        PartitionGranularity::None
+    }
 }
