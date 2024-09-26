@@ -303,7 +303,7 @@ pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =
 #[derive(Clone)]
 pub struct SinkMetrics {
     pub sink_commit_duration: LabelGuardedHistogramVec<4>,
-    pub connector_sink_rows_received: LabelGuardedIntCounterVec<3>,
+    pub connector_sink_rows_received: LabelGuardedIntCounterVec<4>,
 
     // Log store metrics
     pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<4>,
@@ -334,7 +334,7 @@ impl SinkMetrics {
         let connector_sink_rows_received = register_guarded_int_counter_vec_with_registry!(
             "connector_sink_rows_received",
             "Number of rows received by sink",
-            &["connector_type", "sink_id", "sink_name"],
+            &["actor_id", "connector_type", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -467,28 +467,23 @@ pub struct SinkWriterParam {
 #[derive(Clone)]
 pub struct SinkWriterMetrics {
     pub sink_commit_duration: LabelGuardedHistogram<4>,
-    pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
+    pub connector_sink_rows_received: LabelGuardedIntCounter<4>,
 }
 
 impl SinkWriterMetrics {
     pub fn new(writer_param: &SinkWriterParam) -> Self {
+        let labels = [
+            &writer_param.actor_id.to_string(),
+            writer_param.connector.as_str(),
+            &writer_param.sink_id.to_string(),
+            writer_param.sink_name.as_str(),
+        ];
         let sink_commit_duration = GLOBAL_SINK_METRICS
             .sink_commit_duration
-            .with_guarded_label_values(&[
-                &writer_param.actor_id.to_string(),
-                writer_param.connector.as_str(),
-                &writer_param.sink_id.to_string(),
-                writer_param.sink_name.as_str(),
-            ]);
+            .with_guarded_label_values(&labels);
         let connector_sink_rows_received = GLOBAL_SINK_METRICS
             .connector_sink_rows_received
-            .with_guarded_label_values(&[
-                // TODO: should have `actor_id` as label
-                // &writer_param.actor_id.to_string(),
-                writer_param.connector.as_str(),
-                &writer_param.sink_id.to_string(),
-                writer_param.sink_name.as_str(),
-            ]);
+            .with_guarded_label_values(&labels);
         Self {
             sink_commit_duration,
             connector_sink_rows_received,

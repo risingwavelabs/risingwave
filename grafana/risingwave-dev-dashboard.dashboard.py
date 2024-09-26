@@ -4134,7 +4134,7 @@ def section_memory_manager(outer_panels):
         ),
     ]
 
-
+# TODO: remove this section!
 def section_connector_node(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -4152,12 +4152,12 @@ def section_connector_node(outer_panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Connector Sink Throughput(rows)",
-                    "",
+                    "Remote Sink (Java) Throughput",
+                    "The rows sent by remote sink to the Java connector process",
                     [
                         panels.target(
                             f"rate({metric('connector_sink_rows_received')}[$__rate_interval])",
-                            "sink={{connector_type}} @ {{sink_id}}",
+                            "{{sink_id}} {{sink_name}} @ actor {{actor_id}}",
                         ),
                     ],
                 ),
