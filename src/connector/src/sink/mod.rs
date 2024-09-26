@@ -314,12 +314,12 @@ pub struct SinkMetrics {
     // pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
     // pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
     //
-    // // Iceberg metrics
-    // pub iceberg_write_qps: LabelGuardedIntCounterVec<3>,
-    // pub iceberg_write_latency: LabelGuardedHistogramVec<3>,
-    // pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
-    // pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
-    // pub iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
+    // Iceberg metrics
+    pub iceberg_write_qps: LabelGuardedIntCounterVec<3>,
+    pub iceberg_write_latency: LabelGuardedHistogramVec<3>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
+    pub iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
 
     // pub sink_commit_duration: LabelGuardedHistogram<4>,
     pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
@@ -329,11 +329,11 @@ pub struct SinkMetrics {
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
     pub log_store_read_rows: LabelGuardedIntCounter<4>,
     pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
-    pub iceberg_write_qps: LabelGuardedIntCounter<3>,
-    pub iceberg_write_latency: LabelGuardedHistogram<3>,
-    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<3>,
-    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<3>,
-    pub iceberg_partition_num: LabelGuardedIntGauge<3>,
+    // pub iceberg_write_qps: LabelGuardedIntCounter<3>,
+    // pub iceberg_write_latency: LabelGuardedHistogram<3>,
+    // pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<3>,
+    // pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<3>,
+    // pub iceberg_partition_num: LabelGuardedIntGauge<3>,
 }
 
 impl SinkMetrics {
@@ -445,8 +445,13 @@ impl SinkMetrics {
 
         Self {
             sink_commit_duration,
+            iceberg_write_qps,
+            iceberg_write_latency,
+            iceberg_rolling_unflushed_data_file,
+            iceberg_position_delete_cache_num,
+            iceberg_partition_num,
 
-            // TODO
+            // TODO: remove these
             connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
             log_store_first_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_latest_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
@@ -455,11 +460,6 @@ impl SinkMetrics {
             log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
             log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter::test_int_counter(
             ),
-            iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
-            iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
-            iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
-            iceberg_position_delete_cache_num: LabelGuardedIntGauge::test_int_gauge(),
-            iceberg_partition_num: LabelGuardedIntGauge::test_int_gauge(),
         }
     }
 
