@@ -29,7 +29,7 @@ use crate::sink::formatter::SinkFormatter;
 use crate::sink::log_store::{
     DeliveryFutureManager, DeliveryFutureManagerAddFuture, LogStoreReadItem, TruncateOffset,
 };
-use crate::sink::{LogSinker, Result, SinkError, SinkLogReader, SinkMetrics};
+use crate::sink::{LogSinker, Result, SinkError, SinkLogReader, SinkMetrics, SinkWriterMetrics};
 
 #[async_trait]
 pub trait SinkWriter: Send + 'static {
@@ -112,14 +112,14 @@ pub trait FormattedSink {
 
 pub struct LogSinkerOf<W> {
     writer: W,
-    sink_metrics: SinkMetrics,
+    sink_writer_metrics: SinkWriterMetrics,
 }
 
 impl<W> LogSinkerOf<W> {
-    pub fn new(writer: W, sink_metrics: SinkMetrics) -> Self {
+    pub fn new(writer: W, sink_writer_metrics: SinkWriterMetrics) -> Self {
         LogSinkerOf {
             writer,
-            sink_metrics,
+            sink_writer_metrics,
         }
     }
 }
@@ -128,7 +128,7 @@ impl<W> LogSinkerOf<W> {
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         let mut sink_writer = self.writer;
-        let sink_metrics = self.sink_metrics;
+        let metrics = self.sink_writer_metrics;
         #[derive(Debug)]
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
@@ -196,8 +196,8 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                     if is_checkpoint {
                         let start_time = Instant::now();
                         sink_writer.barrier(true).await?;
-                        sink_metrics
-                            .sink_commit_duration_metrics
+                        metrics
+                            .sink_commit_duration
                             .observe(start_time.elapsed().as_millis() as f64);
                         log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                     } else {
@@ -218,10 +218,10 @@ impl<T> T
 where
     T: SinkWriter<CommitMetadata = ()> + Sized,
 {
-    pub fn into_log_sinker(self, sink_metrics: SinkMetrics) -> LogSinkerOf<Self> {
+    pub fn into_log_sinker(self, sink_writer_metrics: SinkWriterMetrics) -> LogSinkerOf<Self> {
         LogSinkerOf {
             writer: self,
-            sink_metrics,
+            sink_writer_metrics,
         }
     }
 }

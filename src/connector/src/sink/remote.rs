@@ -28,6 +28,7 @@ use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, JVM};
@@ -64,7 +65,7 @@ use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
-    SinkLogReader, SinkMetrics, SinkParam, SinkWriterParam,
+    SinkLogReader, SinkMetrics, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 
 macro_rules! def_remote_sink {
@@ -255,8 +256,8 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
 pub struct RemoteLogSinker {
     request_sender: BidiStreamSender<JniSinkWriterStreamRequest>,
     response_stream: BidiStreamReceiver<SinkWriterStreamResponse>,
-    sink_metrics: SinkMetrics,
     stream_chunk_converter: StreamChunkConverter,
+    sink_writer_metrics: SinkWriterMetrics,
 }
 
 impl RemoteLogSinker {
@@ -287,11 +288,10 @@ impl RemoteLogSinker {
             .start_sink_writer_stream(payload_schema, sink_proto)
             .await?;
 
-        let sink_metrics = writer_param.sink_metrics;
         Ok(RemoteLogSinker {
             request_sender,
             response_stream,
-            sink_metrics,
+            sink_writer_metrics: SinkWriterMetrics::new(&writer_param),
             stream_chunk_converter: StreamChunkConverter::new(
                 sink_name,
                 sink_param.schema(),
@@ -307,7 +307,7 @@ impl LogSinker for RemoteLogSinker {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
-        let sink_metrics = self.sink_metrics;
+        let sink_writer_metrics = self.sink_writer_metrics;
 
         let (response_tx, mut response_rx) = unbounded_channel();
 
@@ -335,7 +335,7 @@ impl LogSinker for RemoteLogSinker {
                 queue: &mut VecDeque<(TruncateOffset, Option<Instant>)>,
                 persisted_offset: TruncateOffset,
                 log_reader: &mut impl SinkLogReader,
-                metrics: &SinkMetrics,
+                sink_writer_metrics: &SinkWriterMetrics,
             ) -> Result<()> {
                 while let Some((sent_offset, _)) = queue.front()
                     && sent_offset < &persisted_offset
@@ -357,8 +357,8 @@ impl LogSinker for RemoteLogSinker {
                 if let (TruncateOffset::Barrier { .. }, Some(start_time)) =
                     (persisted_offset, start_time)
                 {
-                    metrics
-                        .sink_commit_duration_metrics
+                    sink_writer_metrics
+                        .sink_commit_duration
                         .observe(start_time.elapsed().as_millis() as f64);
                 }
 
@@ -398,7 +398,7 @@ impl LogSinker for RemoteLogSinker {
                                         chunk_id: batch_id as _,
                                     },
                                     log_reader,
-                                    &sink_metrics,
+                                    &sink_writer_metrics,
                                 )?;
                             }
                             SinkWriterStreamResponse {
@@ -417,7 +417,7 @@ impl LogSinker for RemoteLogSinker {
                                     &mut sent_offset_queue,
                                     TruncateOffset::Barrier { epoch },
                                     log_reader,
-                                    &sink_metrics,
+                                    &sink_writer_metrics,
                                 )?;
                             }
                             response => {
@@ -437,10 +437,11 @@ impl LogSinker for RemoteLogSinker {
                                 if let Some(prev_offset) = &prev_offset {
                                     prev_offset.check_next_offset(offset)?;
                                 }
-                                let cardinality = chunk.cardinality();
-                                sink_metrics
-                                    .connector_sink_rows_received
-                                    .inc_by(cardinality as _);
+                                // TODO
+                                // let cardinality = chunk.cardinality();
+                                // sink_writer_metrics
+                                //     .connector_sink_rows_received
+                                //     .inc_by(cardinality as _);
 
                                 let chunk = self.stream_chunk_converter.convert_chunk(chunk)?;
                                 request_tx
@@ -527,6 +528,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        let metrics = SinkWriterMetrics::new(&writer_param);
         Ok(CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -543,7 +545,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
                 .await?,
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(metrics))
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {

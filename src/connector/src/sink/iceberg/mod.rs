@@ -55,7 +55,8 @@ use super::decouple_checkpoint_log_sink::{
     default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
 };
 use super::{
-    Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Sink, SinkError, SinkWriterMetrics, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -367,6 +368,8 @@ impl Sink for IcebergSink {
         } else {
             IcebergWriter::new_append_only(table, &writer_param).await?
         };
+
+        let metrics = SinkWriterMetrics::new(&writer_param);
         let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -390,7 +393,7 @@ impl Sink for IcebergSink {
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
-            writer_param.sink_metrics,
+            metrics,
             commit_checkpoint_interval,
         ))
     }

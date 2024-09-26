@@ -160,7 +160,7 @@ pub struct StreamingMetrics {
     /// The progress made by the earliest in-flight barriers in the local barrier manager.
     pub barrier_manager_progress: IntCounter,
 
-    // Sink related metrics
+    // Sink related metrics TODO: TO REMOVE
     sink_commit_duration: LabelGuardedHistogramVec<4>,
     connector_sink_rows_received: LabelGuardedIntCounterVec<3>,
     log_store_first_write_epoch: LabelGuardedIntGaugeVec<4>,
@@ -181,7 +181,7 @@ pub struct StreamingMetrics {
     pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<4>,
     pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<4>,
 
-    // Sink iceberg metrics
+    // Sink iceberg metrics TODO: to remove
     iceberg_write_qps: LabelGuardedIntCounterVec<3>,
     iceberg_write_latency: LabelGuardedHistogramVec<3>,
     iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
@@ -1228,83 +1228,6 @@ impl StreamingMetrics {
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         global_streaming_metrics(MetricLevel::Disabled)
-    }
-
-    pub fn new_sink_metrics(
-        &self,
-        actor_id_str: &str,
-        sink_id_str: &str,
-        sink_name: &str,
-        connector: &str,
-    ) -> SinkMetrics {
-        let label_list = [actor_id_str, connector, sink_id_str, sink_name];
-        let sink_commit_duration_metrics = self
-            .sink_commit_duration
-            .with_guarded_label_values(&label_list);
-
-        let connector_sink_rows_received = self
-            .connector_sink_rows_received
-            .with_guarded_label_values(&[connector, sink_id_str, sink_name]);
-
-        let log_store_latest_read_epoch = self
-            .log_store_latest_read_epoch
-            .with_guarded_label_values(&label_list);
-
-        let log_store_latest_write_epoch = self
-            .log_store_latest_write_epoch
-            .with_guarded_label_values(&label_list);
-
-        let log_store_first_write_epoch = self
-            .log_store_first_write_epoch
-            .with_guarded_label_values(&label_list);
-
-        let initial_epoch = Epoch::now().0;
-        log_store_latest_read_epoch.set(initial_epoch as _);
-        log_store_first_write_epoch.set(initial_epoch as _);
-        log_store_latest_write_epoch.set(initial_epoch as _);
-
-        let log_store_write_rows = self
-            .log_store_write_rows
-            .with_guarded_label_values(&label_list);
-        let log_store_read_rows = self
-            .log_store_read_rows
-            .with_guarded_label_values(&label_list);
-        let log_store_reader_wait_new_future_duration_ns = self
-            .log_store_reader_wait_new_future_duration_ns
-            .with_guarded_label_values(&label_list);
-
-        let label_list = [actor_id_str, sink_id_str, sink_name];
-        let iceberg_write_qps = self
-            .iceberg_write_qps
-            .with_guarded_label_values(&label_list);
-        let iceberg_write_latency = self
-            .iceberg_write_latency
-            .with_guarded_label_values(&label_list);
-        let iceberg_rolling_unflushed_data_file = self
-            .iceberg_rolling_unflushed_data_file
-            .with_guarded_label_values(&label_list);
-        let iceberg_position_delete_cache_num = self
-            .iceberg_position_delete_cache_num
-            .with_guarded_label_values(&label_list);
-        let iceberg_partition_num = self
-            .iceberg_partition_num
-            .with_guarded_label_values(&label_list);
-
-        SinkMetrics {
-            sink_commit_duration_metrics,
-            connector_sink_rows_received,
-            log_store_first_write_epoch,
-            log_store_latest_write_epoch,
-            log_store_write_rows,
-            log_store_latest_read_epoch,
-            log_store_read_rows,
-            log_store_reader_wait_new_future_duration_ns,
-            iceberg_write_qps,
-            iceberg_write_latency,
-            iceberg_rolling_unflushed_data_file,
-            iceberg_position_delete_cache_num,
-            iceberg_partition_num,
-        }
     }
 
     pub fn new_actor_metrics(&self, actor_id: ActorId) -> ActorMetrics {

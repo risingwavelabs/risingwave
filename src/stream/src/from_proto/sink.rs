@@ -22,7 +22,8 @@ use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{
-    SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+    SinkError, SinkMetaClient, SinkMetrics, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY,
+    GLOBAL_SINK_METRICS, SINK_TYPE_OPTION,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
@@ -200,19 +201,9 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)
             .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?;
 
-        let actor_id_str = format!("{}", params.actor_context.id);
-        let sink_id_str = format!("{}", sink_id.sink_id);
-
-        let sink_metrics = params.executor_stats.new_sink_metrics(
-            &actor_id_str,
-            &sink_id_str,
-            &sink_name,
-            connector,
-        );
-
         let sink_param = SinkParam {
             sink_id,
-            sink_name,
+            sink_name: sink_name.clone(),
             properties: properties_with_secret,
             columns: columns
                 .iter()
@@ -230,8 +221,13 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             executor_id: params.executor_id,
             vnode_bitmap: params.vnode_bitmap.clone(),
             meta_client: params.env.meta_client().map(SinkMetaClient::MetaClient),
-            sink_metrics,
+            sink_metrics: GLOBAL_SINK_METRICS.clone(), // TODO: remove me
             extra_partition_col_idx: sink_desc.extra_partition_col_idx.map(|v| v as usize),
+
+            actor_id: params.actor_context.id,
+            sink_id,
+            sink_name,
+            connector: connector.to_string(),
         };
 
         let log_store_identity = format!(
