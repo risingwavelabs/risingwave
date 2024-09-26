@@ -19,35 +19,34 @@ use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_sdk_emrserverless::types::builders::SparkSubmitBuilder;
 use aws_sdk_emrserverless::types::{JobDriver, JobRunState};
 use aws_sdk_emrserverless::Client;
-use aws_smithy_runtime_api::client::behavior_version::BehaviorVersion;
 use aws_types::region::Region;
 use tokio::time::sleep;
 use tracing::info;
 
 pub struct NimtableCompactionConfig {
-    region: String,
-    access_key: String,
-    secret_key: String,
+    region: Option<String>,
+    access_key: Option<String>,
+    secret_key: Option<String>,
     execution_role_arn: String,
     application_id: String,
     entrypoint: String,
 }
 
 impl NimtableCompactionConfig {
-    pub fn from_env() -> Self {
+    pub fn from_env() -> anyhow::Result<Self> {
         use std::env::var;
-        NimtableCompactionConfig {
-            region: var("NIMTABLE_COMPACTION_REGION").unwrap_or_default(),
-            access_key: var("NIMTABLE_COMPACTION_ACCESS_KEY")
-                .or_else(|_| var("AWS_ACCESS_KEY_ID"))
-                .unwrap_or_default(),
-            secret_key: var("NIMTABLE_COMPACTION_SECRET_KEY")
-                .or_else(|_| var("AWS_SECRET_ACCESS_KEY"))
-                .unwrap_or_default(),
-            execution_role_arn: var("NIMTABLE_COMPACTION_EXECUTION_ROLE_ARN").unwrap_or_default(),
-            application_id: var("NIMTABLE_COMPACTION_APPLICATION_ID").unwrap_or_default(),
-            entrypoint: var("NIMTABLE_COMPACTION_ENTRYPOINT").unwrap_or_default(),
-        }
+        Ok(NimtableCompactionConfig {
+            region: var("NIMTABLE_COMPACTION_REGION").ok(),
+            access_key: var("NIMTABLE_COMPACTION_ACCESS_KEY").ok(),
+            secret_key: var("NIMTABLE_COMPACTION_SECRET_KEY").ok(),
+            execution_role_arn: var("NIMTABLE_COMPACTION_EXECUTION_ROLE_ARN").map_err(|_| {
+                anyhow!("NIMTABLE_COMPACTION_EXECUTION_ROLE_ARN not set in env var")
+            })?,
+            application_id: var("NIMTABLE_COMPACTION_APPLICATION_ID")
+                .map_err(|_| anyhow!("NIMTABLE_COMPACTION_APPLICATION_ID not set in env var"))?,
+            entrypoint: var("NIMTABLE_COMPACTION_ENTRYPOINT")
+                .map_err(|_| anyhow!("NIMTABLE_COMPACTION_ENTRYPOINT not set in env var"))?,
+        })
     }
 }
 
@@ -57,18 +56,27 @@ pub struct NimtableCompactionClient {
 }
 
 impl NimtableCompactionClient {
-    pub fn new(config: NimtableCompactionConfig) -> Self {
-        let sdk_config = aws_types::SdkConfig::builder()
-            .behavior_version(BehaviorVersion::v2024_03_28())
-            .region(Some(Region::new(config.region.clone())))
-            .credentials_provider(SharedCredentialsProvider::new(
+    pub async fn new(config: NimtableCompactionConfig) -> Self {
+        let config_loader = aws_config::from_env();
+        let config_loader = if let Some(region) = &config.region {
+            config_loader.region(Region::new(region.clone()))
+        } else {
+            config_loader
+        };
+        let config_loader = if let (Some(access_key), Some(secret_key)) =
+            (&config.access_key, &config.secret_key)
+        {
+            config_loader.credentials_provider(SharedCredentialsProvider::new(
                 aws_credential_types::Credentials::from_keys(
-                    config.access_key.clone(),
-                    config.secret_key.clone(),
+                    access_key.clone(),
+                    secret_key.clone(),
                     None,
                 ),
             ))
-            .build();
+        } else {
+            config_loader
+        };
+        let sdk_config = config_loader.load().await;
         Self {
             client: Client::new(&sdk_config),
             config,
@@ -166,8 +174,8 @@ async fn trigger_compaction() {
     let db = "db";
     let table = "table";
 
-    let config = NimtableCompactionConfig::from_env();
-    let client = NimtableCompactionClient::new(config);
+    let config = NimtableCompactionConfig::from_env().unwrap();
+    let client = NimtableCompactionClient::new(config).await;
     let result = client
         .compact(warehouse.to_owned(), db.to_owned(), table.to_owned())
         .await;
