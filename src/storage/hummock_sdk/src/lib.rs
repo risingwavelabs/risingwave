@@ -257,6 +257,15 @@ impl HummockReadEpoch {
             | HummockReadEpoch::TimeTravel(epoch) => epoch,
         }
     }
+
+    pub fn is_read_committed(&self) -> bool {
+        match self {
+            HummockReadEpoch::Committed(_)
+            | HummockReadEpoch::TimeTravel(_)
+            | HummockReadEpoch::BatchQueryCommitted(_, _) => true,
+            HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => false,
+        }
+    }
 }
 pub struct SstObjectIdRange {
     // inclusive

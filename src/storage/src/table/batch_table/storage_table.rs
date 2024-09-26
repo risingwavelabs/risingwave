@@ -362,10 +362,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-        let read_committed = matches!(
-            wait_epoch,
-            HummockReadEpoch::TimeTravel(_) | HummockReadEpoch::Committed(_)
-        );
+        let read_committed = wait_epoch.is_read_committed();
         self.store
             .try_wait_epoch(
                 wait_epoch,
@@ -498,10 +495,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let iterators: Vec<_> = try_join_all(table_key_ranges.map(|table_key_range| {
             let prefix_hint = prefix_hint.clone();
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-            let read_committed = matches!(
-                wait_epoch,
-                HummockReadEpoch::TimeTravel(_) | HummockReadEpoch::Committed(_)
-            );
+            let read_committed = wait_epoch.is_read_committed();
             async move {
                 let read_options = ReadOptions {
                     prefix_hint,
