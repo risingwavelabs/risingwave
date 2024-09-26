@@ -113,9 +113,7 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
 
         match self.op.list(&self.path).await {
             Ok(_) => Ok(()),
-            Err(e) => Err(anyhow!(e)
-                .context("Fail to create sink, please check your config.")
-                .into()),
+            Err(e) => Err(anyhow!(e).into()),
         }
     }
 
