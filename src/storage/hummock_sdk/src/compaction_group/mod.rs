@@ -136,12 +136,12 @@ pub mod group_split {
     ///    `sst_size`: `right_size`,
     /// }
     pub fn split_sst(
-        origin_sst_info: &mut SstableInfo,
+        mut origin_sst_info: SstableInfo,
         new_sst_id: &mut u64,
         split_key: Bytes,
         left_size: u64,
         right_size: u64,
-    ) -> SstableInfo {
+    ) -> (Option<SstableInfo>, Option<SstableInfo>) {
         let mut branch_table_info = origin_sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
         *new_sst_id += 1;
@@ -182,7 +182,22 @@ pub mod group_split {
             branch_table_info.table_ids = table_ids_r;
         }
 
-        branch_table_info
+        // This function does not make any assumptions about the incoming sst, so add some judgement to ensure that the generated sst meets the restrictions.
+        if origin_sst_info.table_ids.is_empty() {
+            (None, Some(branch_table_info))
+        } else if branch_table_info.table_ids.is_empty() {
+            (Some(origin_sst_info), None)
+        } else if KeyComparator::compare_encoded_full_key(
+            &origin_sst_info.key_range.left,
+            &origin_sst_info.key_range.right,
+        )
+        .is_eq()
+        {
+            // avoid empty key_range of origin_sst
+            (None, Some(branch_table_info))
+        } else {
+            (Some(origin_sst_info), Some(branch_table_info))
+        }
     }
 
     /// The old split sst logic with `table_ids`
@@ -382,16 +397,23 @@ pub mod group_split {
                         false
                     }
                     SstSplitType::Both => {
-                        let estimated_size = sst.sst_size;
-                        let branch_sst = split_sst(
-                            sst,
+                        let (left, right) = split_sst(
+                            sst.clone(),
                             new_sst_id,
                             split_key.clone(),
-                            estimated_size / 2,
-                            estimated_size / 2,
+                            sst.sst_size / 2,
+                            sst.sst_size / 2,
                         );
-                        insert_table_infos.push(branch_sst.clone());
-                        true
+                        if let Some(branch_sst) = right {
+                            insert_table_infos.push(branch_sst);
+                        }
+
+                        if left.is_some() {
+                            *sst = left.unwrap();
+                            true
+                        } else {
+                            false
+                        }
                     }
                 }
             });
@@ -415,19 +437,31 @@ pub mod group_split {
                 }
                 SstSplitType::Both => {
                     // split the sst
-                    let estimated_size = sst.sst_size;
-                    let branch_sst = split_sst(
-                        sst,
+                    let (left, right) = split_sst(
+                        sst.clone(),
                         new_sst_id,
-                        split_key,
-                        estimated_size / 2,
-                        estimated_size / 2,
+                        split_key.clone(),
+                        sst.sst_size / 2,
+                        sst.sst_size / 2,
                     );
-                    insert_table_infos.push(branch_sst.clone());
+
+                    if let Some(branch_sst) = right {
+                        insert_table_infos.push(branch_sst);
+                    }
+
+                    let right_start = pos + 1;
+                    let mut left_end = pos;
+
+                    if let Some(origin_sst) = left {
+                        *sst = origin_sst;
+                    } else {
+                        left_end -= 1;
+                    }
+
                     // the sst at pos has been split to both left and right
                     // the branched sst has been inserted to the `insert_table_infos`
-                    insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
-                    level.table_infos = level.table_infos[0..=pos].to_vec();
+                    insert_table_infos.extend_from_slice(&level.table_infos[right_start..]);
+                    level.table_infos = level.table_infos[0..=left_end].to_vec();
                 }
             };
         }

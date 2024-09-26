@@ -2130,19 +2130,22 @@ mod tests {
 
         {
             let split_key = group_split::build_split_key(3, VirtualNode::ZERO);
-            let mut origin_sst = sst.clone();
+            let origin_sst = sst.clone();
             let sst_size = origin_sst.sst_size;
             let split_type = group_split::need_to_split(&origin_sst, split_key.clone());
             assert_eq!(SstSplitType::Both, split_type);
 
             let mut new_sst_id = 10;
-            let branched_sst = group_split::split_sst(
-                &mut origin_sst,
+            let (origin_sst, branched_sst) = group_split::split_sst(
+                origin_sst,
                 &mut new_sst_id,
                 split_key,
                 sst_size / 2,
                 sst_size / 2,
             );
+
+            let origin_sst = origin_sst.unwrap();
+            let branched_sst = branched_sst.unwrap();
 
             assert!(origin_sst.key_range.right_exclusive);
             assert!(origin_sst
@@ -2162,19 +2165,22 @@ mod tests {
         {
             // test un-exist table_id
             let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
-            let mut origin_sst = sst.clone();
+            let origin_sst = sst.clone();
             let sst_size = origin_sst.sst_size;
             let split_type = group_split::need_to_split(&origin_sst, split_key.clone());
             assert_eq!(SstSplitType::Both, split_type);
 
             let mut new_sst_id = 10;
-            let branched_sst = group_split::split_sst(
-                &mut origin_sst,
+            let (origin_sst, branched_sst) = group_split::split_sst(
+                origin_sst,
                 &mut new_sst_id,
                 split_key,
                 sst_size / 2,
                 sst_size / 2,
             );
+
+            let origin_sst = origin_sst.unwrap();
+            let branched_sst = branched_sst.unwrap();
 
             assert!(origin_sst.key_range.right_exclusive);
             assert!(origin_sst.key_range.right.le(&branched_sst.key_range.left));
@@ -2204,6 +2210,27 @@ mod tests {
             let origin_sst = sst.clone();
             let split_type = group_split::need_to_split(&origin_sst, split_key);
             assert_eq!(SstSplitType::Right, split_type);
+        }
+
+        {
+            // test key_range left = right
+            let mut sst = gen_sstable_info(1, vec![1], epoch);
+            sst.key_range.right = sst.key_range.left.clone();
+            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
+            let origin_sst = sst.clone();
+            let sst_size = origin_sst.sst_size;
+
+            let mut new_sst_id = 10;
+            let (origin_sst, branched_sst) = group_split::split_sst(
+                origin_sst,
+                &mut new_sst_id,
+                split_key,
+                sst_size / 2,
+                sst_size / 2,
+            );
+
+            assert!(origin_sst.is_none());
+            assert!(branched_sst.is_some());
         }
     }
 
