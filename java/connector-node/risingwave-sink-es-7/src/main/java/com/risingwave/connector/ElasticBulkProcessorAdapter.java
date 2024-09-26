@@ -76,21 +76,28 @@ public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
     }
 
     @Override
-    public void addRow(String index, String key, String doc) throws InterruptedException {
+    public void addRow(String index, String key, String doc, String routing)
+            throws InterruptedException {
         UpdateRequest updateRequest;
         updateRequest =
                 new UpdateRequest(index, "_doc", key)
                         .doc(doc, XContentType.JSON)
                         .retryOnConflict(this.retryOnConflict);
+        if (routing != null) {
+            updateRequest.routing(routing);
+        }
         updateRequest.docAsUpsert(true);
         this.requestTracker.addWriteTask();
         this.esBulkProcessor.add(updateRequest);
     }
 
     @Override
-    public void deleteRow(String index, String key) throws InterruptedException {
+    public void deleteRow(String index, String key, String routing) throws InterruptedException {
         DeleteRequest deleteRequest;
         deleteRequest = new DeleteRequest(index, "_doc", key);
+        if (routing != null) {
+            deleteRequest.routing(routing);
+        }
         this.requestTracker.addWriteTask();
         this.esBulkProcessor.add(deleteRequest);
     }

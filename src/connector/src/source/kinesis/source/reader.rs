@@ -42,9 +42,9 @@ pub struct KinesisSplitReader {
     shard_id: SplitId,
     latest_offset: Option<String>,
     shard_iter: Option<String>,
-    start_position: KinesisOffset,
+    next_offset: KinesisOffset,
     #[expect(dead_code)]
-    end_position: KinesisOffset,
+    end_offset: KinesisOffset,
 
     split_id: SplitId,
     parser_config: ParserConfig,
@@ -67,7 +67,7 @@ impl SplitReader for KinesisSplitReader {
 
         let split = splits.into_iter().next().unwrap();
 
-        let start_position = match &split.start_position {
+        let next_offset = match &split.next_offset {
             KinesisOffset::None => match &properties.scan_startup_mode {
                 None => KinesisOffset::Earliest,
                 Some(mode) => match mode.as_str() {
@@ -85,10 +85,10 @@ impl SplitReader for KinesisSplitReader {
                     }
                 },
             },
-            start_position => start_position.to_owned(),
+            next_offset => next_offset.to_owned(),
         };
 
-        if !matches!(start_position, KinesisOffset::Timestamp(_))
+        if !matches!(next_offset, KinesisOffset::Timestamp(_))
             && properties.timestamp_offset.is_some()
         {
             // cannot bail! here because all new split readers will fail to start if user set 'scan.startup.mode' to 'timestamp'
@@ -107,8 +107,8 @@ impl SplitReader for KinesisSplitReader {
             shard_id: split.shard_id,
             shard_iter: None,
             latest_offset: None,
-            start_position,
-            end_position: split.end_position,
+            next_offset,
+            end_offset: split.end_offset,
             split_id,
             parser_config,
             source_ctx,
@@ -250,9 +250,9 @@ impl KinesisSplitReader {
                 ShardIteratorType::AfterSequenceNumber,
             )
         } else {
-            match &self.start_position {
+            match &self.next_offset {
                 KinesisOffset::Earliest => (None, None, ShardIteratorType::TrimHorizon),
-                KinesisOffset::SequenceNumber(seq) => (
+                KinesisOffset::AfterSequenceNumber(seq) => (
                     Some(seq.clone()),
                     None,
                     ShardIteratorType::AfterSequenceNumber,
@@ -365,8 +365,8 @@ mod tests {
             properties.clone(),
             vec![KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
-                start_position: KinesisOffset::Earliest,
-                end_position: KinesisOffset::None,
+                next_offset: KinesisOffset::Earliest,
+                end_offset: KinesisOffset::None,
             }],
             Default::default(),
             SourceContext::dummy().into(),
@@ -381,10 +381,10 @@ mod tests {
             properties.clone(),
             vec![KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
-                start_position: KinesisOffset::SequenceNumber(
+                next_offset: KinesisOffset::AfterSequenceNumber(
                     "49629139817504901062972448413535783695568426186596941842".to_string(),
                 ),
-                end_position: KinesisOffset::None,
+                end_offset: KinesisOffset::None,
             }],
             Default::default(),
             SourceContext::dummy().into(),

@@ -1041,6 +1041,26 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "release amd64 (dry-run)"
+    command: "SKIP_RELEASE=1 ci/scripts/release.sh"
+    if: |
+      build.pull_request.labels includes "ci/run-release-dry-run" || build.env("CI_STEPS") =~ /(^|,)release-dry-run(,|$$)/
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v5.1.0:
+          run: release-env-x86
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
+            - BUILDKITE_TAG
+            - BUILDKITE_SOURCE
+    timeout_in_minutes: 60
+    retry: *auto-retry
+
   - label: "release amd64"
     command: "ci/scripts/release.sh"
     if: build.tag != null
@@ -1057,6 +1077,28 @@ steps:
             - GITHUB_TOKEN
             - BUILDKITE_TAG
             - BUILDKITE_SOURCE
+    timeout_in_minutes: 60
+    retry: *auto-retry
+
+  - label: "release aarch64 (dry-run)"
+    command: "SKIP_RELEASE=1 ci/scripts/release.sh"
+    if: |
+      build.pull_request.labels includes "ci/run-release-dry-run" || build.env("CI_STEPS") =~ /(^|,)release-dry-run(,|$$)/
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v5.1.0:
+          run: release-env-arm
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
+            - BUILDKITE_TAG
+            - BUILDKITE_SOURCE
+    agents:
+      queue: "linux-arm64"
     timeout_in_minutes: 60
     retry: *auto-retry
 
