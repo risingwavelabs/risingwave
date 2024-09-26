@@ -8606,9 +8606,9 @@ dependencies = [
 
 [[package]]
 name = "pbjson"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1030c719b0ec2a2d25a5df729d6cff1acf3cc230bf766f4f97833591f7577b90"
+checksum = "c7e6349fa080353f4a597daffd05cb81572a9c031a6d4fff7e504947496fcc68"
 dependencies = [
  "base64 0.21.7",
  "serde",
