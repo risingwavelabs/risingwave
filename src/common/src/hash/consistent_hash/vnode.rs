@@ -51,19 +51,22 @@ impl Crc32HashCode {
 }
 
 impl VirtualNode {
-    /// The total count of virtual nodes.
-    // TODO(var-vnode): remove this and only keep `COUNT_FOR_TEST`
-    pub const COUNT: usize = 1 << 8;
-    /// The maximum value of the virtual node.
-    // TODO(var-vnode): remove this and only keep `MAX_FOR_TEST`
-    pub const MAX: VirtualNode = VirtualNode::from_index(Self::COUNT - 1);
+    /// The total count of virtual nodes, for compatibility purposes **ONLY**.
+    ///
+    /// Typical use cases:
+    ///
+    /// - As the default value for the session configuration.
+    /// - As the vnode count for all streaming jobs, fragments, and tables that were created before
+    ///   the variable vnode count support was introduced.
+    /// - As the vnode count for singletons.
+    pub const COUNT_FOR_COMPAT: usize = 1 << 8;
 }
 
 impl VirtualNode {
     /// The total count of virtual nodes, for testing purposes.
-    pub const COUNT_FOR_TEST: usize = Self::COUNT;
+    pub const COUNT_FOR_TEST: usize = Self::COUNT_FOR_COMPAT;
     /// The maximum value of the virtual node, for testing purposes.
-    pub const MAX_FOR_TEST: VirtualNode = Self::MAX;
+    pub const MAX_FOR_TEST: VirtualNode = VirtualNode::from_index(Self::COUNT_FOR_TEST - 1);
 }
 
 impl VirtualNode {
