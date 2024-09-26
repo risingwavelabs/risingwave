@@ -58,8 +58,8 @@ use super::decouple_checkpoint_log_sink::{
     default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
 };
 use super::{
-    Sink, SinkError, SinkWriterMetrics, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    Sink, SinkError, SinkWriterMetrics, SinkWriterParam, GLOBAL_SINK_METRICS,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -463,7 +463,6 @@ impl IcebergWriter {
     pub async fn new_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
         let builder_helper = table.builder_helper()?;
         let SinkWriterParam {
-            sink_metrics,
             extra_partition_col_idx,
             actor_id,
             sink_id,
@@ -477,13 +476,13 @@ impl IcebergWriter {
         ];
 
         // Metrics
-        let write_qps = sink_metrics
+        let write_qps = GLOBAL_SINK_METRICS
             .iceberg_write_qps
             .with_guarded_label_values(&metrics_labels);
-        let write_latency = sink_metrics
+        let write_latency = GLOBAL_SINK_METRICS
             .iceberg_write_latency
             .with_guarded_label_values(&metrics_labels);
-        let rolling_unflushed_data_file = sink_metrics
+        let rolling_unflushed_data_file = GLOBAL_SINK_METRICS
             .iceberg_rolling_unflushed_data_file
             .with_guarded_label_values(&metrics_labels);
 
@@ -544,15 +543,11 @@ impl IcebergWriter {
     ) -> Result<Self> {
         let builder_helper = table.builder_helper()?;
         let SinkWriterParam {
-            executor_id,
-            vnode_bitmap,
-            meta_client,
-            sink_metrics,
             extra_partition_col_idx,
             actor_id,
             sink_id,
             sink_name,
-            connector,
+            ..
         } = writer_param;
         let metrics_labels = [
             &actor_id.to_string(),
@@ -561,16 +556,16 @@ impl IcebergWriter {
         ];
 
         // Metrics
-        let write_qps = sink_metrics
+        let write_qps = GLOBAL_SINK_METRICS
             .iceberg_write_qps
             .with_guarded_label_values(&metrics_labels);
-        let write_latency = sink_metrics
+        let write_latency = GLOBAL_SINK_METRICS
             .iceberg_write_latency
             .with_guarded_label_values(&metrics_labels);
-        let rolling_unflushed_data_file = sink_metrics
+        let rolling_unflushed_data_file = GLOBAL_SINK_METRICS
             .iceberg_rolling_unflushed_data_file
             .with_guarded_label_values(&metrics_labels);
-        let position_delete_cache_num = sink_metrics
+        let position_delete_cache_num = GLOBAL_SINK_METRICS
             .iceberg_position_delete_cache_num
             .with_guarded_label_values(&metrics_labels);
 
