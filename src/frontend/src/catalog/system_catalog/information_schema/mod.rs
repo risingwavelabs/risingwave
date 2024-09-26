@@ -14,5 +14,6 @@
 
 mod columns;
 mod schemata;
+mod table_constraints;
 mod tables;
 mod views;
