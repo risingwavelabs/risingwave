@@ -32,7 +32,6 @@ use risingwave_common::{
     register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_connector::sink::SinkMetrics;
 
 use crate::common::log_store_impl::kv_log_store::{
     REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,

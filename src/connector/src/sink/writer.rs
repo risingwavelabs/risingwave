@@ -29,7 +29,7 @@ use crate::sink::formatter::SinkFormatter;
 use crate::sink::log_store::{
     DeliveryFutureManager, DeliveryFutureManagerAddFuture, LogStoreReadItem, TruncateOffset,
 };
-use crate::sink::{LogSinker, Result, SinkError, SinkLogReader, SinkMetrics, SinkWriterMetrics};
+use crate::sink::{LogSinker, Result, SinkError, SinkLogReader, SinkWriterMetrics};
 
 #[async_trait]
 pub trait SinkWriter: Send + 'static {

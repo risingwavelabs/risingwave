@@ -41,9 +41,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::metrics::{
-    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedMetric,
-};
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -417,6 +415,7 @@ impl Sink for IcebergSink {
 pub struct IcebergWriter {
     inner_writer: IcebergWriterEnum,
     schema: SchemaRef,
+    // See comments below
     _metrics: IcebergWriterMetrics,
 }
 

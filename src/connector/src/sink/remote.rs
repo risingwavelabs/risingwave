@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::pin;
@@ -28,7 +28,6 @@ use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, JVM};
@@ -65,7 +64,7 @@ use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
-    SinkLogReader, SinkMetrics, SinkParam, SinkWriterMetrics, SinkWriterParam,
+    SinkLogReader, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 
 macro_rules! def_remote_sink {
@@ -591,7 +590,7 @@ impl CoordinatedRemoteSinkWriter {
             epoch: None,
             batch_id: 0,
             stream_handle,
-            sink_metrics: SinkMetrics::for_test(),
+            metrics: SinkWriterMetrics::for_test(),
         }
     }
 }
