@@ -35,14 +35,18 @@ pub struct NimtableCompactionConfig {
 
 impl NimtableCompactionConfig {
     pub fn from_env() -> Self {
+        use std::env::var;
         NimtableCompactionConfig {
-            region: std::env::var("NIMTABLE_COMPACTION_REGION").unwrap_or_default(),
-            access_key: std::env::var("NIMTABLE_COMPACTION_ACCESS_KEY").unwrap_or_default(),
-            secret_key: std::env::var("NIMTABLE_COMPACTION_SECRET_KEY").unwrap_or_default(),
-            execution_role_arn: std::env::var("NIMTABLE_COMPACTION_EXECUTION_ROLE_ARN")
+            region: var("NIMTABLE_COMPACTION_REGION").unwrap_or_default(),
+            access_key: var("NIMTABLE_COMPACTION_ACCESS_KEY")
+                .or_else(|_| var("AWS_ACCESS_KEY_ID"))
                 .unwrap_or_default(),
-            application_id: std::env::var("NIMTABLE_COMPACTION_APPLICATION_ID").unwrap_or_default(),
-            entrypoint: std::env::var("NIMTABLE_COMPACTION_ENTRYPOINT").unwrap_or_default(),
+            secret_key: var("NIMTABLE_COMPACTION_SECRET_KEY")
+                .or_else(|_| var("AWS_SECRET_ACCESS_KEY"))
+                .unwrap_or_default(),
+            execution_role_arn: var("NIMTABLE_COMPACTION_EXECUTION_ROLE_ARN").unwrap_or_default(),
+            application_id: var("NIMTABLE_COMPACTION_APPLICATION_ID").unwrap_or_default(),
+            entrypoint: var("NIMTABLE_COMPACTION_ENTRYPOINT").unwrap_or_default(),
         }
     }
 }
