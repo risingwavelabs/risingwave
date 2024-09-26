@@ -1098,6 +1098,7 @@ mod tests {
                 &locations.actor_locations,
                 Default::default(),
                 TableParallelism::Adaptive,
+                VirtualNode::COUNT_FOR_TEST,
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,

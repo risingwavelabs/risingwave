@@ -315,6 +315,7 @@ impl CatalogController {
             HashMap<ActorId, Vec<actor_dispatcher::Model>>,
         )>,
         parallelism: StreamingParallelism,
+        max_parallelism: usize,
     ) -> MetaResult<PbTableFragments> {
         let mut pb_fragments = HashMap::new();
         let mut pb_actor_splits = HashMap::new();
@@ -347,6 +348,7 @@ impl CatalogController {
             ),
             node_label: "".to_string(),
             backfill_done: true,
+            max_parallelism: Some(max_parallelism as _),
         };
 
         Ok(table_fragments)
@@ -669,6 +671,7 @@ impl CatalogController {
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
             fragment_info,
             job_info.parallelism.clone(),
+            job_info.max_parallelism as _,
         )
     }
 
@@ -790,6 +793,7 @@ impl CatalogController {
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),
                     fragment_info,
                     job.parallelism.clone(),
+                    job.max_parallelism as _,
                 )?,
             );
         }

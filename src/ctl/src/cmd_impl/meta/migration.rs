@@ -439,6 +439,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             create_type: Set(CreateType::Foreground),
             timezone: Set(table_fragment.timezone()),
             parallelism: Set(streaming_parallelism),
+            max_parallelism: Set(table_fragment.max_parallelism as _),
         })
         .exec(&meta_store_sql.conn)
         .await?;
