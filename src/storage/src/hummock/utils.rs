@@ -576,7 +576,7 @@ pub(crate) fn filter_with_delete_range<'a>(
     })
 }
 
-/// Wait for the `commited_epoch` of `table_id` to reach `wait_epoch`.
+/// Wait for the `committed_epoch` of `table_id` to reach `wait_epoch`.
 ///
 /// When the `table_id` does not exist in the latest version, we assume that
 /// the table is not created yet, and will wait until the table is created.
