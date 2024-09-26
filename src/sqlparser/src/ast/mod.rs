@@ -2743,8 +2743,8 @@ pub enum OnConflict {
 impl fmt::Display for OnConflict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            OnConflict::DoUpdateFull => "OVERWRITE",
-            OnConflict::DoNothing => "IGNORE",
+            OnConflict::DoUpdateFull => "DO UPDATE FULL",
+            OnConflict::DoNothing => "DO NOTHING",
             OnConflict::DoUpdateIfNotNull => "DO UPDATE IF NOT NULL",
         })
     }
