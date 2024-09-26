@@ -25,13 +25,8 @@ use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::metrics::{
-    LabelGuardedIntCounter, LabelGuardedIntCounterVec, LabelGuardedIntGauge,
-    LabelGuardedIntGaugeVec,
-};
+use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
-
-use crate::sink::{SinkMetrics, GLOBAL_SINK_METRICS};
 
 pub type LogStoreResult<T> = Result<T, anyhow::Error>;
 pub type ChunkId = usize;
@@ -348,7 +343,13 @@ where
 
 pub struct MonitoredLogWriter<W: LogWriter> {
     inner: W,
-    metrics: SinkMetrics,
+    metrics: LogWriterMetrics,
+}
+
+pub struct LogWriterMetrics {
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_write_rows: LabelGuardedIntCounter<4>,
 }
 
 impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
@@ -405,7 +406,7 @@ impl<T> T
 where
     T: LogWriter + Sized,
 {
-    pub fn monitored(self, metrics: SinkMetrics) -> MonitoredLogWriter<T> {
+    pub fn monitored(self, metrics: LogWriterMetrics) -> MonitoredLogWriter<T> {
         MonitoredLogWriter {
             inner: self,
             metrics,

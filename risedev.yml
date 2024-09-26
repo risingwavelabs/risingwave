@@ -132,6 +132,13 @@ profile:
       - use: grafana
       - use: kafka
         persist-data: true
+      - use: schema-registry
+
+  kafka-family:
+    steps:
+      - use: kafka
+        persist-data: true
+      - use: schema-registry
 
   standalone-full-peripherals:
     steps:

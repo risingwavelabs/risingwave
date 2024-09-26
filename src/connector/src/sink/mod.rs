@@ -307,9 +307,9 @@ pub struct SinkMetrics {
     // pub connector_sink_rows_received: LabelGuardedIntCounterVec<3>,
     //
     // // Log store metrics
-    // pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<4>,
-    // pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<4>,
-    // pub log_store_write_rows: LabelGuardedIntCounterVec<4>,
+    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<4>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<4>,
+    pub log_store_write_rows: LabelGuardedIntCounterVec<4>,
     pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
     pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
     pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
@@ -322,9 +322,9 @@ pub struct SinkMetrics {
 
     // pub sink_commit_duration: LabelGuardedHistogram<4>,
     pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
-    pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
-    pub log_store_write_rows: LabelGuardedIntCounter<4>,
+    // pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
+    // pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
+    // pub log_store_write_rows: LabelGuardedIntCounter<4>,
     // pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
     // pub log_store_read_rows: LabelGuardedIntCounter<4>,
     // pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
@@ -444,6 +444,9 @@ impl SinkMetrics {
 
         Self {
             sink_commit_duration,
+            log_store_first_write_epoch,
+            log_store_latest_write_epoch,
+            log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
             log_store_reader_wait_new_future_duration_ns,
@@ -455,9 +458,6 @@ impl SinkMetrics {
 
             // TODO: remove these
             connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
-            log_store_first_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
-            log_store_latest_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
-            log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
         }
     }
 

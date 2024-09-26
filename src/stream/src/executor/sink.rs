@@ -28,7 +28,7 @@ use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::log_store::{
     BackpressureMonitoredLogReader, LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory,
-    LogWriter, LogWriterExt, MonitoredLogReader,
+    LogWriter, LogWriterExt, LogWriterMetrics, MonitoredLogReader,
 };
 use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam, GLOBAL_SINK_METRICS,
@@ -219,12 +219,33 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         if self.sink.is_sink_into_table() {
             processed_input.boxed()
         } else {
+            let labels = [
+                &actor_id.to_string(),
+                "NA", // TODO: remove the connector label for log writer metrics
+                &sink_id.to_string(),
+                self.sink_param.sink_name.as_str(),
+            ];
+            let log_store_first_write_epoch = GLOBAL_SINK_METRICS
+                .log_store_first_write_epoch
+                .with_guarded_label_values(&labels);
+            let log_store_latest_write_epoch = GLOBAL_SINK_METRICS
+                .log_store_latest_write_epoch
+                .with_guarded_label_values(&labels);
+            let log_store_write_rows = GLOBAL_SINK_METRICS
+                .log_store_write_rows
+                .with_guarded_label_values(&labels);
+            let log_writer_metrics = LogWriterMetrics {
+                log_store_first_write_epoch,
+                log_store_latest_write_epoch,
+                log_store_write_rows,
+            };
+
             self.log_store_factory
                 .build()
                 .map(move |(log_reader, log_writer)| {
                     let write_log_stream = Self::execute_write_log(
                         processed_input,
-                        log_writer.monitored(self.sink_writer_param.sink_metrics.clone()),
+                        log_writer.monitored(log_writer_metrics),
                         actor_id,
                     );
 
