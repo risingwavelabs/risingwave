@@ -1037,6 +1037,16 @@ def section_streaming_cdc(outer_panels):
             "Streaming CDC",
             [
                 panels.timeseries_rowsps(
+                    "CDC Source Throughput",
+                    "The rows received by the CDC source",
+                    [
+                        panels.target(
+                            f"rate({metric('cdc_source_rows_received')}[$__rate_interval])",
+                            "source={{source_type}} @ {{source_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
                     "CDC Backfill Snapshot Read Throughput(rows)",
                     "Total number of rows that have been read from the cdc backfill snapshot",
                     [
@@ -4134,23 +4144,12 @@ def section_memory_manager(outer_panels):
         ),
     ]
 
-# TODO: remove this section!
-def section_connector_node(outer_panels):
+def section_sink_metrics(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Connector Node",
+            "Sink Metrics",
             [
-                panels.timeseries_rowsps(
-                    "Connector Source Throughput(rows)",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('source_rows_received')}[$__rate_interval])",
-                            "source={{source_type}} @ {{source_id}}",
-                        ),
-                    ],
-                ),
                 panels.timeseries_rowsps(
                     "Remote Sink (Java) Throughput",
                     "The rows sent by remote sink to the Java connector process",
@@ -4161,17 +4160,6 @@ def section_connector_node(outer_panels):
                         ),
                     ],
                 ),
-            ],
-        )
-    ]
-
-
-def section_sink_metrics(outer_panels):
-    panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed(
-            "Sink Metrics",
-            [
                 panels.timeseries_latency(
                     "Commit Duration",
                     "",
@@ -4798,7 +4786,6 @@ dashboard = Dashboard(
         *section_grpc_hummock_meta_client(panels),
         *section_frontend(panels),
         *section_memory_manager(panels),
-        *section_connector_node(panels),
         *section_sink_metrics(panels),
         *section_kafka_metrics(panels),
         *section_network_connection(panels),
