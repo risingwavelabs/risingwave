@@ -402,7 +402,7 @@ impl Cluster {
             .unwrap();
         let sql_endpoint = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
             format!(
-                "sqlite://{}stest-{}-{}.sqlite?mode=rwc",
+                "sqlite://{}/stest-{}-{}.sqlite?mode=rwc",
                 sqlite_data_dir.display(),
                 seed,
                 Uuid::new_v4()
