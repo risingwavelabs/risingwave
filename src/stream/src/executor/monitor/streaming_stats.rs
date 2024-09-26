@@ -27,7 +27,6 @@ use risingwave_common::metrics::{
     RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_common::{
     register_guarded_gauge_vec_with_registry, register_guarded_histogram_vec_with_registry,
     register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,

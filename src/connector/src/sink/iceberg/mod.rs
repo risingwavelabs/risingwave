@@ -417,7 +417,7 @@ impl Sink for IcebergSink {
 pub struct IcebergWriter {
     inner_writer: IcebergWriterEnum,
     schema: SchemaRef,
-    metrics: IcebergWriterMetrics,
+    _metrics: IcebergWriterMetrics,
 }
 
 pub struct IcebergWriterMetrics {
@@ -425,8 +425,8 @@ pub struct IcebergWriterMetrics {
     // They are actually used in `PrometheusWriterBuilder`:
     //     WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone())
     // We keep them here to let the guard cleans the labels from metrics registry when dropped
-    write_qps: LabelGuardedIntCounter<3>,
-    write_latency: LabelGuardedHistogram<3>,
+    _write_qps: LabelGuardedIntCounter<3>,
+    _write_latency: LabelGuardedHistogram<3>,
 }
 
 enum IcebergWriterEnum {
@@ -508,9 +508,9 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
-                metrics: IcebergWriterMetrics {
-                    write_qps,
-                    write_latency,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
                 },
             })
         } else {
@@ -528,9 +528,9 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
-                metrics: IcebergWriterMetrics {
-                    write_qps,
-                    write_latency,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
                 },
             })
         }
@@ -603,9 +603,9 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
-                metrics: IcebergWriterMetrics {
-                    write_qps,
-                    write_latency,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
                 },
             })
         } else {
@@ -623,9 +623,9 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
-                metrics: IcebergWriterMetrics {
-                    write_qps,
-                    write_latency,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
                 },
             })
         }

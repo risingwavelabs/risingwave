@@ -16,11 +16,11 @@ use std::num::NonZeroU64;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedHistogramVec};
 
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::SinkWriter;
-use crate::sink::{LogSinker, Result, SinkLogReader, SinkMetrics, SinkWriterMetrics};
+use crate::sink::{LogSinker, Result, SinkLogReader, SinkWriterMetrics};
+
 pub const DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE: u64 = 10;
 pub const DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE: u64 = 1;
 pub const COMMIT_CHECKPOINT_INTERVAL: &str = "commit_checkpoint_interval";

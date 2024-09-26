@@ -66,11 +66,10 @@ use prometheus::Registry;
 use risingwave_common::array::ArrayError;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::config::MetricLevel;
 use risingwave_common::hash::ActorId;
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedHistogramVec, LabelGuardedIntCounter,
-    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec,
+    LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::secret::{LocalSecretManager, SecretError};
@@ -305,32 +304,21 @@ pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =
 pub struct SinkMetrics {
     pub sink_commit_duration: LabelGuardedHistogramVec<4>,
     pub connector_sink_rows_received: LabelGuardedIntCounterVec<3>,
-    // // Log store metrics
+
+    // Log store metrics
     pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<4>,
     pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<4>,
     pub log_store_write_rows: LabelGuardedIntCounterVec<4>,
     pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
     pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
     pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
+
     // Iceberg metrics
     pub iceberg_write_qps: LabelGuardedIntCounterVec<3>,
     pub iceberg_write_latency: LabelGuardedHistogramVec<3>,
     pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
     pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
     pub iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
-    // pub sink_commit_duration: LabelGuardedHistogram<4>,
-    // pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
-    // pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
-    // pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
-    // pub log_store_write_rows: LabelGuardedIntCounter<4>,
-    // pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
-    // pub log_store_read_rows: LabelGuardedIntCounter<4>,
-    // pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
-    // pub iceberg_write_qps: LabelGuardedIntCounter<3>,
-    // pub iceberg_write_latency: LabelGuardedHistogram<3>,
-    // pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<3>,
-    // pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<3>,
-    // pub iceberg_partition_num: LabelGuardedIntGauge<3>,
 }
 
 impl SinkMetrics {
@@ -455,26 +443,6 @@ impl SinkMetrics {
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
         }
-    }
-
-    fn for_test() -> Self {
-        todo!()
-        // SinkMetrics {
-        //     sink_commit_duration_metrics: LabelGuardedHistogram::test_histogram(),
-        //     connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
-        //     log_store_first_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
-        //     log_store_latest_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
-        //     log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
-        //     log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
-        //     log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
-        //     log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter::test_int_counter(
-        //     ),
-        //     iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
-        //     iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
-        //     iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
-        //     iceberg_position_delete_cache_num: LabelGuardedIntGauge::test_int_gauge(),
-        //     iceberg_partition_num: LabelGuardedIntGauge::test_int_gauge(),
-        // }
     }
 }
 
