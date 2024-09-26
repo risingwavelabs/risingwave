@@ -619,13 +619,22 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        Ok(Box::pin(S3ObjectIter::new(
-            self.client.clone(),
-            self.bucket.clone(),
-            prefix.to_string(),
-            self.config.clone(),
-        )))
+    async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter> {
+        Ok(Box::pin(
+            S3ObjectIter::new(
+                self.client.clone(),
+                self.bucket.clone(),
+                prefix.to_string(),
+                self.config.clone(),
+                start_after,
+            )
+            .take(limit.unwrap_or(usize::MAX)),
+        ))
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -947,10 +956,17 @@ struct S3ObjectIter {
     >,
 
     config: Arc<ObjectStoreConfig>,
+    start_after: Option<String>,
 }
 
 impl S3ObjectIter {
-    fn new(client: Client, bucket: String, prefix: String, config: Arc<ObjectStoreConfig>) -> Self {
+    fn new(
+        client: Client,
+        bucket: String,
+        prefix: String,
+        config: Arc<ObjectStoreConfig>,
+        start_after: Option<String>,
+    ) -> Self {
         Self {
             buffer: VecDeque::default(),
             client,
@@ -960,6 +976,7 @@ impl S3ObjectIter {
             is_truncated: Some(true),
             send_future: None,
             config,
+            start_after,
         }
     }
 }
@@ -978,6 +995,8 @@ impl Stream for S3ObjectIter {
                     self.is_truncated = is_truncated;
                     self.buffer.extend(more);
                     self.send_future = None;
+                    // only the first request may set start_after
+                    self.start_after = None;
                     self.poll_next(cx)
                 }
                 Err(e) => {
@@ -994,6 +1013,9 @@ impl Stream for S3ObjectIter {
             .list_objects_v2()
             .bucket(&self.bucket)
             .prefix(&self.prefix);
+        if let Some(start_after) = self.start_after.as_ref() {
+            request = request.start_after(start_after);
+        }
         if let Some(continuation_token) = self.next_continuation_token.as_ref() {
             request = request.continuation_token(continuation_token);
         }
