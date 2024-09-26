@@ -404,8 +404,10 @@ impl HummockVersion {
             }
             return;
         } else if !self.levels.contains_key(&parent_group_id) {
-            warn!(parent_group_id, "non-existing parent group id to init from");
-            return;
+            unreachable!(
+                "non-existing parent group id {} to init from",
+                parent_group_id
+            );
         }
         let [parent_levels, cur_levels] = self
             .levels
@@ -906,8 +908,10 @@ impl HummockVersionCommon<SstableInfo> {
             }
             return;
         } else if !self.levels.contains_key(&parent_group_id) {
-            warn!(parent_group_id, "non-existing parent group id to init from");
-            return;
+            unreachable!(
+                "non-existing parent group id {} to init from (V2)",
+                parent_group_id
+            );
         }
 
         let [parent_levels, cur_levels] = self
