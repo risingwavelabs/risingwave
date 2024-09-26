@@ -2,7 +2,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t1 (v1 int, v2 int, v3 int, primary key(v1)) on conflict do nothing;
+create table t1 (v1 int, v2 int, v3 int, primary key(v1)) APPEND ONLY on conflict do nothing;
 
 statement ok
 insert into t1 values (1,4,2), (2,3,3);
@@ -25,6 +25,9 @@ select v1, v2, v3 from mv1;
 
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
+
+statement error
+create table t2 (v1 int, v2 int, v3 int, primary key(v1)) APPEND ONLY on conflict overwrite;
 
 statement ok
 create table t2 (v1 int, v2 int, v3 int, primary key(v1)) on conflict do update full;

@@ -40,6 +40,7 @@ mod pg_proc;
 mod pg_range;
 mod pg_rewrite;
 mod pg_roles;
+mod pg_sequence;
 mod pg_sequences;
 mod pg_settings;
 mod pg_shadow;
