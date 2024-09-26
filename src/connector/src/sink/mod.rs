@@ -310,10 +310,9 @@ pub struct SinkMetrics {
     // pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<4>,
     // pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<4>,
     // pub log_store_write_rows: LabelGuardedIntCounterVec<4>,
-    // pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
-    // pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
-    // pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
-    //
+    pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
+    pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
     // Iceberg metrics
     pub iceberg_write_qps: LabelGuardedIntCounterVec<3>,
     pub iceberg_write_latency: LabelGuardedHistogramVec<3>,
@@ -326,9 +325,9 @@ pub struct SinkMetrics {
     pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
     pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
     pub log_store_write_rows: LabelGuardedIntCounter<4>,
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
-    pub log_store_read_rows: LabelGuardedIntCounter<4>,
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
+    // pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
+    // pub log_store_read_rows: LabelGuardedIntCounter<4>,
+    // pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
     // pub iceberg_write_qps: LabelGuardedIntCounter<3>,
     // pub iceberg_write_latency: LabelGuardedHistogram<3>,
     // pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<3>,
@@ -445,6 +444,9 @@ impl SinkMetrics {
 
         Self {
             sink_commit_duration,
+            log_store_latest_read_epoch,
+            log_store_read_rows,
+            log_store_reader_wait_new_future_duration_ns,
             iceberg_write_qps,
             iceberg_write_latency,
             iceberg_rolling_unflushed_data_file,
@@ -455,11 +457,7 @@ impl SinkMetrics {
             connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
             log_store_first_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_latest_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
-            log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
-            log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
-            log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter::test_int_counter(
-            ),
         }
     }
 
@@ -508,8 +506,7 @@ pub struct SinkWriterMetrics {
 
 impl SinkWriterMetrics {
     pub fn new(writer_param: &SinkWriterParam) -> Self {
-        let sink_commit_duration = writer_param
-            .sink_metrics
+        let sink_commit_duration = GLOBAL_SINK_METRICS
             .sink_commit_duration
             .with_guarded_label_values(&[
                 &writer_param.actor_id.to_string(),

@@ -27,10 +27,11 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::log_store::{
-    LogReader, LogReaderExt, LogStoreFactory, LogWriter, LogWriterExt,
+    BackpressureMonitoredLogReader, LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory,
+    LogWriter, LogWriterExt, MonitoredLogReader,
 };
 use risingwave_connector::sink::{
-    build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
+    build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam, GLOBAL_SINK_METRICS,
 };
 use thiserror_ext::AsReport;
 
@@ -443,13 +444,32 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
     ) -> StreamExecutorResult<!> {
-        let metrics = sink_writer_param.sink_metrics.clone();
-
         let visible_columns = columns
             .iter()
             .enumerate()
             .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
             .collect_vec();
+
+        let labels = [
+            &actor_context.id.to_string(),
+            sink_writer_param.connector.as_str(),
+            &sink_writer_param.sink_id.to_string(),
+            sink_writer_param.sink_name.as_str(),
+        ];
+        let log_store_reader_wait_new_future_duration_ns = GLOBAL_SINK_METRICS
+            .log_store_reader_wait_new_future_duration_ns
+            .with_guarded_label_values(&labels);
+        let log_store_read_rows = GLOBAL_SINK_METRICS
+            .log_store_read_rows
+            .with_guarded_label_values(&labels);
+        let log_store_latest_read_epoch = GLOBAL_SINK_METRICS
+            .log_store_latest_read_epoch
+            .with_guarded_label_values(&labels);
+        let metrics = LogReaderMetrics {
+            log_store_latest_read_epoch,
+            log_store_read_rows,
+            log_store_reader_wait_new_future_duration_ns,
+        };
 
         let mut log_reader = log_reader
             .transform_chunk(move |chunk| {
