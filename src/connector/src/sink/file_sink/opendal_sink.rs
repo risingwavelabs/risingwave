@@ -145,6 +145,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
         let engine_type = S::get_engine_type();
+
         Ok(Self {
             op,
             path,
