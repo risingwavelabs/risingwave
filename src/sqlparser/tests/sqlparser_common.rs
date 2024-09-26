@@ -3358,7 +3358,7 @@ fn parse_create_table_on_conflict() {
         } => {
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
-            assert_eq!(on_conflict, Some(OnConflict::DoUpdateFull));
+            assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
         }
         _ => unreachable!(),
     }
@@ -3373,7 +3373,7 @@ fn parse_create_table_on_conflict() {
         } => {
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
-            assert_eq!(on_conflict, Some(OnConflict::DoNothing));
+            assert_eq!(on_conflict, Some(OnConflict::Nothing));
         }
         _ => unreachable!(),
     }
@@ -3405,7 +3405,7 @@ fn parse_create_table_on_conflict_with_version_column() {
             ..
         } => {
             assert_eq!("t", name.to_string());
-            assert_eq!(on_conflict, Some(OnConflict::DoUpdateFull));
+            assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
             assert_eq!(with_version_column, Some("v2".to_string()));
         }
         _ => unreachable!(),
