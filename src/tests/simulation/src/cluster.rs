@@ -884,6 +884,37 @@ impl Cluster {
     }
 }
 
+#[cfg_or_panic(madsim)]
+impl Drop for Cluster {
+    fn drop(&mut self) {
+        // FIXME: remove it when deprecate the on-disk version.
+        let seed = std::env::var("MADSIM_TEST_SEED")
+            .unwrap_or("0".to_string())
+            .parse::<u64>()
+            .unwrap();
+        let default_path = PathBuf::from(".");
+        let sqlite_data_dir = self
+            .config
+            .sqlite_data_dir
+            .as_ref()
+            .unwrap_or_else(|| &default_path);
+        for entry in std::fs::read_dir(sqlite_data_dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with(&format!("stest-{}-", seed))
+            {
+                std::fs::remove_file(path).unwrap();
+                break;
+            }
+        }
+    }
+}
+
 type SessionRequest = (
     String,                          // query sql
     oneshot::Sender<Result<String>>, // channel to send result back
