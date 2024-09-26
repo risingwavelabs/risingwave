@@ -437,11 +437,10 @@ impl LogSinker for RemoteLogSinker {
                                 if let Some(prev_offset) = &prev_offset {
                                     prev_offset.check_next_offset(offset)?;
                                 }
-                                // TODO
-                                // let cardinality = chunk.cardinality();
-                                // sink_writer_metrics
-                                //     .connector_sink_rows_received
-                                //     .inc_by(cardinality as _);
+                                let cardinality = chunk.cardinality();
+                                sink_writer_metrics
+                                    .connector_sink_rows_received
+                                    .inc_by(cardinality as _);
 
                                 let chunk = self.stream_chunk_converter.convert_chunk(chunk)?;
                                 request_tx
@@ -541,8 +540,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
                     "sink needs coordination and should not have singleton input"
                 ))
             })?,
-            CoordinatedRemoteSinkWriter::new(self.param.clone(), writer_param.sink_metrics.clone())
-                .await?,
+            CoordinatedRemoteSinkWriter::new(self.param.clone(), metrics.clone()).await?,
         )
         .await?
         .into_log_sinker(metrics))
@@ -557,11 +555,11 @@ pub struct CoordinatedRemoteSinkWriter {
     epoch: Option<u64>,
     batch_id: u64,
     stream_handle: SinkWriterStreamHandle<JniSinkWriterStreamRequest>,
-    sink_metrics: SinkMetrics,
+    metrics: SinkWriterMetrics,
 }
 
 impl CoordinatedRemoteSinkWriter {
-    pub async fn new(param: SinkParam, sink_metrics: SinkMetrics) -> Result<Self> {
+    pub async fn new(param: SinkParam, metrics: SinkWriterMetrics) -> Result<Self> {
         let sink_proto = param.to_proto();
         let stream_handle = EmbeddedConnectorClient::new()?
             .start_sink_writer_stream(sink_proto.table_schema.clone(), sink_proto)
@@ -571,7 +569,7 @@ impl CoordinatedRemoteSinkWriter {
             epoch: None,
             batch_id: 0,
             stream_handle,
-            sink_metrics,
+            metrics,
         })
     }
 
@@ -582,8 +580,6 @@ impl CoordinatedRemoteSinkWriter {
     ) -> CoordinatedRemoteSinkWriter {
         use futures::StreamExt;
 
-        let properties = BTreeMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
-
         let stream_handle = SinkWriterStreamHandle::for_test(
             request_sender,
             ReceiverStream::new(response_receiver)
@@ -592,7 +588,6 @@ impl CoordinatedRemoteSinkWriter {
         );
 
         CoordinatedRemoteSinkWriter {
-            properties,
             epoch: None,
             batch_id: 0,
             stream_handle,
@@ -607,7 +602,7 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let cardinality = chunk.cardinality();
-        self.sink_metrics
+        self.metrics
             .connector_sink_rows_received
             .inc_by(cardinality as _);
 

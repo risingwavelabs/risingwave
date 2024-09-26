@@ -304,8 +304,7 @@ pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =
 #[derive(Clone)]
 pub struct SinkMetrics {
     pub sink_commit_duration: LabelGuardedHistogramVec<4>,
-    // pub connector_sink_rows_received: LabelGuardedIntCounterVec<3>,
-    //
+    pub connector_sink_rows_received: LabelGuardedIntCounterVec<3>,
     // // Log store metrics
     pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<4>,
     pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<4>,
@@ -319,9 +318,8 @@ pub struct SinkMetrics {
     pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
     pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
     pub iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
-
     // pub sink_commit_duration: LabelGuardedHistogram<4>,
-    pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
+    // pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
     // pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
     // pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
     // pub log_store_write_rows: LabelGuardedIntCounter<4>,
@@ -444,6 +442,7 @@ impl SinkMetrics {
 
         Self {
             sink_commit_duration,
+            connector_sink_rows_received,
             log_store_first_write_epoch,
             log_store_latest_write_epoch,
             log_store_write_rows,
@@ -455,9 +454,6 @@ impl SinkMetrics {
             iceberg_rolling_unflushed_data_file,
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
-
-            // TODO: remove these
-            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
         }
     }
 
@@ -500,8 +496,11 @@ pub struct SinkWriterParam {
     pub sink_name: String,
     pub connector: String,
 }
+
+#[derive(Clone)]
 pub struct SinkWriterMetrics {
     pub sink_commit_duration: LabelGuardedHistogram<4>,
+    pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
 }
 
 impl SinkWriterMetrics {
@@ -514,9 +513,19 @@ impl SinkWriterMetrics {
                 &writer_param.sink_id.to_string(),
                 writer_param.sink_name.as_str(),
             ]);
-        return SinkWriterMetrics {
+        let connector_sink_rows_received = GLOBAL_SINK_METRICS
+            .connector_sink_rows_received
+            .with_guarded_label_values(&[
+                // TODO: should have `actor_id` as label
+                // &writer_param.actor_id.to_string(),
+                writer_param.connector.as_str(),
+                &writer_param.sink_id.to_string(),
+                writer_param.sink_name.as_str(),
+            ]);
+        Self {
             sink_commit_duration,
-        };
+            connector_sink_rows_received,
+        }
     }
 }
 
