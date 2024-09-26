@@ -657,7 +657,7 @@ pub(crate) async fn wait_for_update(
                 return Err(HummockError::wait_epoch("tx dropped"));
             }
             Ok(Ok(_)) => {
-                if inspect_fn(&receiver.borrow())? {
+                if inspect_fn(&receiver.borrow_and_update())? {
                     return Ok(());
                 }
             }
