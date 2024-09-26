@@ -396,14 +396,23 @@ impl Cluster {
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
+        let seed = std::env::var("MADSIM_TEST_SEED")
+            .unwrap_or("0".to_string())
+            .parse::<u64>()
+            .unwrap();
         let sql_endpoint = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
             format!(
-                "sqlite://{}stest-{}.sqlite?mode=rwc",
+                "sqlite://{}stest-{}-{}.sqlite?mode=rwc",
                 sqlite_data_dir.display(),
+                seed,
                 Uuid::new_v4()
             )
         } else {
-            format!("sqlite://./stest-{}.sqlite?mode=rwc", Uuid::new_v4())
+            format!(
+                "sqlite://./stest-{}-{}.sqlite?mode=rwc",
+                seed,
+                Uuid::new_v4()
+            )
         };
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
 
