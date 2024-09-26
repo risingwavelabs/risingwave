@@ -21,7 +21,7 @@ pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
-pub mod elasticsearch;
+pub mod elasticsearch_opensearch;
 pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
@@ -105,8 +105,8 @@ macro_rules! for_all_sinks {
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Opensearch, $crate::sink::remote::OpenSearchSink },
-                { ElasticSearchRust, $crate::sink::elasticsearch::elasticsearch::ElasticSearchSink },
-                { OpensearchRust, $crate::sink::elasticsearch::opensearch::OpenSearchSink },
+                { ElasticSearchRust, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
+                { OpensearchRust, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },

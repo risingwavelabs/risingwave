@@ -57,7 +57,7 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::elasticsearch::elasticsearch_converter::{
+use super::elasticsearch_opensearch::elasticsearch_converter::{
     is_es_sink, StreamChunkConverter, ES_OPTION_DELIMITER,
 };
 use crate::error::ConnectorResult;
