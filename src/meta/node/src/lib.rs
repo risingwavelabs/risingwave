@@ -381,6 +381,10 @@ pub fn start(
                 hummock_time_travel_snapshot_interval: config
                     .meta
                     .hummock_time_travel_snapshot_interval,
+                hummock_time_travel_sst_info_fetch_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_sst_info_fetch_batch_size,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,

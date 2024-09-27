@@ -3383,7 +3383,7 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Time Travel Latency",
+                    "Time Travel Replay Latency",
                     "The latency of replaying a hummock version for time travel",
                     quantile(
                         lambda quantile, legend: panels.target(
@@ -3396,6 +3396,16 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                         panels.target(
                             f"rate({metric('storage_time_travel_version_replay_latency_sum')}[$__rate_interval]) / rate({metric('storage_time_travel_version_replay_latency_count')}[$__rate_interval]) > 0",
                             "time_travel_version_replay_avg",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Time Travel Replay Ops",
+                    "The frequency of replaying a hummock version for time travel",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_time_travel_version_replay_latency_count')}[$__rate_interval]))",
+                            "time_travel_version_replay_ops",
                         ),
                     ],
                 ),

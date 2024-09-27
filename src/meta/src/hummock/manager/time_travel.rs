@@ -345,10 +345,7 @@ impl HummockManager {
             .collect::<VecDeque<_>>();
         let sst_count = sst_ids.len();
         let mut sst_id_to_info = HashMap::with_capacity(sst_count);
-        let sst_info_fetch_batch_size = std::env::var("RW_TIME_TRAVEL_SST_INFO_FETCH_BATCH_SIZE")
-            .unwrap_or_else(|_| "10000".into())
-            .parse()
-            .unwrap();
+        let sst_info_fetch_batch_size = self.env.opts.hummock_time_travel_sst_info_fetch_batch_size;
         while !sst_ids.is_empty() {
             let sst_infos = hummock_sstable_info::Entity::find()
                 .filter(hummock_sstable_info::Column::SstId.is_in(

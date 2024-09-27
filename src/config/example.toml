@@ -83,6 +83,7 @@ meta_max_trivial_move_task_count_per_loop = 256
 meta_max_get_task_probe_times = 5
 meta_actor_cnt_per_worker_parallelism_soft_limit = 100
 meta_actor_cnt_per_worker_parallelism_hard_limit = 400
+meta_hummock_time_travel_sst_info_fetch_batch_size = 10000
 
 [batch]
 enable_barrier_read = false

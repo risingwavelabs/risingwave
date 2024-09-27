@@ -121,7 +121,6 @@ impl RecentVersions {
             .get(&table_id)
         {
             if info.committed_epoch <= epoch {
-                self.metric.safe_version_hit_index.observe(0 as _);
                 Some(self.latest_version.clone())
             } else {
                 self.get_safe_version_from_recent(table_id, epoch)
@@ -171,10 +170,7 @@ impl RecentVersions {
             }
         });
         match result {
-            Ok(index) => {
-                self.metric.safe_version_hit_index.observe((index + 1) as _);
-                Some(self.recent_versions[index].clone())
-            }
+            Ok(index) => Some(self.recent_versions[index].clone()),
             Err(index) => {
                 // `index` is index of the first version that has `committed_epoch` greater than `epoch`
                 // or `index` equals `recent_version.len()` when `epoch` is greater than all `committed_epoch`
@@ -194,7 +190,6 @@ impl RecentVersions {
                         .info()
                         .contains_key(&table_id)
                     {
-                        self.metric.safe_version_hit_index.observe(index as _);
                         Some(version)
                     } else {
                         // if the table does not exist in the version, return `None` to try get a time travel version
