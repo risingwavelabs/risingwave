@@ -33,13 +33,13 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
-use super::{HummockError, SstableStoreRef};
+use super::{HummockError, HummockResult, SstableStoreRef};
 use crate::error::StorageResult;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::monitor::MemoryCollector;
-use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead, TryWaitEpochOptions};
+use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -575,24 +575,58 @@ pub(crate) fn filter_with_delete_range<'a>(
     })
 }
 
+/// Wait for the `committed_epoch` of `table_id` to reach `wait_epoch`.
+///
+/// When the `table_id` does not exist in the latest version, we assume that
+/// the table is not created yet, and will wait until the table is created.
 pub(crate) async fn wait_for_epoch(
     notifier: &tokio::sync::watch::Sender<PinnedVersion>,
     wait_epoch: u64,
-    options: TryWaitEpochOptions,
+    table_id: TableId,
 ) -> StorageResult<()> {
+    let mut prev_committed_epoch = None;
+    let prev_committed_epoch = &mut prev_committed_epoch;
+    wait_for_update(
+        notifier,
+        |version| {
+            let committed_epoch = version.table_committed_epoch(table_id);
+            let ret = if let Some(committed_epoch) = committed_epoch {
+                if committed_epoch >= wait_epoch {
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            } else if prev_committed_epoch.is_none() {
+                Ok(false)
+            } else {
+                Err(HummockError::wait_epoch(format!(
+                    "table {} has been dropped",
+                    table_id
+                )))
+            };
+            *prev_committed_epoch = committed_epoch;
+            ret
+        },
+        || {
+            format!(
+                "wait_for_epoch: epoch: {}, table_id: {}",
+                wait_epoch, table_id
+            )
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn wait_for_update(
+    notifier: &tokio::sync::watch::Sender<PinnedVersion>,
+    mut inspect_fn: impl FnMut(&PinnedVersion) -> HummockResult<bool>,
+    mut periodic_debug_info: impl FnMut() -> String,
+) -> HummockResult<()> {
     let mut receiver = notifier.subscribe();
-    let mut committed_epoch = {
-        // avoid unnecessary check in the loop if the value does not change
-        let committed_epoch = receiver
-            .borrow_and_update()
-            .table_committed_epoch(options.table_id);
-        if let Some(committed_epoch) = committed_epoch
-            && committed_epoch >= wait_epoch
-        {
-            return Ok(());
-        }
-        committed_epoch
-    };
+    if inspect_fn(&receiver.borrow_and_update())? {
+        return Ok(());
+    }
     let start_time = Instant::now();
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
@@ -607,26 +641,19 @@ pub(crate) async fn wait_for_epoch(
                 // CN with the same distribution as the upstream MV.
                 // See #3845 for more details.
                 tracing::warn!(
-                    epoch = wait_epoch,
-                    ?committed_epoch,
-                    table_id = options.table_id.table_id,
+                    info = periodic_debug_info(),
                     elapsed = ?start_time.elapsed(),
-                    "wait_epoch timeout when waiting for version update",
+                    "timeout when waiting for version update",
                 );
                 continue;
             }
             Ok(Err(_)) => {
-                return Err(HummockError::wait_epoch("tx dropped").into());
+                return Err(HummockError::wait_epoch("tx dropped"));
             }
             Ok(Ok(_)) => {
-                // TODO: should handle the corner case of drop table
-                let new_committed_epoch = receiver.borrow().table_committed_epoch(options.table_id);
-                if let Some(committed_epoch) = new_committed_epoch
-                    && committed_epoch >= wait_epoch
-                {
+                if inspect_fn(&receiver.borrow_and_update())? {
                     return Ok(());
                 }
-                committed_epoch = new_committed_epoch;
             }
         }
     }

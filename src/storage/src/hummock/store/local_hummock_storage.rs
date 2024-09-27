@@ -135,15 +135,8 @@ impl LocalHummockStorage {
             .await
     }
 
-    async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
-        wait_for_epoch(
-            &self.version_update_notifier_tx,
-            wait_epoch,
-            TryWaitEpochOptions {
-                table_id: self.table_id,
-            },
-        )
-        .await
+    pub async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
+        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch, self.table_id).await
     }
 
     pub async fn iter_flushed(
