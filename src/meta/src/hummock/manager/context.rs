@@ -241,6 +241,16 @@ impl HummockManager {
             }
         }
 
+        // TODO: add sanity check for serverless compaction
+        // sanity check to ensure SSTs to commit have not been full GCed yet.
+        let now = self.now();
+        let sst_retention_watermark = now.saturating_sub(self.env.opts.min_sst_retention_time_sec);
+        for sst in sstables {
+            if sst.created_at < sst_retention_watermark {
+                return Err(anyhow::anyhow!("SST may have been GCed: SST timestamp {}, meta node timestamp {}, retention_sec {}, watermark {}", sst.created_at, now, self.env.opts.min_sst_retention_time_sec, sst_retention_watermark).into());
+            }
+        }
+
         async {
             if !self.env.opts.enable_committed_sst_sanity_check {
                 return;

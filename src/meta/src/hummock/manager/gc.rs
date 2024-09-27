@@ -205,9 +205,10 @@ impl HummockManager {
             }
             Some(compactor) => compactor,
         };
+        let sst_retention_watermark = self.now().saturating_sub(sst_retention_time.as_secs());
         compactor
             .send_event(ResponseEvent::FullScanTask(FullScanTask {
-                sst_retention_time_sec: sst_retention_time.as_secs(),
+                sst_retention_watermark,
                 prefix,
                 start_after,
                 limit,
@@ -261,6 +262,18 @@ impl HummockManager {
             .observe(selected_object_number as _);
         tracing::info!("GC watermark is {watermark}. Object full scan returns {candidate_object_number} objects. {after_watermark} remains after filtered by GC watermark. {after_time_travel} remains after filtered by time travel archives. {selected_object_number} remains after filtered by hummock version.");
         Ok(selected_object_number)
+    }
+
+    pub fn now(&self) -> u64 {
+        // TODO: persist now to maintain non-decreasing even after a meta node reboot.
+        let mut guard = self.now.lock();
+        let new_now = chrono::Utc::now().timestamp().try_into().unwrap();
+        if new_now < *guard {
+            tracing::warn!(old = *guard, new = new_now, "unexpected decreasing now");
+            return *guard;
+        }
+        *guard = new_now;
+        new_now
     }
 }
 
