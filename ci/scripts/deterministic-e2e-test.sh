@@ -25,7 +25,6 @@ git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/sqlsmith-query-snaps
 # popd
 popd
 
-export RUST_LOG=info
 export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR
