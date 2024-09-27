@@ -13,21 +13,28 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
+use bytes::{Bytes, BytesMut};
+use opendal::{FuturesAsyncWriter, Operator, Writer, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use serde_json::Value;
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 
 use crate::sink::catalog::SinkEncode;
+use crate::sink::encoder::{
+    JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
+};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam, SinkWriter,
@@ -105,9 +112,12 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
                     For example, `FORMAT xxx ENCODE xxx(force_append_only='true')`"
             )));
         }
-        if self.format_desc.encode != SinkEncode::Parquet {
+
+        if self.format_desc.encode != SinkEncode::Parquet
+            && self.format_desc.encode != SinkEncode::Json
+        {
             return Err(SinkError::Config(anyhow!(
-                "File sink only supports `PARQUET` encode at present."
+                "File sink only supports `PARQUET` and `JSON` encode at present."
             )));
         }
 
@@ -167,6 +177,7 @@ pub struct OpenDalSinkWriter {
     epoch: Option<u64>,
     executor_id: u64,
     encode_type: SinkEncode,
+    row_encoder: JsonEncoder,
     engine_type: EngineType,
 }
 
@@ -178,10 +189,12 @@ pub struct OpenDalSinkWriter {
 /// - `ParquetFileWriter`: Represents a Parquet file writer using the `AsyncArrowWriter<W>`
 ///   for writing data to a Parquet file. It accepts an implementation of W: `AsyncWrite` + `Unpin` + `Send`
 ///   as the underlying writer. In this case, the `OpendalWriter` serves as the underlying writer.
+/// - `FileWriter`: Represents a basic OpenDAL writer, for writing files in encodes other than parquet.
 ///
 /// The choice of writer used during the actual writing process depends on the encode type of the sink.
 enum FileWriterEnum {
     ParquetFileWriter(AsyncArrowWriter<Compat<FuturesAsyncWriter>>),
+    FileWriter(Writer),
 }
 
 #[async_trait]
@@ -217,6 +230,9 @@ impl SinkWriter for OpenDalSinkWriter {
                 FileWriterEnum::ParquetFileWriter(w) => {
                     let _ = w.close().await?;
                 }
+                FileWriterEnum::FileWriter(mut w) => {
+                    let _ = w.close().await?;
+                }
             };
         }
 
@@ -234,7 +250,16 @@ impl OpenDalSinkWriter {
         encode_type: SinkEncode,
         engine_type: EngineType,
     ) -> Result<Self> {
-        let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
+        let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema.clone())?;
+        let row_encoder = JsonEncoder::new(
+            rw_schema,
+            None,
+            crate::sink::encoder::DateHandlingMode::String,
+            TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::String,
+            JsonbHandlingMode::String,
+        );
         Ok(Self {
             schema: Arc::new(arrow_schema),
             write_path: write_path.to_string(),
@@ -245,6 +270,7 @@ impl OpenDalSinkWriter {
             executor_id,
 
             encode_type,
+            row_encoder,
             engine_type,
         })
     }
@@ -253,6 +279,7 @@ impl OpenDalSinkWriter {
         // Todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
             SinkEncode::Parquet => "parquet",
+            SinkEncode::Json => "json",
             _ => unimplemented!(),
         };
 
@@ -292,28 +319,51 @@ impl OpenDalSinkWriter {
                     )?,
                 ));
             }
-            _ => unimplemented!(),
+            _ => {
+                self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
+            }
         }
 
         Ok(())
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let (data_chunk, _) = chunk.compact().into_parts();
-
+        let chunk_buf = self.convert_chunk_to_bytes(chunk.clone())?;
         match self
             .sink_writer
             .as_mut()
             .ok_or_else(|| SinkError::File("Sink writer is not created.".to_string()))?
         {
             FileWriterEnum::ParquetFileWriter(w) => {
+                let (data_chunk, _) = chunk.clone().compact().into_parts();
                 let batch =
                     IcebergArrowConvert.to_record_batch(self.schema.clone(), &data_chunk)?;
                 w.write(&batch).await?;
             }
+            FileWriterEnum::FileWriter(w) => {
+                w.write(chunk_buf).await?;
+            }
         }
 
         Ok(())
+    }
+
+    fn convert_chunk_to_bytes(&mut self, chunk: StreamChunk) -> anyhow::Result<Bytes> {
+        let mut chunk_buf = BytesMut::new();
+
+        // write the json representations of the row(s) in current chunk to `chunk_buf`
+        for (op, row) in chunk.rows() {
+            assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
+            // to prevent temporary string allocation,
+            // so we directly write to `chunk_buf` implicitly via `write_fmt`.
+            writeln!(
+                chunk_buf,
+                "{}",
+                Value::Object(self.row_encoder.encode(row)?)
+            )
+            .unwrap(); // write to a `BytesMut` should never fail
+        }
+        Ok(chunk_buf.freeze())
     }
 }
 
