@@ -346,6 +346,7 @@ define_keywords!(
     NOSCAN,
     NOSUPERUSER,
     NOT,
+    NOTHING,
     NOTNULL,
     NTH_VALUE,
     NTILE,

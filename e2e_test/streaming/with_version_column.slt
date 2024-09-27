@@ -12,7 +12,7 @@ statement error
 create table t0 (v1 int, v2 int, v3 int, v4 bool, primary key(v1)) on conflict do update if not null with version column v4;
 
 statement error
-create table t0 (v1 int, v2 int, v3 int, v4 int, primary key(v1)) on conflict ignore with version column(v4);
+create table t0 (v1 int, v2 int, v3 int, v4 int, primary key(v1)) on conflict do nothing with version column(v4);
 
 statement ok
 create table t1 (v1 int, v2 int, v3 int, v4 int, primary key(v1)) on conflict do update if not null with version column(v4);
@@ -62,7 +62,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t2 (v1 int, v2 int, v3 int, v4 int, primary key(v1)) on conflict overwrite with version column(v4);
+create table t2 (v1 int, v2 int, v3 int, v4 int, primary key(v1)) on conflict do update full with version column(v4);
 
 statement ok
 insert into t2 values (1,null,2, 4), (2,3,null, 1);

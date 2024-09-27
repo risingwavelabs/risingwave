@@ -262,7 +262,12 @@ impl HummockTestEnv {
             .await
             .unwrap();
 
-        self.storage.try_wait_epoch_for_test(epoch).await;
+        self.wait_sync_committed_version().await;
+    }
+
+    pub async fn wait_sync_committed_version(&self) {
+        let version = self.manager.get_current_version().await;
+        self.storage.wait_version(version).await;
     }
 }
 

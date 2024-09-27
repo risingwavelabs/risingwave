@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{ActorMapping, VnodeCountCompat, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
@@ -136,7 +136,7 @@ impl FragmentManagerCore {
     fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> HashMap<FragmentId, usize> {
+    ) -> HashMap<FragmentId, FragmentParallelismInfo> {
         self.table_fragments
             .values()
             .filter(|tf| tf.state() != State::Initial)
@@ -148,13 +148,14 @@ impl FragmentManagerCore {
                         return None;
                     }
 
-                    let parallelism = match fragment.get_distribution_type().unwrap() {
-                        FragmentDistributionType::Unspecified => unreachable!(),
-                        FragmentDistributionType::Single => 1,
-                        FragmentDistributionType::Hash => fragment.get_actors().len(),
-                    };
-
-                    Some((fragment.fragment_id, parallelism))
+                    Some((
+                        fragment.fragment_id,
+                        FragmentParallelismInfo {
+                            distribution_type: fragment.get_distribution_type().unwrap(),
+                            actor_count: fragment.actors.len(),
+                            vnode_count: fragment.vnode_count(),
+                        },
+                    ))
                 })
             })
             .collect()
@@ -187,6 +188,13 @@ impl ActorInfos {
     pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
         Self { fragment_infos }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct FragmentParallelismInfo {
+    pub distribution_type: FragmentDistributionType,
+    pub actor_count: usize,
+    pub vnode_count: usize,
 }
 
 pub type FragmentManagerRef = Arc<FragmentManager>;
@@ -1678,7 +1686,7 @@ impl FragmentManager {
     pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> HashMap<FragmentId, usize> {
+    ) -> HashMap<FragmentId, FragmentParallelismInfo> {
         self.core
             .read()
             .await

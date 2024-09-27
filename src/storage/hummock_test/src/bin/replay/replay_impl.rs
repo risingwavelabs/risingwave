@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId, SyncResult};
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, LocalReplayRead, ReplayItem, ReplayRead, ReplayStateStore,
     ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions, TracedSealCurrentEpochOptions, TracedSubResp,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedSubResp, TracedTryWaitEpochOptions,
 };
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_pb::common::WorkerNode;
@@ -170,9 +170,13 @@ impl ReplayStateStore for GlobalReplayImpl {
         Box::new(LocalReplayImpl(local_storage))
     }
 
-    async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Result<()> {
+    async fn try_wait_epoch(
+        &self,
+        epoch: HummockReadEpoch,
+        options: TracedTryWaitEpochOptions,
+    ) -> Result<()> {
         self.store
-            .try_wait_epoch(epoch)
+            .try_wait_epoch(epoch, options.into())
             .await
             .map_err(|_| TraceError::TryWaitEpochFailed)?;
         Ok(())

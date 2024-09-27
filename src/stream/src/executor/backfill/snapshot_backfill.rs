@@ -218,13 +218,12 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     // use `upstream_buffer.run_future` to poll upstream concurrently so that we won't have back-pressure
                     // on the upstream. Otherwise, in `batch_iter_log_with_pk_bounds`, we may wait upstream epoch to be committed,
                     // and the back-pressure may cause the upstream unable to consume the barrier and then cause deadlock.
-                    let stream =
-                        upstream_buffer
-                            .run_future(self.upstream_table.batch_iter_log_with_pk_bounds(
-                                barrier_epoch.prev,
-                                barrier_epoch.prev,
-                            ))
-                            .await?;
+                    let stream = upstream_buffer
+                        .run_future(self.upstream_table.batch_iter_log_with_pk_bounds(
+                            barrier_epoch.prev,
+                            HummockReadEpoch::Committed(barrier_epoch.prev),
+                        ))
+                        .await?;
                     let data_types = self.upstream_table.schema().data_types();
                     let builder = create_builder(None, self.chunk_size, data_types);
                     let stream = read_change_log(stream, builder);

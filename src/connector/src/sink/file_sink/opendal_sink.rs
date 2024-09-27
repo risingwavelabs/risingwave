@@ -31,6 +31,7 @@ use crate::sink::catalog::SinkEncode;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam, SinkWriter,
+    SinkWriterMetrics,
 };
 use crate::source::TryFromBTreeMap;
 use crate::with_options::WithOptions;
@@ -110,7 +111,11 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
                 "File sink only supports `PARQUET` encode at present."
             )));
         }
-        Ok(())
+
+        match self.op.list(&self.path).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(anyhow!(e).into()),
+        }
     }
 
     async fn new_log_sinker(
@@ -126,7 +131,7 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
             self.format_desc.encode.clone(),
             self.engine_type.clone(),
         )?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
     }
 }
 
@@ -139,6 +144,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
         let engine_type = S::get_engine_type();
+
         Ok(Self {
             op,
             path,

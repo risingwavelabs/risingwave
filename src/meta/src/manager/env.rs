@@ -186,6 +186,8 @@ pub struct MetaOpts {
     pub min_sst_retention_time_sec: u64,
     /// Interval of automatic hummock full GC.
     pub full_gc_interval_sec: u64,
+    /// Max number of object per full GC job can fetch.
+    pub full_gc_object_limit: u64,
     /// The spin interval when collecting global GC watermark in hummock
     pub collect_gc_watermark_spin_interval_sec: u64,
     /// Enable sanity check when SSTs are committed
@@ -318,6 +320,7 @@ impl MetaOpts {
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
+            full_gc_object_limit: 100_000,
             collect_gc_watermark_spin_interval_sec: 5,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,

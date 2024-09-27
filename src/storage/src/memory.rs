@@ -735,7 +735,11 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = MemtableLocalStateStore<Self>;
 
     #[allow(clippy::unused_async)]
-    async fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+    async fn try_wait_epoch(
+        &self,
+        _epoch: HummockReadEpoch,
+        _options: TryWaitEpochOptions,
+    ) -> StorageResult<()> {
         // memory backend doesn't need to wait for epoch, so this is a no-op.
         Ok(())
     }
