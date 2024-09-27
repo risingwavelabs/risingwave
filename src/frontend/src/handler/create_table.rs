@@ -702,8 +702,8 @@ fn gen_table_plan_inner(
     let pk_on_append_only = append_only && row_id_index.is_none();
 
     let on_conflict = if pk_on_append_only {
-        let on_conflict = on_conflict.unwrap_or(OnConflict::Ignore);
-        if on_conflict != OnConflict::Ignore {
+        let on_conflict = on_conflict.unwrap_or(OnConflict::Nothing);
+        if on_conflict != OnConflict::Nothing {
             return Err(ErrorCode::InvalidInputSyntax(
                 "When PRIMARY KEY constraint applied to an APPEND ONLY table, the ON CONFLICT behavior must be IGNORE.".to_owned(),
             )
