@@ -248,7 +248,7 @@ impl OpenDalSinkWriter {
 #[async_trait]
 impl SinkWriter for OpenDalSinkWriter {
     async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
-        unreachable!()
+        Ok(())
     }
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
@@ -256,8 +256,6 @@ impl SinkWriter for OpenDalSinkWriter {
         Ok(())
     }
 
-    /// Currently, if no batching strategy is defined, the system will still forcibly finish writing the file when the checkpoint barrier arrives.
-    /// If a batching strategy is defined, it effectively enables sink decoupling, the file is no longer forcibly written when the checkpoint barrier arrive.
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<Self::CommitMetadata> {
         Ok(())
     }
