@@ -390,6 +390,7 @@ pub fn start(
                     .min_delta_log_num_for_hummock_version_checkpoint,
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
                 full_gc_interval_sec: config.meta.full_gc_interval_sec,
+                full_gc_object_limit: config.meta.full_gc_object_limit,
                 collect_gc_watermark_spin_interval_sec: config
                     .meta
                     .collect_gc_watermark_spin_interval_sec,

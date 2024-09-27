@@ -242,10 +242,14 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
 impl<S: StateStore> StateStore for TracedStateStore<S> {
     type Local = TracedStateStore<S::Local>;
 
-    async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-        let span = TraceSpan::new_try_wait_epoch_span(epoch);
+    async fn try_wait_epoch(
+        &self,
+        epoch: HummockReadEpoch,
+        options: TryWaitEpochOptions,
+    ) -> StorageResult<()> {
+        let span = TraceSpan::new_try_wait_epoch_span(epoch, options.clone().into());
 
-        let res = self.inner.try_wait_epoch(epoch).await;
+        let res = self.inner.try_wait_epoch(epoch, options).await;
         span.may_send_result(OperationResult::TryWaitEpoch(
             res.as_ref().map(|o| *o).into(),
         ));

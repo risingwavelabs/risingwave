@@ -18,7 +18,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_pb::common::PbBuffer;
 
 use crate::TracedBytes;
@@ -170,6 +170,11 @@ pub struct TracedNewLocalOptions {
     pub vnodes: TracedBitmap,
 }
 
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+pub struct TracedTryWaitEpochOptions {
+    pub table_id: TracedTableId,
+}
+
 #[cfg(test)]
 impl TracedNewLocalOptions {
     pub(crate) fn for_test(table_id: u32) -> Self {
@@ -192,6 +197,7 @@ pub type TracedHummockEpoch = u64;
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub enum TracedHummockReadEpoch {
     Committed(TracedHummockEpoch),
+    BatchQueryReadCommitted(TracedHummockEpoch, u64),
     NoWait(TracedHummockEpoch),
     Backup(TracedHummockEpoch),
     TimeTravel(TracedHummockEpoch),
@@ -201,6 +207,9 @@ impl From<HummockReadEpoch> for TracedHummockReadEpoch {
     fn from(value: HummockReadEpoch) -> Self {
         match value {
             HummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
+            HummockReadEpoch::BatchQueryCommitted(epoch, version_id) => {
+                Self::BatchQueryReadCommitted(epoch, version_id.to_u64())
+            }
             HummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             HummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
             HummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
@@ -212,6 +221,9 @@ impl From<TracedHummockReadEpoch> for HummockReadEpoch {
     fn from(value: TracedHummockReadEpoch) -> Self {
         match value {
             TracedHummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
+            TracedHummockReadEpoch::BatchQueryReadCommitted(epoch, version_id) => {
+                Self::BatchQueryCommitted(epoch, HummockVersionId::new(version_id))
+            }
             TracedHummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             TracedHummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
             TracedHummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),

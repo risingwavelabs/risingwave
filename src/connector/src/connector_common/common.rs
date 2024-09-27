@@ -664,7 +664,7 @@ impl NatsCommon {
 
         let deliver_policy = match start_sequence {
             NatsOffset::Earliest => DeliverPolicy::All,
-            NatsOffset::Latest => DeliverPolicy::Last,
+            NatsOffset::Latest => DeliverPolicy::New,
             NatsOffset::SequenceNumber(v) => {
                 let parsed = v
                     .parse::<u64>()
@@ -674,7 +674,7 @@ impl NatsCommon {
                 }
             }
             NatsOffset::Timestamp(v) => DeliverPolicy::ByStartTime {
-                start_time: OffsetDateTime::from_unix_timestamp_nanos(v * 1_000_000)
+                start_time: OffsetDateTime::from_unix_timestamp_nanos(v as i128 * 1_000_000)
                     .context("invalid timestamp for nats offset")?,
             },
             NatsOffset::None => DeliverPolicy::All,

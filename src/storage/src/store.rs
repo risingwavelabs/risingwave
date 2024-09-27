@@ -35,7 +35,8 @@ use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection
 use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
-    TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
+    TracedWriteOptions,
 };
 use risingwave_pb::hummock::PbVnodeWatermark;
 
@@ -344,6 +345,34 @@ pub trait StateStoreWrite: StaticSendSync {
 
 pub trait SyncFuture = Future<Output = StorageResult<SyncResult>> + Send + 'static;
 
+#[derive(Clone)]
+pub struct TryWaitEpochOptions {
+    pub table_id: TableId,
+}
+
+impl TryWaitEpochOptions {
+    #[cfg(any(test, feature = "test"))]
+    pub fn for_test(table_id: TableId) -> Self {
+        Self { table_id }
+    }
+}
+
+impl From<TracedTryWaitEpochOptions> for TryWaitEpochOptions {
+    fn from(value: TracedTryWaitEpochOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+        }
+    }
+}
+
+impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
+    fn from(value: TryWaitEpochOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+        }
+    }
+}
+
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
@@ -352,6 +381,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn try_wait_epoch(
         &self,
         epoch: HummockReadEpoch,
+        options: TryWaitEpochOptions,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture;

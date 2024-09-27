@@ -22,9 +22,10 @@ use prometheus::Histogram;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ScalarImpl;
+use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -50,6 +51,7 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
     table: StorageTable<S>,
     old_epoch: u64,
     new_epoch: u64,
+    version_id: HummockVersionId,
 }
 
 impl<S: StateStore> LogRowSeqScanExecutor<S> {
@@ -57,6 +59,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         table: StorageTable<S>,
         old_epoch: u64,
         new_epoch: u64,
+        version_id: HummockVersionId,
         chunk_size: usize,
         identity: String,
         metrics: Option<BatchMetrics>,
@@ -74,6 +77,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             table,
             old_epoch,
             new_epoch,
+            version_id,
         }
     }
 }
@@ -107,8 +111,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
             Some(vnodes) => Some(Bitmap::from(vnodes).into()),
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            // TODO(var-vnode): use vnode count from table desc
-            None => Some(Bitmap::ones(VirtualNode::COUNT).into()),
+            None => Some(Bitmap::ones(table_desc.vnode_count()).into()),
         };
 
         let chunk_size = source.context.get_config().developer.chunk_size as u32;
@@ -128,12 +131,18 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
             unreachable!("invalid new epoch: {:?}", log_store_seq_scan_node.new_epoch)
         };
 
+        assert_eq!(old_epoch.hummock_version_id, new_epoch.hummock_version_id);
+        let version_id = old_epoch.hummock_version_id;
+        let old_epoch = old_epoch.epoch;
+        let new_epoch = new_epoch.epoch;
+
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
             Ok(Box::new(LogRowSeqScanExecutor::new(
                 table,
-                *old_epoch,
-                *new_epoch,
+                old_epoch,
+                new_epoch,
+                HummockVersionId::new(version_id),
                 chunk_size as usize,
                 source.plan_node().get_identity().clone(),
                 metrics,
@@ -164,6 +173,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             table,
             old_epoch,
             new_epoch,
+            version_id,
             schema,
             ..
         } = *self;
@@ -180,6 +190,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             table.clone(),
             old_epoch,
             new_epoch,
+            version_id,
             chunk_size,
             histogram,
             Arc::new(schema.clone()),
@@ -196,13 +207,17 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         table: Arc<StorageTable<S>>,
         old_epoch: u64,
         new_epoch: u64,
+        version_id: HummockVersionId,
         chunk_size: usize,
         histogram: Option<impl Deref<Target = Histogram>>,
         schema: Arc<Schema>,
     ) {
         // Range Scan.
         let iter = table
-            .batch_iter_log_with_pk_bounds(old_epoch, new_epoch)
+            .batch_iter_log_with_pk_bounds(
+                old_epoch,
+                HummockReadEpoch::BatchQueryCommitted(new_epoch, version_id),
+            )
             .await?
             .flat_map(|r| {
                 futures::stream::iter(std::iter::from_coroutine(

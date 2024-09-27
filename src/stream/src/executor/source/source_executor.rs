@@ -20,6 +20,7 @@ use either::Either;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
+use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -32,6 +33,7 @@ use risingwave_connector::source::{
     SplitMetaData, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
@@ -104,6 +106,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let wait_checkpoint_worker = WaitCheckpointWorker {
             wait_checkpoint_rx,
             state_store: core.split_state_store.state_table.state_store().clone(),
+            table_id: core.split_state_store.state_table.table_id().into(),
         };
         tokio::spawn(wait_checkpoint_worker.run());
         Ok(Some(WaitCheckpointTaskBuilder {
@@ -820,6 +823,7 @@ impl WaitCheckpointTaskBuilder {
 struct WaitCheckpointWorker<S: StateStore> {
     wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
     state_store: S,
+    table_id: TableId,
 }
 
 impl<S: StateStore> WaitCheckpointWorker<S> {
@@ -832,7 +836,12 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                     tracing::debug!("start to wait epoch {}", epoch.0);
                     let ret = self
                         .state_store
-                        .try_wait_epoch(HummockReadEpoch::Committed(epoch.0))
+                        .try_wait_epoch(
+                            HummockReadEpoch::Committed(epoch.0),
+                            TryWaitEpochOptions {
+                                table_id: self.table_id,
+                            },
+                        )
                         .await;
 
                     match ret {

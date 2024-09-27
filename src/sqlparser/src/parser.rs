@@ -2793,9 +2793,11 @@ impl Parser<'_> {
 
     pub fn parse_handle_conflict_behavior(&mut self) -> PResult<Option<OnConflict>> {
         if self.parse_keyword(Keyword::OVERWRITE) {
-            Ok(Some(OnConflict::OverWrite))
+            // compatible with v1.9 - v2.0
+            Ok(Some(OnConflict::UpdateFull))
         } else if self.parse_keyword(Keyword::IGNORE) {
-            Ok(Some(OnConflict::Ignore))
+            // compatible with v1.9 - v2.0
+            Ok(Some(OnConflict::Nothing))
         } else if self.parse_keywords(&[
             Keyword::DO,
             Keyword::UPDATE,
@@ -2803,7 +2805,11 @@ impl Parser<'_> {
             Keyword::NOT,
             Keyword::NULL,
         ]) {
-            Ok(Some(OnConflict::DoUpdateIfNotNull))
+            Ok(Some(OnConflict::UpdateIfNotNull))
+        } else if self.parse_keywords(&[Keyword::DO, Keyword::UPDATE, Keyword::FULL]) {
+            Ok(Some(OnConflict::UpdateFull))
+        } else if self.parse_keywords(&[Keyword::DO, Keyword::NOTHING]) {
+            Ok(Some(OnConflict::Nothing))
         } else {
             Ok(None)
         }
@@ -4289,6 +4295,26 @@ impl Parser<'_> {
             let value = alt((
                 Keyword::DEFAULT.value(SetTimeZoneValue::Default),
                 Keyword::LOCAL.value(SetTimeZoneValue::Local),
+                preceded(
+                    Keyword::INTERVAL,
+                    cut_err(Self::parse_literal_interval.try_map(|e| match e {
+                        // support a special case for clients which would send when initializing the connection
+                        // like: SET TIME ZONE INTERVAL '+00:00' HOUR TO MINUTE;
+                        Expr::Value(v) => match v {
+                            Value::Interval { value, .. } => {
+                                if value != "+00:00" {
+                                    return Err(StrError("only support \"+00:00\" ".into()));
+                                }
+                                Ok(SetTimeZoneValue::Ident(Ident::with_quote_unchecked(
+                                    '\'',
+                                    "UTC".to_string(),
+                                )))
+                            }
+                            _ => Err(StrError("expect Value::Interval".into())),
+                        },
+                        _ => Err(StrError("expect Expr::Value".into())),
+                    })),
+                ),
                 Self::parse_identifier.map(SetTimeZoneValue::Ident),
                 Self::parse_value.map(SetTimeZoneValue::Literal),
             ))

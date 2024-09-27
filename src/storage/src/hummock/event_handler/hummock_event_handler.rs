@@ -197,7 +197,7 @@ pub struct HummockEventHandler {
     /// A copy of `read_version_mapping` but owned by event handler
     local_read_version_mapping: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
 
-    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
@@ -316,8 +316,7 @@ impl HummockEventHandler {
     ) -> Self {
         let (hummock_event_tx, hummock_event_rx) =
             event_channel(state_store_metrics.event_handler_pending_event.clone());
-        let (version_update_notifier_tx, _) =
-            tokio::sync::watch::channel(pinned_version.visible_table_committed_epoch());
+        let (version_update_notifier_tx, _) = tokio::sync::watch::channel(pinned_version.clone());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
         let buffer_tracker = BufferTracker::from_storage_opts(
@@ -372,7 +371,7 @@ impl HummockEventHandler {
         }
     }
 
-    pub fn version_update_notifier_tx(&self) -> Arc<tokio::sync::watch::Sender<HummockEpoch>> {
+    pub fn version_update_notifier_tx(&self) -> Arc<tokio::sync::watch::Sender<PinnedVersion>> {
         self.version_update_notifier_tx.clone()
     }
 
@@ -649,18 +648,16 @@ impl HummockEventHandler {
             );
         }
 
-        let prev_max_committed_epoch = pinned_version.visible_table_committed_epoch();
         let max_committed_epoch = new_pinned_version.visible_table_committed_epoch();
 
-        // only notify local_version_manager when MCE change
         self.version_update_notifier_tx.send_if_modified(|state| {
-            assert_eq!(prev_max_committed_epoch, *state);
-            if max_committed_epoch > *state {
-                *state = max_committed_epoch;
-                true
-            } else {
-                false
+            assert_eq!(pinned_version.id(), state.id());
+            if state.id() == new_pinned_version.id() {
+                return false;
             }
+            assert!(new_pinned_version.id() > state.id());
+            *state = new_pinned_version.clone();
+            true
         });
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {

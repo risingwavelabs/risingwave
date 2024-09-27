@@ -23,7 +23,7 @@ use risingwave_pb::meta::SubscribeResponse;
 
 use crate::{
     LocalStorageId, StorageType, TracedHummockReadEpoch, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions, TracedSealCurrentEpochOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
 };
 
 pub type RecordId = u64;
@@ -164,7 +164,7 @@ pub enum Operation {
     LocalStorageInit(TracedInitOptions),
 
     /// Try wait epoch
-    TryWaitEpoch(TracedHummockReadEpoch),
+    TryWaitEpoch(TracedHummockReadEpoch, TracedTryWaitEpochOptions),
 
     /// Seal current epoch
     SealCurrentEpoch {

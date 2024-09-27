@@ -334,6 +334,7 @@ impl HummockManager {
             .order_by_asc(hummock_time_travel_delta::Column::VersionId)
             .all(&sql_store.conn)
             .await?;
+        // SstableInfo in actual_version is incomplete before refill_version.
         let mut actual_version = replay_archive(
             replay_version.version.to_protobuf(),
             deltas.into_iter().map(|d| d.version_delta.to_protobuf()),
@@ -364,7 +365,7 @@ impl HummockManager {
                 query_epoch, actual_version_id,
             ))));
         }
-        refill_version(&mut actual_version, &sst_id_to_info);
+        refill_version(&mut actual_version, &sst_id_to_info, table_id);
         timer.observe_duration();
         Ok(actual_version)
     }

@@ -27,7 +27,9 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
-use risingwave_pb::expr::{PbAggCall, PbExprNode, PbInputRef, PbUserDefinedFunctionMetadata};
+use risingwave_pb::expr::{
+    PbAggCall, PbAggType, PbExprNode, PbInputRef, PbUserDefinedFunctionMetadata,
+};
 
 use crate::expr::{
     build_from_prost, BoxedExpression, ExpectExt, Expression, LiteralExpression, Token,
@@ -65,7 +67,7 @@ pub struct AggCall {
 
 impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
-        let agg_type = AggType::from_protobuf(
+        let agg_type = AggType::from_protobuf_flatten(
             agg_call.get_kind()?,
             agg_call.udf.as_ref(),
             agg_call.scalar.as_ref(),
@@ -160,7 +162,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
         self.tokens.next(); // Consume the RParen
 
         AggCall {
-            agg_type: AggType::from_protobuf(func, None, None).unwrap(),
+            agg_type: AggType::from_protobuf_flatten(func, None, None).unwrap(),
             args: AggArgs {
                 data_types: children.iter().map(|(_, ty)| ty.clone()).collect(),
                 val_indices: children.iter().map(|(idx, _)| *idx).collect(),
@@ -260,7 +262,7 @@ impl From<PbAggKind> for AggType {
 }
 
 impl AggType {
-    pub fn from_protobuf(
+    pub fn from_protobuf_flatten(
         pb_kind: PbAggKind,
         user_defined: Option<&PbUserDefinedFunctionMetadata>,
         scalar: Option<&PbExprNode>,
@@ -284,6 +286,35 @@ impl AggType {
             Self::Builtin(pb) => *pb,
             Self::UserDefined(_) => PbAggKind::UserDefined,
             Self::WrapScalar(_) => PbAggKind::WrapScalar,
+        }
+    }
+
+    pub fn from_protobuf(pb_type: &PbAggType) -> Result<Self> {
+        match PbAggKind::try_from(pb_type.kind).context("no such aggregate function type")? {
+            PbAggKind::Unspecified => bail!("Unrecognized agg."),
+            PbAggKind::UserDefined => Ok(AggType::UserDefined(pb_type.get_udf_meta()?.clone())),
+            PbAggKind::WrapScalar => Ok(AggType::WrapScalar(pb_type.get_scalar_expr()?.clone())),
+            kind => Ok(AggType::Builtin(kind)),
+        }
+    }
+
+    pub fn to_protobuf(&self) -> PbAggType {
+        match self {
+            Self::Builtin(kind) => PbAggType {
+                kind: *kind as _,
+                udf_meta: None,
+                scalar_expr: None,
+            },
+            Self::UserDefined(udf_meta) => PbAggType {
+                kind: PbAggKind::UserDefined as _,
+                udf_meta: Some(udf_meta.clone()),
+                scalar_expr: None,
+            },
+            Self::WrapScalar(scalar_expr) => PbAggType {
+                kind: PbAggKind::WrapScalar as _,
+                udf_meta: None,
+                scalar_expr: Some(scalar_expr.clone()),
+            },
         }
     }
 }

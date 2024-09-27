@@ -19,22 +19,23 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use foyer::CacheContext;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::StorageMemoryConfig;
+use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
-use super::{HummockError, SstableStoreRef};
+use super::{HummockError, HummockResult, SstableStoreRef};
 use crate::error::StorageResult;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::monitor::MemoryCollector;
@@ -574,16 +575,59 @@ pub(crate) fn filter_with_delete_range<'a>(
     })
 }
 
+/// Wait for the `committed_epoch` of `table_id` to reach `wait_epoch`.
+///
+/// When the `table_id` does not exist in the latest version, we assume that
+/// the table is not created yet, and will wait until the table is created.
 pub(crate) async fn wait_for_epoch(
-    notifier: &tokio::sync::watch::Sender<HummockEpoch>,
+    notifier: &tokio::sync::watch::Sender<PinnedVersion>,
     wait_epoch: u64,
+    table_id: TableId,
 ) -> StorageResult<()> {
+    let mut prev_committed_epoch = None;
+    let prev_committed_epoch = &mut prev_committed_epoch;
+    wait_for_update(
+        notifier,
+        |version| {
+            let committed_epoch = version.version().table_committed_epoch(table_id);
+            let ret = if let Some(committed_epoch) = committed_epoch {
+                if committed_epoch >= wait_epoch {
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            } else if prev_committed_epoch.is_none() {
+                Ok(false)
+            } else {
+                Err(HummockError::wait_epoch(format!(
+                    "table {} has been dropped",
+                    table_id
+                )))
+            };
+            *prev_committed_epoch = committed_epoch;
+            ret
+        },
+        || {
+            format!(
+                "wait_for_epoch: epoch: {}, table_id: {}",
+                wait_epoch, table_id
+            )
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn wait_for_update(
+    notifier: &tokio::sync::watch::Sender<PinnedVersion>,
+    mut inspect_fn: impl FnMut(&PinnedVersion) -> HummockResult<bool>,
+    mut periodic_debug_info: impl FnMut() -> String,
+) -> HummockResult<()> {
     let mut receiver = notifier.subscribe();
-    // avoid unnecessary check in the loop if the value does not change
-    let max_committed_epoch = *receiver.borrow_and_update();
-    if max_committed_epoch >= wait_epoch {
+    if inspect_fn(&receiver.borrow_and_update())? {
         return Ok(());
     }
+    let start_time = Instant::now();
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
             Err(_) => {
@@ -597,17 +641,17 @@ pub(crate) async fn wait_for_epoch(
                 // CN with the same distribution as the upstream MV.
                 // See #3845 for more details.
                 tracing::warn!(
-                    epoch = wait_epoch,
-                    "wait_epoch timeout when waiting for version update",
+                    info = periodic_debug_info(),
+                    elapsed = ?start_time.elapsed(),
+                    "timeout when waiting for version update",
                 );
                 continue;
             }
             Ok(Err(_)) => {
-                return Err(HummockError::wait_epoch("tx dropped").into());
+                return Err(HummockError::wait_epoch("tx dropped"));
             }
             Ok(Ok(_)) => {
-                let max_committed_epoch = *receiver.borrow();
-                if max_committed_epoch >= wait_epoch {
+                if inspect_fn(&receiver.borrow_and_update())? {
                     return Ok(());
                 }
             }

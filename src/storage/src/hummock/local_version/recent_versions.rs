@@ -155,12 +155,7 @@ impl RecentVersions {
             );
         }
         let result = self.recent_versions.binary_search_by(|version| {
-            let committed_epoch = version
-                .version()
-                .state_table_info
-                .info()
-                .get(&table_id)
-                .map(|info| info.committed_epoch);
+            let committed_epoch = version.version().table_committed_epoch(table_id);
             if let Some(committed_epoch) = committed_epoch {
                 committed_epoch.cmp(&epoch)
             } else {
