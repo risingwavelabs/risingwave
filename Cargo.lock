@@ -1320,16 +1320,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1181e1e0d1fce796a03db1ae795d67167da795f9cf4a39c37589e85ef57f26d3"
 
 [[package]]
-name = "atomic-write-file"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbf54d4588732bdfc5ebc3eb9f74f20e027112fc31de412fc7ff0cd1c6896dae"
-dependencies = [
- "nix 0.28.0",
- "rand",
-]
-
-[[package]]
 name = "auto_enums"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2341,7 +2331,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6362ed55def622cddc70a4746a68554d7b687713770de539e59a739b249f8ed"
 dependencies = [
  "borsh-derive",
- "cfg_aliases 0.2.1",
+ "cfg_aliases",
 ]
 
 [[package]]
@@ -2691,12 +2681,6 @@ dependencies = [
  "quote",
  "syn 2.0.66",
 ]
-
-[[package]]
-name = "cfg_aliases"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
 name = "cfg_aliases"
@@ -6164,7 +6148,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=ff8ba5a6b785539a9e2390eea28c72bbbb921c50#ff8ba5a6b785539a9e2390eea28c72bbbb921c50"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6209,7 +6193,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=ff8ba5a6b785539a9e2390eea28c72bbbb921c50#ff8ba5a6b785539a9e2390eea28c72bbbb921c50"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6226,7 +6210,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=ff8ba5a6b785539a9e2390eea28c72bbbb921c50#ff8ba5a6b785539a9e2390eea28c72bbbb921c50"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6246,7 +6230,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-sql"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=ff8ba5a6b785539a9e2390eea28c72bbbb921c50#ff8ba5a6b785539a9e2390eea28c72bbbb921c50"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
 dependencies = [
  "async-trait",
  "iceberg",
@@ -7717,25 +7701,13 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
-dependencies = [
- "bitflags 2.6.0",
- "cfg-if",
- "cfg_aliases 0.1.1",
- "libc",
-]
-
-[[package]]
-name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
- "cfg_aliases 0.2.1",
+ "cfg_aliases",
  "libc",
 ]
 
@@ -13575,8 +13547,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9a2ccff1a000a5a59cd33da541d9f2fdcd9e6e8229cc200565942bff36d0aaa"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -13587,8 +13560,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-core"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24ba59a9342a3d9bab6c56c118be528b27c9b60e490080e9711a04dccac83ef6"
 dependencies = [
  "ahash 0.8.11",
  "atoi",
@@ -13609,7 +13583,6 @@ dependencies = [
  "hex",
  "indexmap 2.2.6",
  "log",
- "madsim-tokio",
  "memchr",
  "native-tls",
  "once_cell",
@@ -13623,6 +13596,7 @@ dependencies = [
  "sqlformat",
  "thiserror",
  "time",
+ "tokio",
  "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
  "url",
@@ -13631,8 +13605,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ea40e2345eb2faa9e1e5e326db8c34711317d2b5e08d0d5741619048a803127"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -13643,15 +13618,14 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros-core"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5833ef53aaa16d860e92123292f1f6a3d53c34ba8b1969f152ef1a7bb803f3c8"
 dependencies = [
- "atomic-write-file",
  "dotenvy",
  "either",
  "heck 0.4.1",
  "hex",
- "madsim-tokio",
  "once_cell",
  "proc-macro2",
  "quote",
@@ -13664,13 +13638,15 @@ dependencies = [
  "sqlx-sqlite",
  "syn 1.0.109",
  "tempfile",
+ "tokio",
  "url",
 ]
 
 [[package]]
 name = "sqlx-mysql"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ed31390216d20e538e447a7a9b959e06ed9fc51c37b514b46eb758016ecd418"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -13715,8 +13691,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-postgres"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c824eb80b894f926f89a0b9da0c7f435d27cdd35b8c655b114e58223918577e"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -13745,7 +13722,6 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
- "sha1",
  "sha2",
  "smallvec",
  "sqlx-core",
@@ -13759,20 +13735,20 @@ dependencies = [
 
 [[package]]
 name = "sqlx-sqlite"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b244ef0a8414da0bed4bb1910426e890b19e5e9bccc27ada6b797d05c55ae0aa"
 dependencies = [
- "async-channel 2.2.1",
  "atoi",
  "chrono",
  "flume",
  "futures-channel",
  "futures-core",
+ "futures-executor",
  "futures-intrusive",
  "futures-util",
  "libsqlite3-sys",
  "log",
- "madsim-tokio",
  "percent-encoding",
  "serde",
  "sqlx-core",
