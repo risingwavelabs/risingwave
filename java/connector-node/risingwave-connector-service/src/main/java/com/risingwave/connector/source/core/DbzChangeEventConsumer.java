@@ -212,8 +212,8 @@ public class DbzChangeEventConsumer
                                         .setPayload(new String(payload, StandardCharsets.UTF_8))
                                         .setSourceTsMs(sourceTsMs)
                                         .build();
-                        LOG.debug(
-                                "offset => {}, key => {}, payload => {}",
+                        LOG.info(
+                                "[schema] offset => {}, key => {}, payload => {}",
                                 message.getOffset(),
                                 message.getKey(),
                                 message.getPayload());
@@ -268,10 +268,9 @@ public class DbzChangeEventConsumer
                                         .setKey(msgKey)
                                         .setSourceTsMs(sourceTsMs)
                                         .build();
-                        LOG.debug(
-                                "offset => {}, key => {}, payload => {}",
+                        LOG.info(
+                                "[data] offset => {}, payload => {}",
                                 message.getOffset(),
-                                message.getKey(),
                                 message.getPayload());
                         respBuilder.addEvents(message);
                         break;
