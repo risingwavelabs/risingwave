@@ -23,6 +23,7 @@ use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta_model_v2::{SourceId, StreamingParallelism};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
+use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -438,21 +439,44 @@ impl StreamManagerService for StreamServiceImpl {
                     mut actor_splits,
                 } = self.stream_manager.source_manager.get_running_info().await;
 
+                let source_actors = mgr.catalog_controller.list_source_actors().await?;
+
+                let is_shared_source = mgr
+                    .catalog_controller
+                    .list_source_id_with_shared_types()
+                    .await?;
+
                 let fragment_to_source: HashMap<_, _> =
                     source_fragments
                         .into_iter()
                         .flat_map(|(source_id, fragment_ids)| {
+                            let source_type = if is_shared_source
+                                .get(&(source_id as _))
+                                .copied()
+                                .unwrap_or(false)
+                            {
+                                FragmentType::SharedSource
+                            } else {
+                                FragmentType::NonSharedSource
+                            };
+
                             fragment_ids
                                 .into_iter()
-                                .map(move |fragment_id| (fragment_id, source_id))
+                                .map(move |fragment_id| (fragment_id, (source_id, source_type)))
                         })
                         .chain(backfill_fragments.into_iter().flat_map(
                             |(source_id, fragment_ids)| {
                                 fragment_ids.into_iter().flat_map(
                                     move |(fragment_id, upstream_fragment_id)| {
                                         [
-                                            (fragment_id, source_id),
-                                            (upstream_fragment_id, source_id),
+                                            (
+                                                fragment_id,
+                                                (source_id, FragmentType::SharedSourceBackfill),
+                                            ),
+                                            (
+                                                upstream_fragment_id,
+                                                (source_id, FragmentType::SharedSource),
+                                            ),
                                         ]
                                     },
                                 )
@@ -460,15 +484,12 @@ impl StreamManagerService for StreamServiceImpl {
                         ))
                         .collect();
 
-                let source_actors = mgr.catalog_controller.list_source_actors().await?;
-
                 let actor_splits = source_actors
                     .into_iter()
                     .flat_map(|(actor_id, fragment_id)| {
-                        let source_id = fragment_to_source
+                        let (source_id, fragment_type) = fragment_to_source
                             .get(&(fragment_id as _))
                             .copied()
-                            .map(|id| id as _)
                             .unwrap_or_default();
 
                         actor_splits
@@ -477,9 +498,10 @@ impl StreamManagerService for StreamServiceImpl {
                             .into_iter()
                             .map(move |split| list_actor_splits_response::ActorSplit {
                                 actor_id: actor_id as _,
-                                source_id,
+                                source_id: source_id as _,
                                 fragment_id: fragment_id as _,
                                 split_id: split.id().to_string(),
+                                fragment_type: fragment_type.into(),
                             })
                     })
                     .collect_vec();

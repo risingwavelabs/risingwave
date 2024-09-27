@@ -14,7 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
+use risingwave_pb::meta::list_actor_splits_response::{ActorSplit, FragmentType};
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
@@ -26,6 +26,7 @@ struct RwActorSplit {
     split_id: String,
     source_id: i32,
     fragment_id: i32,
+    fragment_type: String,
 }
 
 impl From<ActorSplit> for RwActorSplit {
@@ -35,6 +36,10 @@ impl From<ActorSplit> for RwActorSplit {
             split_id: actor_split.split_id,
             source_id: actor_split.source_id as _,
             fragment_id: actor_split.fragment_id as _,
+            fragment_type: FragmentType::try_from(actor_split.fragment_type)
+                .unwrap_or(FragmentType::Unspecified)
+                .as_str_name()
+                .to_string(),
         }
     }
 }

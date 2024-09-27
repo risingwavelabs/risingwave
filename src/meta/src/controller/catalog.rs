@@ -2723,6 +2723,28 @@ impl CatalogController {
         inner.list_sources().await
     }
 
+    // Return a hashmap to distinguish whether each source is shared or not.
+    pub async fn list_source_id_with_shared_types(&self) -> MetaResult<HashMap<SourceId, bool>> {
+        let inner = self.inner.read().await;
+        let source_ids: Vec<(SourceId, Option<StreamSourceInfo>)> = Source::find()
+            .select_only()
+            .columns([source::Column::SourceId, source::Column::SourceInfo])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(source_ids
+            .into_iter()
+            .map(|(source_id, info)| {
+                (
+                    source_id,
+                    info.map(|info| info.to_protobuf().cdc_source_job)
+                        .unwrap_or(false),
+                )
+            })
+            .collect())
+    }
+
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<SourceId>> {
         let inner = self.inner.read().await;
         let source_ids: Vec<SourceId> = Source::find()
