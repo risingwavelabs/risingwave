@@ -47,14 +47,14 @@ use risingwave_pb::stream_plan::{
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, DbErr, EntityOrSelect, EntityTrait, JoinType, ModelTrait, PaginatorTrait,
-    QueryFilter, QuerySelect, RelationTrait, TransactionTrait, Value,
+    ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
+    QuerySelect, RelationTrait, TransactionTrait, Value,
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
-    FragmentDesc, PartialActorLocation, PartialActorSplits, PartialFragmentStateTables,
+    FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
 use crate::model::{TableFragments, TableParallelism};

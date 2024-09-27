@@ -12,36 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Fields, JsonbVal};
+use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
 #[derive(Fields)]
 #[primary_key(actor_id, split_id, source_id)]
-struct RwActorSplits {
+struct RwActorSplit {
     actor_id: i32,
-    split_id: i32,
+    split_id: String,
     source_id: i32,
     fragment_id: i32,
 }
 
+impl From<ActorSplit> for RwActorSplit {
+    fn from(actor_split: ActorSplit) -> Self {
+        Self {
+            actor_id: actor_split.actor_id as _,
+            split_id: actor_split.split_id,
+            source_id: actor_split.source_id as _,
+            fragment_id: actor_split.fragment_id as _,
+        }
+    }
+}
+
 #[system_catalog(table, "rw_catalog.rw_actor_splits")]
-async fn read_rw_actor_splits(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActorSplits>> {
+async fn read_rw_actor_splits(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActorSplit>> {
     let actor_splits = reader.meta_client.list_actor_splits().await?;
-
-    // actor_id, fragment_id, source_id, split_id
-
-    // Ok(states
-    //     .into_iter()
-    //     .map(|state| RwActor {
-    //         actor_id: state.actor_id as i32,
-    //         fragment_id: state.fragment_id as i32,
-    //         worker_id: state.worker_id as i32,
-    //         state: state.state().as_str_name().into(),
-    //     })
-    //     .collect())
-
-    Ok(vec![])
+    Ok(actor_splits.into_iter().map(RwActorSplit::from).collect())
 }
