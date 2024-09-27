@@ -360,7 +360,6 @@ impl FrontendEnv {
             system_params_manager.clone(),
             session_params.clone(),
             compute_client_pool.clone(),
-            sessions_map.clone(),
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)

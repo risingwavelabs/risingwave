@@ -19,7 +19,7 @@ use risingwave_pb::catalog::PbSubscription;
 
 use super::OwnedByUserCatalog;
 use crate::error::{ErrorCode, Result};
-use crate::handler::util::convert_interval_to_logstore_u64;
+use crate::handler::util::convert_interval_to_u64_seconds;
 use crate::WithOptions;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -83,7 +83,7 @@ impl SubscriptionCatalog {
         let retention_seconds_str = properties.get("retention").ok_or_else(|| {
             ErrorCode::InternalError("Subscription retention time not set.".to_string())
         })?;
-        let retention_seconds = convert_interval_to_logstore_u64(retention_seconds_str)?;
+        let retention_seconds = convert_interval_to_u64_seconds(retention_seconds_str)?;
         self.retention_seconds = retention_seconds;
         Ok(())
     }

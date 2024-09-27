@@ -287,32 +287,12 @@ impl Catalog {
         }
     }
 
-    pub fn get_all_table_ids_in_database(&self, db_id: DatabaseId) -> Vec<TableId> {
-        if let Ok(database) = self.get_database_by_id(&db_id) {
-            database.iter_all_table_ids().collect()
-        } else {
-            vec![]
-        }
-    }
-
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
         let database = self.database_by_name.remove(&name).unwrap();
         database.iter_all_table_ids().for_each(|table| {
             self.table_by_id.remove(&table);
         });
-    }
-
-    pub fn get_all_table_ids_in_schema(
-        &self,
-        db_id: DatabaseId,
-        schema_id: SchemaId,
-    ) -> Vec<TableId> {
-        if let Ok(schema) = self.get_schema_by_id(&db_id, &schema_id) {
-            schema.iter_all_table_ids().cloned().collect()
-        } else {
-            vec![]
-        }
     }
 
     pub fn drop_schema(&mut self, db_id: DatabaseId, schema_id: SchemaId) {

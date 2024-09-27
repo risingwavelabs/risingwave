@@ -242,8 +242,8 @@ pub fn convert_logstore_u64_to_unix_millis(logstore_u64: u64) -> u64 {
     Epoch::from(logstore_u64).as_unix_millis()
 }
 
-pub fn convert_interval_to_logstore_u64(interval: &String) -> RwResult<u64> {
-    let retention_seconds = (Interval::from_str(interval)
+pub fn convert_interval_to_u64_seconds(interval: &String) -> RwResult<u64> {
+    let seconds = (Interval::from_str(interval)
         .map_err(|err| {
             ErrorCode::InternalError(format!(
                 "Covert interval to u64 error, please check format, error: {:?}",
@@ -252,7 +252,7 @@ pub fn convert_interval_to_logstore_u64(interval: &String) -> RwResult<u64> {
         })?
         .epoch_in_micros()
         / 1000000) as u64;
-    Ok(retention_seconds)
+    Ok(seconds)
 }
 
 #[cfg(test)]

@@ -101,7 +101,7 @@ impl<T> TableChangeLogCommon<T> {
         &self.0[start..end]
     }
 
-    // Returns epochs where value is non-null and >= `min_epoch`.
+    /// Returns epochs where value is non-null and >= `min_epoch`.
     pub fn get_non_empty_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
         self.filter_epoch((min_epoch, u64::MAX))
             .iter()
