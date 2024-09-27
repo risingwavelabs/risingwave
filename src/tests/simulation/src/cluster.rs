@@ -140,7 +140,7 @@ impl Configuration {
             config_path: ConfigPath::Temp(config_path.into()),
             frontend_nodes: 2,
             compute_nodes: 3,
-            meta_nodes: 3,
+            meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
             ..Default::default()
@@ -277,7 +277,7 @@ metrics_level = "Disabled"
             // in a different process.
             frontend_nodes: 1,
             compute_nodes: 3,
-            meta_nodes: 3,
+            meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
             ..Default::default()
