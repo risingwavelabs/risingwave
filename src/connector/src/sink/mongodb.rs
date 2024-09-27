@@ -38,8 +38,8 @@ use crate::deserialize_bool_from_string;
 use crate::sink::encoder::RowEncoder;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterMetrics,
+    SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 
 pub const MONGODB_SINK: &str = "mongodb";
@@ -302,7 +302,7 @@ impl Sink for MongodbSink {
             self.is_append_only,
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
     }
 }
 

@@ -14,9 +14,8 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail;
-use risingwave_common::hash::VirtualNode;
 use risingwave_pb::meta::table_parallelism::{
-    AdaptiveParallelism, FixedParallelism, Parallelism, PbParallelism,
+    AdaptiveParallelism, FixedParallelism, PbParallelism,
 };
 use risingwave_pb::meta::{PbTableParallelism, TableParallelism};
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
@@ -93,39 +92,9 @@ pub async fn handle_alter_parallelism(
         }
     };
 
-    let mut target_parallelism = extract_table_parallelism(parallelism)?;
-
-    let available_parallelism = session
-        .env()
-        .worker_node_manager()
-        .list_worker_nodes()
-        .iter()
-        .filter(|w| w.is_streaming_schedulable())
-        .map(|w| w.parallelism)
-        .sum::<u32>();
-    // TODO(var-vnode): use vnode count from config
-    let max_parallelism = VirtualNode::COUNT;
+    let target_parallelism = extract_table_parallelism(parallelism)?;
 
     let mut builder = RwPgResponse::builder(stmt_type);
-
-    match &target_parallelism.parallelism {
-        Some(Parallelism::Adaptive(_)) | Some(Parallelism::Auto(_)) => {
-            if available_parallelism > max_parallelism as u32 {
-                builder = builder.notice(format!("Available parallelism exceeds the maximum parallelism limit, the actual parallelism will be limited to {max_parallelism}"));
-            }
-        }
-        Some(Parallelism::Fixed(FixedParallelism { parallelism })) => {
-            if *parallelism > max_parallelism as u32 {
-                builder = builder.notice(format!("Provided parallelism exceeds the maximum parallelism limit, resetting to FIXED({max_parallelism})"));
-                target_parallelism = PbTableParallelism {
-                    parallelism: Some(PbParallelism::Fixed(FixedParallelism {
-                        parallelism: max_parallelism as u32,
-                    })),
-                };
-            }
-        }
-        _ => {}
-    };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer

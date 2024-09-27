@@ -275,3 +275,9 @@
   stream_error: |-
     Not supported: Temporal join requires the lookup table's primary key contained exactly in the equivalence condition
     HINT: Please add the primary key of the lookup table to the join condition and remove any other conditions
+- name: use CTE as temporal join right table. https://github.com/risingwavelabs/risingwave/issues/18703
+  sql: |
+    create table stream(id1 int, a1 int, b1 int, c1 int);
+    create table version(id2 int, a2 int, b2 int, c2 int, primary key (id2));
+    with version as (select * from version) select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1= id2;
+  binder_error: 'Bind error: Right table of a temporal join should not be a CTE. It should be a table, index, or materialized view'

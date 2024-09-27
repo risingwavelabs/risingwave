@@ -21,7 +21,8 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{
-    ExpandedWorkerSlotMapping, HashKey, HashKeyDispatcher, VirtualNode, WorkerSlotId,
+    ExpandedWorkerSlotMapping, HashKey, HashKeyDispatcher, VirtualNode, VnodeCountCompat,
+    WorkerSlotId,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::{DataType, Datum};
@@ -408,8 +409,8 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             })
             .collect();
 
-        // TODO(var-vnode): use vnode count from table desc
-        let vnodes = Some(Bitmap::ones(VirtualNode::COUNT).into());
+        let vnodes = Some(Bitmap::ones(table_desc.vnode_count()).into());
+
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
             table_distribution: TableDistribution::new_from_storage_table_desc(vnodes, table_desc),
