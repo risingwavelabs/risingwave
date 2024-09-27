@@ -341,6 +341,9 @@ impl Cluster {
         println!("seed = {}", handle.seed());
         println!("{:#?}", conf);
 
+        // TODO: support mutil meta nodes
+        assert_eq!(conf.meta_nodes, 1);
+
         // setup DNS and load balance
         let net = madsim::net::NetSim::current();
         for i in 1..=conf.meta_nodes {
