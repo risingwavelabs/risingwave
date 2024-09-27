@@ -1280,7 +1280,13 @@ impl LogicalJoin {
     ) -> Result<StreamAsOfJoin> {
         use super::stream::prelude::*;
 
-        assert!(predicate.has_eq());
+        if predicate.eq_keys().is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "AsOf join requires at least 1 equal condition".to_string(),
+            )
+            .into())
+        }
+
         let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
         let left_len = left.schema().len();
         let logical_join = self.clone_with_left_right(left, right);

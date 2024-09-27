@@ -97,12 +97,6 @@ impl StreamAsOfJoin {
         predicate: EqJoinPredicate,
         left_input_len: usize,
     ) -> Result<AsOfJoinDesc> {
-        if predicate.eq_keys().is_empty() {
-            Err(ErrorCode::InvalidInputSyntax(
-                "AsOf join requires at least 1 equal condition".to_string(),
-            )
-            .into())
-        } else {
             let expr: ExprImpl = predicate.other_cond().clone().into();
             if let Some((left_input_ref, expr_type, right_input_ref)) = expr.as_comparison_cond() {
                 if left_input_ref.index() < left_input_len
@@ -118,11 +112,10 @@ impl StreamAsOfJoin {
                 }
             } else {
                 Err(ErrorCode::InvalidInputSyntax(
-                    "AsOf join requires exactly 1 ineuqual condition".to_string(),
+                    "AsOf join requires exactly 1 ineuquality condition".to_string(),
                 )
                 .into())
             }
-        }
     }
 
     fn expr_type_to_comparison_type(expr_type: PbType) -> Result<PbAsOfJoinInequalityType> {
