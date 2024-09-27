@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
+
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{
@@ -202,7 +204,12 @@ pub fn parse_schema_change(
 
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
-                            unimplemented!()
+                            DataType::from_str(type_name.as_str()).map_err(|err| {
+                                tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
+                                AccessError::UnsupportedType {
+                                    ty: type_name.clone(),
+                                }
+                            })?
                         }
                         ConnectorProperties::MysqlCdc(_) => {
                             let ty = type_name_to_mysql_type(type_name.as_str());
@@ -226,20 +233,41 @@ pub fn parse_schema_change(
                     // handle default value expression, currently we only support constant expression
                     let column_desc = match col.access_object_field("defaultValueExpression") {
                         Some(default_val_expr_str) if !default_val_expr_str.is_jsonb_null() => {
-                            let mut value_text = default_val_expr_str.as_string().unwrap();
-                            // mysql timestamp is mapped to timestamptz, we use UTC timezone to
-                            // interpret its value
-                            if data_type == DataType::Timestamptz
-                                && matches!(*connector_props, ConnectorProperties::MysqlCdc(_))
-                            {
-                                value_text = timestamp_val_to_timestamptz(value_text.as_str()).map_err(|err| {
-                                    tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
-                                    AccessError::TypeError {
-                                        expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
-                                        got: data_type.to_string(),
-                                        value: value_text,
-                                    }})?;
+                            let value_text: String;
+                            match *connector_props {
+                                ConnectorProperties::PostgresCdc(_) => {
+                                    // default value of non-number data type will be stored as
+                                    // "'value'::type"
+                                    value_text = default_val_expr_str
+                                        .as_str()
+                                        .unwrap()
+                                        .split("::")
+                                        .map(|s| s.trim_matches('\''))
+                                        .next()
+                                        .expect("default value expression")
+                                        .to_string();
+                                }
+                                ConnectorProperties::MysqlCdc(_) => {
+                                    // mysql timestamp is mapped to timestamptz, we use UTC timezone to
+                                    // interpret its value
+                                    let val_str = default_val_expr_str.as_str().unwrap();
+                                    if data_type == DataType::Timestamptz {
+                                        value_text = timestamp_val_to_timestamptz(val_str).map_err(|err| {
+                                            tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
+                                            AccessError::TypeError {
+                                                expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
+                                                got: data_type.to_string(),
+                                                value: val_str.to_string(),
+                                            }})?;
+                                    } else {
+                                        value_text = val_str.to_string();
+                                    }
+                                }
+                                _ => {
+                                    unreachable!("connector doesn't support schema change")
+                                }
                             }
+
                             let snapshot_value: Datum = Some(
                                 ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
                                     |err| {
