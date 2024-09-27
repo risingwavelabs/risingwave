@@ -804,6 +804,20 @@ impl CatalogController {
         Ok(actor_locations)
     }
 
+    pub async fn list_source_actors(&self) -> MetaResult<Vec<(ActorId, FragmentId)>> {
+        let inner = self.inner.read().await;
+
+        let source_actors: Vec<(ActorId, FragmentId)> = Actor::find()
+            .select_only()
+            .filter(actor::Column::Splits.is_not_null())
+            .columns([actor::Column::ActorId, actor::Column::FragmentId])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(source_actors)
+    }
+
     pub async fn list_fragment_descs(&self) -> MetaResult<Vec<FragmentDesc>> {
         let inner = self.inner.read().await;
         let fragment_descs: Vec<FragmentDesc> = Fragment::find()

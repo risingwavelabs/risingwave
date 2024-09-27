@@ -27,8 +27,8 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
-    view, ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
+    view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
@@ -254,6 +254,14 @@ pub struct PartialActorLocation {
     pub fragment_id: FragmentId,
     pub worker_id: WorkerId,
     pub status: ActorStatus,
+}
+
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Actor")]
+pub struct PartialActorSplits {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub splits: Option<ConnectorSplits>,
 }
 
 #[derive(FromQueryResult)]
