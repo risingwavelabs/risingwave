@@ -137,12 +137,12 @@ impl BatchManager {
         tid: &PbTaskId,
         plan: PlanFragment,
     ) -> Result<()> {
-        use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+        use risingwave_hummock_sdk::test_batch_query_epoch;
 
         self.fire_task(
             tid,
             plan,
-            to_committed_batch_query_epoch(0),
+            test_batch_query_epoch(),
             ComputeNodeContext::for_test(),
             StateReporter::new_with_test(),
             TracingContext::none(),

@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::{VnodeCountCompat, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
@@ -48,7 +49,7 @@ use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
-    QuerySelect, RelationTrait, TransactionTrait, Value,
+    QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
@@ -56,7 +57,9 @@ use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
-use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
+use crate::manager::{
+    ActorInfos, FragmentParallelismInfo, InflightFragmentInfo, LocalNotification,
+};
 use crate::model::{TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
@@ -475,21 +478,55 @@ impl CatalogController {
     pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> MetaResult<HashMap<FragmentId, usize>> {
+    ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let inner = self.inner.read().await;
-        let mut select = Actor::find()
-            .select_only()
+
+        let query_alias = Alias::new("fragment_actor_count");
+        let count_alias = Alias::new("count");
+
+        let mut query = SelectStatement::new()
             .column(actor::Column::FragmentId)
-            .column_as(actor::Column::ActorId.count(), "count")
-            .group_by(actor::Column::FragmentId);
+            .expr_as(actor::Column::ActorId.count(), count_alias.clone())
+            .from(Actor)
+            .group_by_col(actor::Column::FragmentId)
+            .to_owned();
+
         if let Some(id_filter) = id_filter {
-            select = select.having(actor::Column::FragmentId.is_in(id_filter));
+            query.cond_having(actor::Column::FragmentId.is_in(id_filter));
         }
-        let fragment_parallelisms: Vec<(FragmentId, i64)> =
-            select.into_tuple().all(&inner.db).await?;
+
+        let outer = SelectStatement::new()
+            .column((Fragment, fragment::Column::FragmentId))
+            .column(count_alias)
+            .column(fragment::Column::DistributionType)
+            .column(fragment::Column::VnodeCount)
+            .from_subquery(query.to_owned(), query_alias.clone())
+            .inner_join(
+                Fragment,
+                Expr::col((query_alias, actor::Column::FragmentId))
+                    .equals((Fragment, fragment::Column::FragmentId)),
+            )
+            .to_owned();
+
+        let fragment_parallelisms: Vec<(FragmentId, i64, DistributionType, i32)> =
+            Selector::<SelectGetableTuple<(FragmentId, i64, DistributionType, i32)>>::into_tuple(
+                outer.to_owned(),
+            )
+            .all(&inner.db)
+            .await?;
+
         Ok(fragment_parallelisms
             .into_iter()
-            .map(|(fragment_id, count)| (fragment_id, count as usize))
+            .map(|(fragment_id, count, distribution_type, vnode_count)| {
+                (
+                    fragment_id,
+                    FragmentParallelismInfo {
+                        distribution_type: distribution_type.into(),
+                        actor_count: count as usize,
+                        vnode_count: vnode_count as usize,
+                    },
+                )
+            })
             .collect())
     }
 

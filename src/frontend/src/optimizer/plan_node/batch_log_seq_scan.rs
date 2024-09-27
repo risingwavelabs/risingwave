@@ -15,7 +15,7 @@
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LogRowSeqScanNode;
-use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::common::{BatchQueryCommittedEpoch, BatchQueryEpoch};
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
@@ -112,12 +112,18 @@ impl TryToBatchPb for BatchLogSeqScan {
             vnode_bitmap: None,
             old_epoch: Some(BatchQueryEpoch {
                 epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
-                    self.core.old_epoch,
+                    BatchQueryCommittedEpoch {
+                        epoch: self.core.old_epoch,
+                        hummock_version_id: 0,
+                    },
                 )),
             }),
             new_epoch: Some(BatchQueryEpoch {
                 epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
-                    self.core.new_epoch,
+                    BatchQueryCommittedEpoch {
+                        epoch: self.core.new_epoch,
+                        hummock_version_id: 0,
+                    },
                 )),
             }),
         }))

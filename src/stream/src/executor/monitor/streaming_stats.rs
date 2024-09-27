@@ -27,13 +27,11 @@ use risingwave_common::metrics::{
     RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_common::{
     register_guarded_gauge_vec_with_registry, register_guarded_histogram_vec_with_registry,
     register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_connector::sink::SinkMetrics;
 
 use crate::common::log_store_impl::kv_log_store::{
     REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
@@ -160,16 +158,6 @@ pub struct StreamingMetrics {
     /// The progress made by the earliest in-flight barriers in the local barrier manager.
     pub barrier_manager_progress: IntCounter,
 
-    // Sink related metrics
-    sink_commit_duration: LabelGuardedHistogramVec<4>,
-    connector_sink_rows_received: LabelGuardedIntCounterVec<3>,
-    log_store_first_write_epoch: LabelGuardedIntGaugeVec<4>,
-    log_store_latest_write_epoch: LabelGuardedIntGaugeVec<4>,
-    log_store_write_rows: LabelGuardedIntCounterVec<4>,
-    log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
-    log_store_read_rows: LabelGuardedIntCounterVec<4>,
-    log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
-
     pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<4>,
     pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<4>,
     pub kv_log_store_rewind_count: LabelGuardedIntCounterVec<4>,
@@ -180,13 +168,6 @@ pub struct StreamingMetrics {
     pub kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec<4>,
     pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<4>,
     pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<4>,
-
-    // Sink iceberg metrics
-    iceberg_write_qps: LabelGuardedIntCounterVec<3>,
-    iceberg_write_latency: LabelGuardedHistogramVec<3>,
-    iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
-    iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
-    iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
 
     // Memory management
     pub lru_runtime_loop_count: IntCounter,
@@ -810,71 +791,6 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let sink_commit_duration = register_guarded_histogram_vec_with_registry!(
-            "sink_commit_duration",
-            "Duration of commit op in sink",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let connector_sink_rows_received = register_guarded_int_counter_vec_with_registry!(
-            "connector_sink_rows_received",
-            "Number of rows received by sink",
-            &["connector_type", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_first_write_epoch = register_guarded_int_gauge_vec_with_registry!(
-            "log_store_first_write_epoch",
-            "The first write epoch of log store",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_latest_write_epoch = register_guarded_int_gauge_vec_with_registry!(
-            "log_store_latest_write_epoch",
-            "The latest write epoch of log store",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_write_rows = register_guarded_int_counter_vec_with_registry!(
-            "log_store_write_rows",
-            "The write rate of rows",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_latest_read_epoch = register_guarded_int_gauge_vec_with_registry!(
-            "log_store_latest_read_epoch",
-            "The latest read epoch of log store",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_read_rows = register_guarded_int_counter_vec_with_registry!(
-            "log_store_read_rows",
-            "The read rate of rows",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_reader_wait_new_future_duration_ns =
-            register_guarded_int_counter_vec_with_registry!(
-                "log_store_reader_wait_new_future_duration_ns",
-                "Accumulated duration of LogReader to wait for next call to create future",
-                &["actor_id", "connector", "sink_id", "sink_name"],
-                registry
-            )
-            .unwrap();
-
         let kv_log_store_storage_write_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_count",
             "Write row count throughput of kv log store",
@@ -1073,46 +989,6 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
-        let iceberg_write_qps = register_guarded_int_counter_vec_with_registry!(
-            "iceberg_write_qps",
-            "The qps of iceberg writer",
-            &["actor_id", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let iceberg_write_latency = register_guarded_histogram_vec_with_registry!(
-            "iceberg_write_latency",
-            "The latency of iceberg writer",
-            &["actor_id", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let iceberg_rolling_unflushed_data_file = register_guarded_int_gauge_vec_with_registry!(
-            "iceberg_rolling_unflushed_data_file",
-            "The unflushed data file count of iceberg rolling writer",
-            &["actor_id", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let iceberg_position_delete_cache_num = register_guarded_int_gauge_vec_with_registry!(
-            "iceberg_position_delete_cache_num",
-            "The delete cache num of iceberg position delete writer",
-            &["actor_id", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let iceberg_partition_num = register_guarded_int_gauge_vec_with_registry!(
-            "iceberg_partition_num",
-            "The partition num of iceberg partition writer",
-            &["actor_id", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
         Self {
             level,
             executor_row_count,
@@ -1185,14 +1061,6 @@ impl StreamingMetrics {
             barrier_inflight_latency,
             barrier_sync_latency,
             barrier_manager_progress,
-            sink_commit_duration,
-            connector_sink_rows_received,
-            log_store_first_write_epoch,
-            log_store_latest_write_epoch,
-            log_store_write_rows,
-            log_store_latest_read_epoch,
-            log_store_read_rows,
-            log_store_reader_wait_new_future_duration_ns,
             kv_log_store_storage_write_count,
             kv_log_store_storage_write_size,
             kv_log_store_rewind_count,
@@ -1203,11 +1071,6 @@ impl StreamingMetrics {
             kv_log_store_buffer_unconsumed_row_count,
             kv_log_store_buffer_unconsumed_epoch_count,
             kv_log_store_buffer_unconsumed_min_epoch,
-            iceberg_write_qps,
-            iceberg_write_latency,
-            iceberg_rolling_unflushed_data_file,
-            iceberg_position_delete_cache_num,
-            iceberg_partition_num,
             lru_runtime_loop_count,
             lru_latest_sequence,
             lru_watermark_sequence,
@@ -1228,83 +1091,6 @@ impl StreamingMetrics {
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         global_streaming_metrics(MetricLevel::Disabled)
-    }
-
-    pub fn new_sink_metrics(
-        &self,
-        actor_id_str: &str,
-        sink_id_str: &str,
-        sink_name: &str,
-        connector: &str,
-    ) -> SinkMetrics {
-        let label_list = [actor_id_str, connector, sink_id_str, sink_name];
-        let sink_commit_duration_metrics = self
-            .sink_commit_duration
-            .with_guarded_label_values(&label_list);
-
-        let connector_sink_rows_received = self
-            .connector_sink_rows_received
-            .with_guarded_label_values(&[connector, sink_id_str, sink_name]);
-
-        let log_store_latest_read_epoch = self
-            .log_store_latest_read_epoch
-            .with_guarded_label_values(&label_list);
-
-        let log_store_latest_write_epoch = self
-            .log_store_latest_write_epoch
-            .with_guarded_label_values(&label_list);
-
-        let log_store_first_write_epoch = self
-            .log_store_first_write_epoch
-            .with_guarded_label_values(&label_list);
-
-        let initial_epoch = Epoch::now().0;
-        log_store_latest_read_epoch.set(initial_epoch as _);
-        log_store_first_write_epoch.set(initial_epoch as _);
-        log_store_latest_write_epoch.set(initial_epoch as _);
-
-        let log_store_write_rows = self
-            .log_store_write_rows
-            .with_guarded_label_values(&label_list);
-        let log_store_read_rows = self
-            .log_store_read_rows
-            .with_guarded_label_values(&label_list);
-        let log_store_reader_wait_new_future_duration_ns = self
-            .log_store_reader_wait_new_future_duration_ns
-            .with_guarded_label_values(&label_list);
-
-        let label_list = [actor_id_str, sink_id_str, sink_name];
-        let iceberg_write_qps = self
-            .iceberg_write_qps
-            .with_guarded_label_values(&label_list);
-        let iceberg_write_latency = self
-            .iceberg_write_latency
-            .with_guarded_label_values(&label_list);
-        let iceberg_rolling_unflushed_data_file = self
-            .iceberg_rolling_unflushed_data_file
-            .with_guarded_label_values(&label_list);
-        let iceberg_position_delete_cache_num = self
-            .iceberg_position_delete_cache_num
-            .with_guarded_label_values(&label_list);
-        let iceberg_partition_num = self
-            .iceberg_partition_num
-            .with_guarded_label_values(&label_list);
-
-        SinkMetrics {
-            sink_commit_duration_metrics,
-            connector_sink_rows_received,
-            log_store_first_write_epoch,
-            log_store_latest_write_epoch,
-            log_store_write_rows,
-            log_store_latest_read_epoch,
-            log_store_read_rows,
-            log_store_reader_wait_new_future_duration_ns,
-            iceberg_write_qps,
-            iceberg_write_latency,
-            iceberg_rolling_unflushed_data_file,
-            iceberg_position_delete_cache_num,
-            iceberg_partition_num,
-        }
     }
 
     pub fn new_actor_metrics(&self, actor_id: ActorId) -> ActorMetrics {

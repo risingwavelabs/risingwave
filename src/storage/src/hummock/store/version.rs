@@ -428,10 +428,7 @@ impl HummockReadVersion {
                         vnode_watermarks,
                         self.committed
                             .version()
-                            .state_table_info
-                            .info()
-                            .get(&self.table_id)
-                            .map(|info| info.committed_epoch),
+                            .table_committed_epoch(self.table_id),
                     ));
                 }
             }

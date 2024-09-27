@@ -152,11 +152,11 @@ impl Distribution {
     }
 
     /// Get the vnode count of the distribution.
-    // TODO(var-vnode): after `ServingVnodeMapping::upsert` is made vnode-count-aware,
-    // we may return 1 for singleton.
+    ///
+    /// For backwards compatibility, [`VirtualNode::COUNT_FOR_COMPAT`] is used for singleton.
     pub fn vnode_count(&self) -> usize {
         match self {
-            Distribution::Singleton(_) => VirtualNode::COUNT,
+            Distribution::Singleton(_) => VirtualNode::COUNT_FOR_COMPAT,
             Distribution::Hash(mapping) => mapping.len(),
         }
     }

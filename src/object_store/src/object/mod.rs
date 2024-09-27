@@ -121,7 +121,12 @@ pub trait ObjectStore: Send + Sync {
         MonitoredObjectStore::new(self, metrics, config)
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
+    async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
 
@@ -326,8 +331,13 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, delete_objects(paths).await)
     }
 
-    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        object_store_impl_method_body!(self, list(prefix).await)
+    pub async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter> {
+        object_store_impl_method_body!(self, list(prefix, start_after, limit).await)
     }
 
     pub fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
@@ -814,7 +824,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+    pub async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter> {
         let operation_type = OperationType::List;
         let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
@@ -827,7 +842,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
         let builder = || async {
             self.inner
-                .list(prefix)
+                .list(prefix, start_after.clone(), limit)
                 .verbose_instrument_await(operation_type_str)
                 .await
         };

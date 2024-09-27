@@ -53,7 +53,7 @@ use crate::hummock::local_version::pinned_version::{start_pinned_version_worker,
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
-use crate::hummock::utils::wait_for_epoch;
+use crate::hummock::utils::{wait_for_epoch, wait_for_update};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockStorageIterator, HummockStorageRevIterator,
@@ -96,7 +96,7 @@ pub struct HummockStorage {
 
     buffer_tracker: BufferTracker,
 
-    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
 
     recent_versions: Arc<ArcSwap<RecentVersions>>,
 
@@ -628,15 +628,67 @@ impl StateStore for HummockStorage {
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
     /// we will only check whether it is le `sealed_epoch` and won't wait.
-    async fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> StorageResult<()> {
-        let wait_epoch = match wait_epoch {
-            HummockReadEpoch::Committed(epoch) => {
-                assert!(!is_max_epoch(epoch), "epoch should not be MAX EPOCH");
-                epoch
+    async fn try_wait_epoch(
+        &self,
+        wait_epoch: HummockReadEpoch,
+        options: TryWaitEpochOptions,
+    ) -> StorageResult<()> {
+        match wait_epoch {
+            HummockReadEpoch::Committed(wait_epoch) => {
+                assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
+                wait_for_epoch(
+                    &self.version_update_notifier_tx,
+                    wait_epoch,
+                    options.table_id,
+                )
+                .await?;
             }
-            _ => return Ok(()),
+            HummockReadEpoch::BatchQueryCommitted(wait_epoch, wait_version_id) => {
+                assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
+                // fast path by checking recent_versions
+                {
+                    let recent_versions = self.recent_versions.load();
+                    let latest_version = recent_versions.latest_version().version();
+                    if latest_version.id >= wait_version_id
+                        && let Some(committed_epoch) =
+                            latest_version.table_committed_epoch(options.table_id)
+                        && committed_epoch >= wait_epoch
+                    {
+                        return Ok(());
+                    }
+                }
+                wait_for_update(
+                    &self.version_update_notifier_tx,
+                    |version| {
+                        if wait_version_id > version.id() {
+                            return Ok(false);
+                        }
+                        let committed_epoch = version
+                            .version()
+                            .table_committed_epoch(options.table_id)
+                            .ok_or_else(|| {
+                                // In batch query, since we have ensured that the current version must be after the
+                                // `wait_version_id`, when seeing that the table_id not exist in the latest version,
+                                // the table must have been dropped.
+                                HummockError::wait_epoch(format!(
+                                    "table id {} has been dropped",
+                                    options.table_id
+                                ))
+                            })?;
+                        Ok(committed_epoch >= wait_epoch)
+                    },
+                    || {
+                        format!(
+                            "try_wait_epoch: epoch: {}, version_id: {:?}",
+                            wait_epoch, wait_version_id
+                        )
+                    },
+                )
+                .await?;
+            }
+            _ => {}
         };
-        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
+        Ok(())
     }
 
     fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
@@ -698,13 +750,6 @@ impl HummockStorage {
 
     pub fn get_shared_buffer_size(&self) -> usize {
         self.buffer_tracker.get_buffer_size()
-    }
-
-    pub async fn try_wait_epoch_for_test(&self, wait_epoch: u64) {
-        let mut rx = self.version_update_notifier_tx.subscribe();
-        while *(rx.borrow_and_update()) < wait_epoch {
-            rx.changed().await.unwrap();
-        }
     }
 
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.

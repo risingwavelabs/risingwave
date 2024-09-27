@@ -38,7 +38,7 @@ use super::encoder::{
     TimestamptzHandlingMode,
 };
 use super::writer::LogSinkerOf;
-use super::{SinkError, SinkParam};
+use super::{SinkError, SinkParam, SinkWriterMetrics};
 use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
@@ -114,7 +114,7 @@ impl Sink for SnowflakeSink {
             self.pk_indices.clone(),
             self.is_append_only,
         )?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
     }
 
     async fn validate(&self) -> Result<()> {

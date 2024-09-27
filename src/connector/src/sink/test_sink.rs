@@ -19,7 +19,7 @@ use parking_lot::Mutex;
 
 use crate::sink::boxed::{BoxCoordinator, BoxWriter};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
+use crate::sink::{Sink, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam};
 
 pub trait BuildBoxWriterTrait = FnMut(SinkParam, SinkWriterParam) -> BoxWriter<()> + Send + 'static;
 
@@ -57,7 +57,7 @@ impl Sink for TestSink {
         &self,
         writer_param: SinkWriterParam,
     ) -> crate::sink::Result<Self::LogSinker> {
-        let metrics = writer_param.sink_metrics.clone();
+        let metrics = SinkWriterMetrics::new(&writer_param);
         Ok(build_box_writer(self.param.clone(), writer_param).into_log_sinker(metrics))
     }
 }
