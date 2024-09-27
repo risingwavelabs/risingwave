@@ -94,9 +94,7 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election::etcd::EtcdElectionClient;
-use crate::rpc::election::sql::{
-    MySqlDriver, PostgresDriver, SqlBackendElectionClient, SqliteDriver,
-};
+use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };
