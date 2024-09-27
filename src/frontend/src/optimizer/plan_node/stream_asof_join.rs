@@ -97,25 +97,24 @@ impl StreamAsOfJoin {
         predicate: EqJoinPredicate,
         left_input_len: usize,
     ) -> Result<AsOfJoinDesc> {
-            let expr: ExprImpl = predicate.other_cond().clone().into();
-            if let Some((left_input_ref, expr_type, right_input_ref)) = expr.as_comparison_cond() {
-                if left_input_ref.index() < left_input_len
-                    && right_input_ref.index() >= left_input_len
-                {
-                    Ok(AsOfJoinDesc {
-                        left_idx: left_input_ref.index() as u32,
-                        right_idx: (right_input_ref.index() - left_input_len) as u32,
-                        inequality_type: Self::expr_type_to_comparison_type(expr_type)?.into(),
-                    })
-                } else {
-                    bail!("inequal condition from the same side should be push down in optimizer");
-                }
+        let expr: ExprImpl = predicate.other_cond().clone().into();
+        if let Some((left_input_ref, expr_type, right_input_ref)) = expr.as_comparison_cond() {
+            if left_input_ref.index() < left_input_len && right_input_ref.index() >= left_input_len
+            {
+                Ok(AsOfJoinDesc {
+                    left_idx: left_input_ref.index() as u32,
+                    right_idx: (right_input_ref.index() - left_input_len) as u32,
+                    inequality_type: Self::expr_type_to_comparison_type(expr_type)?.into(),
+                })
             } else {
-                Err(ErrorCode::InvalidInputSyntax(
-                    "AsOf join requires exactly 1 ineuquality condition".to_string(),
-                )
-                .into())
+                bail!("inequal condition from the same side should be push down in optimizer");
             }
+        } else {
+            Err(ErrorCode::InvalidInputSyntax(
+                "AsOf join requires exactly 1 ineuquality condition".to_string(),
+            )
+            .into())
+        }
     }
 
     fn expr_type_to_comparison_type(expr_type: PbType) -> Result<PbAsOfJoinInequalityType> {
