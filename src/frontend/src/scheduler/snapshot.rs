@@ -12,20 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use risingwave_common::util::epoch::Epoch;
+use anyhow::anyhow;
+use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
-    FrontendHummockVersion, FrontendHummockVersionDelta, INVALID_VERSION_ID,
+    FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
 };
-use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use risingwave_pb::hummock::{HummockVersionDeltas, PbHummockSnapshot};
+use risingwave_pb::common::{batch_query_epoch, BatchQueryCommittedEpoch, BatchQueryEpoch};
+use risingwave_pb::hummock::{HummockVersionDeltas, StateTableInfoDelta};
 use tokio::sync::watch;
 
 use crate::expr::InlineNowProcTime;
 use crate::meta_client::FrontendMetaClient;
+use crate::scheduler::SchedulerError;
 
 /// The storage snapshot to read from in a query, which can be freely cloned.
 #[derive(Clone)]
@@ -33,9 +36,9 @@ pub enum ReadSnapshot {
     /// A frontend-pinned snapshot.
     FrontendPinned {
         snapshot: PinnedSnapshotRef,
-        // It's embedded here because we always use it together with snapshot.
-        is_barrier_read: bool,
     },
+
+    ReadUncommitted,
 
     /// Other arbitrary epoch, e.g. user specified.
     /// Availability and consistency of underlying data should be guaranteed accordingly.
@@ -45,21 +48,37 @@ pub enum ReadSnapshot {
 
 impl ReadSnapshot {
     /// Get the [`BatchQueryEpoch`] for this snapshot.
-    pub fn batch_query_epoch(&self) -> BatchQueryEpoch {
-        match self {
-            ReadSnapshot::FrontendPinned {
-                snapshot,
-                is_barrier_read,
-            } => snapshot.batch_query_epoch(*is_barrier_read),
+    pub fn batch_query_epoch(
+        &self,
+        read_storage_tables: &HashSet<TableId>,
+    ) -> Result<BatchQueryEpoch, SchedulerError> {
+        Ok(match self {
+            ReadSnapshot::FrontendPinned { snapshot } => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::Committed(
+                    BatchQueryCommittedEpoch {
+                        epoch: snapshot.batch_query_epoch(read_storage_tables)?.0,
+                        hummock_version_id: snapshot.value.id.to_u64(),
+                    },
+                )),
+            },
+            ReadSnapshot::ReadUncommitted => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::Current(u64::MAX)),
+            },
             ReadSnapshot::Other(e) => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
             },
-        }
+        })
     }
 
     pub fn inline_now_proc_time(&self) -> InlineNowProcTime {
         let epoch = match self {
-            ReadSnapshot::FrontendPinned { snapshot, .. } => Epoch(snapshot.committed_epoch()),
+            ReadSnapshot::FrontendPinned { snapshot } => snapshot
+                .value
+                .state_table_info
+                .max_table_committed_epoch()
+                .map(Epoch)
+                .unwrap_or_else(Epoch::now),
+            ReadSnapshot::ReadUncommitted => Epoch::now(),
             ReadSnapshot::Other(epoch) => *epoch,
         };
         InlineNowProcTime::new(epoch)
@@ -67,13 +86,7 @@ impl ReadSnapshot {
 
     /// Returns true if this snapshot is a barrier read.
     pub fn support_barrier_read(&self) -> bool {
-        match self {
-            ReadSnapshot::FrontendPinned {
-                snapshot: _,
-                is_barrier_read,
-            } => *is_barrier_read,
-            ReadSnapshot::Other(_) => false,
-        }
+        matches!(self, ReadSnapshot::ReadUncommitted)
     }
 }
 
@@ -93,17 +106,38 @@ impl std::fmt::Debug for PinnedSnapshot {
 pub type PinnedSnapshotRef = Arc<PinnedSnapshot>;
 
 impl PinnedSnapshot {
-    fn batch_query_epoch(&self, is_barrier_read: bool) -> BatchQueryEpoch {
-        let epoch = if is_barrier_read {
-            batch_query_epoch::Epoch::Current(u64::MAX)
-        } else {
-            batch_query_epoch::Epoch::Committed(self.value.max_committed_epoch)
-        };
-        BatchQueryEpoch { epoch: Some(epoch) }
+    fn batch_query_epoch(
+        &self,
+        read_storage_tables: &HashSet<TableId>,
+    ) -> Result<Epoch, SchedulerError> {
+        // use the min committed epoch of tables involved in the scan
+        let epoch = read_storage_tables
+            .iter()
+            .map(|table_id| {
+                self.value
+                    .state_table_info
+                    .info()
+                    .get(table_id)
+                    .map(|info| Epoch(info.committed_epoch))
+                    .ok_or_else(|| anyhow!("table id {table_id} may have been dropped"))
+            })
+            .try_fold(None, |prev_min_committed_epoch, committed_epoch| {
+                committed_epoch.map(|committed_epoch| {
+                    if let Some(prev_min_committed_epoch) = prev_min_committed_epoch
+                        && prev_min_committed_epoch <= committed_epoch
+                    {
+                        Some(prev_min_committed_epoch)
+                    } else {
+                        Some(committed_epoch)
+                    }
+                })
+            })?
+            .unwrap_or_else(Epoch::now);
+        Ok(epoch)
     }
 
-    pub fn committed_epoch(&self) -> u64 {
-        self.value.max_committed_epoch
+    pub fn version(&self) -> &FrontendHummockVersion {
+        &self.value
     }
 }
 
@@ -111,7 +145,6 @@ impl PinnedSnapshot {
 fn invalid_snapshot() -> FrontendHummockVersion {
     FrontendHummockVersion {
         id: INVALID_VERSION_ID,
-        max_committed_epoch: 0,
         state_table_info: HummockVersionStateTableInfo::from_protobuf(&HashMap::new()),
         table_change_log: Default::default(),
     }
@@ -169,6 +202,24 @@ impl HummockSnapshotManager {
         })
     }
 
+    pub fn add_table_for_test(&self, table_id: TableId) {
+        self.update_inner(|version| {
+            let mut version = version.clone();
+            version.id = version.id.next();
+            version.state_table_info.apply_delta(
+                &HashMap::from_iter([(
+                    table_id,
+                    StateTableInfoDelta {
+                        committed_epoch: INVALID_EPOCH,
+                        compaction_group_id: 0,
+                    },
+                )]),
+                &HashSet::new(),
+            );
+            Some(version)
+        });
+    }
+
     fn update_inner(
         &self,
         get_new_snapshot: impl FnOnce(&FrontendHummockVersion) -> Option<FrontendHummockVersion>,
@@ -192,9 +243,9 @@ impl HummockSnapshotManager {
     }
 
     /// Wait until the latest snapshot is newer than the given one.
-    pub async fn wait(&self, snapshot: PbHummockSnapshot) {
+    pub async fn wait(&self, version_id: HummockVersionId) {
         let mut rx = self.latest_snapshot.subscribe();
-        while rx.borrow_and_update().value.max_committed_epoch < snapshot.committed_epoch {
+        while rx.borrow_and_update().value.id < version_id {
             rx.changed().await.unwrap();
         }
     }

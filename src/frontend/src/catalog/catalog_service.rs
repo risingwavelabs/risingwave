@@ -19,6 +19,7 @@ use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
@@ -26,7 +27,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, create_connection_request, PbReplaceTablePlan,
-    PbTableJobType, ReplaceTablePlan, TableJobType,
+    PbTableJobType, ReplaceTablePlan, TableJobType, WaitVersion,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -36,6 +37,7 @@ use tokio::sync::watch::Receiver;
 use super::root_catalog::Catalog;
 use super::{DatabaseId, SecretId, TableId};
 use crate::error::Result;
+use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -216,6 +218,7 @@ pub trait CatalogWriter: Send + Sync {
 pub struct CatalogWriterImpl {
     meta_client: MetaClient,
     catalog_updated_rx: Receiver<CatalogVersion>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 #[async_trait::async_trait]
@@ -578,18 +581,26 @@ impl CatalogWriter for CatalogWriterImpl {
 }
 
 impl CatalogWriterImpl {
-    pub fn new(meta_client: MetaClient, catalog_updated_rx: Receiver<CatalogVersion>) -> Self {
+    pub fn new(
+        meta_client: MetaClient,
+        catalog_updated_rx: Receiver<CatalogVersion>,
+        hummock_snapshot_manager: HummockSnapshotManagerRef,
+    ) -> Self {
         Self {
             meta_client,
             catalog_updated_rx,
+            hummock_snapshot_manager,
         }
     }
 
-    async fn wait_version(&self, version: CatalogVersion) -> Result<()> {
+    async fn wait_version(&self, version: WaitVersion) -> Result<()> {
         let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow_and_update() < version {
+        while *rx.borrow_and_update() < version.catalog_version {
             rx.changed().await.map_err(|e| anyhow!(e))?;
         }
+        self.hummock_snapshot_manager
+            .wait(HummockVersionId::new(version.hummock_version_id))
+            .await;
         Ok(())
     }
 }

@@ -14,11 +14,12 @@
 
 use core::mem;
 use core::time::Duration;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
 use futures::StreamExt;
@@ -29,6 +30,7 @@ use risingwave_common::catalog::Field;
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use super::SessionImpl;
@@ -48,7 +50,7 @@ use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
 use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
-use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot};
+use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog};
 
 pub enum CursorDataChunkStream {
@@ -256,14 +258,17 @@ impl SubscriptionCursor {
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
             let (chunk_stream, fields, init_query_timer) =
                 Self::initiate_query(None, &dependent_table_id, handle_args.clone()).await?;
-            let pinned_epoch = match handle_args.session.get_pinned_snapshot().ok_or_else(|| {
-                ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_string())
-            })? {
-                ReadSnapshot::FrontendPinned { snapshot, .. } => snapshot.committed_epoch(),
-                ReadSnapshot::Other(_) => {
-                    return Err(ErrorCode::InternalError("Fetch Cursor can't start from specified query epoch. May run `set query_epoch = 0;`".to_string()).into());
-                }
-            };
+            let pinned_epoch = handle_args
+                .session
+                .env
+                .hummock_snapshot_manager
+                .acquire()
+                .version()
+                .state_table_info
+                .info()
+                .get(&dependent_table_id)
+                .ok_or_else(|| anyhow!("dependent_table_id {dependent_table_id} not exists"))?
+                .committed_epoch;
             let start_timestamp = pinned_epoch;
 
             (
@@ -519,6 +524,18 @@ impl SubscriptionCursor {
         let init_query_timer = Instant::now();
         let (chunk_stream, fields) = if let Some(rw_timestamp) = rw_timestamp {
             let context = OptimizerContext::from_handler_args(handle_args);
+            let version_id = {
+                let version = session.env.hummock_snapshot_manager.acquire();
+                let version = version.version();
+                if !version
+                    .state_table_info
+                    .info()
+                    .contains_key(dependent_table_id)
+                {
+                    return Err(anyhow!("table id {dependent_table_id} has been dropped").into());
+                }
+                version.id
+            };
             let plan_fragmenter_result = gen_batch_plan_fragmenter(
                 &session,
                 Self::create_batch_plan_for_cursor(
@@ -527,6 +544,7 @@ impl SubscriptionCursor {
                     context.into(),
                     rw_timestamp,
                     rw_timestamp,
+                    version_id,
                 )?,
             )?;
             create_chunk_stream_for_cursor(session, plan_fragmenter_result).await?
@@ -602,6 +620,7 @@ impl SubscriptionCursor {
         context: OptimizerContextRef,
         old_epoch: u64,
         new_epoch: u64,
+        version_id: HummockVersionId,
     ) -> Result<BatchQueryPlanResult> {
         let out_col_idx = table_catalog
             .columns
@@ -617,6 +636,7 @@ impl SubscriptionCursor {
             context,
             old_epoch,
             new_epoch,
+            version_id,
         );
         let batch_log_seq_scan = BatchLogSeqScan::new(core);
         let schema = batch_log_seq_scan
@@ -647,6 +667,7 @@ impl SubscriptionCursor {
             schema,
             stmt_type: StatementType::SELECT,
             dependent_relations: table_catalog.dependent_relations.clone(),
+            read_storage_tables: HashSet::from_iter([table_catalog.id]),
         })
     }
 

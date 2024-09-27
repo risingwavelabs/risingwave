@@ -138,7 +138,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             .await?;
         } else {
             let mut metadata_iter = sstable_store
-                .list_object_metadata_from_object_store(None)
+                .list_object_metadata_from_object_store(None, None, None)
                 .await?;
             while let Some(obj) = metadata_iter.try_next().await? {
                 print_object(&obj);

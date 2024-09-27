@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
 pub use risingwave_telemetry_event::{
     current_timestamp, post_telemetry_report_pb, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
 };
@@ -65,15 +66,21 @@ where
         // fetch telemetry tracking_id from the meta node only at the beginning
         // There is only one case tracking_id updated at the runtime ---- etcd data has been
         // cleaned. There is no way that etcd has been cleaned but nodes are still running
-        let tracking_id = match info_fetcher.fetch_telemetry_info().await {
-            Ok(Some(id)) => id,
-            Ok(None) => {
-                tracing::info!("Telemetry is disabled");
-                return;
-            }
-            Err(err) => {
-                tracing::error!("Telemetry failed to get tracking_id, err {}", err);
-                return;
+        let tracking_id = {
+            if let Some(cloud_uuid) = get_telemetry_risingwave_cloud_uuid() {
+                cloud_uuid
+            } else {
+                match info_fetcher.fetch_telemetry_info().await {
+                    Ok(Some(id)) => id,
+                    Ok(None) => {
+                        tracing::info!("Telemetry is disabled");
+                        return;
+                    }
+                    Err(err) => {
+                        tracing::error!("Telemetry failed to get tracking_id, err {}", err);
+                        return;
+                    }
+                }
             }
         };
         TELEMETRY_TRACKING_ID

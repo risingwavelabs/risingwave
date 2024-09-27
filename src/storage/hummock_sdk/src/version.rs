@@ -36,7 +36,9 @@ use crate::compaction_group::StaticCompactionGroupId;
 use crate::level::LevelsCommon;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
-use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID};
+use crate::{
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersionStateTableInfo {
@@ -203,6 +205,13 @@ impl HummockVersionStateTableInfo {
 
     pub fn compaction_group_member_tables(&self) -> &HashMap<CompactionGroupId, BTreeSet<TableId>> {
         &self.compaction_group_member_tables
+    }
+
+    pub fn max_table_committed_epoch(&self) -> Option<HummockEpoch> {
+        self.state_table_info
+            .values()
+            .map(|info| info.committed_epoch)
+            .max()
     }
 }
 
@@ -411,6 +420,13 @@ impl HummockVersion {
     #[cfg(any(test, feature = "test"))]
     pub fn max_committed_epoch(&self) -> u64 {
         self.max_committed_epoch
+    }
+
+    pub fn table_committed_epoch(&self, table_id: TableId) -> Option<u64> {
+        self.state_table_info
+            .info()
+            .get(&table_id)
+            .map(|info| info.committed_epoch)
     }
 
     pub fn visible_table_committed_epoch(&self) -> u64 {

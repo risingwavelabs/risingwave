@@ -568,8 +568,9 @@ pub mod verify {
         fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.actual.try_wait_epoch(epoch)
+            self.actual.try_wait_epoch(epoch, options)
         }
 
         fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
@@ -655,7 +656,7 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                     .with_flushers(opts.meta_file_cache_flushers)
                     .with_reclaimers(opts.meta_file_cache_reclaimers)
-                    .with_buffer_threshold(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                    .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
                     .with_clean_region_threshold(
                         opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                     )
@@ -700,7 +701,7 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.data_file_cache_indexer_shards)
                     .with_flushers(opts.data_file_cache_flushers)
                     .with_reclaimers(opts.data_file_cache_reclaimers)
-                    .with_buffer_threshold(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                    .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
                     .with_clean_region_threshold(
                         opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                     )
@@ -1134,7 +1135,11 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreExt: StaticSendSync {
-        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
+        async fn try_wait_epoch(
+            &self,
+            epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
+        ) -> StorageResult<()>;
 
         fn sync(
             &self,
@@ -1147,8 +1152,12 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStore> DynamicDispatchedStateStoreExt for S {
-        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.try_wait_epoch(epoch).await
+        async fn try_wait_epoch(
+            &self,
+            epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
+        ) -> StorageResult<()> {
+            self.try_wait_epoch(epoch, options).await
         }
 
         fn sync(
@@ -1233,8 +1242,9 @@ pub mod boxed_state_store {
         fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref().try_wait_epoch(epoch)
+            self.deref().try_wait_epoch(epoch, options)
         }
 
         fn sync(

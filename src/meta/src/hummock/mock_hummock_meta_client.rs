@@ -246,6 +246,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         _filtered_object_ids: Vec<HummockSstableObjectId>,
         _total_object_count: u64,
         _total_object_size: u64,
+        _next_start_after: Option<String>,
     ) -> Result<()> {
         unimplemented!()
     }

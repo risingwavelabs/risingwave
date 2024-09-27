@@ -56,6 +56,7 @@ import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {
   [actorId: number]: Dispatcher[]
+  fragment: TableFragments_Fragment
 }
 
 // Refresh interval (ms) for back pressure stats
@@ -107,10 +108,14 @@ function buildPlanNodeDependency(
     dispatcherName = "noDispatcher"
   }
 
-  const dispatcherNode = fragment.actors.reduce((obj, actor) => {
+  let dispatcherNode = fragment.actors.reduce((obj, actor) => {
     obj[actor.actorId] = actor.dispatcher
     return obj
   }, {} as DispatcherNode)
+  dispatcherNode.fragment = {
+    ...fragment,
+    actors: [],
+  }
 
   return d3.hierarchy({
     name: dispatcherName,

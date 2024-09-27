@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::mem::replace;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -74,7 +74,7 @@ impl TableDistribution {
     ) -> Self {
         let compute_vnode = if let Some(vnode_col_idx_in_pk) = vnode_col_idx_in_pk {
             ComputeVnode::VnodeColumnIndex {
-                vnodes: vnodes.unwrap_or_else(|| Bitmap::singleton().into()),
+                vnodes: vnodes.unwrap_or_else(|| Bitmap::singleton_arc().clone()),
                 vnode_col_idx_in_pk,
             }
         } else if !dist_key_in_pk_indices.is_empty() {
@@ -132,13 +132,10 @@ impl TableDistribution {
 
     /// Get vnode bitmap if distributed, or a dummy [`Bitmap::singleton()`] if singleton.
     pub fn vnodes(&self) -> &Arc<Bitmap> {
-        static SINGLETON_VNODES: LazyLock<Arc<Bitmap>> =
-            LazyLock::new(|| Bitmap::singleton().into());
-
         match &self.compute_vnode {
             ComputeVnode::DistKeyIndices { vnodes, .. } => vnodes,
             ComputeVnode::VnodeColumnIndex { vnodes, .. } => vnodes,
-            ComputeVnode::Singleton => &SINGLETON_VNODES,
+            ComputeVnode::Singleton => Bitmap::singleton_arc(),
         }
     }
 

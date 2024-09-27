@@ -54,7 +54,6 @@ use self::command::CommandContext;
 use self::notifier::Notifier;
 use crate::barrier::creating_job::CreatingStreamingJobControl;
 use crate::barrier::info::InflightGraphInfo;
-use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::state::BarrierManagerState;
@@ -1029,11 +1028,14 @@ impl GlobalBarrierManager {
         });
         span.record("epoch", curr_epoch.value().0);
 
+        let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
+
         let command_ctx = Arc::new(CommandContext::new(
             self.active_streaming_nodes.current().clone(),
             pre_applied_subscription_info,
             prev_epoch.clone(),
             curr_epoch.clone(),
+            table_ids_to_commit.clone(),
             self.state.paused_reason(),
             command,
             kind,
@@ -1042,8 +1044,6 @@ impl GlobalBarrierManager {
         ));
 
         send_latency_timer.observe_duration();
-
-        let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
 
         let mut jobs_to_wait = HashSet::new();
 
@@ -1075,16 +1075,9 @@ impl GlobalBarrierManager {
         };
 
         // Notify about the injection.
-        let prev_paused_reason = self.state.paused_reason();
         let curr_paused_reason = command_ctx.next_paused_reason();
 
-        let info = BarrierInfo {
-            prev_epoch: prev_epoch.value(),
-            curr_epoch: curr_epoch.value(),
-            prev_paused_reason,
-            curr_paused_reason,
-        };
-        notifiers.iter_mut().for_each(|n| n.notify_started(info));
+        notifiers.iter_mut().for_each(|n| n.notify_started());
 
         // Update the paused state after the barrier is injected.
         self.state.set_paused_reason(curr_paused_reason);
@@ -1300,6 +1293,10 @@ impl GlobalBarrierManagerContext {
                 })
             }
         }
+    }
+
+    pub fn hummock_manager(&self) -> &HummockManagerRef {
+        &self.hummock_manager
     }
 }
 
