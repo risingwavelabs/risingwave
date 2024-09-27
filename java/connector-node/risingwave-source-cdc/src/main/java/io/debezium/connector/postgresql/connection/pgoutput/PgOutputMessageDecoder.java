@@ -204,25 +204,27 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
                 var partition = processor.getPartition();
                 var offsetContext = processor.getOffsetContext();
                 var databaseName = offsetContext.getSourceInfo().getString("db");
-                SchemaChangeEvent schemaChangeEvent =
-                        SchemaChangeEvent.ofAlter(
-                                partition,
-                                offsetContext,
-                                databaseName,
-                                table.id().schema(),
-                                "UNKNOWN_DDL",
-                                table);
-                dispatcher.dispatchSchemaChangeEvent(
-                        partition,
-                        offsetContext,
-                        table.id(),
-                        (receiver -> {
-                            try {
-                                receiver.schemaChangeEvent(schemaChangeEvent);
-                            } catch (Exception e) {
-                                throw new DebeziumException(e);
-                            }
-                        }));
+                if (processor.includeSchemaChange()) {
+                    SchemaChangeEvent schemaChangeEvent =
+                            SchemaChangeEvent.ofAlter(
+                                    partition,
+                                    offsetContext,
+                                    databaseName,
+                                    table.id().schema(),
+                                    "UNKNOWN_DDL",
+                                    table);
+                    dispatcher.dispatchSchemaChangeEvent(
+                            partition,
+                            offsetContext,
+                            table.id(),
+                            (receiver -> {
+                                try {
+                                    receiver.schemaChangeEvent(schemaChangeEvent);
+                                } catch (Exception e) {
+                                    throw new DebeziumException(e);
+                                }
+                            }));
+                }
                 /* patch code */
                 break;
             case LOGICAL_DECODING_MESSAGE:

@@ -575,7 +575,9 @@
                     </execution>
                 </executions>
                 <configuration>
-                    <excludePackageNames>com.risingwave.connector.*</excludePackageNames>
+                    <excludePackageNames>
+                        com.risingwave.connector.*:io.debezium.*:com.risingwave.connector.cdc.debezium.*
+                    </excludePackageNames>
                 </configuration>
             </plugin>
 

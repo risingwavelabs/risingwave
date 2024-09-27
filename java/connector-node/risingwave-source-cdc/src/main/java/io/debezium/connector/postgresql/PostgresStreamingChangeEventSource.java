@@ -278,6 +278,11 @@ public class PostgresStreamingChangeEventSource
                                 public OffsetContext getOffsetContext() {
                                     return offsetContext;
                                 }
+
+                                @Override
+                                public boolean includeSchemaChange() {
+                                    return connectorConfig.includeSchemaChangeRecords();
+                                }
                                 /* patched code */
                             });
 
@@ -496,7 +501,7 @@ public class PostgresStreamingChangeEventSource
             LOGGER.warn(
                     "Received {} events which were all filtered out, so no offset could be committed. "
                             + "This prevents the replication slot from acknowledging the processed WAL offsets, "
-                            + "causing a growing backlog of non-removeable WAL segments on the database server. "
+                            + "causing a growing backlog of non-removable WAL segments on the database server. "
                             + "Consider to either adjust your filter configuration or enable heartbeat events "
                             + "(via the {} option) to avoid this situation.",
                     numberOfEventsSinceLastEventSentOrWalGrowingWarning,
