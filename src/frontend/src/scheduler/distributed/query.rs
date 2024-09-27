@@ -470,7 +470,7 @@ pub(crate) mod tests {
         WorkerNodeManager, WorkerNodeSelector,
     };
     use risingwave_common::catalog::{
-        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, StreamJobStatus,
+        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, StreamJobStatus,
         DEFAULT_SUPER_USER_ID,
     };
     use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};
@@ -590,6 +590,7 @@ pub(crate) mod tests {
             created_at_cluster_version: None,
             cdc_table_id: None,
             vnode_count: Some(vnode_count),
+            engine: Engine::Hummock,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),

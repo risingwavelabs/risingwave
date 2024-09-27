@@ -1002,6 +1002,7 @@ mod test {
                 catalog_name: Some("demo".to_string()),
                 database_name: Some("demo_db".to_string()),
                 table_name: "demo_table".to_string(),
+                enable_config_load: None,
             },
             r#type: "upsert".to_string(),
             force_append_only: false,

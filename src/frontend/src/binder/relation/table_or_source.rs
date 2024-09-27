@@ -17,7 +17,9 @@ use std::sync::Arc;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{debug_assert_column_ids_distinct, is_system_schema, Field};
+use risingwave_common::catalog::{
+    debug_assert_column_ids_distinct, is_system_schema, Engine, Field,
+};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
@@ -129,7 +131,31 @@ impl Binder {
                         .catalog
                         .get_created_table_by_name(&self.db_name, schema_path, table_name)
                     {
-                        self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
+                        match table_catalog.engine() {
+                            Engine::Iceberg => {
+                                if self.is_for_batch()
+                                    && let Ok((source_catalog, _)) =
+                                        self.catalog.get_source_by_name(
+                                            &self.db_name,
+                                            schema_path,
+                                            &table_catalog.iceberg_source_name().unwrap(),
+                                        )
+                                {
+                                    self.resolve_source_relation(&source_catalog.clone(), as_of)
+                                } else {
+                                    self.resolve_table_relation(
+                                        table_catalog.clone(),
+                                        schema_name,
+                                        as_of,
+                                    )?
+                                }
+                            }
+                            Engine::Hummock => self.resolve_table_relation(
+                                table_catalog.clone(),
+                                schema_name,
+                                as_of,
+                            )?,
+                        }
                     } else if let Ok((source_catalog, _)) =
                         self.catalog
                             .get_source_by_name(&self.db_name, schema_path, table_name)
@@ -177,11 +203,36 @@ impl Binder {
                                 } else if let Some(table_catalog) =
                                     schema.get_created_table_by_name(table_name)
                                 {
-                                    return self.resolve_table_relation(
-                                        table_catalog.clone(),
-                                        &schema_name.clone(),
-                                        as_of,
-                                    );
+                                    match table_catalog.engine {
+                                        Engine::Iceberg => {
+                                            if self.is_for_batch()
+                                                && let Some(source_catalog) = schema
+                                                    .get_source_by_name(
+                                                        &table_catalog
+                                                            .iceberg_source_name()
+                                                            .unwrap(),
+                                                    )
+                                            {
+                                                return Ok(self.resolve_source_relation(
+                                                    &source_catalog.clone(),
+                                                    as_of,
+                                                ));
+                                            } else {
+                                                return self.resolve_table_relation(
+                                                    table_catalog.clone(),
+                                                    &schema_name.clone(),
+                                                    as_of,
+                                                );
+                                            }
+                                        }
+                                        Engine::Hummock => {
+                                            return self.resolve_table_relation(
+                                                table_catalog.clone(),
+                                                &schema_name.clone(),
+                                                as_of,
+                                            );
+                                        }
+                                    }
                                 } else if let Some(source_catalog) =
                                     schema.get_source_by_name(table_name)
                                 {
