@@ -1438,6 +1438,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-emrserverless"
+version = "1.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45a36c7e63b7c48a5495e8c5bb240baf52fd297a54bbc0472eb91edddd19768a"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand 2.0.1",
+ "http 0.2.9",
+ "once_cell",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-glue"
 version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10940,6 +10963,7 @@ dependencies = [
  "aws-credential-types",
  "aws-msk-iam-sasl-signer",
  "aws-sdk-dynamodb",
+ "aws-sdk-emrserverless",
  "aws-sdk-glue",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
