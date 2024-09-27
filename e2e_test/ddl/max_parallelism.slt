@@ -1,0 +1,70 @@
+statement ok
+create view table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;
+
+#### BEGIN
+
+
+statement ok
+set streaming_max_parallelism to 4;
+
+# When the parallelism is specified to a value greater than the max parallelism, return an error.
+statement ok
+set streaming_parallelism to 6;
+
+statement error specified parallelism 6 should not exceed max parallelism 4
+create table t;
+
+# When the parallelism is specified to an valid value, ok.
+statement ok
+set streaming_parallelism to 4;
+
+statement ok
+create table t;
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+FIXED(4)
+
+statement ok
+drop table t;
+
+# When no parallelism is specified, ok, and the parallelism will be adaptive.
+
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+create table t;
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+ADAPTIVE
+
+# Alter parallelism to a valid value, ok.
+statement ok
+alter table t set parallelism to 4;
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+FIXED(4)
+
+# Alter parallelism to an invalid value, return an error.
+statement error specified parallelism 8 should not exceed max parallelism 4
+alter table t set parallelism to 8;
+
+statement ok
+drop table t;
+
+#### END
+
+statement ok
+set streaming_max_parallelism to default;
+
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+drop view table_parallelism;
