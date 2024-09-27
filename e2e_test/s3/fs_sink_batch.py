@@ -134,9 +134,9 @@ if __name__ == "__main__":
     _s3 = lambda idx: f"{run_id}_data_{idx}.parquet"
 
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
-    
+
     objects = client.list_objects("hummock001", prefix="test_sink/", recursive=True)
-    
+
     for obj in objects:
         client.remove_object("hummock001", obj.object_name)
         print(f"Deleted: {obj.object_name}")
