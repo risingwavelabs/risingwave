@@ -188,9 +188,13 @@ impl HummockManager {
             sst_retention_time,
             Duration::from_secs(self.env.opts.min_sst_retention_time_sec),
         );
+        let start_after = self.full_gc_state.next_start_after();
+        let limit = self.full_gc_state.limit;
         tracing::info!(
             retention_sec = sst_retention_time.as_secs(),
             prefix = prefix.as_ref().unwrap_or(&String::from("")),
+            start_after,
+            limit,
             "run full GC"
         );
 
@@ -205,8 +209,8 @@ impl HummockManager {
             .send_event(ResponseEvent::FullScanTask(FullScanTask {
                 sst_retention_time_sec: sst_retention_time.as_secs(),
                 prefix,
-                start_after: self.full_gc_state.next_start_after(),
-                limit: self.full_gc_state.limit,
+                start_after,
+                limit,
             }))
             .map_err(|_| Error::CompactorUnreachable(compactor.context_id()))?;
         Ok(true)

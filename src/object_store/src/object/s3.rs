@@ -1014,6 +1014,7 @@ impl Stream for S3ObjectIter {
             .bucket(&self.bucket)
             .prefix(&self.prefix);
         if let Some(start_after) = self.start_after.as_ref() {
+            #[cfg(not(madsim))]
             request = request.start_after(start_after);
         }
         if let Some(continuation_token) = self.next_continuation_token.as_ref() {
