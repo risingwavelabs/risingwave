@@ -208,8 +208,10 @@ impl PartialEq for LocalSstableInfo {
 /// Package read epoch of hummock, it be used for `wait_epoch`
 #[derive(Debug, Clone, Copy)]
 pub enum HummockReadEpoch {
-    /// We need to wait the `max_committed_epoch`
+    /// We need to wait the `committed_epoch` of the read table
     Committed(HummockEpoch),
+    /// We need to wait the `committed_epoch` of the read table and also the hummock version to the version id
+    BatchQueryCommitted(HummockEpoch, HummockVersionId),
     /// We don't need to wait epoch, we usually do stream reading with it.
     NoWait(HummockEpoch),
     /// We don't need to wait epoch.
@@ -220,7 +222,10 @@ pub enum HummockReadEpoch {
 impl From<BatchQueryEpoch> for HummockReadEpoch {
     fn from(e: BatchQueryEpoch) -> Self {
         match e.epoch.unwrap() {
-            batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::Committed(epoch),
+            batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::BatchQueryCommitted(
+                epoch.epoch,
+                HummockVersionId::new(epoch.hummock_version_id),
+            ),
             batch_query_epoch::Epoch::Current(epoch) => {
                 if epoch != HummockEpoch::MAX {
                     warn!(
@@ -236,19 +241,29 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
     }
 }
 
-pub fn to_committed_batch_query_epoch(epoch: u64) -> BatchQueryEpoch {
+pub fn test_batch_query_epoch() -> BatchQueryEpoch {
     BatchQueryEpoch {
-        epoch: Some(batch_query_epoch::Epoch::Committed(epoch)),
+        epoch: Some(batch_query_epoch::Epoch::Current(u64::MAX)),
     }
 }
 
 impl HummockReadEpoch {
     pub fn get_epoch(&self) -> HummockEpoch {
         *match self {
-            HummockReadEpoch::Committed(epoch) => epoch,
-            HummockReadEpoch::NoWait(epoch) => epoch,
-            HummockReadEpoch::Backup(epoch) => epoch,
-            HummockReadEpoch::TimeTravel(epoch) => epoch,
+            HummockReadEpoch::Committed(epoch)
+            | HummockReadEpoch::BatchQueryCommitted(epoch, _)
+            | HummockReadEpoch::NoWait(epoch)
+            | HummockReadEpoch::Backup(epoch)
+            | HummockReadEpoch::TimeTravel(epoch) => epoch,
+        }
+    }
+
+    pub fn is_read_committed(&self) -> bool {
+        match self {
+            HummockReadEpoch::Committed(_)
+            | HummockReadEpoch::TimeTravel(_)
+            | HummockReadEpoch::BatchQueryCommitted(_, _) => true,
+            HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => false,
         }
     }
 }
