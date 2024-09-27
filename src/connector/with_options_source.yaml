@@ -636,7 +636,7 @@ NatsProperties:
     field_type: String
     required: false
   - name: scan.startup.timestamp.millis
-    field_type: String
+    field_type: i64
     required: false
     alias:
     - scan.startup.timestamp_millis
