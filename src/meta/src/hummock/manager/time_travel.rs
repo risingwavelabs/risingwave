@@ -303,6 +303,10 @@ impl HummockManager {
                     query_epoch
                 )))
             })?;
+        let timer = self
+            .metrics
+            .time_travel_version_replay_latency
+            .start_timer();
         let actual_version_id = epoch_to_version.version_id;
         tracing::debug!(
             query_epoch,
@@ -342,10 +346,7 @@ impl HummockManager {
             .collect::<VecDeque<_>>();
         let sst_count = sst_ids.len();
         let mut sst_id_to_info = HashMap::with_capacity(sst_count);
-        let sst_info_fetch_batch_size = std::env::var("RW_TIME_TRAVEL_SST_INFO_FETCH_BATCH_SIZE")
-            .unwrap_or_else(|_| "100".into())
-            .parse()
-            .unwrap();
+        let sst_info_fetch_batch_size = self.env.opts.hummock_time_travel_sst_info_fetch_batch_size;
         while !sst_ids.is_empty() {
             let sst_infos = hummock_sstable_info::Entity::find()
                 .filter(hummock_sstable_info::Column::SstId.is_in(
@@ -365,6 +366,7 @@ impl HummockManager {
             ))));
         }
         refill_version(&mut actual_version, &sst_id_to_info, table_id);
+        timer.observe_duration();
         Ok(actual_version)
     }
 

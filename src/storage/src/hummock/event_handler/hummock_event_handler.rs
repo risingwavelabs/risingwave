@@ -338,7 +338,7 @@ impl HummockEventHandler {
         };
 
         let uploader = HummockUploader::new(
-            state_store_metrics,
+            state_store_metrics.clone(),
             pinned_version.clone(),
             spawn_upload_task,
             buffer_tracker,
@@ -358,6 +358,7 @@ impl HummockEventHandler {
             recent_versions: Arc::new(ArcSwap::from_pointee(RecentVersions::new(
                 pinned_version,
                 storage_opts.max_cached_recent_versions_number,
+                state_store_metrics,
             ))),
             write_conflict_detector,
             read_version_mapping,

@@ -13,27 +13,35 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::monitor::HummockStateStoreMetrics;
 
 pub struct RecentVersions {
     latest_version: PinnedVersion,
     is_latest_committed: bool,
     recent_versions: Vec<PinnedVersion>, // earlier version at the front
     max_version_num: usize,
+    metric: Arc<HummockStateStoreMetrics>,
 }
 
 impl RecentVersions {
-    pub fn new(version: PinnedVersion, max_version_num: usize) -> Self {
+    pub fn new(
+        version: PinnedVersion,
+        max_version_num: usize,
+        metric: Arc<HummockStateStoreMetrics>,
+    ) -> Self {
         assert!(max_version_num > 0);
         Self {
             latest_version: version,
             is_latest_committed: true, // The first version is always treated as committed epochs
             recent_versions: Vec::new(),
             max_version_num,
+            metric,
         }
     }
 
@@ -89,6 +97,7 @@ impl RecentVersions {
             is_latest_committed: is_committed,
             recent_versions,
             max_version_num: self.max_version_num,
+            metric: self.metric.clone(),
         }
     }
 
@@ -104,7 +113,7 @@ impl RecentVersions {
         table_id: TableId,
         epoch: HummockEpoch,
     ) -> Option<PinnedVersion> {
-        if let Some(info) = self
+        let result = if let Some(info) = self
             .latest_version
             .version()
             .state_table_info
@@ -118,7 +127,13 @@ impl RecentVersions {
             }
         } else {
             None
+        };
+        if result.is_some() {
+            self.metric.safe_version_hit.inc();
+        } else {
+            self.metric.safe_version_miss.inc();
         }
+        result
     }
 
     fn get_safe_version_from_recent(
@@ -192,6 +207,7 @@ mod tests {
 
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::local_version::recent_versions::RecentVersions;
+    use crate::monitor::HummockStateStoreMetrics;
 
     const TEST_TABLE_ID1: TableId = TableId::new(233);
     const TEST_TABLE_ID2: TableId = TableId::new(234);
@@ -246,7 +262,11 @@ mod tests {
         let epoch4 = epoch3 + 1;
         let version1 = gen_pin_version(1, [(TEST_TABLE_ID1, epoch1)]);
         // with at most 2 historical versions
-        let recent_versions = RecentVersions::new(version1.clone(), 2);
+        let recent_versions = RecentVersions::new(
+            version1.clone(),
+            2,
+            HummockStateStoreMetrics::unused().into(),
+        );
         assert!(recent_versions.recent_versions.is_empty());
         assert!(recent_versions.is_latest_committed);
         assert_query_equal(
