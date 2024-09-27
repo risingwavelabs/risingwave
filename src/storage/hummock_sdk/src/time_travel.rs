@@ -28,9 +28,12 @@ use crate::{CompactionGroupId, HummockSstableId};
 
 pub type IncompleteHummockVersion = HummockVersionCommon<SstableIdInVersion>;
 
+/// Populates `SstableInfo` for `table_id`.
+/// `SstableInfo` not associated with `table_id` is removed.
 pub fn refill_version(
     version: &mut HummockVersion,
     sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>,
+    table_id: u32,
 ) {
     for level in version.levels.values_mut().flat_map(|level| {
         level
@@ -41,8 +44,13 @@ pub fn refill_version(
             .chain(level.levels.iter_mut())
     }) {
         refill_level(level, sst_id_to_info);
+        level
+            .table_infos
+            .retain(|t| t.table_ids.contains(&table_id));
     }
-
+    version
+        .table_change_log
+        .retain(|t, _| t.table_id == table_id);
     for t in version.table_change_log.values_mut() {
         refill_table_change_log(t, sst_id_to_info);
     }
