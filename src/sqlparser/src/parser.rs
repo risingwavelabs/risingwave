@@ -2808,7 +2808,7 @@ impl Parser<'_> {
             Ok(Some(OnConflict::UpdateIfNotNull))
         } else if self.parse_keywords(&[Keyword::DO, Keyword::UPDATE, Keyword::FULL]) {
             Ok(Some(OnConflict::UpdateFull))
-        } else if self.parse_keywords(&[Keyword::DO, Keyword::UPDATE, Keyword::FULL]) {
+        } else if self.parse_keywords(&[Keyword::DO, Keyword::NOTHING]) {
             Ok(Some(OnConflict::Nothing))
         } else {
             Ok(None)
