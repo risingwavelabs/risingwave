@@ -32,7 +32,6 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
-use tracing::warn;
 
 use super::{HummockError, HummockResult, SstableStoreRef};
 use crate::error::StorageResult;
@@ -586,19 +585,10 @@ pub(crate) async fn wait_for_epoch(
     table_id: TableId,
 ) -> StorageResult<()> {
     let mut prev_committed_epoch = None;
-    let mut call_count = 0;
-    let mut prev_call_time: Option<Instant> = None;
     let prev_committed_epoch = &mut prev_committed_epoch;
-    let call_count = &mut call_count;
-    let prev_call_time = &mut prev_call_time;
     wait_for_update(
         notifier,
         |version| {
-            *call_count += 1;
-            if *call_count > 1 {
-                warn!(call_count, prev_elapsed = ?prev_call_time.unwrap().elapsed(), version_id = version.id().to_u64(),"call inspect again");
-            }
-            *prev_call_time = Some(Instant::now());
             let committed_epoch = version.version().table_committed_epoch(table_id);
             let ret = if let Some(committed_epoch) = committed_epoch {
                 if committed_epoch >= wait_epoch {
@@ -607,11 +597,6 @@ pub(crate) async fn wait_for_epoch(
                     Ok(false)
                 }
             } else if prev_committed_epoch.is_none() {
-                warn!(
-                    table_id = table_id.table_id,
-                    version_id = version.id().to_u64(),
-                    "table id not exist yet, wait for registering"
-                );
                 Ok(false)
             } else {
                 Err(HummockError::wait_epoch(format!(
