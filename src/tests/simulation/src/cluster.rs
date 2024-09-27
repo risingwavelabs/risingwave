@@ -396,24 +396,25 @@ impl Cluster {
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
-        let seed = std::env::var("MADSIM_TEST_SEED")
-            .unwrap_or("0".to_string())
-            .parse::<u64>()
-            .unwrap();
-        let sql_endpoint = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
+        // FIXME: some tests like integration tests will run concurrently,
+        // resulting in connecting to the same sqlite file if they're using the same seed.
+        let file_path = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
             format!(
-                "sqlite://{}/stest-{}-{}.sqlite?mode=rwc",
+                "{}/stest-{}-{}.sqlite",
                 sqlite_data_dir.display(),
-                seed,
+                handle.seed(),
                 Uuid::new_v4()
             )
         } else {
-            format!(
-                "sqlite://./stest-{}-{}.sqlite?mode=rwc",
-                seed,
-                Uuid::new_v4()
-            )
+            format!("./stest-{}-{}.sqlite", handle.seed(), Uuid::new_v4())
         };
+        if std::fs::exists(&file_path).unwrap() {
+            panic!(
+                "sqlite file already exists and used by other cluster: {}",
+                file_path
+            )
+        }
+        let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path);
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
 
         // FIXME(kwannoel):
@@ -888,10 +889,6 @@ impl Cluster {
 impl Drop for Cluster {
     fn drop(&mut self) {
         // FIXME: remove it when deprecate the on-disk version.
-        let seed = std::env::var("MADSIM_TEST_SEED")
-            .unwrap_or("0".to_string())
-            .parse::<u64>()
-            .unwrap();
         let default_path = PathBuf::from(".");
         let sqlite_data_dir = self
             .config
@@ -906,7 +903,7 @@ impl Drop for Cluster {
                 .unwrap()
                 .to_str()
                 .unwrap()
-                .starts_with(&format!("stest-{}-", seed))
+                .starts_with(&format!("stest-{}-", self.handle.seed()))
             {
                 std::fs::remove_file(path).unwrap();
                 break;

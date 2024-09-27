@@ -57,7 +57,7 @@ fi
 echo "--- EXTRA_ARGS: ${EXTRA_ARGS}"
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, background_ddl"
-seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+seq "$TEST_NUM" | parallel './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 ${EXTRA_ARGS:-} \
@@ -65,7 +65,7 @@ ${EXTRA_ARGS:-} \
 2> $LOGDIR/recovery-background-ddl-{}.log && rm $LOGDIR/recovery-background-ddl-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, ddl"
-seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+seq "$TEST_NUM" | parallel './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
@@ -73,7 +73,7 @@ ${EXTRA_ARGS:-} \
 ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/recovery-ddl-{}.log && rm $LOGDIR/recovery-ddl-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, streaming"
-seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+seq "$TEST_NUM" | parallel './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
@@ -81,7 +81,7 @@ ${EXTRA_ARGS:-} \
 ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/recovery-streaming-{}.log && rm $LOGDIR/recovery-streaming-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, batch"
-seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+seq "$TEST_NUM" | parallel './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
@@ -89,7 +89,7 @@ ${EXTRA_ARGS:-} \
 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/recovery-batch-{}.log && rm $LOGDIR/recovery-batch-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, kafka source,sink"
-seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+seq "$TEST_NUM" | parallel './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --kafka-datadir=./scripts/source/test_data \
