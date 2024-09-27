@@ -46,7 +46,7 @@ use super::decouple_checkpoint_log_sink::{
 };
 use super::writer::SinkWriter;
 use super::{
-    Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterParam,
+    Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 
@@ -289,6 +289,8 @@ impl Sink for DeltaLakeSink {
             self.param.downstream_pk.clone(),
         )
         .await?;
+
+        let metrics = SinkWriterMetrics::new(&writer_param);
         let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -312,7 +314,7 @@ impl Sink for DeltaLakeSink {
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
-            writer_param.sink_metrics,
+            metrics,
             commit_checkpoint_interval,
         ))
     }

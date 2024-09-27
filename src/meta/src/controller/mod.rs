@@ -163,6 +163,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             created_at_cluster_version: value.1.created_at_cluster_version,
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
             cdc_table_id: value.0.cdc_table_id,
+            maybe_vnode_count: Some(value.0.vnode_count as _),
         }
     }
 }

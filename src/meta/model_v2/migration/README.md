@@ -13,7 +13,7 @@
 - Generate a new migration file, a database endpoint is required but not used.
   Run this command in this directory, not project root.
     ```sh
-    export DATABASE_URL=sqlite::memory:; cargo run -- generate MIGRATION_NAME
+    DATABASE_URL=sqlite::memory: cargo run -- generate MIGRATION_NAME
     ```
 - Apply all pending migrations for test purposes, change `DATABASE_URL` to the actual database endpoint.
     ```sh

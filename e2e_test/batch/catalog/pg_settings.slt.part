@@ -58,6 +58,7 @@ user sink_decouple
 user source_rate_limit
 user standard_conforming_strings
 user statement_timeout
+user streaming_max_parallelism
 user streaming_parallelism
 user streaming_use_arrangement_backfill
 user streaming_use_snapshot_backfill

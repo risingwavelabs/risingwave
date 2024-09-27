@@ -323,6 +323,73 @@ drop table t_primary_key;
 statement ok
 drop table t_s3;
 
+
+
+# target table append only with primary key
+
+statement ok
+create table t_s3 (v1 int, v2 int) append only;
+
+statement ok
+insert into t_s3 values (1, 11), (2, 12), (3, 13);
+
+statement ok
+create table t_primary_key_append_only (v1 int primary key, v2 int, v3 int default 1000, v4 int as v1 + v2) APPEND ONLY;
+
+statement error
+create sink s3 into t_primary_key_append_only as select v1, v2 from t_s3;
+
+statement ok
+create sink s3 into t_primary_key_append_only as select v1, v2 from t_s3  with (type = 'append-only');
+
+
+statement ok
+flush;
+
+query IIII rowsort
+select * from t_primary_key_append_only order by v1;
+----
+1	11	1000	12
+2	12	1000	14
+3	13	1000	16
+
+statement ok
+insert into t_s3 values (4, 14), (5, 15), (6, 16);
+
+query IIII rowsort
+select * from t_primary_key_append_only order by v1;
+----
+1	11	1000	12
+2	12	1000	14
+3	13	1000	16
+4	14	1000	18
+5	15	1000	20
+6	16	1000	22
+
+statement ok
+insert into t_primary_key_append_only values (100, 100);
+
+query IIII
+select * from t_primary_key_append_only order by v1;
+----
+1	11	1000	12
+2	12	1000	14
+3	13	1000	16
+4	14	1000	18
+5	15	1000	20
+6	16	1000	22
+100	100	1000	200
+
+statement ok
+drop sink s3;
+
+statement ok
+drop table t_primary_key_append_only;
+
+statement ok
+drop table t_s3;
+
+
 # multi sinks
 
 statement ok
