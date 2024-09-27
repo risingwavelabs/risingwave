@@ -282,7 +282,7 @@ impl StreamManagerService for StreamServiceImpl {
                 let job_states = mgr.catalog_controller.list_streaming_job_states().await?;
                 job_states
                     .into_iter()
-                    .map(|(table_id, state, parallelism)| {
+                    .map(|(table_id, state, parallelism, max_parallelism)| {
                         let parallelism = match parallelism {
                             StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
                             StreamingParallelism::Custom => model::TableParallelism::Custom,
@@ -295,7 +295,7 @@ impl StreamManagerService for StreamServiceImpl {
                             table_id: table_id as _,
                             state: PbState::from(state) as _,
                             parallelism: Some(parallelism.into()),
-                            max_parallelism: 0, // TODO(var-vnode): write query to obtain this from `fragment`
+                            max_parallelism: max_parallelism as _,
                         }
                     })
                     .collect_vec()

@@ -677,14 +677,15 @@ impl CatalogController {
 
     pub async fn list_streaming_job_states(
         &self,
-    ) -> MetaResult<Vec<(ObjectId, JobStatus, StreamingParallelism)>> {
+    ) -> MetaResult<Vec<(ObjectId, JobStatus, StreamingParallelism, i32)>> {
         let inner = self.inner.read().await;
-        let job_states: Vec<(ObjectId, JobStatus, StreamingParallelism)> = StreamingJob::find()
+        let job_states = StreamingJob::find()
             .select_only()
             .columns([
                 streaming_job::Column::JobId,
                 streaming_job::Column::JobStatus,
                 streaming_job::Column::Parallelism,
+                streaming_job::Column::MaxParallelism,
             ])
             .into_tuple()
             .all(&inner.db)
