@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use opendal::{FuturesAsyncWriter, Operator, Writer, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties;
@@ -189,7 +189,7 @@ pub struct OpenDalSinkWriter {
 /// - `ParquetFileWriter`: Represents a Parquet file writer using the `AsyncArrowWriter<W>`
 ///   for writing data to a Parquet file. It accepts an implementation of W: `AsyncWrite` + `Unpin` + `Send`
 ///   as the underlying writer. In this case, the `OpendalWriter` serves as the underlying writer.
-/// - `FileWriter`: Represents a basic OpenDAL writer, for writing files in encodes other than parquet.
+/// - `FileWriter`: Represents a basic `OpenDAL` writer, for writing files in encodes other than parquet.
 ///
 /// The choice of writer used during the actual writing process depends on the encode type of the sink.
 enum FileWriterEnum {
@@ -328,42 +328,36 @@ impl OpenDalSinkWriter {
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let chunk_buf = self.convert_chunk_to_bytes(chunk.clone())?;
         match self
             .sink_writer
             .as_mut()
             .ok_or_else(|| SinkError::File("Sink writer is not created.".to_string()))?
         {
             FileWriterEnum::ParquetFileWriter(w) => {
-                let (data_chunk, _) = chunk.clone().compact().into_parts();
                 let batch =
-                    IcebergArrowConvert.to_record_batch(self.schema.clone(), &data_chunk)?;
+                    IcebergArrowConvert.to_record_batch(self.schema.clone(), chunk.data_chunk())?;
                 w.write(&batch).await?;
             }
             FileWriterEnum::FileWriter(w) => {
-                w.write(chunk_buf).await?;
+                let mut chunk_buf = BytesMut::new();
+
+                // write the json representations of the row(s) in current chunk to `chunk_buf`
+                for (op, row) in chunk.rows() {
+                    assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
+                    // to prevent temporary string allocation,
+                    // so we directly write to `chunk_buf` implicitly via `write_fmt`.
+                    writeln!(
+                        chunk_buf,
+                        "{}",
+                        Value::Object(self.row_encoder.encode(row)?)
+                    )
+                    .unwrap(); // write to a `BytesMut` should never fail
+                }
+                w.write(chunk_buf.freeze()).await?;
             }
         }
 
         Ok(())
-    }
-
-    fn convert_chunk_to_bytes(&mut self, chunk: StreamChunk) -> anyhow::Result<Bytes> {
-        let mut chunk_buf = BytesMut::new();
-
-        // write the json representations of the row(s) in current chunk to `chunk_buf`
-        for (op, row) in chunk.rows() {
-            assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
-            // to prevent temporary string allocation,
-            // so we directly write to `chunk_buf` implicitly via `write_fmt`.
-            writeln!(
-                chunk_buf,
-                "{}",
-                Value::Object(self.row_encoder.encode(row)?)
-            )
-            .unwrap(); // write to a `BytesMut` should never fail
-        }
-        Ok(chunk_buf.freeze())
     }
 }
 
