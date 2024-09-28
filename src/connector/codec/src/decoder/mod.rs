@@ -14,6 +14,7 @@
 
 pub mod avro;
 pub mod json;
+pub mod protobuf;
 pub mod utils;
 
 use risingwave_common::error::NotImplemented;
@@ -38,12 +39,18 @@ pub enum AccessError {
     #[error("Unsupported additional column `{name}`")]
     UnsupportedAdditionalColumn { name: String },
 
+    #[error("Fail to convert protobuf Any into jsonb: {0}")]
+    ProtobufAnyToJson(#[source] serde_json::Error),
+
     /// Errors that are not categorized into variants above.
     #[error("{message}")]
     Uncategorized { message: String },
 
     #[error(transparent)]
     NotImplemented(#[from] NotImplemented),
+    // NOTE: We intentionally don't embed `anyhow::Error` in `AccessError` since it happens
+    // in record-level and it might be too heavy to capture the backtrace
+    // when creating a new `anyhow::Error`.
 }
 
 pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;

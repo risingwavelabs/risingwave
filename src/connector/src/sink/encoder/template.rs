@@ -22,7 +22,8 @@ use risingwave_common::types::ToText;
 use super::{Result, RowEncoder};
 use crate::sink::SinkError;
 
-/// Encode a row according to a specified string template `user_id:{user_id}`
+/// Encode a row according to a specified string template `user_id:{user_id}`.
+/// Data is encoded to string with [`ToText`].
 pub struct TemplateEncoder {
     schema: Schema,
     col_indices: Option<Vec<usize>>,

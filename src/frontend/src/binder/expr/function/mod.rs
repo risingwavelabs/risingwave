@@ -20,13 +20,14 @@ use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_sqlparser::ast::{self, Function, FunctionArg, FunctionArgExpr, Ident};
 use risingwave_sqlparser::parser::ParserError;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, UdfContext};
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     Expr, ExprImpl, ExprType, FunctionCallWithLambda, InputRef, TableFunction, TableFunctionType,
@@ -43,6 +44,7 @@ const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "user",
     "current_user",
     "current_role",
+    "current_catalog",
     "current_schema",
     "current_timestamp",
 ];
@@ -59,9 +61,27 @@ pub(super) fn is_sys_function_without_args(ident: &Ident) -> bool {
 /// stack is set to `16`.
 const SQL_UDF_MAX_CALLING_DEPTH: u32 = 16;
 
+macro_rules! reject_syntax {
+    ($pred:expr, $msg:expr) => {
+        if $pred {
+            return Err(ErrorCode::InvalidInputSyntax($msg.to_string()).into());
+        }
+    };
+}
+
 impl Binder {
-    pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
-        let function_name = match f.name.0.as_slice() {
+    pub(in crate::binder) fn bind_function(
+        &mut self,
+        Function {
+            scalar_as_agg,
+            name,
+            arg_list,
+            within_group,
+            filter,
+            over,
+        }: Function,
+    ) -> Result<ExprImpl> {
+        let func_name = match name.0.as_slice() {
             [name] => name.real_value(),
             [schema, name] => {
                 let schema_name = schema.real_value();
@@ -90,7 +110,7 @@ impl Binder {
                     );
                 }
             }
-            _ => bail_not_implemented!(issue = 112, "qualified function {}", f.name),
+            _ => bail_not_implemented!(issue = 112, "qualified function {}", name),
         };
 
         // FIXME: This is a hack to support [Bytebase queries](https://github.com/TennyZhuang/bytebase/blob/4a26f7c62b80e86e58ad2f77063138dc2f420623/backend/plugin/db/pg/sync.go#L549).
@@ -99,215 +119,245 @@ impl Binder {
         // retrieve object comment, however we don't support casting a non-literal expression to
         // regclass. We just hack the `obj_description` and `col_description` here, to disable it to
         // bind its arguments.
-        if function_name == "obj_description" || function_name == "col_description" {
+        if func_name == "obj_description" || func_name == "col_description" {
             return Ok(ExprImpl::literal_varchar("".to_string()));
         }
-        if function_name == "array_transform" {
+
+        // special binding logic for `array_transform`
+        if func_name == "array_transform" {
             // For type inference, we need to bind the array type first.
-            return self.bind_array_transform(f);
+            reject_syntax!(
+                scalar_as_agg,
+                "`AGGREGATE:` prefix is not allowed for `array_transform`"
+            );
+            reject_syntax!(!arg_list.is_args_only(), "keywords like `DISTINCT`, `ORDER BY` are not allowed in `array_transform` argument list");
+            reject_syntax!(
+                within_group.is_some(),
+                "`WITHIN GROUP` is not allowed in `array_transform` call"
+            );
+            reject_syntax!(
+                filter.is_some(),
+                "`FILTER` is not allowed in `array_transform` call"
+            );
+            reject_syntax!(
+                over.is_some(),
+                "`OVER` is not allowed in `array_transform` call"
+            );
+            return self.bind_array_transform(arg_list.args);
         }
 
-        let mut inputs: Vec<_> = f
+        let mut args: Vec<_> = arg_list
             .args
             .iter()
             .map(|arg| self.bind_function_arg(arg.clone()))
             .flatten_ok()
             .try_collect()?;
 
-        // `aggregate:` on a scalar function
-        if f.scalar_as_agg {
-            let mut scalar_inputs = inputs
+        let wrapped_agg_type = if scalar_as_agg {
+            // Let's firstly try to apply the `AGGREGATE:` prefix.
+            // We will reject functions that are not able to be wrapped as aggregate function.
+            let mut array_args = args
                 .iter()
                 .enumerate()
                 .map(|(i, expr)| {
                     InputRef::new(i, DataType::List(Box::new(expr.return_type()))).into()
                 })
                 .collect_vec();
-            let scalar: ExprImpl = if let Ok(schema) = self.first_valid_schema()
-                && let Some(func) =
-                    schema.get_function_by_name_inputs(&function_name, &mut scalar_inputs)
+            let scalar_func_expr = if let Ok(schema) = self.first_valid_schema()
+                && let Some(func) = schema.get_function_by_name_inputs(&func_name, &mut array_args)
             {
                 if !func.kind.is_scalar() {
                     return Err(ErrorCode::InvalidInputSyntax(
-                        "expect a scalar function after `aggregate:`".to_string(),
+                        "expect a scalar function after `AGGREGATE:`".to_string(),
                     )
                     .into());
                 }
-                UserDefinedFunction::new(func.clone(), scalar_inputs).into()
+                if func.language == "sql" {
+                    self.bind_sql_udf(func.clone(), array_args)?
+                } else {
+                    UserDefinedFunction::new(func.clone(), array_args).into()
+                }
             } else {
-                self.bind_builtin_scalar_function(&function_name, scalar_inputs, f.variadic)?
+                self.bind_builtin_scalar_function(&func_name, array_args, arg_list.variadic)?
             };
-            return self.bind_aggregate_function(f, AggKind::WrapScalar(scalar.to_expr_proto()));
-        }
 
-        // user defined function
-        // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
-        if let Ok(schema) = self.first_valid_schema()
-            && let Some(func) = schema.get_function_by_name_inputs(&function_name, &mut inputs)
+            // now this is either an aggregate/window function call
+            Some(AggType::WrapScalar(scalar_func_expr.to_expr_proto()))
+        } else {
+            None
+        };
+
+        let udf = if wrapped_agg_type.is_none()
+            && let Ok(schema) = self.first_valid_schema()
+            && let Some(func) = schema
+                .get_function_by_name_inputs(&func_name, &mut args)
+                .cloned()
         {
-            use crate::catalog::function_catalog::FunctionKind::*;
-
             if func.language == "sql" {
-                if func.body.is_none() {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "`body` must exist for sql udf".to_string(),
-                    )
-                    .into());
-                }
-
-                // This represents the current user defined function is `language sql`
-                let parse_result = risingwave_sqlparser::parser::Parser::parse_sql(
-                    func.body.as_ref().unwrap().as_str(),
+                let name = format!("SQL user-defined function `{}`", func.name);
+                reject_syntax!(
+                    scalar_as_agg,
+                    format!("`AGGREGATE:` prefix is not allowed for {}", name)
                 );
-                if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
-                    parse_result
-                {
-                    // Here we just return the original parse error message
-                    return Err(ErrorCode::InvalidInputSyntax(err).into());
-                }
-
-                debug_assert!(parse_result.is_ok());
-
-                // We can safely unwrap here
-                let ast = parse_result.unwrap();
-
-                // Stash the current `udf_context`
-                // Note that the `udf_context` may be empty,
-                // if the current binding is the root (top-most) sql udf.
-                // In this case the empty context will be stashed
-                // and restored later, no need to maintain other flags.
-                let stashed_udf_context = self.udf_context.get_context();
-
-                // The actual inline logic for sql udf
-                // Note that we will always create new udf context for each sql udf
-                let Ok(context) = UdfContext::create_udf_context(&f.args, &Arc::clone(func)) else {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
+                reject_syntax!(
+                    !arg_list.is_args_only(),
+                    format!(
+                        "keywords like `DISTINCT`, `ORDER BY` are not allowed in {} argument list",
+                        name
                     )
-                    .into());
-                };
-
-                let mut udf_context = HashMap::new();
-                for (c, e) in context {
-                    // Note that we need to bind the args before actual delve in the function body
-                    // This will update the context in the subsequent inner calling function
-                    // e.g.,
-                    // - create function print(INT) returns int language sql as 'select $1';
-                    // - create function print_add_one(INT) returns int language sql as 'select print($1 + 1)';
-                    // - select print_add_one(1); # The result should be 2 instead of 1.
-                    // Without the pre-binding here, the ($1 + 1) will not be correctly populated,
-                    // causing the result to always be 1.
-                    let Ok(e) = self.bind_expr(e) else {
-                        return Err(ErrorCode::BindError(
-                            "failed to bind the argument, please recheck the syntax".to_string(),
-                        )
-                        .into());
-                    };
-                    udf_context.insert(c, e);
-                }
-                self.udf_context.update_context(udf_context);
-
-                // Check for potential recursive calling
-                if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
-                    return Err(ErrorCode::BindError(format!(
-                        "function {} calling stack depth limit exceeded",
-                        &function_name
-                    ))
-                    .into());
-                } else {
-                    // Update the status for the global counter
-                    self.udf_context.incr_global_count();
-                }
-
-                if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
-                    let bind_result = self.bind_expr(expr);
-
-                    // We should properly decrement global count after a successful binding
-                    // Since the subsequent probe operation in `bind_column` or
-                    // `bind_parameter` relies on global counting
-                    self.udf_context.decr_global_count();
-
-                    // Restore context information for subsequent binding
-                    self.udf_context.update_context(stashed_udf_context);
-
-                    return bind_result;
-                } else {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "failed to parse the input query and extract the udf expression,
-                        please recheck the syntax"
-                            .to_string(),
-                    )
-                    .into());
-                }
-            } else {
-                match &func.kind {
-                    Scalar { .. } => {
-                        return Ok(UserDefinedFunction::new(func.clone(), inputs).into())
-                    }
-                    Table { .. } => {
-                        self.ensure_table_function_allowed()?;
-                        return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
-                    }
-                    Aggregate => {
-                        return self.bind_aggregate_function(
-                            f,
-                            AggKind::UserDefined(func.as_ref().into()),
-                        );
-                    }
-                }
+                );
+                reject_syntax!(
+                    within_group.is_some(),
+                    format!("`WITHIN GROUP` is not allowed in {} call", name)
+                );
+                reject_syntax!(
+                    filter.is_some(),
+                    format!("`FILTER` is not allowed in {} call", name)
+                );
+                reject_syntax!(
+                    over.is_some(),
+                    format!("`OVER` is not allowed in {} call", name)
+                );
+                return self.bind_sql_udf(func, args);
             }
-        }
 
-        // agg calls
-        if f.over.is_none()
-            && let Ok(kind) = function_name.parse()
+            // now `func` is a non-SQL user-defined scalar/aggregate/table function
+            Some(func)
+        } else {
+            None
+        };
+
+        let agg_type = if wrapped_agg_type.is_some() {
+            wrapped_agg_type
+        } else if let Some(ref udf) = udf
+            && udf.kind.is_aggregate()
         {
-            return self.bind_aggregate_function(f, AggKind::Builtin(kind));
+            assert_ne!(udf.language, "sql", "SQL UDAF is not supported yet");
+            Some(AggType::UserDefined(udf.as_ref().into()))
+        } else if let Ok(agg_type) = AggType::from_str(&func_name) {
+            Some(agg_type)
+        } else {
+            None
+        };
+
+        // try to bind it as a window function call
+        if let Some(over) = over {
+            reject_syntax!(
+                arg_list.distinct,
+                "`DISTINCT` is not allowed in window function call"
+            );
+            reject_syntax!(
+                arg_list.variadic,
+                "`VARIADIC` is not allowed in window function call"
+            );
+            reject_syntax!(
+                !arg_list.order_by.is_empty(),
+                "`ORDER BY` is not allowed in window function call argument list"
+            );
+            reject_syntax!(
+                within_group.is_some(),
+                "`WITHIN GROUP` is not allowed in window function call"
+            );
+
+            let kind = if let Some(agg_type) = agg_type {
+                // aggregate as window function
+                WindowFuncKind::Aggregate(agg_type)
+            } else if let Ok(kind) = WindowFuncKind::from_str(&func_name) {
+                kind
+            } else {
+                bail_not_implemented!(issue = 8961, "Unrecognized window function: {}", func_name);
+            };
+            return self.bind_window_function(kind, args, arg_list.ignore_nulls, filter, over);
         }
 
-        if f.distinct || !f.order_by.is_empty() || f.filter.is_some() {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
-                )
-                )
-                .into());
-        }
+        // now it's a aggregate/scalar/table function call
+        reject_syntax!(
+            arg_list.ignore_nulls,
+            "`IGNORE NULLS` is not allowed in aggregate/scalar/table function call"
+        );
 
-        // window function
-        let window_func_kind = WindowFuncKind::from_str(function_name.as_str());
-        if let Ok(kind) = window_func_kind {
-            if let Some(window_spec) = f.over {
-                return self.bind_window_function(kind, inputs, window_spec);
-            }
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "Window function `{}` must have OVER clause",
-                function_name
-            ))
-            .into());
-        } else if f.over.is_some() {
-            bail_not_implemented!(
-                issue = 8961,
-                "Unrecognized window function: {}",
-                function_name
+        // try to bind it as an aggregate function call
+        if let Some(agg_type) = agg_type {
+            reject_syntax!(
+                arg_list.variadic,
+                "`VARIADIC` is not allowed in aggregate function call"
+            );
+            return self.bind_aggregate_function(
+                agg_type,
+                arg_list.distinct,
+                args,
+                arg_list.order_by,
+                within_group,
+                filter,
             );
         }
 
-        // file_scan table function
-        if function_name.eq_ignore_ascii_case("file_scan") {
-            self.ensure_table_function_allowed()?;
-            return Ok(TableFunction::new_file_scan(inputs)?.into());
-        }
-        // table function
-        if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
-            self.ensure_table_function_allowed()?;
-            return Ok(TableFunction::new(function_type, inputs)?.into());
+        // now it's a scalar/table function call
+        reject_syntax!(
+            arg_list.distinct,
+            "`DISTINCT` is not allowed in scalar/table function call"
+        );
+        reject_syntax!(
+            !arg_list.order_by.is_empty(),
+            "`ORDER BY` is not allowed in scalar/table function call"
+        );
+        reject_syntax!(
+            within_group.is_some(),
+            "`WITHIN GROUP` is not allowed in scalar/table function call"
+        );
+        reject_syntax!(
+            filter.is_some(),
+            "`FILTER` is not allowed in scalar/table function call"
+        );
+
+        // try to bind it as a table function call
+        {
+            // `file_scan` table function
+            if func_name.eq_ignore_ascii_case("file_scan") {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+                return Ok(TableFunction::new_file_scan(args)?.into());
+            }
+            // UDTF
+            if let Some(ref udf) = udf
+                && udf.kind.is_table()
+            {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+                return Ok(TableFunction::new_user_defined(udf.clone(), args).into());
+            }
+            // builtin table function
+            if let Ok(function_type) = TableFunctionType::from_str(&func_name) {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+                return Ok(TableFunction::new(function_type, args)?.into());
+            }
         }
 
-        self.bind_builtin_scalar_function(function_name.as_str(), inputs, f.variadic)
+        // try to bind it as a scalar function call
+        if let Some(ref udf) = udf {
+            assert!(udf.kind.is_scalar());
+            reject_syntax!(
+                arg_list.variadic,
+                "`VARIADIC` is not allowed in user-defined function call"
+            );
+            return Ok(UserDefinedFunction::new(udf.clone(), args).into());
+        }
+
+        self.bind_builtin_scalar_function(&func_name, args, arg_list.variadic)
     }
 
-    fn bind_array_transform(&mut self, f: Function) -> Result<ExprImpl> {
-        let [array, lambda] = <[FunctionArg; 2]>::try_from(f.args).map_err(|args| -> RwError {
+    fn bind_array_transform(&mut self, args: Vec<FunctionArg>) -> Result<ExprImpl> {
+        let [array, lambda] = <[FunctionArg; 2]>::try_from(args).map_err(|args| -> RwError {
             ErrorCode::BindError(format!(
                 "`array_transform` expect two inputs `array` and `lambda`, but {} were given",
                 args.len()
@@ -401,6 +451,87 @@ impl Binder {
             }
         }
         Ok(())
+    }
+
+    fn bind_sql_udf(
+        &mut self,
+        func: Arc<FunctionCatalog>,
+        args: Vec<ExprImpl>,
+    ) -> Result<ExprImpl> {
+        if func.body.is_none() {
+            return Err(
+                ErrorCode::InvalidInputSyntax("`body` must exist for sql udf".to_string()).into(),
+            );
+        }
+
+        // This represents the current user defined function is `language sql`
+        let parse_result =
+            risingwave_sqlparser::parser::Parser::parse_sql(func.body.as_ref().unwrap().as_str());
+        if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
+            parse_result
+        {
+            // Here we just return the original parse error message
+            return Err(ErrorCode::InvalidInputSyntax(err).into());
+        }
+
+        debug_assert!(parse_result.is_ok());
+
+        // We can safely unwrap here
+        let ast = parse_result.unwrap();
+
+        // Stash the current `udf_context`
+        // Note that the `udf_context` may be empty,
+        // if the current binding is the root (top-most) sql udf.
+        // In this case the empty context will be stashed
+        // and restored later, no need to maintain other flags.
+        let stashed_udf_context = self.udf_context.get_context();
+
+        // The actual inline logic for sql udf
+        // Note that we will always create new udf context for each sql udf
+        let mut udf_context = HashMap::new();
+        for (i, arg) in args.into_iter().enumerate() {
+            if func.arg_names[i].is_empty() {
+                // unnamed argument, use `$1`, `$2` as the name
+                udf_context.insert(format!("${}", i + 1), arg);
+            } else {
+                // named argument
+                udf_context.insert(func.arg_names[i].clone(), arg);
+            }
+        }
+        self.udf_context.update_context(udf_context);
+
+        // Check for potential recursive calling
+        if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
+            return Err(ErrorCode::BindError(format!(
+                "function {} calling stack depth limit exceeded",
+                func.name
+            ))
+            .into());
+        } else {
+            // Update the status for the global counter
+            self.udf_context.incr_global_count();
+        }
+
+        if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
+            let bind_result = self.bind_expr(expr);
+
+            // We should properly decrement global count after a successful binding
+            // Since the subsequent probe operation in `bind_column` or
+            // `bind_parameter` relies on global counting
+            self.udf_context.decr_global_count();
+
+            // Restore context information for subsequent binding
+            self.udf_context.update_context(stashed_udf_context);
+
+            return bind_result;
+        }
+
+        Err(ErrorCode::InvalidInputSyntax(
+            "failed to parse the input query and extract the udf expression,
+                please recheck the syntax"
+                .to_string(),
+        )
+        .into())
     }
 
     pub(in crate::binder) fn bind_function_expr_arg(

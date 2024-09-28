@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::pin;
@@ -23,7 +23,6 @@ use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use futures::future::select;
 use futures::TryStreamExt;
-use itertools::Itertools;
 use jni::JavaVM;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
@@ -60,24 +59,21 @@ use tracing::warn;
 
 use super::elasticsearch::{is_es_sink, StreamChunkConverter, ES_OPTION_DELIMITER};
 use crate::error::ConnectorResult;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
-    SinkLogReader, SinkMetrics, SinkParam, SinkWriterParam,
+    SinkLogReader, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 
 macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
             { ElasticSearch, ElasticSearchSink, "elasticsearch" }
-            { Opensearch, OpensearchSink, "opensearch"}
+            { Opensearch, OpenSearchSink, "opensearch"}
             { Cassandra, CassandraSink, "cassandra" }
-            { Jdbc, JdbcSink, "jdbc", |desc| {
-                desc.sink_type.is_append_only()
-            } }
+            { Jdbc, JdbcSink, "jdbc" }
             { DeltaLake, DeltaLakeSink, "deltalake" }
             { HttpJava, HttpJavaSink, "http" }
         }
@@ -118,8 +114,8 @@ def_remote_sink!();
 
 pub trait RemoteSinkTrait: Send + Sync + 'static {
     const SINK_NAME: &'static str;
-    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
-        false
+    fn default_sink_decouple() -> bool {
+        true
     }
 }
 
@@ -146,9 +142,9 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Default => Ok(R::default_sink_decouple(desc)),
+            SinkDecouple::Default => Ok(R::default_sink_decouple()),
             SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
         }
@@ -165,14 +161,19 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 }
 
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
+    if sink_name == OpenSearchSink::SINK_NAME {
+        risingwave_common::license::Feature::OpenSearchSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
     if is_es_sink(sink_name)
         && param.downstream_pk.len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
-        bail!("Es sink only support single pk or pk with delimiter option");
+        bail!("Es sink only supports single pk or pk with delimiter option");
     }
     // FIXME: support struct and array in stream sink
-    param.columns.iter().map(|col| {
+    param.columns.iter().try_for_each(|col| {
         match &col.data_type {
             DataType::Int16
                     | DataType::Int32
@@ -194,7 +195,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
-                        "Remote sink only support list<int16, int32, int64, float, double, varchar>, got {:?}: {:?}",
+                        "Remote sink only supports list<int16, int32, int64, float, double, varchar>, got {:?}: {:?}",
                         col.name,
                         col.data_type,
                     )))
@@ -205,17 +206,17 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     Ok(())
                 }else{
                     Err(SinkError::Remote(anyhow!(
-                        "Only Es sink support struct, got {:?}: {:?}",
+                        "Only Es sink supports struct, got {:?}: {:?}",
                         col.name,
                         col.data_type,
                     )))
                 }
             },
-            DataType::Serial | DataType::Int256 => Err(SinkError::Remote(anyhow!(
+            DataType::Serial | DataType::Int256 | DataType::Map(_) => Err(SinkError::Remote(anyhow!(
                             "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, Bytea, List and Varchar, (Es sink support Struct) got {:?}: {:?}",
                             col.name,
                             col.data_type,
-                        )))}}).try_collect()?;
+                        )))}})?;
 
     let jvm = JVM.get_or_init()?;
     let sink_param = param.to_proto();
@@ -254,8 +255,8 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
 pub struct RemoteLogSinker {
     request_sender: BidiStreamSender<JniSinkWriterStreamRequest>,
     response_stream: BidiStreamReceiver<SinkWriterStreamResponse>,
-    sink_metrics: SinkMetrics,
     stream_chunk_converter: StreamChunkConverter,
+    sink_writer_metrics: SinkWriterMetrics,
 }
 
 impl RemoteLogSinker {
@@ -270,6 +271,7 @@ impl RemoteLogSinker {
                 ColumnDesc::unnamed(ColumnId::from(0), DataType::Varchar).to_protobuf(),
                 ColumnDesc::unnamed(ColumnId::from(1), DataType::Varchar).to_protobuf(),
                 ColumnDesc::unnamed(ColumnId::from(2), DataType::Jsonb).to_protobuf(),
+                ColumnDesc::unnamed(ColumnId::from(2), DataType::Varchar).to_protobuf(),
             ];
             Some(TableSchema {
                 columns,
@@ -286,11 +288,10 @@ impl RemoteLogSinker {
             .start_sink_writer_stream(payload_schema, sink_proto)
             .await?;
 
-        let sink_metrics = writer_param.sink_metrics;
         Ok(RemoteLogSinker {
             request_sender,
             response_stream,
-            sink_metrics,
+            sink_writer_metrics: SinkWriterMetrics::new(&writer_param),
             stream_chunk_converter: StreamChunkConverter::new(
                 sink_name,
                 sink_param.schema(),
@@ -306,7 +307,7 @@ impl LogSinker for RemoteLogSinker {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
-        let sink_metrics = self.sink_metrics;
+        let sink_writer_metrics = self.sink_writer_metrics;
 
         let (response_tx, mut response_rx) = unbounded_channel();
 
@@ -334,7 +335,7 @@ impl LogSinker for RemoteLogSinker {
                 queue: &mut VecDeque<(TruncateOffset, Option<Instant>)>,
                 persisted_offset: TruncateOffset,
                 log_reader: &mut impl SinkLogReader,
-                metrics: &SinkMetrics,
+                sink_writer_metrics: &SinkWriterMetrics,
             ) -> Result<()> {
                 while let Some((sent_offset, _)) = queue.front()
                     && sent_offset < &persisted_offset
@@ -347,7 +348,7 @@ impl LogSinker for RemoteLogSinker {
                 })?;
                 if sent_offset != persisted_offset {
                     bail!(
-                        "new response offset {:?} not match the buffer offset {:?}",
+                        "new response offset {:?} does not match the buffer offset {:?}",
                         persisted_offset,
                         sent_offset
                     );
@@ -356,8 +357,8 @@ impl LogSinker for RemoteLogSinker {
                 if let (TruncateOffset::Barrier { .. }, Some(start_time)) =
                     (persisted_offset, start_time)
                 {
-                    metrics
-                        .sink_commit_duration_metrics
+                    sink_writer_metrics
+                        .sink_commit_duration
                         .observe(start_time.elapsed().as_millis() as f64);
                 }
 
@@ -397,7 +398,7 @@ impl LogSinker for RemoteLogSinker {
                                         chunk_id: batch_id as _,
                                     },
                                     log_reader,
-                                    &sink_metrics,
+                                    &sink_writer_metrics,
                                 )?;
                             }
                             SinkWriterStreamResponse {
@@ -416,7 +417,7 @@ impl LogSinker for RemoteLogSinker {
                                     &mut sent_offset_queue,
                                     TruncateOffset::Barrier { epoch },
                                     log_reader,
-                                    &sink_metrics,
+                                    &sink_writer_metrics,
                                 )?;
                             }
                             response => {
@@ -437,7 +438,7 @@ impl LogSinker for RemoteLogSinker {
                                     prev_offset.check_next_offset(offset)?;
                                 }
                                 let cardinality = chunk.cardinality();
-                                sink_metrics
+                                sink_writer_metrics
                                     .connector_sink_rows_received
                                     .inc_by(cardinality as _);
 
@@ -526,6 +527,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        let metrics = SinkWriterMetrics::new(&writer_param);
         Ok(CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -535,14 +537,13 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
                 SinkError::Remote(anyhow!(
-                    "sink needs coordination should not have singleton input"
+                    "sink needs coordination and should not have singleton input"
                 ))
             })?,
-            CoordinatedRemoteSinkWriter::new(self.param.clone(), writer_param.sink_metrics.clone())
-                .await?,
+            CoordinatedRemoteSinkWriter::new(self.param.clone(), metrics.clone()).await?,
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(metrics))
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
@@ -551,27 +552,24 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 }
 
 pub struct CoordinatedRemoteSinkWriter {
-    #[expect(dead_code)]
-    properties: BTreeMap<String, String>,
     epoch: Option<u64>,
     batch_id: u64,
     stream_handle: SinkWriterStreamHandle<JniSinkWriterStreamRequest>,
-    sink_metrics: SinkMetrics,
+    metrics: SinkWriterMetrics,
 }
 
 impl CoordinatedRemoteSinkWriter {
-    pub async fn new(param: SinkParam, sink_metrics: SinkMetrics) -> Result<Self> {
+    pub async fn new(param: SinkParam, metrics: SinkWriterMetrics) -> Result<Self> {
         let sink_proto = param.to_proto();
         let stream_handle = EmbeddedConnectorClient::new()?
             .start_sink_writer_stream(sink_proto.table_schema.clone(), sink_proto)
             .await?;
 
         Ok(Self {
-            properties: param.properties,
             epoch: None,
             batch_id: 0,
             stream_handle,
-            sink_metrics,
+            metrics,
         })
     }
 
@@ -582,8 +580,6 @@ impl CoordinatedRemoteSinkWriter {
     ) -> CoordinatedRemoteSinkWriter {
         use futures::StreamExt;
 
-        let properties = BTreeMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
-
         let stream_handle = SinkWriterStreamHandle::for_test(
             request_sender,
             ReceiverStream::new(response_receiver)
@@ -592,11 +588,10 @@ impl CoordinatedRemoteSinkWriter {
         );
 
         CoordinatedRemoteSinkWriter {
-            properties,
             epoch: None,
             batch_id: 0,
             stream_handle,
-            sink_metrics: SinkMetrics::for_test(),
+            metrics: SinkWriterMetrics::for_test(),
         }
     }
 }
@@ -607,7 +602,7 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let cardinality = chunk.cardinality();
-        self.sink_metrics
+        self.metrics
             .connector_sink_rows_received
             .inc_by(cardinality as _);
 

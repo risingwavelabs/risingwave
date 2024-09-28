@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::{AggKind, PbAggKind};
+use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
@@ -105,10 +105,10 @@ impl<'a> LogicalOverWindowBuilder<'a> {
             window_func.frame,
         );
 
-        let new_expr = if let WindowFuncKind::Aggregate(agg_kind) = &kind
+        let new_expr = if let WindowFuncKind::Aggregate(agg_type) = &kind
             && matches!(
-                agg_kind,
-                AggKind::Builtin(
+                agg_type,
+                AggType::Builtin(
                     PbAggKind::Avg
                         | PbAggKind::StddevPop
                         | PbAggKind::StddevSamp
@@ -117,7 +117,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                 )
             ) {
             let agg_call = AggCall::new(
-                agg_kind.clone(),
+                agg_type.clone(),
                 args,
                 false,
                 order_by,
@@ -128,7 +128,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                 Ok(self.push_window_func(
                     // AggCall -> WindowFunction
                     WindowFunction::new(
-                        WindowFuncKind::Aggregate(agg_call.agg_kind),
+                        WindowFuncKind::Aggregate(agg_call.agg_type),
                         partition_by.clone(),
                         agg_call.order_by.clone(),
                         agg_call.args.clone(),
@@ -188,10 +188,10 @@ impl<'a> OverWindowProjectBuilder<'a> {
         &mut self,
         window_function: &WindowFunction,
     ) -> std::result::Result<(), ErrorCode> {
-        if let WindowFuncKind::Aggregate(agg_kind) = &window_function.kind
+        if let WindowFuncKind::Aggregate(agg_type) = &window_function.kind
             && matches!(
-                agg_kind,
-                AggKind::Builtin(
+                agg_type,
+                AggType::Builtin(
                     PbAggKind::StddevPop
                         | PbAggKind::StddevSamp
                         | PbAggKind::VarPop
@@ -379,7 +379,7 @@ impl LogicalOverWindow {
                 };
 
                 (
-                    WindowFuncKind::Aggregate(AggKind::Builtin(PbAggKind::FirstValue)),
+                    WindowFuncKind::Aggregate(AggType::Builtin(PbAggKind::FirstValue)),
                     frame,
                 )
             }
@@ -548,11 +548,10 @@ impl ColPrunable for LogicalOverWindow {
             let new_window_functions = req_cols_win_func_part
                 .indices()
                 .map(|idx| self.window_functions()[idx - input_len].clone())
-                .map(|func| {
+                .inspect(|func| {
                     tmp.extend(func.args.iter().map(|x| x.index()));
                     tmp.extend(func.partition_by.iter().map(|x| x.index()));
                     tmp.extend(func.order_by.iter().map(|x| x.column_index));
-                    func
                 })
                 .collect_vec();
             (tmp, new_window_functions)

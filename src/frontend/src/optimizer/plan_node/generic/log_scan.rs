@@ -20,12 +20,13 @@ use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, Schema, TableDesc};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_hummock_sdk::HummockVersionId;
 
 use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 
 const OP_NAME: &str = "op";
-const OP_TYPE: DataType = DataType::Int16;
+const OP_TYPE: DataType = DataType::Varchar;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
@@ -44,6 +45,7 @@ pub struct LogScan {
 
     pub old_epoch: u64,
     pub new_epoch: u64,
+    pub version_id: HummockVersionId,
 }
 
 impl LogScan {
@@ -101,6 +103,7 @@ impl LogScan {
         ctx: OptimizerContextRef,
         old_epoch: u64,
         new_epoch: u64,
+        version_id: HummockVersionId,
     ) -> Self {
         Self {
             table_name,
@@ -110,6 +113,7 @@ impl LogScan {
             ctx,
             old_epoch,
             new_epoch,
+            version_id,
         }
     }
 

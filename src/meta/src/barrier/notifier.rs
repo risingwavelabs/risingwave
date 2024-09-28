@@ -12,27 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::meta::PausedReason;
 use tokio::sync::oneshot;
 
 use crate::{MetaError, MetaResult};
-
-/// The barrier info sent back to the caller when a barrier is injected.
-#[derive(Debug, Clone, Copy)]
-pub struct BarrierInfo {
-    pub prev_epoch: Epoch,
-    pub curr_epoch: Epoch,
-
-    pub prev_paused_reason: Option<PausedReason>,
-    pub curr_paused_reason: Option<PausedReason>,
-}
 
 /// Used for notifying the status of a scheduled command/barrier.
 #[derive(Debug, Default)]
 pub(crate) struct Notifier {
     /// Get notified when scheduled barrier has started to be handled.
-    pub started: Option<oneshot::Sender<BarrierInfo>>,
+    pub started: Option<oneshot::Sender<MetaResult<()>>>,
 
     /// Get notified when scheduled barrier is collected or failed.
     pub collected: Option<oneshot::Sender<MetaResult<()>>>,
@@ -40,9 +28,15 @@ pub(crate) struct Notifier {
 
 impl Notifier {
     /// Notify when we have injected a barrier to compute nodes.
-    pub fn notify_started(&mut self, info: BarrierInfo) {
+    pub fn notify_started(&mut self) {
         if let Some(tx) = self.started.take() {
-            tx.send(info).ok();
+            tx.send(Ok(())).ok();
+        }
+    }
+
+    pub fn notify_start_failed(self, err: MetaError) {
+        if let Some(tx) = self.started {
+            tx.send(Err(err)).ok();
         }
     }
 

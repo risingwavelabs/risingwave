@@ -23,10 +23,11 @@ use super::{
 use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
-use crate::parser::unified::debezium::parse_transaction_meta;
+use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::unified::AccessImpl;
 use crate::parser::upsert_parser::get_key_column_name;
 use crate::parser::{BytesProperties, ParseResult, ParserFormat};
+use crate::source::cdc::CdcMessageType;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMeta};
 
 /// Parser for `FORMAT PLAIN`, i.e., append-only source.
@@ -38,6 +39,7 @@ pub struct PlainParser {
     pub source_ctx: SourceContextRef,
     // parsing transaction metadata for shared cdc source
     pub transaction_meta_builder: Option<AccessBuilderImpl>,
+    pub schema_change_builder: Option<AccessBuilderImpl>,
 }
 
 impl PlainParser {
@@ -69,12 +71,18 @@ impl PlainParser {
         let transaction_meta_builder = Some(AccessBuilderImpl::DebeziumJson(
             DebeziumJsonAccessBuilder::new(TimestamptzHandling::GuessNumberUnit)?,
         ));
+
+        let schema_change_builder = Some(AccessBuilderImpl::DebeziumJson(
+            DebeziumJsonAccessBuilder::new_for_schema_event()?,
+        ));
+
         Ok(Self {
             key_builder,
             payload_builder,
             rw_columns,
             source_ctx,
             transaction_meta_builder,
+            schema_change_builder,
         })
     }
 
@@ -82,26 +90,66 @@ impl PlainParser {
         &mut self,
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
+        writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<ParseResult> {
-        // if the message is transaction metadata, parse it and return
+        // plain parser also used in the shared cdc source,
+        // we need to handle transaction metadata and schema change messages here
         if let Some(msg_meta) = writer.row_meta
             && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.meta
-            && cdc_meta.is_transaction_meta
             && let Some(data) = payload
         {
-            let accessor = self
-                .transaction_meta_builder
-                .as_mut()
-                .expect("expect transaction metadata access builder")
-                .generate_accessor(data)
-                .await?;
-            return match parse_transaction_meta(&accessor, &self.source_ctx.connector_props) {
-                Ok(transaction_control) => Ok(ParseResult::TransactionControl(transaction_control)),
-                Err(err) => Err(err)?,
-            };
+            match cdc_meta.msg_type {
+                CdcMessageType::Data | CdcMessageType::Heartbeat => {
+                    return self.parse_rows(key, Some(data), writer).await;
+                }
+                CdcMessageType::TransactionMeta => {
+                    let accessor = self
+                        .transaction_meta_builder
+                        .as_mut()
+                        .expect("expect transaction metadata access builder")
+                        .generate_accessor(data)
+                        .await?;
+                    return match parse_transaction_meta(&accessor, &self.source_ctx.connector_props)
+                    {
+                        Ok(transaction_control) => {
+                            Ok(ParseResult::TransactionControl(transaction_control))
+                        }
+                        Err(err) => Err(err)?,
+                    };
+                }
+                CdcMessageType::SchemaChange => {
+                    let accessor = self
+                        .schema_change_builder
+                        .as_mut()
+                        .expect("expect schema change access builder")
+                        .generate_accessor(data)
+                        .await?;
+
+                    return match parse_schema_change(
+                        &accessor,
+                        self.source_ctx.source_id.into(),
+                        &self.source_ctx.connector_props,
+                    ) {
+                        Ok(schema_change) => Ok(ParseResult::SchemaChange(schema_change)),
+                        Err(err) => Err(err)?,
+                    };
+                }
+                CdcMessageType::Unspecified => {
+                    unreachable!()
+                }
+            }
         }
 
+        // for non-cdc source messages
+        self.parse_rows(key, payload, writer).await
+    }
+
+    async fn parse_rows(
+        &mut self,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
+    ) -> ConnectorResult<ParseResult> {
         let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
 
         if let Some(data) = key
@@ -158,11 +206,13 @@ mod tests {
     use std::ops::Deref;
     use std::sync::Arc;
 
+    use expect_test::expect;
     use futures::executor::block_on;
     use futures::StreamExt;
     use futures_async_stream::try_stream;
     use itertools::Itertools;
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use risingwave_pb::connector_service::cdc_message;
 
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
@@ -247,10 +297,9 @@ mod tests {
             .unwrap()
             .into_iter()
             .filter(|c| c.cardinality() > 0)
-            .map(|c| {
+            .inspect(|c| {
                 // 5 data messages in a single chunk
                 assert_eq!(5, c.cardinality());
-                c
             })
             .collect_vec();
 
@@ -281,7 +330,11 @@ mod tests {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                         "orders".to_string(),
                         0,
-                        transactional,
+                        if transactional {
+                            cdc_message::CdcMessageType::TransactionMeta
+                        } else {
+                            cdc_message::CdcMessageType::Data
+                        },
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -295,7 +348,7 @@ mod tests {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                         "orders".to_string(),
                         0,
-                        false,
+                        cdc_message::CdcMessageType::Data,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -309,7 +362,11 @@ mod tests {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                         "orders".to_string(),
                         0,
-                        transactional,
+                        if transactional {
+                            cdc_message::CdcMessageType::TransactionMeta
+                        } else {
+                            cdc_message::CdcMessageType::Data
+                        },
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -355,7 +412,11 @@ mod tests {
         let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
         let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
 
-        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new("orders".to_string(), 0, true));
+        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+            "orders".to_string(),
+            0,
+            cdc_message::CdcMessageType::TransactionMeta,
+        ));
         let msg_meta = MessageMeta {
             meta: &cdc_meta,
             split_id: "1001",
@@ -392,5 +453,122 @@ mod tests {
 
         let output = builder.take(10);
         assert_eq!(0, output.cardinality());
+    }
+
+    #[tokio::test]
+    async fn test_parse_schema_change() {
+        let schema = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
+                is_hidden: false,
+            },
+            ColumnCatalog::offset_column(),
+            ColumnCatalog::cdc_table_name_column(),
+        ];
+
+        let columns = schema
+            .iter()
+            .map(|c| SourceColumnDesc::from(&c.column_desc))
+            .collect::<Vec<_>>();
+
+        // format plain encode json parser
+        let source_ctx = SourceContext {
+            connector_props: ConnectorProperties::MysqlCdc(Box::default()),
+            ..SourceContext::dummy()
+        };
+        let mut parser = PlainParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            columns.clone(),
+            Arc::new(source_ctx),
+        )
+        .await
+        .unwrap();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+
+        let msg = r#"{"schema":null,"payload": { "databaseName": "mydb", "ddl": "ALTER TABLE test add column v2 varchar(32)", "schemaName": null, "source": { "connector": "mysql", "db": "mydb", "file": "binlog.000065", "gtid": null, "name": "RW_CDC_0", "pos": 234, "query": null, "row": 0, "sequence": null, "server_id": 1, "snapshot": "false", "table": "test", "thread": null, "ts_ms": 1718354727000, "version": "2.4.2.Final" }, "tableChanges": [ { "id": "\"mydb\".\"test\"", "table": { "columns": [ { "autoIncremented": false, "charsetName": null, "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 4, "length": null, "name": "id", "nativeType": null, "optional": false, "position": 1, "scale": null, "typeExpression": "INT", "typeName": "INT" }, { "autoIncremented": false, "charsetName": null, "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 2014, "length": null, "name": "v1", "nativeType": null, "optional": true, "position": 2, "scale": null, "typeExpression": "TIMESTAMP", "typeName": "TIMESTAMP" }, { "autoIncremented": false, "charsetName": "utf8mb4", "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 12, "length": 32, "name": "v2", "nativeType": null, "optional": true, "position": 3, "scale": null, "typeExpression": "VARCHAR", "typeName": "VARCHAR" } ], "comment": null, "defaultCharsetName": "utf8mb4", "primaryKeyColumnNames": [ "id" ] }, "type": "ALTER" } ], "ts_ms": 1718354727594 }}"#;
+        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+            "mydb.test".to_string(),
+            0,
+            cdc_message::CdcMessageType::SchemaChange,
+        ));
+        let msg_meta = MessageMeta {
+            meta: &cdc_meta,
+            split_id: "1001",
+            offset: "",
+        };
+
+        let res = parser
+            .parse_one_with_txn(
+                None,
+                Some(msg.as_bytes().to_vec()),
+                builder.row_writer().with_meta(msg_meta),
+            )
+            .await;
+
+        let res = res.unwrap();
+        expect![[r#"
+            SchemaChange(
+                SchemaChangeEnvelope {
+                    table_changes: [
+                        TableSchemaChange {
+                            cdc_table_id: "0.mydb.test",
+                            columns: [
+                                ColumnCatalog {
+                                    column_desc: ColumnDesc {
+                                        data_type: Int32,
+                                        column_id: #2147483646,
+                                        name: "id",
+                                        field_descs: [],
+                                        type_name: "",
+                                        generated_or_default_column: None,
+                                        description: None,
+                                        additional_column: AdditionalColumn {
+                                            column_type: None,
+                                        },
+                                        version: Pr13707,
+                                    },
+                                    is_hidden: false,
+                                },
+                                ColumnCatalog {
+                                    column_desc: ColumnDesc {
+                                        data_type: Timestamptz,
+                                        column_id: #2147483646,
+                                        name: "v1",
+                                        field_descs: [],
+                                        type_name: "",
+                                        generated_or_default_column: None,
+                                        description: None,
+                                        additional_column: AdditionalColumn {
+                                            column_type: None,
+                                        },
+                                        version: Pr13707,
+                                    },
+                                    is_hidden: false,
+                                },
+                                ColumnCatalog {
+                                    column_desc: ColumnDesc {
+                                        data_type: Varchar,
+                                        column_id: #2147483646,
+                                        name: "v2",
+                                        field_descs: [],
+                                        type_name: "",
+                                        generated_or_default_column: None,
+                                        description: None,
+                                        additional_column: AdditionalColumn {
+                                            column_type: None,
+                                        },
+                                        version: Pr13707,
+                                    },
+                                    is_hidden: false,
+                                },
+                            ],
+                            change_type: Alter,
+                            upstream_ddl: "ALTER TABLE test add column v2 varchar(32)",
+                        },
+                    ],
+                },
+            )
+        "#]]
+        .assert_debug_eq(&res);
     }
 }

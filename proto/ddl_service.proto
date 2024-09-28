@@ -5,10 +5,16 @@ package ddl_service;
 import "catalog.proto";
 import "common.proto";
 import "meta.proto";
+import "plan_common.proto";
 import "stream_plan.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
+
+message WaitVersion {
+  uint64 catalog_version = 1;
+  uint64 hummock_version_id = 2;
+}
 
 message CreateDatabaseRequest {
   catalog.Database db = 1;
@@ -16,7 +22,7 @@ message CreateDatabaseRequest {
 
 message CreateDatabaseResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message DropDatabaseRequest {
@@ -25,7 +31,7 @@ message DropDatabaseRequest {
 
 message DropDatabaseResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message CreateSchemaRequest {
@@ -34,7 +40,7 @@ message CreateSchemaRequest {
 
 message CreateSchemaResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message DropSchemaRequest {
@@ -43,7 +49,7 @@ message DropSchemaRequest {
 
 message DropSchemaResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message CreateSourceRequest {
@@ -53,7 +59,7 @@ message CreateSourceRequest {
 
 message CreateSourceResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message DropSourceRequest {
@@ -63,7 +69,7 @@ message DropSourceRequest {
 
 message DropSourceResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message AlterSourceRequest {
@@ -72,7 +78,7 @@ message AlterSourceRequest {
 
 message AlterSourceResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message CreateSinkRequest {
@@ -84,7 +90,7 @@ message CreateSinkRequest {
 
 message CreateSinkResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message DropSinkRequest {
@@ -95,7 +101,7 @@ message DropSinkRequest {
 
 message DropSinkResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message CreateSubscriptionRequest {
@@ -104,7 +110,7 @@ message CreateSubscriptionRequest {
 
 message CreateSubscriptionResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message DropSubscriptionRequest {
@@ -114,7 +120,7 @@ message DropSubscriptionRequest {
 
 message DropSubscriptionResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message CreateMaterializedViewRequest {
@@ -134,7 +140,7 @@ message CreateMaterializedViewRequest {
 
 message CreateMaterializedViewResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message DropMaterializedViewRequest {
@@ -144,7 +150,7 @@ message DropMaterializedViewRequest {
 
 message DropMaterializedViewResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message CreateViewRequest {
@@ -153,7 +159,7 @@ message CreateViewRequest {
 
 message CreateViewResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message DropViewRequest {
@@ -163,7 +169,7 @@ message DropViewRequest {
 
 message DropViewResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 // An enum to distinguish different types of the `Table` streaming job.
@@ -196,7 +202,7 @@ message CreateTableRequest {
 
 message CreateTableResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message AlterNameRequest {
@@ -215,7 +221,7 @@ message AlterNameRequest {
 
 message AlterNameResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message AlterOwnerRequest {
@@ -246,7 +252,7 @@ message AlterSetSchemaRequest {
 
 message AlterSetSchemaResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message AlterParallelismRequest {
@@ -259,7 +265,7 @@ message AlterParallelismResponse {}
 
 message AlterOwnerResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message CreateFunctionRequest {
@@ -268,7 +274,7 @@ message CreateFunctionRequest {
 
 message CreateFunctionResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message DropFunctionRequest {
@@ -277,7 +283,7 @@ message DropFunctionRequest {
 
 message DropFunctionResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message DropTableRequest {
@@ -290,7 +296,7 @@ message DropTableRequest {
 
 message DropTableResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 // Used by risectl (and in the future, dashboard)
@@ -309,7 +315,7 @@ message CreateIndexRequest {
 
 message CreateIndexResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message DropIndexRequest {
@@ -319,7 +325,7 @@ message DropIndexRequest {
 
 message DropIndexResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message ReplaceTablePlan {
@@ -344,7 +350,7 @@ message ReplaceTablePlanRequest {
 message ReplaceTablePlanResponse {
   common.Status status = 1;
   // The new global catalog version.
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message GetTableRequest {
@@ -377,7 +383,7 @@ message CreateSecretRequest {
 }
 
 message CreateSecretResponse {
-  uint64 version = 1;
+  WaitVersion version = 1;
 }
 
 message DropSecretRequest {
@@ -385,7 +391,7 @@ message DropSecretRequest {
 }
 
 message DropSecretResponse {
-  uint64 version = 1;
+  WaitVersion version = 1;
 }
 
 message CreateConnectionRequest {
@@ -405,7 +411,7 @@ message CreateConnectionRequest {
 
 message CreateConnectionResponse {
   // global catalog version
-  uint64 version = 1;
+  WaitVersion version = 1;
 }
 
 message ListConnectionsRequest {}
@@ -420,7 +426,7 @@ message DropConnectionRequest {
 
 message DropConnectionResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
 
 message GetTablesRequest {
@@ -441,8 +447,32 @@ message CommentOnRequest {
 
 message CommentOnResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  WaitVersion version = 2;
 }
+
+message TableSchemaChange {
+  enum TableChangeType {
+    UNSPECIFIED = 0;
+    ALTER = 1;
+    CREATE = 2;
+    DROP = 3;
+  }
+
+  TableChangeType change_type = 1;
+  string cdc_table_id = 2;
+  repeated plan_common.ColumnCatalog columns = 3;
+  string upstream_ddl = 4;
+}
+
+message SchemaChangeEnvelope {
+  repeated TableSchemaChange table_changes = 1;
+}
+
+message AutoSchemaChangeRequest {
+  SchemaChangeEnvelope schema_change = 1;
+}
+
+message AutoSchemaChangeResponse {}
 
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
@@ -482,4 +512,5 @@ service DdlService {
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
   rpc Wait(WaitRequest) returns (WaitResponse);
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
+  rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
 }

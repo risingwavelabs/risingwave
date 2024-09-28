@@ -43,7 +43,7 @@ impl HummockManager {
             const COMPACTION_HEARTBEAT_PERIOD_SEC: u64 = 1;
 
             pub enum HummockTimerEvent {
-                GroupSplit,
+                GroupSchedule,
                 CheckDeadTask,
                 Report,
                 CompactionHeartBeatExpiredCheck,
@@ -145,21 +145,22 @@ impl HummockManager {
                 Box::pin(tombstone_reclaim_trigger),
             ];
 
-            let periodic_check_split_group_interval_sec = hummock_manager
+            let periodic_scheduling_compaction_group_interval_sec = hummock_manager
                 .env
                 .opts
-                .periodic_split_compact_group_interval_sec;
+                .periodic_scheduling_compaction_group_interval_sec;
 
-            if periodic_check_split_group_interval_sec > 0 {
-                let mut split_group_trigger_interval = tokio::time::interval(Duration::from_secs(
-                    periodic_check_split_group_interval_sec,
-                ));
-                split_group_trigger_interval
+            if periodic_scheduling_compaction_group_interval_sec > 0 {
+                let mut scheduling_compaction_group_trigger_interval = tokio::time::interval(
+                    Duration::from_secs(periodic_scheduling_compaction_group_interval_sec),
+                );
+                scheduling_compaction_group_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-                let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
-                    .map(|_| HummockTimerEvent::GroupSplit);
-                triggers.push(Box::pin(split_group_trigger));
+                let group_scheduling_trigger =
+                    IntervalStream::new(scheduling_compaction_group_trigger_interval)
+                        .map(|_| HummockTimerEvent::GroupSchedule);
+                triggers.push(Box::pin(group_scheduling_trigger));
             }
 
             let event_stream = select_all(triggers);
@@ -169,8 +170,8 @@ impl HummockManager {
             let shutdown_rx_shared = shutdown_rx.shared();
 
             tracing::info!(
-                "Hummock timer task tracing [GroupSplit interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
-                    periodic_check_split_group_interval_sec, CHECK_PENDING_TASK_PERIOD_SEC, STAT_REPORT_PERIOD_SEC, COMPACTION_HEARTBEAT_PERIOD_SEC
+                "Hummock timer task [GroupScheduling interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
+                periodic_scheduling_compaction_group_interval_sec, CHECK_PENDING_TASK_PERIOD_SEC, STAT_REPORT_PERIOD_SEC, COMPACTION_HEARTBEAT_PERIOD_SEC
             );
 
             loop {
@@ -189,12 +190,12 @@ impl HummockManager {
                                     hummock_manager.check_dead_task().await;
                                 }
 
-                                HummockTimerEvent::GroupSplit => {
+                                HummockTimerEvent::GroupSchedule => {
                                     if hummock_manager.env.opts.compaction_deterministic_test {
                                         continue;
                                     }
 
-                                    hummock_manager.on_handle_check_split_multi_group().await;
+                                    hummock_manager.on_handle_schedule_group().await;
                                 }
 
                                 HummockTimerEvent::Report => {
@@ -339,8 +340,10 @@ impl HummockManager {
                                 }
 
                                 HummockTimerEvent::FullGc => {
+                                    let retention_sec =
+                                        hummock_manager.env.opts.min_sst_retention_time_sec;
                                     if hummock_manager
-                                        .start_full_gc(Duration::from_secs(3600), None)
+                                        .start_full_gc(Duration::from_secs(retention_sec), None)
                                         .is_ok()
                                     {
                                         tracing::info!("Start full GC from meta node.");
@@ -443,7 +446,7 @@ impl HummockManager {
     ///   throughput keep larger than `table_write_throughput_threshold` for a long time.
     /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
     ///   increase it size of base-level.
-    async fn on_handle_check_split_multi_group(&self) {
+    async fn on_handle_schedule_group(&self) {
         let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
         let checkpoint_secs = std::cmp::max(
@@ -469,18 +472,13 @@ impl HummockManager {
                 continue;
             }
 
-            for (table_id, table_size) in &group.table_statistic {
-                self.try_move_table_to_dedicated_cg(
-                    &table_write_throughput,
-                    table_id,
-                    table_size,
-                    !created_tables.contains(table_id),
-                    checkpoint_secs,
-                    group.group_id,
-                    group.group_size,
-                )
-                .await;
-            }
+            self.try_split_compaction_group(
+                &table_write_throughput,
+                checkpoint_secs,
+                group,
+                &created_tables,
+            )
+            .await;
         }
     }
 

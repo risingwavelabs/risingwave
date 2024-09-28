@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod jni_catalog;
-mod mock_catalog;
 mod prometheus;
-mod storage_catalog;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
@@ -24,17 +21,9 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-use arrow_schema_iceberg::{
-    DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
-};
 use async_trait::async_trait;
-use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
-use iceberg::table::Table as TableV2;
-use iceberg::{Catalog as CatalogV2, TableIdent};
-use icelake::catalog::{
-    load_catalog, load_iceberg_base_catalog_config, BaseCatalogConfig, CatalogRef, CATALOG_NAME,
-    CATALOG_TYPE,
-};
+use iceberg::{Catalog as CatalogV2, NamespaceIdent, TableCreation, TableIdent};
+use icelake::catalog::CatalogRef;
 use icelake::io_v2::input_wrapper::{DeltaWriter, RecordBatchWriter};
 use icelake::io_v2::prometheus::{PrometheusWriterBuilder, WriterMetrics};
 use icelake::io_v2::{
@@ -42,85 +31,62 @@ use icelake::io_v2::{
 };
 use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
-use icelake::{Table, TableIdentifier};
+use icelake::Table;
 use itertools::Itertools;
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::arrow_schema_iceberg::{
+    self, DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
+};
+use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::Deserialize;
-use storage_catalog::StorageCatalogConfig;
+use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
-use url::Url;
 use with_options::WithOptions;
 
-use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
-use super::catalog::desc::SinkDesc;
-use super::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
-use super::{
-    Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+use super::decouple_checkpoint_log_sink::{
+    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
 };
-use crate::error::ConnectorResult;
+use super::{
+    Sink, SinkError, SinkWriterMetrics, SinkWriterParam, GLOBAL_SINK_METRICS,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+};
+use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::SinkWriter;
-use crate::sink::{Result, SinkCommitCoordinator, SinkDecouple, SinkParam};
+use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{
-    deserialize_bool_from_string, deserialize_optional_string_seq_from_string,
-    deserialize_optional_u64_from_string,
+    deserialize_bool_from_string, deserialize_optional_bool_from_string,
+    deserialize_optional_string_seq_from_string,
 };
 
-/// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
 pub const ICEBERG_SINK: &str = "iceberg";
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions, Default)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
 pub struct IcebergConfig {
-    pub connector: String, // Avoid deny unknown field. Must be "iceberg"
-
     pub r#type: String, // accept "append-only" or "upsert"
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub force_append_only: bool,
 
-    #[serde(rename = "table.name")]
-    pub table_name: String, // Full name of table, must include schema name
+    #[serde(flatten)]
+    common: IcebergCommon,
 
-    #[serde(rename = "database.name")]
-    pub database_name: Option<String>,
-    // Database name of table
-
-    // Catalog name, can be omitted for storage catalog, but
-    // must be set for other catalogs.
-    #[serde(rename = "catalog.name")]
-    pub catalog_name: Option<String>,
-
-    // Catalog type supported by iceberg, such as "storage", "rest".
-    // If not set, we use "storage" as default.
-    #[serde(rename = "catalog.type")]
-    pub catalog_type: Option<String>,
-
-    #[serde(rename = "warehouse.path")]
-    pub path: String, // Path of iceberg warehouse, only applicable in storage catalog.
-
-    #[serde(rename = "catalog.uri")]
-    pub uri: Option<String>, // URI of iceberg catalog, only applicable in rest catalog.
-
-    #[serde(rename = "s3.region")]
-    pub region: Option<String>,
-
-    #[serde(rename = "s3.endpoint")]
-    pub endpoint: Option<String>,
-
-    #[serde(rename = "s3.access.key")]
-    pub access_key: String,
-
-    #[serde(rename = "s3.secret.key")]
-    pub secret_key: String,
+    #[serde(
+        rename = "s3.path.style.access",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub path_style_access: Option<bool>,
 
     #[serde(
         rename = "primary_key",
@@ -133,9 +99,13 @@ pub struct IcebergConfig {
     #[serde(skip)]
     pub java_catalog_props: HashMap<String, String>,
 
-    // Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
-    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
-    pub commit_checkpoint_interval: Option<u64>,
+    /// Commit every n(>0) checkpoints, default is 10.
+    #[serde(default = "default_commit_checkpoint_interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub commit_checkpoint_interval: u64,
+
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub create_table_if_not_exists: bool,
 }
 
 impl IcebergConfig {
@@ -169,7 +139,9 @@ impl IcebergConfig {
             }
         }
 
-        if config.catalog_name.is_none() && config.catalog_type.as_deref() != Some("storage") {
+        if config.common.catalog_name.is_none()
+            && config.common.catalog_type.as_deref() != Some("storage")
+        {
             return Err(SinkError::Config(anyhow!(
                 "catalog.name must be set for non-storage catalog"
             )));
@@ -187,396 +159,42 @@ impl IcebergConfig {
             .map(|(k, v)| (k[8..].to_string(), v.to_string()))
             .collect();
 
-        if config.commit_checkpoint_interval == Some(0) {
+        if config.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
-                "commit_checkpoint_interval must be greater than 0"
+                "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
 
         Ok(config)
     }
 
-    fn catalog_type(&self) -> &str {
-        self.catalog_type.as_deref().unwrap_or("storage")
+    pub fn catalog_type(&self) -> &str {
+        self.common.catalog_type()
     }
 
-    fn catalog_name(&self) -> String {
-        self.catalog_name
-            .as_ref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "risingwave".to_string())
-    }
-
-    fn full_table_name(&self) -> Result<TableIdentifier> {
-        let ret = if let Some(database_name) = &self.database_name {
-            TableIdentifier::new(vec![database_name, &self.table_name])
-        } else {
-            TableIdentifier::new(vec![&self.table_name])
-        };
-
-        ret.context("Failed to create table identifier")
-            .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-    }
-
-    fn build_iceberg_configs(&self) -> Result<HashMap<String, String>> {
-        let mut iceberg_configs = HashMap::new();
-
-        let catalog_type = self.catalog_type().to_string();
-
-        iceberg_configs.insert(CATALOG_TYPE.to_string(), catalog_type.clone());
-        iceberg_configs.insert(CATALOG_NAME.to_string(), self.catalog_name());
-
-        match catalog_type.as_str() {
-            "storage" => {
-                iceberg_configs.insert(
-                    format!("iceberg.catalog.{}.warehouse", self.catalog_name()),
-                    self.path.clone(),
-                );
-            }
-            "rest" => {
-                let uri = self.uri.clone().ok_or_else(|| {
-                    SinkError::Iceberg(anyhow!("`catalog.uri` must be set in rest catalog"))
-                })?;
-                iceberg_configs.insert(format!("iceberg.catalog.{}.uri", self.catalog_name()), uri);
-            }
-            _ => {
-                return Err(SinkError::Iceberg(anyhow!(
-                    "Unsupported catalog type: {}, only support `storage` and `rest`",
-                    catalog_type
-                )));
-            }
-        }
-
-        if let Some(region) = &self.region {
-            iceberg_configs.insert(
-                "iceberg.table.io.region".to_string(),
-                region.clone().to_string(),
-            );
-        }
-
-        if let Some(endpoint) = &self.endpoint {
-            iceberg_configs.insert(
-                "iceberg.table.io.endpoint".to_string(),
-                endpoint.clone().to_string(),
-            );
-        }
-
-        iceberg_configs.insert(
-            "iceberg.table.io.access_key_id".to_string(),
-            self.access_key.clone().to_string(),
-        );
-        iceberg_configs.insert(
-            "iceberg.table.io.secret_access_key".to_string(),
-            self.secret_key.clone().to_string(),
-        );
-
-        let (bucket, root) = {
-            let url = Url::parse(&self.path).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
-            let bucket = url
-                .host_str()
-                .ok_or_else(|| {
-                    SinkError::Iceberg(anyhow!("Invalid s3 path: {}, bucket is missing", self.path))
-                })?
-                .to_string();
-            let root = url.path().trim_start_matches('/').to_string();
-            (bucket, root)
-        };
-
-        iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
-
-        // Only storage catalog should set this.
-        if catalog_type == "storage" {
-            iceberg_configs.insert("iceberg.table.io.root".to_string(), root);
-        }
-        // #TODO
-        // Support load config file
-        iceberg_configs.insert(
-            "iceberg.table.io.disable_config_load".to_string(),
-            "true".to_string(),
-        );
-
-        Ok(iceberg_configs)
-    }
-
-    fn build_jni_catalog_configs(&self) -> Result<(BaseCatalogConfig, HashMap<String, String>)> {
-        let mut iceberg_configs = HashMap::new();
-
-        let base_catalog_config = {
-            let catalog_type = self.catalog_type().to_string();
-
-            iceberg_configs.insert(CATALOG_TYPE.to_string(), catalog_type.clone());
-            iceberg_configs.insert(CATALOG_NAME.to_string(), self.catalog_name());
-
-            if let Some(region) = &self.region {
-                // icelake
-                iceberg_configs.insert(
-                    "iceberg.table.io.region".to_string(),
-                    region.clone().to_string(),
-                );
-                // iceberg-rust
-                iceberg_configs.insert(
-                    ("iceberg.table.io.".to_string() + S3_REGION).to_string(),
-                    region.clone().to_string(),
-                );
-            }
-
-            if let Some(endpoint) = &self.endpoint {
-                iceberg_configs.insert(
-                    "iceberg.table.io.endpoint".to_string(),
-                    endpoint.clone().to_string(),
-                );
-
-                // iceberg-rust
-                iceberg_configs.insert(
-                    ("iceberg.table.io.".to_string() + S3_ENDPOINT).to_string(),
-                    endpoint.clone().to_string(),
-                );
-            }
-
-            // icelake
-            iceberg_configs.insert(
-                "iceberg.table.io.access_key_id".to_string(),
-                self.access_key.clone().to_string(),
-            );
-            iceberg_configs.insert(
-                "iceberg.table.io.secret_access_key".to_string(),
-                self.secret_key.clone().to_string(),
-            );
-
-            // iceberg-rust
-            iceberg_configs.insert(
-                ("iceberg.table.io.".to_string() + S3_ACCESS_KEY_ID).to_string(),
-                self.access_key.clone().to_string(),
-            );
-            iceberg_configs.insert(
-                ("iceberg.table.io.".to_string() + S3_SECRET_ACCESS_KEY).to_string(),
-                self.secret_key.clone().to_string(),
-            );
-
-            let (bucket, _) = {
-                let url = Url::parse(&self.path).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
-                let bucket = url
-                    .host_str()
-                    .ok_or_else(|| {
-                        SinkError::Iceberg(anyhow!(
-                            "Invalid s3 path: {}, bucket is missing",
-                            self.path
-                        ))
-                    })?
-                    .to_string();
-                let root = url.path().trim_start_matches('/').to_string();
-                (bucket, root)
-            };
-
-            iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
-            // #TODO
-            // Support load config file
-            iceberg_configs.insert(
-                "iceberg.table.io.disable_config_load".to_string(),
-                "true".to_string(),
-            );
-
-            load_iceberg_base_catalog_config(&iceberg_configs)?
-        };
-
-        // Prepare jni configs, for details please see https://iceberg.apache.org/docs/latest/aws/
-        let mut java_catalog_configs = HashMap::new();
-        {
-            if let Some(uri) = self.uri.as_deref() {
-                java_catalog_configs.insert("uri".to_string(), uri.to_string());
-            }
-
-            java_catalog_configs.insert("warehouse".to_string(), self.path.clone());
-            java_catalog_configs.extend(self.java_catalog_props.clone());
-
-            // Currently we only support s3, so let's set it to s3
-            java_catalog_configs.insert(
-                "io-impl".to_string(),
-                "org.apache.iceberg.aws.s3.S3FileIO".to_string(),
-            );
-
-            if let Some(endpoint) = &self.endpoint {
-                java_catalog_configs
-                    .insert("s3.endpoint".to_string(), endpoint.clone().to_string());
-            }
-
-            java_catalog_configs.insert(
-                "s3.access-key-id".to_string(),
-                self.access_key.clone().to_string(),
-            );
-            java_catalog_configs.insert(
-                "s3.secret-access-key".to_string(),
-                self.secret_key.clone().to_string(),
-            );
-
-            if matches!(self.catalog_type.as_deref(), Some("glue")) {
-                java_catalog_configs.insert(
-                    "client.credentials-provider".to_string(),
-                    "com.risingwave.connector.catalog.GlueCredentialProvider".to_string(),
-                );
-                // Use S3 ak/sk and region as glue ak/sk and region by default.
-                // TODO: use different ak/sk and region for s3 and glue.
-                java_catalog_configs.insert(
-                    "client.credentials-provider.glue.access-key-id".to_string(),
-                    self.access_key.clone().to_string(),
-                );
-                java_catalog_configs.insert(
-                    "client.credentials-provider.glue.secret-access-key".to_string(),
-                    self.secret_key.clone().to_string(),
-                );
-                if let Some(region) = &self.region {
-                    java_catalog_configs
-                        .insert("client.region".to_string(), region.clone().to_string());
-                    java_catalog_configs.insert(
-                        "glue.endpoint".to_string(),
-                        format!("https://glue.{}.amazonaws.com", region),
-                    );
-                }
-            }
-        }
-
-        Ok((base_catalog_config, java_catalog_configs))
-    }
-
-    async fn create_catalog(&self) -> ConnectorResult<CatalogRef> {
-        match self.catalog_type() {
-            "storage" | "rest" => {
-                let iceberg_configs = self.build_iceberg_configs()?;
-                let catalog = load_catalog(&iceberg_configs).await?;
-                Ok(catalog)
-            }
-            catalog_type
-                if catalog_type == "hive" || catalog_type == "jdbc" || catalog_type == "glue" =>
-            {
-                // Create java catalog
-                let (base_catalog_config, java_catalog_props) = self.build_jni_catalog_configs()?;
-                let catalog_impl = match catalog_type {
-                    "hive" => "org.apache.iceberg.hive.HiveCatalog",
-                    "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
-                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
-                    _ => unreachable!(),
-                };
-
-                jni_catalog::JniCatalog::build_catalog(
-                    base_catalog_config,
-                    self.catalog_name(),
-                    catalog_impl,
-                    java_catalog_props,
-                )
-            }
-            "mock" => Ok(Arc::new(MockCatalog {})),
-            _ => {
-                bail!(
-                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`",
-                    self.catalog_type()
-                )
-            }
-        }
-    }
-
-    pub async fn load_table(&self) -> ConnectorResult<Table> {
-        let catalog = self
-            .create_catalog()
+    pub async fn create_catalog(&self) -> Result<CatalogRef> {
+        self.common
+            .create_catalog(&self.path_style_access, &self.java_catalog_props)
             .await
-            .context("Unable to load iceberg catalog")?;
-
-        let table_id = self
-            .full_table_name()
-            .context("Unable to parse table name")?;
-
-        catalog.load_table(&table_id).await.map_err(Into::into)
-    }
-}
-
-impl IcebergConfig {
-    fn full_table_name_v2(&self) -> Result<TableIdent> {
-        let ret = if let Some(database_name) = &self.database_name {
-            TableIdent::from_strs(vec![database_name, &self.table_name])
-        } else {
-            TableIdent::from_strs(vec![&self.table_name])
-        };
-
-        ret.context("Failed to create table identifier")
-            .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+            .map_err(Into::into)
     }
 
-    async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
-        match self.catalog_type() {
-            "storage" => {
-                let config = StorageCatalogConfig::builder()
-                    .warehouse(self.path.clone())
-                    .access_key(self.access_key.clone())
-                    .secret_key(self.secret_key.clone())
-                    .region(self.region.clone())
-                    .endpoint(self.endpoint.clone())
-                    .build();
-                let catalog = storage_catalog::StorageCatalog::new(config)?;
-                Ok(Arc::new(catalog))
-            }
-            "rest" => {
-                let mut iceberg_configs = HashMap::new();
-                if let Some(region) = &self.region {
-                    iceberg_configs.insert(S3_REGION.to_string(), region.clone().to_string());
-                }
-                if let Some(endpoint) = &self.endpoint {
-                    iceberg_configs.insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
-                }
-                iceberg_configs.insert(
-                    S3_ACCESS_KEY_ID.to_string(),
-                    self.access_key.clone().to_string(),
-                );
-                iceberg_configs.insert(
-                    S3_SECRET_ACCESS_KEY.to_string(),
-                    self.secret_key.clone().to_string(),
-                );
-                let config = iceberg_catalog_rest::RestCatalogConfig::builder()
-                    .uri(self.uri.clone().ok_or_else(|| {
-                        SinkError::Iceberg(anyhow!("`catalog.uri` must be set in rest catalog"))
-                    })?)
-                    .props(iceberg_configs)
-                    .build();
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config).await?;
-                Ok(Arc::new(catalog))
-            }
-            catalog_type
-                if catalog_type == "hive" || catalog_type == "jdbc" || catalog_type == "glue" =>
-            {
-                // Create java catalog
-                let (base_catalog_config, java_catalog_props) = self.build_jni_catalog_configs()?;
-                let catalog_impl = match catalog_type {
-                    "hive" => "org.apache.iceberg.hive.HiveCatalog",
-                    "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
-                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
-                    _ => unreachable!(),
-                };
-
-                jni_catalog::JniCatalog::build_catalog_v2(
-                    base_catalog_config,
-                    self.catalog_name(),
-                    catalog_impl,
-                    java_catalog_props,
-                )
-            }
-            _ => {
-                bail!(
-                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`",
-                    self.catalog_type()
-                )
-            }
-        }
-    }
-
-    pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
-        let catalog = self
-            .create_catalog_v2()
+    pub async fn load_table(&self) -> Result<Table> {
+        self.common
+            .load_table(&self.path_style_access, &self.java_catalog_props)
             .await
-            .context("Unable to load iceberg catalog")?;
+            .map_err(Into::into)
+    }
 
-        let table_id = self
-            .full_table_name_v2()
-            .context("Unable to parse table name")?;
+    pub async fn create_catalog_v2(&self) -> Result<Arc<dyn CatalogV2>> {
+        self.common
+            .create_catalog_v2(&self.path_style_access, &self.java_catalog_props)
+            .await
+            .map_err(Into::into)
+    }
 
-        catalog.load_table(&table_id).await.map_err(Into::into)
+    pub fn full_table_name_v2(&self) -> Result<TableIdent> {
+        self.common.full_table_name_v2().map_err(Into::into)
     }
 }
 
@@ -606,6 +224,10 @@ impl Debug for IcebergSink {
 
 impl IcebergSink {
     async fn create_and_validate_table(&self) -> Result<Table> {
+        if self.config.create_table_if_not_exists {
+            self.create_table_if_not_exists().await?;
+        }
+
         let table = self
             .config
             .load_table()
@@ -625,6 +247,69 @@ impl IcebergSink {
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         Ok(table)
+    }
+
+    async fn create_table_if_not_exists(&self) -> Result<()> {
+        let catalog = self.config.create_catalog_v2().await?;
+        let table_id = self
+            .config
+            .full_table_name_v2()
+            .context("Unable to parse table name")?;
+        if !catalog
+            .table_exists(&table_id)
+            .await
+            .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
+        {
+            let namespace = if let Some(database_name) = &self.config.common.database_name {
+                NamespaceIdent::new(database_name.clone())
+            } else {
+                bail!("database name must be set if you want to create table")
+            };
+
+            let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+            // convert risingwave schema -> arrow schema -> iceberg schema
+            let arrow_fields = self
+                .param
+                .columns
+                .iter()
+                .map(|column| {
+                    Ok(iceberg_create_table_arrow_convert
+                        .to_arrow_field(&column.name, &column.data_type)
+                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                        .context(format!(
+                            "failed to convert {}: {} to arrow type",
+                            &column.name, &column.data_type
+                        ))?)
+                })
+                .collect::<Result<Vec<ArrowField>>>()?;
+            let arrow_schema = arrow_schema_iceberg::Schema::new(arrow_fields);
+            let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&arrow_schema)
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .context("failed to convert arrow schema to iceberg schema")?;
+
+            let location = {
+                let mut names = namespace.clone().inner();
+                names.push(self.config.common.table_name.to_string());
+                if self.config.common.warehouse_path.ends_with('/') {
+                    format!("{}{}", self.config.common.warehouse_path, names.join("/"))
+                } else {
+                    format!("{}/{}", self.config.common.warehouse_path, names.join("/"))
+                }
+            };
+
+            let table_creation = TableCreation::builder()
+                .name(self.config.common.table_name.clone())
+                .schema(iceberg_schema)
+                .location(location)
+                .build();
+
+            catalog
+                .create_table(&namespace, table_creation)
+                .await
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .context("failed to create iceberg table")?;
+        }
+        Ok(())
     }
 
     pub fn new(config: IcebergConfig, param: SinkParam) -> Result<Self> {
@@ -667,31 +352,12 @@ impl Sink for IcebergSink {
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let config_decouple = if let Some(interval) =
-            desc.properties.get("commit_checkpoint_interval")
-            && interval.parse::<u64>().unwrap_or(0) > 1
-        {
-            true
-        } else {
-            false
-        };
-
-        match user_specified {
-            SinkDecouple::Default => Ok(config_decouple),
-            SinkDecouple::Disable => {
-                if config_decouple {
-                    return Err(SinkError::Config(anyhow!(
-                        "config conflict: Iceberg config `commit_checkpoint_interval` bigger than 1 which means that must enable sink decouple, but session config sink decouple is disabled"
-                    )));
-                }
-                Ok(false)
-            }
-            SinkDecouple::Enable => Ok(true),
-        }
-    }
-
     async fn validate(&self) -> Result<()> {
+        if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
+            risingwave_common::license::Feature::IcebergSinkWithGlue
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
         let _ = self.create_and_validate_table().await?;
         Ok(())
     }
@@ -703,6 +369,8 @@ impl Sink for IcebergSink {
         } else {
             IcebergWriter::new_append_only(table, &writer_param).await?
         };
+
+        let metrics = SinkWriterMetrics::new(&writer_param);
         let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -712,7 +380,7 @@ impl Sink for IcebergSink {
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
                 SinkError::Remote(anyhow!(
-                    "sink needs coordination should not have singleton input"
+                    "sink needs coordination and should not have singleton input"
                 ))
             })?,
             inner,
@@ -720,22 +388,24 @@ impl Sink for IcebergSink {
         .await?;
 
         let commit_checkpoint_interval =
-            NonZeroU64::new(self.config.commit_checkpoint_interval.unwrap_or(1)).expect(
+            NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
-            writer_param.sink_metrics,
+            metrics,
             commit_checkpoint_interval,
         ))
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+        let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
 
         Ok(IcebergSinkCommitter {
+            catalog,
             table,
             partition_type,
         })
@@ -745,6 +415,17 @@ impl Sink for IcebergSink {
 pub struct IcebergWriter {
     inner_writer: IcebergWriterEnum,
     schema: SchemaRef,
+    // See comments below
+    _metrics: IcebergWriterMetrics,
+}
+
+pub struct IcebergWriterMetrics {
+    // NOTE: These 2 metrics are not used directly by us, but only kept for lifecycle management.
+    // They are actually used in `PrometheusWriterBuilder`:
+    //     WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone())
+    // We keep them here to let the guard cleans the labels from metrics registry when dropped
+    _write_qps: LabelGuardedIntCounter<3>,
+    _write_latency: LabelGuardedHistogram<3>,
 }
 
 enum IcebergWriterEnum {
@@ -780,38 +461,56 @@ impl IcebergWriter {
 
     pub async fn new_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
         let builder_helper = table.builder_helper()?;
+        let SinkWriterParam {
+            extra_partition_col_idx,
+            actor_id,
+            sink_id,
+            sink_name,
+            ..
+        } = writer_param;
+        let metrics_labels = [
+            &actor_id.to_string(),
+            &sink_id.to_string(),
+            sink_name.as_str(),
+        ];
+
+        // Metrics
+        let write_qps = GLOBAL_SINK_METRICS
+            .iceberg_write_qps
+            .with_guarded_label_values(&metrics_labels);
+        let write_latency = GLOBAL_SINK_METRICS
+            .iceberg_write_latency
+            .with_guarded_label_values(&metrics_labels);
+        let rolling_unflushed_data_file = GLOBAL_SINK_METRICS
+            .iceberg_rolling_unflushed_data_file
+            .with_guarded_label_values(&metrics_labels);
 
         let data_file_builder = DataFileWriterBuilder::new(MonitoredBaseFileWriterBuilder::new(
             builder_helper
                 .rolling_writer_builder(builder_helper.parquet_writer_builder(0, None)?)?,
-            writer_param
-                .sink_metrics
-                .iceberg_rolling_unflushed_data_file
-                .clone(),
+            rolling_unflushed_data_file,
         ));
-        if let Some(extra_partition_col_idx) = writer_param.extra_partition_col_idx {
+
+        if let Some(extra_partition_col_idx) = extra_partition_col_idx {
             let partition_data_file_builder = builder_helper.precompute_partition_writer_builder(
                 data_file_builder.clone(),
-                extra_partition_col_idx,
+                *extra_partition_col_idx,
             )?;
             let dispatch_builder = builder_helper
                 .dispatcher_writer_builder(partition_data_file_builder, data_file_builder)?;
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
-                WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
-                ),
+                WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone()),
             );
-            let schema = Self::schema_with_extra_partition_col(&table, extra_partition_col_idx)?;
+            let schema = Self::schema_with_extra_partition_col(&table, *extra_partition_col_idx)?;
             let inner_writer = RecordBatchWriter::new(prometheus_builder.build(&schema).await?);
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
+                },
             })
         } else {
             let partition_data_file_builder =
@@ -821,20 +520,17 @@ impl IcebergWriter {
             // wrap a layer with collect write metrics
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
-                WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
-                ),
+                WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone()),
             );
             let schema = table.current_arrow_schema()?;
             let inner_writer = RecordBatchWriter::new(prometheus_builder.build(&schema).await?);
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
+                },
             })
         }
     }
@@ -845,20 +541,41 @@ impl IcebergWriter {
         writer_param: &SinkWriterParam,
     ) -> Result<Self> {
         let builder_helper = table.builder_helper()?;
+        let SinkWriterParam {
+            extra_partition_col_idx,
+            actor_id,
+            sink_id,
+            sink_name,
+            ..
+        } = writer_param;
+        let metrics_labels = [
+            &actor_id.to_string(),
+            &sink_id.to_string(),
+            sink_name.as_str(),
+        ];
+
+        // Metrics
+        let write_qps = GLOBAL_SINK_METRICS
+            .iceberg_write_qps
+            .with_guarded_label_values(&metrics_labels);
+        let write_latency = GLOBAL_SINK_METRICS
+            .iceberg_write_latency
+            .with_guarded_label_values(&metrics_labels);
+        let rolling_unflushed_data_file = GLOBAL_SINK_METRICS
+            .iceberg_rolling_unflushed_data_file
+            .with_guarded_label_values(&metrics_labels);
+        let position_delete_cache_num = GLOBAL_SINK_METRICS
+            .iceberg_position_delete_cache_num
+            .with_guarded_label_values(&metrics_labels);
+
         let data_file_builder = DataFileWriterBuilder::new(MonitoredBaseFileWriterBuilder::new(
             builder_helper
                 .rolling_writer_builder(builder_helper.parquet_writer_builder(0, None)?)?,
-            writer_param
-                .sink_metrics
-                .iceberg_rolling_unflushed_data_file
-                .clone(),
+            rolling_unflushed_data_file,
         ));
         let position_delete_builder = MonitoredPositionDeleteWriterBuilder::new(
             builder_helper.position_delete_writer_builder(0, 1024)?,
-            writer_param
-                .sink_metrics
-                .iceberg_position_delete_cache_num
-                .clone(),
+            position_delete_cache_num,
         );
         let equality_delete_builder =
             builder_helper.equality_delete_writer_builder(unique_column_ids.clone(), 0)?;
@@ -868,30 +585,27 @@ impl IcebergWriter {
             equality_delete_builder,
             unique_column_ids,
         );
-        if let Some(extra_partition_col_idx) = writer_param.extra_partition_col_idx {
+        if let Some(extra_partition_col_idx) = extra_partition_col_idx {
             let partition_delta_builder = builder_helper.precompute_partition_writer_builder(
                 delta_builder.clone(),
-                extra_partition_col_idx,
+                *extra_partition_col_idx,
             )?;
             let dispatch_builder =
                 builder_helper.dispatcher_writer_builder(partition_delta_builder, delta_builder)?;
             // wrap a layer with collect write metrics
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
-                WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
-                ),
+                WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone()),
             );
-            let schema = Self::schema_with_extra_partition_col(&table, extra_partition_col_idx)?;
+            let schema = Self::schema_with_extra_partition_col(&table, *extra_partition_col_idx)?;
             let inner_writer = DeltaWriter::new(prometheus_builder.build(&schema).await?);
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
+                },
             })
         } else {
             let partition_delta_builder =
@@ -901,20 +615,17 @@ impl IcebergWriter {
             // wrap a layer with collect write metrics
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
-                WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
-                ),
+                WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone()),
             );
             let schema = table.current_arrow_schema()?;
             let inner_writer = DeltaWriter::new(prometheus_builder.build(&schema).await?);
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
+                },
             })
         }
     }
@@ -1028,7 +739,7 @@ impl WriteResult {
             {
                 v
             } else {
-                bail!("iceberg sink metadata should be a object");
+                bail!("iceberg sink metadata should be an object");
             };
 
             let data_files: Vec<DataFile>;
@@ -1055,7 +766,7 @@ impl WriteResult {
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
                     .context("Failed to parse data file from json")?;
             } else {
-                bail!("icberg sink metadata should have data_files object");
+                bail!("Iceberg sink metadata should have data_files object");
             }
             Ok(Self {
                 data_files,
@@ -1107,6 +818,7 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
 }
 
 pub struct IcebergSinkCommitter {
+    catalog: CatalogRef,
     table: Table,
     partition_type: Any,
 }
@@ -1133,6 +845,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+        // Load the latest table to avoid concurrent modification with the best effort.
+        self.table = self
+            .catalog
+            .clone()
+            .load_table(self.table.table_name())
+            .await?;
         let mut txn = Transaction::new(&mut self.table);
         write_results.into_iter().for_each(|s| {
             txn.append_data_file(s.data_files);
@@ -1155,7 +873,7 @@ pub fn try_matches_arrow_schema(
 ) -> anyhow::Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
-            "Schema length not match, risingwave is {}, and iceberg is {}",
+            "Schema length mismatch, risingwave is {}, and iceberg is {}",
             rw_schema.fields.len(),
             arrow_schema.fields.len()
         );
@@ -1182,15 +900,23 @@ pub fn try_matches_arrow_schema(
 
         let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
             (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
-            (left, right) => left == right,
+            (ArrowDataType::Binary, ArrowDataType::LargeBinary) => true,
+            (ArrowDataType::LargeBinary, ArrowDataType::Binary) => true,
+            // cases where left != right (metadata, field name mismatch)
+            //
+            // all nested types: in iceberg `field_id` will always be present, but RW doesn't have it:
+            // {"PARQUET:field_id": ".."}
+            //
+            // map: The standard name in arrow is "entries", "key", "value".
+            // in iceberg-rs, it's called "key_value"
+            (left, right) => left.equals_datatype(right),
         };
         if !compatible {
-            bail!("Field {}'s type not compatible, risingwave converted data type {}, iceberg's data type: {}",
+            bail!("field {}'s type is incompatible\nRisingWave converted data type: {}\niceberg's data type: {}",
                     arrow_field.name(), converted_arrow_data_type, arrow_field.data_type()
                 );
         }
     }
-
     Ok(())
 }
 
@@ -1200,6 +926,8 @@ mod test {
 
     use risingwave_common::catalog::Field;
 
+    use crate::connector_common::IcebergCommon;
+    use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
     use crate::sink::iceberg::IcebergConfig;
     use crate::source::DataType;
 
@@ -1246,6 +974,7 @@ mod test {
             ("s3.endpoint", "http://127.0.0.1:9301"),
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
+            ("s3.path.style.access", "true"),
             ("s3.region", "us-east-1"),
             ("catalog.type", "jdbc"),
             ("catalog.name", "demo"),
@@ -1262,31 +991,34 @@ mod test {
         let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
 
         let expected_iceberg_config = IcebergConfig {
-            connector: "iceberg".to_string(),
+            common: IcebergCommon {
+                warehouse_path: "s3://iceberg".to_string(),
+                catalog_uri: Some("jdbc://postgresql://postgres:5432/iceberg".to_string()),
+                region: Some("us-east-1".to_string()),
+                endpoint: Some("http://127.0.0.1:9301".to_string()),
+                access_key: "hummockadmin".to_string(),
+                secret_key: "hummockadmin".to_string(),
+                catalog_type: Some("jdbc".to_string()),
+                catalog_name: Some("demo".to_string()),
+                database_name: Some("demo_db".to_string()),
+                table_name: "demo_table".to_string(),
+            },
             r#type: "upsert".to_string(),
             force_append_only: false,
-            table_name: "demo_table".to_string(),
-            database_name: Some("demo_db".to_string()),
-            catalog_name: Some("demo".to_string()),
-            catalog_type: Some("jdbc".to_string()),
-            path: "s3://iceberg".to_string(),
-            uri: Some("jdbc://postgresql://postgres:5432/iceberg".to_string()),
-            region: Some("us-east-1".to_string()),
-            endpoint: Some("http://127.0.0.1:9301".to_string()),
-            access_key: "hummockadmin".to_string(),
-            secret_key: "hummockadmin".to_string(),
+            path_style_access: Some(true),
             primary_key: Some(vec!["v1".to_string()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
-            commit_checkpoint_interval: None,
+            commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+            create_table_if_not_exists: false,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
 
         assert_eq!(
-            &iceberg_config.full_table_name().unwrap().to_string(),
+            &iceberg_config.common.full_table_name().unwrap().to_string(),
             "demo_db.demo_table"
         );
     }
@@ -1310,6 +1042,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "storage"),
             ("warehouse.path", "s3://icebergdata/demo"),
@@ -1334,6 +1067,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "rest"),
             ("catalog.uri", "http://192.168.167.4:8181"),
@@ -1359,6 +1093,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "jdbc"),
             ("catalog.uri", "jdbc:postgresql://localhost:5432/iceberg"),
@@ -1386,6 +1121,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "hive"),
             ("catalog.uri", "thrift://localhost:9083"),

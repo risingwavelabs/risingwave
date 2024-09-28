@@ -53,7 +53,7 @@ impl HummockVersionCheckpoint {
             stale_objects: checkpoint
                 .stale_objects
                 .iter()
-                .map(|(version_id, objects)| (*version_id as HummockVersionId, objects.clone()))
+                .map(|(version_id, objects)| (HummockVersionId::new(*version_id), objects.clone()))
                 .collect(),
         }
     }
@@ -61,7 +61,11 @@ impl HummockVersionCheckpoint {
     pub fn to_protobuf(&self) -> PbHummockVersionCheckpoint {
         PbHummockVersionCheckpoint {
             version: Some(PbHummockVersion::from(&self.version)),
-            stale_objects: self.stale_objects.clone(),
+            stale_objects: self
+                .stale_objects
+                .iter()
+                .map(|(version_id, objects)| (version_id.to_u64(), objects.clone()))
+                .collect(),
         }
     }
 }
@@ -152,8 +156,8 @@ impl HummockManager {
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
-            for group_deltas in version_delta.group_deltas.values() {
-                let summary = summarize_group_deltas(group_deltas);
+            for (group_id, group_deltas) in &version_delta.group_deltas {
+                let summary = summarize_group_deltas(group_deltas, *group_id);
                 object_sizes.extend(
                     summary
                         .insert_table_infos
@@ -245,7 +249,7 @@ impl HummockManager {
         timer.observe_duration();
         self.metrics
             .checkpoint_version_id
-            .set(new_checkpoint_id as i64);
+            .set(new_checkpoint_id.to_u64() as i64);
 
         Ok(new_checkpoint_id - old_checkpoint_id)
     }

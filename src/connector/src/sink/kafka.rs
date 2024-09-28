@@ -26,7 +26,6 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
@@ -38,7 +37,6 @@ use super::{Sink, SinkError, SinkParam};
 use crate::connector_common::{
     AwsAuthProps, KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon,
 };
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -61,10 +59,6 @@ const fn _default_max_retries() -> u32 {
 
 const fn _default_retry_backoff() -> Duration {
     Duration::from_millis(100)
-}
-
-const fn _default_message_timeout_ms() -> usize {
-    5000
 }
 
 const fn _default_max_in_flight_requests_per_connection() -> usize {
@@ -152,12 +146,9 @@ pub struct RdKafkaPropertiesProducer {
     /// Produce message timeout.
     /// This value is used to limits the time a produced message waits for
     /// successful delivery (including retries).
-    #[serde(
-        rename = "properties.message.timeout.ms",
-        default = "_default_message_timeout_ms"
-    )]
-    #[serde_as(as = "DisplayFromStr")]
-    message_timeout_ms: usize,
+    #[serde(rename = "properties.message.timeout.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    message_timeout_ms: Option<usize>,
 
     /// The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     #[serde(
@@ -207,7 +198,9 @@ impl RdKafkaPropertiesProducer {
         if let Some(v) = self.request_required_acks {
             c.set("request.required.acks", v.to_string());
         }
-        c.set("message.timeout.ms", self.message_timeout_ms.to_string());
+        if let Some(v) = self.message_timeout_ms {
+            c.set("message.timeout.ms", v.to_string());
+        }
         c.set(
             "max.in.flight.requests.per.connection",
             self.max_in_flight_requests_per_connection.to_string(),
@@ -280,6 +273,7 @@ impl From<KafkaConfig> for KafkaProperties {
             rdkafka_properties_consumer: Default::default(),
             privatelink_common: val.privatelink_common,
             aws_auth_props: val.aws_auth_props,
+            group_id_prefix: None,
             unknown_fields: Default::default(),
         }
     }
@@ -319,13 +313,6 @@ impl Sink for KafkaSink {
     type LogSinker = AsyncTruncateLogSinkerOf<KafkaSinkWriter>;
 
     const SINK_NAME: &'static str = KAFKA_SINK;
-
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
-        }
-    }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let formatter = SinkFormatterImpl::new(
@@ -403,7 +390,16 @@ struct KafkaPayloadWriter<'a> {
     config: &'a KafkaConfig,
 }
 
-pub type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+mod opaque_type {
+    use super::*;
+    pub type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+
+    pub(super) fn map_delivery_future(future: DeliveryFuture) -> KafkaSinkDeliveryFuture {
+        future.map(KafkaPayloadWriter::<'static>::map_future_result)
+    }
+}
+use opaque_type::map_delivery_future;
+pub use opaque_type::KafkaSinkDeliveryFuture;
 
 pub struct KafkaSinkWriter {
     formatter: SinkFormatterImpl,
@@ -482,7 +478,7 @@ impl<'w> KafkaPayloadWriter<'w> {
                 Ok(delivery_future) => {
                     if self
                         .add_future
-                        .add_future_may_await(Self::map_delivery_future(delivery_future))
+                        .add_future_may_await(map_delivery_future(delivery_future))
                         .await?
                     {
                         tracing::warn!(
@@ -567,10 +563,6 @@ impl<'w> KafkaPayloadWriter<'w> {
             Err(_) => Err(KafkaError::Canceled.into()),
         }
     }
-
-    fn map_delivery_future(future: DeliveryFuture) -> KafkaSinkDeliveryFuture {
-        future.map(KafkaPayloadWriter::<'static>::map_future_result)
-    }
 }
 
 impl<'a> FormattedSink for KafkaPayloadWriter<'a> {
@@ -629,7 +621,10 @@ mod test {
             c.rdkafka_properties_producer.compression_codec,
             Some(CompressionCodec::Zstd)
         );
-        assert_eq!(c.rdkafka_properties_producer.message_timeout_ms, 114514);
+        assert_eq!(
+            c.rdkafka_properties_producer.message_timeout_ms,
+            Some(114514)
+        );
         assert_eq!(
             c.rdkafka_properties_producer
                 .max_in_flight_requests_per_connection,

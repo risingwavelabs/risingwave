@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{ActorMapping, VnodeCountCompat, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
@@ -38,7 +38,6 @@ use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
 };
-use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
@@ -49,7 +48,7 @@ use crate::model::{
     TableParallelism,
 };
 use crate::storage::Transaction;
-use crate::stream::{to_build_actor_info, SplitAssignment, TableRevision};
+use crate::stream::{SplitAssignment, TableRevision};
 use crate::{MetaError, MetaResult};
 
 pub struct FragmentManagerCore {
@@ -137,7 +136,7 @@ impl FragmentManagerCore {
     fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> HashMap<FragmentId, usize> {
+    ) -> HashMap<FragmentId, FragmentParallelismInfo> {
         self.table_fragments
             .values()
             .filter(|tf| tf.state() != State::Initial)
@@ -149,13 +148,14 @@ impl FragmentManagerCore {
                         return None;
                     }
 
-                    let parallelism = match fragment.get_distribution_type().unwrap() {
-                        FragmentDistributionType::Unspecified => unreachable!(),
-                        FragmentDistributionType::Single => 1,
-                        FragmentDistributionType::Hash => fragment.get_actors().len(),
-                    };
-
-                    Some((fragment.fragment_id, parallelism))
+                    Some((
+                        fragment.fragment_id,
+                        FragmentParallelismInfo {
+                            distribution_type: fragment.get_distribution_type().unwrap(),
+                            actor_count: fragment.actors.len(),
+                            vnode_count: fragment.vnode_count(),
+                        },
+                    ))
                 })
             })
             .collect()
@@ -188,6 +188,13 @@ impl ActorInfos {
     pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
         Self { fragment_infos }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct FragmentParallelismInfo {
+    pub distribution_type: FragmentDistributionType,
+    pub actor_count: usize,
+    pub vnode_count: usize,
 }
 
 pub type FragmentManagerRef = Arc<FragmentManager>;
@@ -347,7 +354,7 @@ impl FragmentManager {
         let map = &mut guard.table_fragments;
         let table_id = table_fragment.table_id();
         if map.contains_key(&table_id) {
-            bail!("table_fragment already exist: id={}", table_id);
+            bail!("table_fragment already exists: id={}", table_id);
         }
 
         let mut table_fragments = BTreeMapTransaction::new(map);
@@ -704,6 +711,35 @@ impl FragmentManager {
 
         let mut dirty_downstream_table_ids = HashMap::new();
 
+        fn union_input_is_clean(
+            all_fragment_ids: &HashSet<FragmentId>,
+            input: &StreamNode,
+        ) -> bool {
+            match &input.node_body {
+                // for old version sink into table
+                Some(NodeBody::Merge(merge_node))
+                    if !all_fragment_ids.contains(&merge_node.upstream_fragment_id) =>
+                {
+                    false
+                }
+                // for new version sink into table with project
+                Some(NodeBody::Project(_)) => {
+                    let merge_stream_node = input.input.iter().exactly_one().expect(
+                        "project of the sink input for the target table should have only one input",
+                    );
+
+                    if let Some(NodeBody::Merge(merge_node)) = &merge_stream_node.node_body
+                        && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
+                    {
+                        false
+                    } else {
+                        true
+                    }
+                }
+                _ => true,
+            }
+        }
+
         for (table_id, table_fragment) in table_fragments.tree_ref() {
             if to_delete_table_ids.contains(table_id) {
                 continue;
@@ -722,9 +758,7 @@ impl FragmentManager {
                     visit_stream_node_cont(actor.nodes.as_ref().unwrap(), |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             for input in &node.input {
-                                if let Some(NodeBody::Merge(merge_node)) = &input.node_body
-                                    && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
-                                {
+                                if !union_input_is_clean(&all_fragment_ids, input) {
                                     dirty_downstream_table_ids
                                         .insert(*table_id, fragment.fragment_id);
                                     return false;
@@ -754,15 +788,8 @@ impl FragmentManager {
             for actor in &mut fragment.actors {
                 visit_stream_node_cont_mut(actor.nodes.as_mut().unwrap(), |node| {
                     if let Some(NodeBody::Union(_)) = node.node_body {
-                        node.input.retain_mut(|input| {
-                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
-                                && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
-                            {
-                                false
-                            } else {
-                                true
-                            }
-                        });
+                        node.input
+                            .retain_mut(|input| union_input_is_clean(&all_fragment_ids, input));
                     }
                     true
                 })
@@ -945,20 +972,14 @@ impl FragmentManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-        subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
-    ) -> HashMap<WorkerId, Vec<BuildActorInfo>> {
+    ) -> HashMap<WorkerId, Vec<StreamActor>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            let table_id = fragments.table_id();
             for (node_id, actors) in fragments.worker_actors(include_inactive) {
                 let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actors.extend(
-                    actors
-                        .into_iter()
-                        .map(|actor| to_build_actor_info(actor, subscriptions, table_id)),
-                );
+                node_actors.extend(actors);
             }
         }
 
@@ -1059,6 +1080,11 @@ impl FragmentManager {
                 for actor in &mut fragment.actors {
                     if let Some(node) = actor.nodes.as_mut() {
                         visit_stream_node(node, |node_body| match node_body {
+                            // rate limit for cdc backfill
+                            NodeBody::StreamCdcScan(ref mut node) => {
+                                node.rate_limit = rate_limit;
+                                actor_to_apply.push(actor.actor_id);
+                            }
                             NodeBody::StreamScan(ref mut node) => {
                                 node.rate_limit = rate_limit;
                                 actor_to_apply.push(actor.actor_id);
@@ -1660,7 +1686,7 @@ impl FragmentManager {
     pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> HashMap<FragmentId, usize> {
+    ) -> HashMap<FragmentId, FragmentParallelismInfo> {
         self.core
             .read()
             .await

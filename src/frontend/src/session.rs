@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
-#[cfg(test)]
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
@@ -60,15 +59,18 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::cluster_limit::ActorCountPerParallelism;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::{cluster_limit, resource_util};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::meta::add_worker_node_request::Property as AddWorkerNodeProperty;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
@@ -80,6 +82,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
+use tracing::log::error;
 
 use self::cursor_manager::CursorManager;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
@@ -87,6 +90,7 @@ use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWrite
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::secret_catalog::SecretCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
@@ -103,8 +107,9 @@ use crate::handler::variable::infer_show_variable;
 use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
+use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
+use crate::rpc::FrontendServiceImpl;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
@@ -147,6 +152,8 @@ pub struct FrontendEnv {
 
     pub frontend_metrics: Arc<FrontendMetrics>,
 
+    pub cursor_metrics: Arc<CursorMetrics>,
+
     source_metrics: Arc<SourceMetrics>,
 
     /// Batch spill metrics
@@ -169,7 +176,7 @@ pub struct FrontendEnv {
 }
 
 /// Session map identified by `(process_id, secret_key)`
-type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
+pub type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 /// The proportion of frontend memory used for batch processing.
 const FRONTEND_BATCH_MEMORY_PROPORTION: f64 = 0.5;
@@ -179,14 +186,17 @@ impl FrontendEnv {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
-        let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
+        let meta_client = Arc::new(MockFrontendMetaClient {});
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let catalog_writer = Arc::new(MockCatalogWriter::new(
+            catalog.clone(),
+            hummock_snapshot_manager.clone(),
+        ));
         let catalog_reader = CatalogReader::new(catalog);
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let user_info_writer = Arc::new(MockUserInfoWriter::new(user_info_manager.clone()));
         let user_info_reader = UserInfoReader::new(user_info_manager);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let meta_client = Arc::new(MockFrontendMetaClient {});
-        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let query_manager = QueryManager::new(
@@ -212,6 +222,7 @@ impl FrontendEnv {
                 .build()
                 .unwrap(),
         ));
+        let sessions_map = Arc::new(RwLock::new(HashMap::new()));
         Self {
             meta_client,
             catalog_writer,
@@ -225,8 +236,9 @@ impl FrontendEnv {
             session_params: Default::default(),
             server_addr,
             client_pool,
-            sessions_map: Arc::new(RwLock::new(HashMap::new())),
+            sessions_map: sessions_map.clone(),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
+            cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
@@ -259,15 +271,24 @@ impl FrontendEnv {
             .unwrap();
         info!("advertise addr is {}", frontend_address);
 
+        let rpc_addr: HostAddr = opts.frontend_rpc_listener_addr.parse().unwrap();
+        let internal_rpc_host_addr = HostAddr {
+            // Use the host of advertise address for the frontend rpc address.
+            host: frontend_address.host.clone(),
+            port: rpc_addr.port,
+        };
         // Register in meta by calling `AddWorkerNode` RPC.
         let (meta_client, system_params_reader) = MetaClient::register_new(
             opts.meta_addr,
             WorkerType::Frontend,
             &frontend_address,
-            Default::default(),
+            AddWorkerNodeProperty {
+                internal_rpc_host_addr: internal_rpc_host_addr.to_string(),
+                ..Default::default()
+            },
             &config.meta,
         )
-        .await?;
+        .await;
 
         let worker_id = meta_client.worker_id();
         info!("Assigned worker node id {}", worker_id);
@@ -280,19 +301,21 @@ impl FrontendEnv {
         let mut join_handles = vec![heartbeat_join_handle];
         let mut shutdown_senders = vec![heartbeat_shutdown_sender];
 
+        let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
+        let hummock_snapshot_manager =
+            Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
+
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(CatalogWriterImpl::new(
             meta_client.clone(),
             catalog_updated_rx,
+            hummock_snapshot_manager.clone(),
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
-        let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
-        let hummock_snapshot_manager =
-            Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
         let compute_client_pool = Arc::new(ComputeClientPool::new(
             config.batch_exchange_connection_pool_size(),
         ));
@@ -352,7 +375,8 @@ impl FrontendEnv {
         }
 
         let health_srv = HealthServiceImpl::new();
-        let host = opts.health_check_listener_addr.clone();
+        let frontend_srv = FrontendServiceImpl::new();
+        let frontend_rpc_addr = opts.frontend_rpc_listener_addr.parse().unwrap();
 
         let telemetry_manager = TelemetryManager::new(
             Arc::new(meta_client.clone()),
@@ -372,13 +396,14 @@ impl FrontendEnv {
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
-                .serve(host.parse().unwrap())
+                .add_service(FrontendServiceServer::new(frontend_srv))
+                .serve(frontend_rpc_addr)
                 .await
                 .unwrap();
         });
         info!(
             "Health Check RPC Listener is set up on {}",
-            opts.health_check_listener_addr.clone()
+            opts.frontend_rpc_listener_addr.clone()
         );
 
         let creating_streaming_job_tracker =
@@ -394,6 +419,7 @@ impl FrontendEnv {
         ));
 
         let sessions_map: SessionMapRef = Arc::new(RwLock::new(HashMap::new()));
+        let cursor_metrics = Arc::new(CursorMetrics::init(sessions_map.clone()));
         let sessions = sessions_map.clone();
 
         // Idle transaction background monitor
@@ -445,6 +471,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool: compute_client_pool,
                 frontend_metrics,
+                cursor_metrics,
                 spill_metrics,
                 sessions_map,
                 batch_config: config.batch,
@@ -604,7 +631,6 @@ impl AuthContext {
         }
     }
 }
-
 pub struct SessionImpl {
     env: FrontendEnv,
     auth_context: Arc<AuthContext>,
@@ -638,6 +664,46 @@ pub struct SessionImpl {
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
 
     cursor_manager: Arc<CursorManager>,
+
+    /// temporary sources for the current session
+    temporary_source_manager: Arc<Mutex<TemporarySourceManager>>,
+}
+
+/// If TEMPORARY or TEMP is specified, the source is created as a temporary source.
+/// Temporary sources are automatically dropped at the end of a session
+/// Temporary sources are expected to be selected by batch queries, not streaming queries.
+/// Temporary sources currently are only used by cloud portal to preview the data during table and
+/// source creation, so it is a internal feature and not exposed to users.
+/// The current PR supports temporary source with minimum effort,
+/// so we don't care about the database name and schema name, but only care about the source name.
+/// Temporary sources can only be shown via `show sources` command but not other system tables.
+#[derive(Default, Clone)]
+pub struct TemporarySourceManager {
+    sources: HashMap<String, SourceCatalog>,
+}
+
+impl TemporarySourceManager {
+    pub fn new() -> Self {
+        Self {
+            sources: HashMap::new(),
+        }
+    }
+
+    pub fn create_source(&mut self, name: String, source: SourceCatalog) {
+        self.sources.insert(name, source);
+    }
+
+    pub fn drop_source(&mut self, name: &str) {
+        self.sources.remove(name);
+    }
+
+    pub fn get_source(&self, name: &str) -> Option<&SourceCatalog> {
+        self.sources.get(name)
+    }
+
+    pub fn keys(&self) -> Vec<String> {
+        self.sources.keys().cloned().collect()
+    }
 }
 
 #[derive(Error, Debug)]
@@ -666,6 +732,7 @@ impl SessionImpl {
         peer_addr: AddressRef,
         session_config: SessionConfig,
     ) -> Self {
+        let cursor_metrics = env.cursor_metrics.clone();
         Self {
             env,
             auth_context,
@@ -678,12 +745,14 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::default()),
+            cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
+            temporary_source_manager: Default::default(),
         }
     }
 
     #[cfg(test)]
     pub fn mock() -> Self {
+        let env = FrontendEnv::mock();
         Self {
             env: FrontendEnv::mock(),
             auth_context: Arc::new(AuthContext::new(
@@ -705,7 +774,8 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::default()),
+            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
+            temporary_source_manager: Default::default(),
         }
     }
 
@@ -1116,7 +1186,72 @@ impl SessionImpl {
             Duration::from_secs(self.config().statement_timeout() as u64)
         }
     }
+
+    pub fn create_temporary_source(&self, source: SourceCatalog) {
+        self.temporary_source_manager
+            .lock()
+            .create_source(source.name.to_string(), source);
+    }
+
+    pub fn get_temporary_source(&self, name: &str) -> Option<SourceCatalog> {
+        self.temporary_source_manager
+            .lock()
+            .get_source(name)
+            .cloned()
+    }
+
+    pub fn drop_temporary_source(&self, name: &str) {
+        self.temporary_source_manager.lock().drop_source(name);
+    }
+
+    pub fn temporary_source_manager(&self) -> TemporarySourceManager {
+        self.temporary_source_manager.lock().clone()
+    }
+
+    pub async fn check_cluster_limits(&self) -> Result<()> {
+        if self.config().bypass_cluster_limits() {
+            return Ok(());
+        }
+
+        let gen_message = |violated_limit: &ActorCountPerParallelism,
+                           exceed_hard_limit: bool|
+         -> String {
+            let (limit_type, action) = if exceed_hard_limit {
+                ("critical", "Please scale the cluster before proceeding!")
+            } else {
+                ("recommended", "Scaling the cluster is recommended.")
+            };
+            format!(
+                "\n- {}\n- {}\n- {}\n- {}\n- {}\n{}",
+                format_args!("Actor count per parallelism exceeds the {} limit.", limit_type),
+                format_args!("Depending on your workload, this may overload the cluster and cause performance/stability issues. {}", action),
+                "Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.",
+                "You can bypass this check via SQL `SET bypass_cluster_limits TO true`.",
+                "You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.",
+                violated_limit,
+            )
+        };
+
+        let limits = self.env().meta_client().get_cluster_limits().await?;
+        for limit in limits {
+            match limit {
+                cluster_limit::ClusterLimit::ActorCount(l) => {
+                    if l.exceed_hard_limit() {
+                        return Err(RwError::from(ErrorCode::ProtocolError(gen_message(
+                            &l, true,
+                        ))));
+                    } else if l.exceed_soft_limit() {
+                        self.notice_to_user(gen_message(&l, false));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
+
+pub static SESSION_MANAGER: std::sync::OnceLock<Arc<SessionManagerImpl>> =
+    std::sync::OnceLock::new();
 
 pub struct SessionManagerImpl {
     env: FrontendEnv,
@@ -1127,6 +1262,27 @@ pub struct SessionManagerImpl {
 
 impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
+
+    fn create_dummy_session(
+        &self,
+        database_id: u32,
+        user_id: u32,
+    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        let dummy_addr = Address::Tcp(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            5691, // port of meta
+        ));
+        let user_reader = self.env.user_info_reader();
+        let reader = user_reader.read_guard();
+        if let Some(user_name) = reader.get_user_name_by_id(user_id) {
+            self.connect_inner(database_id, user_name.as_str(), Arc::new(dummy_addr))
+        } else {
+            Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Role id {} does not exist", user_id),
+            )))
+        }
+    }
 
     fn connect(
         &self,
@@ -1145,79 +1301,8 @@ impl SessionManager for SessionManagerImpl {
                 ))
             })?
             .id();
-        let user_reader = self.env.user_info_reader();
-        let reader = user_reader.read_guard();
-        if let Some(user) = reader.get_user_by_name(user_name) {
-            if !user.can_login {
-                return Err(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("User {} is not allowed to login", user_name),
-                )));
-            }
-            let has_privilege =
-                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
-            if !user.is_super && !has_privilege {
-                return Err(Box::new(Error::new(
-                    ErrorKind::PermissionDenied,
-                    "User does not have CONNECT privilege.",
-                )));
-            }
-            let user_authenticator = match &user.auth_info {
-                None => UserAuthenticator::None,
-                Some(auth_info) => {
-                    if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
-                        UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
-                    } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
-                        let mut salt = [0; 4];
-                        let mut rng = rand::thread_rng();
-                        rng.fill_bytes(&mut salt);
-                        UserAuthenticator::Md5WithSalt {
-                            encrypted_password: md5_hash_with_salt(
-                                &auth_info.encrypted_value,
-                                &salt,
-                            ),
-                            salt,
-                        }
-                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
-                        UserAuthenticator::OAuth(auth_info.metadata.clone())
-                    } else {
-                        return Err(Box::new(Error::new(
-                            ErrorKind::Unsupported,
-                            format!("Unsupported auth type: {}", auth_info.encryption_type),
-                        )));
-                    }
-                }
-            };
 
-            // Assign a session id and insert into sessions map (for cancel request).
-            let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
-            // Use a trivial strategy: process_id and secret_key are equal.
-            let id = (secret_key, secret_key);
-            // Read session params snapshot from frontend env.
-            let session_config = self.env.session_params_snapshot();
-
-            let session_impl: Arc<SessionImpl> = SessionImpl::new(
-                self.env.clone(),
-                Arc::new(AuthContext::new(
-                    database.to_string(),
-                    user_name.to_string(),
-                    user.id,
-                )),
-                user_authenticator,
-                id,
-                peer_addr,
-                session_config,
-            )
-            .into();
-            self.insert_session(session_impl.clone());
-
-            Ok(session_impl)
-        } else {
-            Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Role {} does not exist", user_name),
-            )))
-        }
+        self.connect_inner(database_id, user_name, peer_addr)
     }
 
     /// Used when cancel request happened.
@@ -1280,6 +1365,99 @@ impl SessionManagerImpl {
             .active_sessions
             .set(active_sessions as i64);
     }
+
+    fn connect_inner(
+        &self,
+        database_id: u32,
+        user_name: &str,
+        peer_addr: AddressRef,
+    ) -> std::result::Result<Arc<SessionImpl>, BoxedError> {
+        let catalog_reader = self.env.catalog_reader();
+        let reader = catalog_reader.read_guard();
+        let database_name = reader
+            .get_database_by_id(&database_id)
+            .map_err(|_| {
+                Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("database \"{}\" does not exist", database_id),
+                ))
+            })?
+            .name();
+
+        let user_reader = self.env.user_info_reader();
+        let reader = user_reader.read_guard();
+        if let Some(user) = reader.get_user_by_name(user_name) {
+            if !user.can_login {
+                return Err(Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("User {} is not allowed to login", user_name),
+                )));
+            }
+            let has_privilege =
+                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
+            if !user.is_super && !has_privilege {
+                return Err(Box::new(Error::new(
+                    ErrorKind::PermissionDenied,
+                    "User does not have CONNECT privilege.",
+                )));
+            }
+            let user_authenticator = match &user.auth_info {
+                None => UserAuthenticator::None,
+                Some(auth_info) => {
+                    if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
+                        UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
+                    } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
+                        let mut salt = [0; 4];
+                        let mut rng = rand::thread_rng();
+                        rng.fill_bytes(&mut salt);
+                        UserAuthenticator::Md5WithSalt {
+                            encrypted_password: md5_hash_with_salt(
+                                &auth_info.encrypted_value,
+                                &salt,
+                            ),
+                            salt,
+                        }
+                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
+                        UserAuthenticator::OAuth(auth_info.metadata.clone())
+                    } else {
+                        return Err(Box::new(Error::new(
+                            ErrorKind::Unsupported,
+                            format!("Unsupported auth type: {}", auth_info.encryption_type),
+                        )));
+                    }
+                }
+            };
+
+            // Assign a session id and insert into sessions map (for cancel request).
+            let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
+            // Use a trivial strategy: process_id and secret_key are equal.
+            let id = (secret_key, secret_key);
+            // Read session params snapshot from frontend env.
+            let session_config = self.env.session_params_snapshot();
+
+            let session_impl: Arc<SessionImpl> = SessionImpl::new(
+                self.env.clone(),
+                Arc::new(AuthContext::new(
+                    database_name.to_string(),
+                    user_name.to_string(),
+                    user.id,
+                )),
+                user_authenticator,
+                id,
+                peer_addr,
+                session_config,
+            )
+            .into();
+            self.insert_session(session_impl.clone());
+
+            Ok(session_impl)
+        } else {
+            Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Role {} does not exist", user_name),
+            )))
+        }
+    }
 }
 
 impl Session for SessionImpl {
@@ -1309,13 +1487,13 @@ impl Session for SessionImpl {
         self.id
     }
 
-    fn parse(
+    async fn parse(
         self: Arc<Self>,
         statement: Option<Statement>,
         params_types: Vec<Option<DataType>>,
     ) -> std::result::Result<PrepareStatement, BoxedError> {
         Ok(if let Some(statement) = statement {
-            handle_parse(self, statement, params_types)?
+            handle_parse(self, statement, params_types).await?
         } else {
             PrepareStatement::Empty
         })
@@ -1431,7 +1609,6 @@ impl Session for SessionImpl {
                         self.elapse_since_last_idle_instant()
                     {
                         if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
-                            self.unpin_snapshot();
                             return Err(PsqlError::IdleInTxnTimeout);
                         }
                     }
@@ -1448,7 +1625,8 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => Ok(bound
+        | Statement::Update { .. }
+        | Statement::FetchCursor { .. } => Ok(bound
             .unwrap()
             .output_fields()
             .iter()

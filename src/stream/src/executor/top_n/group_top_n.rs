@@ -239,8 +239,7 @@ where
 
     async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
         if watermark.col_idx == self.group_by[0] {
-            self.managed_state
-                .update_watermark(watermark.val.clone(), false);
+            self.managed_state.update_watermark(watermark.val.clone());
             Some(watermark)
         } else {
             None

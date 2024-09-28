@@ -26,3 +26,41 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 100, offset: 0 }
         └─BatchScan { table: t1_mv, columns: [t1_mv.pk, t1_mv.a, t1_mv.b, t1_mv.c, t1_mv.d], limit: 100, distribution: SomeShard }
+- sql: |
+    WITH c1(k, v) AS (
+        VALUES
+            (1, 'foo'),
+            (2, 'bar')
+    ),
+    c2 AS (
+        SELECT
+            *,
+            row_number() over (
+                PARTITION by k
+                ORDER BY 1
+            ) AS rn
+        FROM
+            c1
+    )
+    SELECT
+        count(*)
+    FROM
+        c2
+    WHERE
+        rn <= 1;
+  logical_plan: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalAgg { aggs: [count] }
+      └─LogicalProject { exprs: [] }
+        └─LogicalFilter { predicate: (row_number <= 1:Int32) }
+          └─LogicalShare { id: 5 }
+            └─LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, row_number] }
+              └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY *VALUES*_0.column_0 ORDER BY 1:Int32 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+                └─LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, 1:Int32] }
+                  └─LogicalShare { id: 1 }
+                    └─LogicalValues { rows: [[1:Int32, 'foo':Varchar], [2:Int32, 'bar':Varchar]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Varchar] } }
+  optimized_logical_plan_for_batch: |-
+    LogicalAgg { aggs: [count] }
+    └─LogicalTopN { order: [1:Int32 ASC], limit: 1, offset: 0, group_key: [*VALUES*_0.column_0] }
+      └─LogicalProject { exprs: [*VALUES*_0.column_0, 1:Int32] }
+        └─LogicalValues { rows: [[1:Int32], [2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }

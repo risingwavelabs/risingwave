@@ -375,7 +375,6 @@ macro_rules! to_jvalue {
 
 /// Generate the jni signature of a given function
 /// ```
-/// #![feature(lazy_cell)]
 /// use risingwave_jni_core::gen_jni_sig;
 /// assert_eq!(gen_jni_sig!(boolean f(int, short, byte[])), "(IS[B)Z");
 /// assert_eq!(
@@ -386,7 +385,7 @@ macro_rules! to_jvalue {
 ///     gen_jni_sig!(boolean f(int, java.lang.String)),
 ///     "(ILjava/lang/String;)Z"
 /// );
-/// assert_eq!(gen_jni_sig!(public static native int vnodeCount()), "()I");
+/// assert_eq!(gen_jni_sig!(public static native int defaultVnodeCount()), "()I");
 /// assert_eq!(
 ///     gen_jni_sig!(long hummockIteratorNew(byte[] readPlan)),
 ///     "([B)J"
@@ -446,7 +445,7 @@ macro_rules! for_all_plain_native_methods {
 
                 public static native boolean tracingSlf4jEventEnabled(int level);
 
-                public static native int vnodeCount();
+                public static native int defaultVnodeCount();
 
                 static native long iteratorNewStreamChunk(long pointer);
 
@@ -862,7 +861,7 @@ mod tests {
             (test) => {{
                 for_all_native_methods! {
                     {
-                        public static native int vnodeCount();
+                        public static native int defaultVnodeCount();
                         static native long hummockIteratorNew(byte[] readPlan);
                         public static native byte[] rowGetKey(long pointer);
                     },
@@ -886,7 +885,7 @@ mod tests {
         assert_eq!(
             sig,
             [
-                ("vnodeCount", "()I"),
+                ("defaultVnodeCount", "()I"),
                 ("hummockIteratorNew", "([B)J"),
                 ("rowGetKey", "(J)[B")
             ]
@@ -903,7 +902,7 @@ mod tests {
             [
                 tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V,
                 tracingSlf4jEventEnabled                 (I)Z,
-                vnodeCount                               ()I,
+                defaultVnodeCount                        ()I,
                 iteratorNewStreamChunk                   (J)J,
                 iteratorNext                             (J)Z,
                 iteratorClose                            (J)V,

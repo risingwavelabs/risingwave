@@ -17,11 +17,9 @@
 #![feature(type_alias_impl_trait)]
 #![feature(extract_if)]
 #![feature(custom_test_frameworks)]
-#![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(hash_extract_if)]
 #![feature(btree_extract_if)]
-#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
@@ -38,10 +36,10 @@ use std::hash::Hasher;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::RW_VERSION;
+use risingwave_hummock_sdk::state_table_info::StateTableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
-use risingwave_pb::hummock::PbStateTableInfo;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{BackupError, BackupResult};
@@ -56,12 +54,11 @@ pub struct MetaSnapshotMetadata {
     pub hummock_version_id: HummockVersionId,
     pub ssts: HashSet<HummockSstableObjectId>,
     pub max_committed_epoch: u64,
-    pub safe_epoch: u64,
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
-    #[serde(with = "table_id_key_map")]
-    pub state_table_info: HashMap<TableId, PbStateTableInfo>,
+    #[serde(default, with = "table_id_key_map")]
+    pub state_table_info: HashMap<TableId, StateTableInfo>,
     pub rw_version: Option<String>,
 }
 
@@ -76,11 +73,15 @@ impl MetaSnapshotMetadata {
             id,
             hummock_version_id: v.id,
             ssts: v.get_object_ids(),
-            max_committed_epoch: v.max_committed_epoch,
-            safe_epoch: v.visible_table_safe_epoch(),
+            max_committed_epoch: v.visible_table_committed_epoch(),
             format_version,
             remarks,
-            state_table_info: v.state_table_info.info().clone(),
+            state_table_info: v
+                .state_table_info
+                .info()
+                .iter()
+                .map(|(id, info)| (*id, info.into()))
+                .collect(),
             rw_version: Some(RW_VERSION.to_owned()),
         }
     }
@@ -93,7 +94,6 @@ pub struct MetaSnapshotManifest {
     pub snapshot_metadata: Vec<MetaSnapshotMetadata>,
 }
 
-// Code is copied from storage crate. TODO #6482: extract method.
 pub fn xxhash64_checksum(data: &[u8]) -> u64 {
     let mut hasher = twox_hash::XxHash64::with_seed(0);
     hasher.write(data);
@@ -115,15 +115,14 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
     fn from(m: &MetaSnapshotMetadata) -> Self {
         Self {
             id: m.id,
-            hummock_version_id: m.hummock_version_id,
+            hummock_version_id: m.hummock_version_id.to_u64(),
             max_committed_epoch: m.max_committed_epoch,
-            safe_epoch: m.safe_epoch,
             format_version: Some(m.format_version),
             remarks: m.remarks.clone(),
             state_table_info: m
                 .state_table_info
                 .iter()
-                .map(|(t, i)| (t.table_id, i.clone()))
+                .map(|(t, i)| (t.table_id, i.into()))
                 .collect(),
             rw_version: m.rw_version.clone(),
         }
@@ -144,28 +143,30 @@ mod table_id_key_map {
     use std::str::FromStr;
 
     use risingwave_common::catalog::TableId;
-    use risingwave_pb::hummock::PbStateTableInfo;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+    use crate::StateTableInfo;
+
     pub fn serialize<S>(
-        map: &HashMap<TableId, PbStateTableInfo>,
+        map: &HashMap<TableId, StateTableInfo>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let map_as_str: HashMap<String, &PbStateTableInfo> =
+        let map_as_str: HashMap<String, &StateTableInfo> =
             map.iter().map(|(k, v)| (k.to_string(), v)).collect();
         map_as_str.serialize(serializer)
     }
 
     pub fn deserialize<'de, D>(
         deserializer: D,
-    ) -> Result<HashMap<TableId, PbStateTableInfo>, D::Error>
+    ) -> Result<HashMap<TableId, StateTableInfo>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let map_as_str: HashMap<String, PbStateTableInfo> = HashMap::deserialize(deserializer)?;
+        let map_as_str: HashMap<String, StateTableInfo> =
+            HashMap::deserialize(deserializer).unwrap_or_else(|_| HashMap::new());
         map_as_str
             .into_iter()
             .map(|(k, v)| {

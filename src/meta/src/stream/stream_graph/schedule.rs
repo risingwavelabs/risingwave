@@ -25,7 +25,7 @@ use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{ActorMapping, VirtualNode, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::{bail, hash};
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::{
@@ -151,6 +151,16 @@ impl Distribution {
         }
     }
 
+    /// Get the vnode count of the distribution.
+    ///
+    /// For backwards compatibility, [`VirtualNode::COUNT_FOR_COMPAT`] is used for singleton.
+    pub fn vnode_count(&self) -> usize {
+        match self {
+            Distribution::Singleton(_) => VirtualNode::COUNT_FOR_COMPAT,
+            Distribution::Hash(mapping) => mapping.len(),
+        }
+    }
+
     /// Create a distribution from a persisted protobuf `Fragment`.
     pub fn from_fragment(
         fragment: &risingwave_pb::meta::table_fragments::Fragment,
@@ -214,6 +224,7 @@ impl Scheduler {
         streaming_job_id: u32,
         workers: &HashMap<u32, WorkerNode>,
         default_parallelism: NonZeroUsize,
+        expected_vnode_count: usize,
     ) -> MetaResult<Self> {
         // Group worker slots with worker node.
 
@@ -223,6 +234,11 @@ impl Scheduler {
             .collect();
 
         let parallelism = default_parallelism.get();
+        assert!(
+            parallelism <= expected_vnode_count,
+            "parallelism should be limited by vnode count in previous steps"
+        );
+
         let scheduled = schedule_units_for_slots(&slots, parallelism, streaming_job_id)?;
 
         let scheduled_worker_slots = scheduled
@@ -235,7 +251,8 @@ impl Scheduler {
         assert_eq!(scheduled_worker_slots.len(), parallelism);
 
         // Build the default hash mapping uniformly.
-        let default_hash_mapping = WorkerSlotMapping::build_from_ids(&scheduled_worker_slots);
+        let default_hash_mapping =
+            WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, expected_vnode_count);
 
         let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
         let default_single_worker_id = single_scheduled.keys().exactly_one().cloned().unwrap();

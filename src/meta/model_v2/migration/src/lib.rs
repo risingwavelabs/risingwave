@@ -18,6 +18,10 @@ mod m20240630_131430_remove_parallel_unit;
 mod m20240701_060504_hummock_time_travel;
 mod m20240702_080451_system_param_value;
 mod m20240702_084927_unnecessary_fk;
+mod m20240726_063833_auto_schema_change;
+mod m20240806_143329_add_rate_limit_to_source_catalog;
+mod m20240820_081248_add_time_travel_per_table_epoch;
+mod m20240911_083152_variable_vnode_count;
 
 pub struct Migrator;
 
@@ -34,13 +38,17 @@ impl MigratorTrait for Migrator {
             Box::new(m20240418_142249_function_runtime::Migration),
             Box::new(m20240506_112555_subscription_partial_ckpt::Migration),
             Box::new(m20240525_090457_secret::Migration),
-            Box::new(m20240618_072634_function_compressed_binary::Migration),
             Box::new(m20240617_070131_index_column_properties::Migration),
             Box::new(m20240617_071625_sink_into_table_column::Migration),
+            Box::new(m20240618_072634_function_compressed_binary::Migration),
             Box::new(m20240630_131430_remove_parallel_unit::Migration),
+            Box::new(m20240701_060504_hummock_time_travel::Migration),
             Box::new(m20240702_080451_system_param_value::Migration),
             Box::new(m20240702_084927_unnecessary_fk::Migration),
-            Box::new(m20240701_060504_hummock_time_travel::Migration),
+            Box::new(m20240726_063833_auto_schema_change::Migration),
+            Box::new(m20240806_143329_add_rate_limit_to_source_catalog::Migration),
+            Box::new(m20240820_081248_add_time_travel_per_table_epoch::Migration),
+            Box::new(m20240911_083152_variable_vnode_count::Migration),
         ]
     }
 }

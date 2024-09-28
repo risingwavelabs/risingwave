@@ -21,15 +21,13 @@ use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
 use itertools::Itertools;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
-use crate::cmd_impl::hummock::{
-    build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
-};
+use crate::cmd_impl::hummock::{build_compaction_config_vec, list_pinned_versions};
 use crate::cmd_impl::meta::EtcdBackend;
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
@@ -223,8 +221,6 @@ enum HummockCommands {
     },
     /// List pinned versions of each worker.
     ListPinnedVersions {},
-    /// List pinned snapshots of each worker.
-    ListPinnedSnapshots {},
     /// List all compaction groups.
     ListCompactionGroup,
     /// Update compaction config for compaction groups.
@@ -267,6 +263,8 @@ enum HummockCommands {
         compression_algorithm: Option<String>,
         #[clap(long)]
         max_l0_compact_level: Option<u32>,
+        #[clap(long)]
+        sst_allowed_trivial_move_min_size: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -274,6 +272,8 @@ enum HummockCommands {
         compaction_group_id: u64,
         #[clap(long, value_delimiter = ',')]
         table_ids: Vec<u32>,
+        #[clap(long, default_value_t = 0)]
+        partition_vnode_count: u32,
     },
     /// Pause version checkpoint, which subsequently pauses GC of delta log and SST object.
     PauseVersionCheckpoint,
@@ -337,6 +337,12 @@ enum HummockCommands {
         record_hybrid_remove_threshold_ms: Option<u32>,
         #[clap(long)]
         record_hybrid_fetch_threshold_ms: Option<u32>,
+    },
+    MergeCompactionGroup {
+        #[clap(long)]
+        left_group_id: u64,
+        #[clap(long)]
+        right_group_id: u64,
     },
 }
 
@@ -402,7 +408,10 @@ enum MetaCommands {
     /// get cluster info
     ClusterInfo,
     /// get source split info
-    SourceSplitInfo,
+    SourceSplitInfo {
+        #[clap(long)]
+        ignore_id: bool,
+    },
     /// Reschedule the actors in the stream graph
     ///
     /// The format is `fragment_id-[worker_id:count]+[worker_id:count]`
@@ -594,7 +603,12 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             start_id,
             num_epochs,
         }) => {
-            cmd_impl::hummock::list_version_deltas(context, start_id, num_epochs).await?;
+            cmd_impl::hummock::list_version_deltas(
+                context,
+                HummockVersionId::new(start_id),
+                num_epochs,
+            )
+            .await?;
         }
         Commands::Hummock(HummockCommands::ListKv {
             epoch,
@@ -636,9 +650,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::ListPinnedVersions {}) => {
             list_pinned_versions(context).await?
         }
-        Commands::Hummock(HummockCommands::ListPinnedSnapshots {}) => {
-            list_pinned_snapshots(context).await?
-        }
         Commands::Hummock(HummockCommands::ListCompactionGroup) => {
             cmd_impl::hummock::list_compaction_group(context).await?
         }
@@ -662,6 +673,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             compression_level,
             compression_algorithm,
             max_l0_compact_level,
+            sst_allowed_trivial_move_min_size,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -692,6 +704,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                         None
                     },
                     max_l0_compact_level,
+                    sst_allowed_trivial_move_min_size,
                 ),
             )
             .await?
@@ -699,9 +712,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::SplitCompactionGroup {
             compaction_group_id,
             table_ids,
+            partition_vnode_count,
         }) => {
-            cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
-                .await?;
+            cmd_impl::hummock::split_compaction_group(
+                context,
+                compaction_group_id,
+                &table_ids,
+                partition_vnode_count,
+            )
+            .await?;
         }
         Commands::Hummock(HummockCommands::PauseVersionCheckpoint) => {
             cmd_impl::hummock::pause_version_checkpoint(context).await?;
@@ -737,7 +756,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::print_version_delta_in_archive(
                 context,
-                archive_ids,
+                archive_ids.into_iter().map(HummockVersionId::new),
                 data_dir,
                 sst_id,
                 use_new_object_prefix_strategy,
@@ -752,7 +771,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::print_user_key_in_archive(
                 context,
-                archive_ids,
+                archive_ids.into_iter().map(HummockVersionId::new),
                 data_dir,
                 user_key,
                 use_new_object_prefix_strategy,
@@ -778,6 +797,13 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             )
             .await?
         }
+        Commands::Hummock(HummockCommands::MergeCompactionGroup {
+            left_group_id,
+            right_group_id,
+        }) => {
+            cmd_impl::hummock::merge_compaction_group(context, left_group_id, right_group_id)
+                .await?
+        }
         Commands::Table(TableCommands::Scan {
             mv_name,
             data_dir,
@@ -799,8 +825,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause(context).await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume(context).await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
-        Commands::Meta(MetaCommands::SourceSplitInfo) => {
-            cmd_impl::meta::source_split_info(context).await?
+        Commands::Meta(MetaCommands::SourceSplitInfo { ignore_id }) => {
+            cmd_impl::meta::source_split_info(context, ignore_id).await?
         }
         Commands::Meta(MetaCommands::Reschedule {
             from,

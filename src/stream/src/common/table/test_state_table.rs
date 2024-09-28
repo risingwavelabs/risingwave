@@ -27,12 +27,12 @@ use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::DEFAULT_VNODE;
+use risingwave_storage::table::SINGLETON_VNODE;
 
 use crate::common::table::state_table::{
     ReplicatedStateTable, StateTable, WatermarkCacheStateTable,
 };
-use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
+use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indices};
 
 #[tokio::test]
 async fn test_state_table_update_insert() {
@@ -48,7 +48,7 @@ async fn test_state_table_update_insert() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -241,7 +241,7 @@ async fn test_state_table_iter_with_prefix() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -376,7 +376,7 @@ async fn test_state_table_iter_with_pk_range() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -445,7 +445,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(OwnedRow::new(vec![Some(4_i32.into())])),
     );
     let iter = state_table
-        .iter_with_vnode(DEFAULT_VNODE, &pk_range, Default::default())
+        .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -470,7 +470,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state_table
-        .iter_with_vnode(DEFAULT_VNODE, &pk_range, Default::default())
+        .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -516,7 +516,7 @@ async fn test_mem_table_assertion() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -560,7 +560,7 @@ async fn test_state_table_iter_with_value_indices() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table_with_value_indices(
+    let table = gen_pbtable_with_value_indices(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -733,7 +733,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table_with_value_indices(
+    let table = gen_pbtable_with_value_indices(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -981,7 +981,7 @@ async fn test_state_table_write_chunk() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1113,7 +1113,7 @@ async fn test_state_table_write_chunk_visibility() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1239,7 +1239,7 @@ async fn test_state_table_write_chunk_value_indices() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table_with_value_indices(
+    let table = gen_pbtable_with_value_indices(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1338,7 +1338,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1399,7 +1399,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     assert_eq!(cache.len(), 0);
 
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
-    state_table.update_watermark(watermark, true);
+    state_table.update_watermark(watermark);
 
     epoch.inc_for_test();
     test_env
@@ -1464,7 +1464,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1486,7 +1486,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     assert_eq!(cache.len(), 0);
 
     let watermark = Timestamptz::from_secs(0).unwrap().to_scalar_value();
-    state_table.update_watermark(watermark, true);
+    state_table.update_watermark(watermark);
 
     epoch.inc_for_test();
     test_env
@@ -1598,7 +1598,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
 
     // Should not cleanup anything.
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
-    state_table.update_watermark(watermark, true);
+    state_table.update_watermark(watermark);
 
     epoch.inc_for_test();
     test_env
@@ -1639,7 +1639,7 @@ async fn test_state_table_watermark_cache_refill() {
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1701,7 +1701,7 @@ async fn test_state_table_watermark_cache_refill() {
     assert_eq!(cache.len(), 0);
 
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
-    state_table.update_watermark(watermark, true);
+    state_table.update_watermark(watermark);
 
     epoch.inc_for_test();
     test_env
@@ -1735,7 +1735,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 0;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1921,7 +1921,7 @@ async fn test_replicated_state_table_replication() {
     ];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -1976,11 +1976,11 @@ async fn test_replicated_state_table_replication() {
             std::ops::Bound::Included(OwnedRow::new(vec![Some(2_i32.into())])),
         );
         let iter = state_table
-            .iter_with_vnode(DEFAULT_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         let replicated_iter = replicated_state_table
-            .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode_and_output_indices(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         pin_mut!(iter);
@@ -2039,7 +2039,7 @@ async fn test_replicated_state_table_replication() {
         );
 
         let iter = state_table
-            .iter_with_vnode(DEFAULT_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
 
@@ -2048,7 +2048,7 @@ async fn test_replicated_state_table_replication() {
             std::ops::Bound::Unbounded,
         );
         let replicated_iter = replicated_state_table
-            .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode_and_output_indices(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         pin_mut!(iter);
@@ -2079,7 +2079,7 @@ async fn test_replicated_state_table_replication() {
         let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) =
             (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
         let replicated_iter = replicated_state_table
-            .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode_and_output_indices(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         pin_mut!(replicated_iter);

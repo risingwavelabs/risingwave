@@ -50,7 +50,7 @@
     create table t(x int);
     select sum(x) filter (where row_number() over () > 1) from t;
   binder_error: |
-    Failed to bind expression: sum(x) FILTER(WHERE row_number() OVER () > 1)
+    Failed to bind expression: sum(x) FILTER (WHERE row_number() OVER () > 1)
 
     Caused by:
       Invalid input syntax: window functions are not allowed in FILTER
@@ -62,7 +62,7 @@
     Failed to bind expression: lag(x)
 
     Caused by:
-      Invalid input syntax: Window function `lag` must have OVER clause
+      function lag(integer) does not exist, do you mean log
 - id: lag with empty over clause
   sql: |
     create table t(x int);

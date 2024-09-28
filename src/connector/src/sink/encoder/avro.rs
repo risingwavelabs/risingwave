@@ -146,9 +146,13 @@ impl SerTo<Vec<u8>> for AvroEncoded {
 }
 
 enum OptIdx {
+    /// `T`
     NotUnion,
+    /// `[T]`
     Single,
+    /// `[null, T]`
     NullLeft,
+    /// `[T, null]`
     NullRight,
 }
 
@@ -167,7 +171,9 @@ trait MaybeData: std::fmt::Debug {
 
     fn on_list(self, elem: &DataType, avro: &AvroSchema) -> Result<Self::Out>;
 
-    fn handle_union(out: Self::Out, opt_idx: OptIdx) -> Result<Self::Out>;
+    fn on_map(self, value_type: &DataType, avro_value_schema: &AvroSchema) -> Result<Self::Out>;
+
+    fn handle_nullable_union(out: Self::Out, opt_idx: OptIdx) -> Result<Self::Out>;
 }
 
 impl MaybeData for () {
@@ -182,10 +188,14 @@ impl MaybeData for () {
     }
 
     fn on_list(self, elem: &DataType, avro: &AvroSchema) -> Result<Self::Out> {
-        encode_field(elem, (), avro)
+        on_field(elem, (), avro)
     }
 
-    fn handle_union(out: Self::Out, _: OptIdx) -> Result<Self::Out> {
+    fn on_map(self, elem: &DataType, avro: &AvroSchema) -> Result<Self::Out> {
+        on_field(elem, (), avro)
+    }
+
+    fn handle_nullable_union(out: Self::Out, _: OptIdx) -> Result<Self::Out> {
         Ok(out)
     }
 }
@@ -214,14 +224,27 @@ impl MaybeData for DatumRef<'_> {
             Some(s) => s.into_list(),
             None => return Ok(Value::Null),
         };
-        let vs = d
-            .iter()
-            .map(|d| encode_field(elem, d, avro))
-            .try_collect()?;
+        let vs = d.iter().map(|d| on_field(elem, d, avro)).try_collect()?;
         Ok(Value::Array(vs))
     }
 
-    fn handle_union(out: Self::Out, opt_idx: OptIdx) -> Result<Self::Out> {
+    fn on_map(self, elem: &DataType, avro: &AvroSchema) -> Result<Self::Out> {
+        let d = match self {
+            Some(s) => s.into_map(),
+            None => return Ok(Value::Null),
+        };
+        let vs = d
+            .iter()
+            .map(|(k, v)| {
+                let k = k.into_utf8().to_string();
+                let v = on_field(elem, v, avro)?;
+                Ok((k, v))
+            })
+            .try_collect()?;
+        Ok(Value::Map(vs))
+    }
+
+    fn handle_nullable_union(out: Self::Out, opt_idx: OptIdx) -> Result<Self::Out> {
         use OptIdx::*;
 
         match out == Value::Null {
@@ -264,7 +287,7 @@ fn validate_fields<'rw>(
         };
         present[idx] = true;
         let avro_field = &fields[idx];
-        encode_field(t, (), &avro_field.schema).map_err(|e| e.with_name(name))?;
+        on_field(t, (), &avro_field.schema).map_err(|e| e.with_name(name))?;
     }
     for (p, avro_field) in present.into_iter().zip_eq_fast(fields) {
         if p {
@@ -292,7 +315,7 @@ fn encode_fields<'avro, 'rw>(
         let idx = lookup[name];
         present[idx] = true;
         let avro_field = &fields[idx];
-        let value = encode_field(t, d, &avro_field.schema).map_err(|e| e.with_name(name))?;
+        let value = on_field(t, d, &avro_field.schema).map_err(|e| e.with_name(name))?;
         record.put(name, value);
     }
     // Unfortunately, the upstream `apache_avro` does not handle missing fields as nullable correctly.
@@ -323,11 +346,7 @@ fn encode_fields<'avro, 'rw>(
 
 /// Handles both `validate` (without actual data) and `encode`.
 /// See [`MaybeData`] for more info.
-fn encode_field<D: MaybeData>(
-    data_type: &DataType,
-    maybe: D,
-    expected: &AvroSchema,
-) -> Result<D::Out> {
+fn on_field<D: MaybeData>(data_type: &DataType, maybe: D, expected: &AvroSchema) -> Result<D::Out> {
     use risingwave_common::types::Interval;
 
     let no_match_err = || {
@@ -397,6 +416,16 @@ fn encode_field<D: MaybeData>(
             AvroSchema::Array(avro_elem) => maybe.on_list(elem, avro_elem)?,
             _ => return no_match_err(),
         },
+        DataType::Map(m) => {
+            if *m.key() != DataType::Varchar {
+                return no_match_err();
+            }
+            match inner {
+                AvroSchema::Map(avro_value_type) => maybe.on_map(m.value(), avro_value_type)?,
+                _ => return no_match_err(),
+            }
+        }
+
         // Group B: match between RisingWave types and Avro logical types
         DataType::Timestamptz => match inner {
             AvroSchema::TimestampMicros => maybe.on_base(|s| {
@@ -456,32 +485,128 @@ fn encode_field<D: MaybeData>(
         }
     };
 
-    D::handle_union(value, opt_idx)
+    D::handle_nullable_union(value, opt_idx)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::str::FromStr;
+
+    use expect_test::expect;
+    use itertools::Itertools;
+    use risingwave_common::array::{ArrayBuilder, MapArrayBuilder};
     use risingwave_common::catalog::Field;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{
-        Date, Datum, Interval, ListValue, ScalarImpl, StructValue, Time, Timestamptz, ToDatumRef,
+        Date, Datum, Interval, ListValue, MapType, MapValue, Scalar, ScalarImpl, StructValue, Time,
+        Timestamptz, ToDatumRef,
     };
 
     use super::*;
 
-    fn test_ok(t: &DataType, d: Datum, avro: &str, expected: Value) {
-        let avro_schema = AvroSchema::parse_str(avro).unwrap();
-        let actual = encode_field(t, d.to_datum_ref(), &avro_schema).unwrap();
+    #[track_caller]
+    fn test_ok(rw_type: &DataType, rw_datum: Datum, avro_type: &str, expected: Value) {
+        let avro_schema = AvroSchema::parse_str(avro_type).unwrap();
+        let actual = on_field(rw_type, rw_datum.to_datum_ref(), &avro_schema).unwrap();
         assert_eq!(actual, expected);
     }
 
+    #[track_caller]
     fn test_err<D: MaybeData>(t: &DataType, d: D, avro: &str, expected: &str)
     where
         D::Out: std::fmt::Debug,
     {
         let avro_schema = AvroSchema::parse_str(avro).unwrap();
-        let err = encode_field(t, d, &avro_schema).unwrap_err();
+        let err = on_field(t, d, &avro_schema).unwrap_err();
         assert_eq!(err.to_string(), expected);
+    }
+
+    #[track_caller]
+    fn test_v2(rw_type: &str, rw_scalar: &str, avro_type: &str, expected: expect_test::Expect) {
+        let avro_schema = AvroSchema::parse_str(avro_type).unwrap();
+        let rw_type = DataType::from_str(rw_type).unwrap();
+        let rw_datum = ScalarImpl::from_text_for_test(rw_scalar, &rw_type).unwrap();
+
+        if let Err(validate_err) = on_field(&rw_type, (), &avro_schema) {
+            expected.assert_debug_eq(&validate_err);
+            return;
+        }
+        let actual = on_field(&rw_type, Some(rw_datum).to_datum_ref(), &avro_schema);
+        match actual {
+            Ok(v) => expected.assert_eq(&print_avro_value(&v)),
+            Err(e) => expected.assert_debug_eq(&e),
+        }
+    }
+
+    fn print_avro_value(v: &Value) -> String {
+        match v {
+            Value::Map(m) => {
+                let mut res = "Map({".to_string();
+                for (k, v) in m.iter().sorted_by_key(|x| x.0) {
+                    res.push_str(&format!("{}: {}, ", k, print_avro_value(v)));
+                }
+                res.push_str("})");
+                res
+            }
+            _ => format!("{v:?}"),
+        }
+    }
+
+    #[test]
+    fn test_encode_v2() {
+        test_v2(
+            "boolean",
+            "false",
+            r#""int""#,
+            expect![[r#"
+                FieldEncodeError {
+                    message: "cannot encode boolean column as \"int\" field",
+                    rev_path: [],
+                }
+            "#]],
+        );
+        test_v2("boolean", "true", r#""boolean""#, expect!["Boolean(true)"]);
+
+        test_v2(
+            "map(varchar,varchar)",
+            "{1:1,2:2,3:3}",
+            r#"{"type": "map","values": "string"}"#,
+            expect![[r#"Map({1: String("1"), 2: String("2"), 3: String("3"), })"#]],
+        );
+
+        test_v2(
+            "map(varchar,varchar)",
+            "{1:1,2:NULL,3:3}",
+            r#"{"type": "map","values": "string"}"#,
+            expect![[r#"
+                FieldEncodeError {
+                    message: "found null but required",
+                    rev_path: [],
+                }
+            "#]],
+        );
+
+        test_v2(
+            "map(varchar,varchar)",
+            "{1:1,2:NULL,3:3}",
+            r#"{"type": "map","values": ["null", "string"]}"#,
+            expect![[
+                r#"Map({1: Union(1, String("1")), 2: Union(0, Null), 3: Union(1, String("3")), })"#
+            ]],
+        );
+
+        test_v2(
+            "map(int,varchar)",
+            "{1:1,2:NULL,3:3}",
+            r#"{"type": "map","values": ["null", "string"]}"#,
+            expect![[r#"
+                FieldEncodeError {
+                    message: "cannot encode map(integer,character varying) column as {\"type\":\"map\",\"values\":[\"null\",\"string\"]} field",
+                    rev_path: [],
+                }
+            "#]],
+        );
     }
 
     #[test]
@@ -588,7 +713,59 @@ mod tests {
                 apache_avro::Days::new(2),
                 apache_avro::Millis::new(1000),
             )),
-        )
+        );
+
+        let mut inner_map_array_builder = MapArrayBuilder::with_type(
+            2,
+            DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Int32)),
+        );
+        inner_map_array_builder.append(Some(
+            MapValue::try_from_kv(
+                ListValue::from_iter(["a", "b"]),
+                ListValue::from_iter([1, 2]),
+            )
+            .unwrap()
+            .as_scalar_ref(),
+        ));
+        inner_map_array_builder.append(Some(
+            MapValue::try_from_kv(
+                ListValue::from_iter(["c", "d"]),
+                ListValue::from_iter([3, 4]),
+            )
+            .unwrap()
+            .as_scalar_ref(),
+        ));
+        let inner_map_array = inner_map_array_builder.finish();
+        test_ok(
+            &DataType::Map(MapType::from_kv(
+                DataType::Varchar,
+                DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Int32)),
+            )),
+            Some(ScalarImpl::Map(
+                MapValue::try_from_kv(
+                    ListValue::from_iter(["k1", "k2"]),
+                    ListValue::new(inner_map_array.into()),
+                )
+                .unwrap(),
+            )),
+            r#"{"type": "map","values": {"type": "map","values": "int"}}"#,
+            Value::Map(HashMap::from_iter([
+                (
+                    "k1".into(),
+                    Value::Map(HashMap::from_iter([
+                        ("a".into(), Value::Int(1)),
+                        ("b".into(), Value::Int(2)),
+                    ])),
+                ),
+                (
+                    "k2".into(),
+                    Value::Map(HashMap::from_iter([
+                        ("c".into(), Value::Int(3)),
+                        ("d".into(), Value::Int(4)),
+                    ])),
+                ),
+            ])),
+        );
     }
 
     #[test]
@@ -648,7 +825,7 @@ mod tests {
                     }
                 ]
             }"#,
-            "encode q error: avro name ref unsupported yet",
+            "encode 'q' error: avro name ref unsupported yet",
         );
 
         test_err(
@@ -659,7 +836,7 @@ mod tests {
                 i64::MAX,
             ))),
             r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
-            "encode  error: -1 mons -1 days +2562047788:00:54.775807 overflows avro duration",
+            "encode '' error: -1 mons -1 days +2562047788:00:54.775807 overflows avro duration",
         );
 
         let avro_schema = AvroSchema::parse_str(
@@ -734,7 +911,7 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            "Encode error: encode req error: field not present but required"
+            "Encode error: encode 'req' error: field not present but required"
         );
 
         let schema = Schema::new(vec![
@@ -747,7 +924,7 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            "Encode error: encode extra error: field not in avro"
+            "Encode error: encode 'extra' error: field not in avro"
         );
 
         let avro_schema = AvroSchema::parse_str(r#"["null", "long"]"#).unwrap();
@@ -757,14 +934,14 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            r#"Encode error: encode  error: expect avro record but got ["null","long"]"#
+            r#"Encode error: encode '' error: expect avro record but got ["null","long"]"#
         );
 
         test_err(
             &DataType::Struct(StructType::new(vec![("f0", DataType::Boolean)])),
             (),
             r#"{"type": "record", "name": "T", "fields": [{"name": "f0", "type": "int"}]}"#,
-            "encode f0 error: cannot encode boolean column as \"int\" field",
+            "encode 'f0' error: cannot encode boolean column as \"int\" field",
         );
     }
 
@@ -786,7 +963,7 @@ mod tests {
             &DataType::List(DataType::Int32.into()),
             Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))).to_datum_ref(),
             avro_schema,
-            "encode  error: found null but required",
+            "encode '' error: found null but required",
         );
 
         test_ok(
@@ -825,7 +1002,7 @@ mod tests {
             &DataType::List(DataType::Boolean.into()),
             (),
             r#"{"type": "array", "items": "int"}"#,
-            "encode  error: cannot encode boolean column as \"int\" field",
+            "encode '' error: cannot encode boolean column as \"int\" field",
         );
     }
 
@@ -859,14 +1036,14 @@ mod tests {
             t,
             datum.to_datum_ref(),
             both,
-            r#"encode  error: cannot encode timestamp with time zone column as [{"type":"long","logicalType":"timestamp-millis"},{"type":"long","logicalType":"timestamp-micros"}] field"#,
+            r#"encode '' error: cannot encode timestamp with time zone column as [{"type":"long","logicalType":"timestamp-millis"},{"type":"long","logicalType":"timestamp-micros"}] field"#,
         );
 
         test_err(
             t,
             datum.to_datum_ref(),
             empty,
-            "encode  error: cannot encode timestamp with time zone column as [] field",
+            "encode '' error: cannot encode timestamp with time zone column as [] field",
         );
 
         test_ok(
@@ -875,7 +1052,7 @@ mod tests {
             one,
             Value::Union(0, Value::TimestampMillis(1).into()),
         );
-        test_err(t, None, one, "encode  error: found null but required");
+        test_err(t, None, one, "encode '' error: found null but required");
 
         test_ok(
             t,

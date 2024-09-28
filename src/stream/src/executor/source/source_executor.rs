@@ -20,10 +20,12 @@ use either::Either;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
+use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -31,9 +33,10 @@ use risingwave_connector::source::{
     SplitMetaData, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
@@ -44,7 +47,7 @@ use super::{
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::{AddMutation, UpdateMutation};
+use crate::executor::UpdateMutation;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -103,6 +106,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let wait_checkpoint_worker = WaitCheckpointWorker {
             wait_checkpoint_rx,
             state_store: core.split_state_store.state_table.state_store().clone(),
+            table_id: core.split_state_store.state_table.table_id().into(),
         };
         tokio::spawn(wait_checkpoint_worker.run());
         Ok(Some(WaitCheckpointTaskBuilder {
@@ -122,6 +126,46 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+
+        let (schema_change_tx, mut schema_change_rx) =
+            tokio::sync::mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
+        let schema_change_tx = if self.is_auto_schema_change_enable() {
+            let meta_client = self.actor_ctx.meta_client.clone();
+            // spawn a task to handle schema change event from source parser
+            let _join_handle = tokio::task::spawn(async move {
+                while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
+                    let table_ids = schema_change.table_ids();
+                    tracing::info!(
+                        target: "auto_schema_change",
+                        "recv a schema change event for tables: {:?}", table_ids);
+                    // TODO: retry on rpc error
+                    if let Some(ref meta_client) = meta_client {
+                        match meta_client
+                            .auto_schema_change(schema_change.to_protobuf())
+                            .await
+                        {
+                            Ok(_) => {
+                                tracing::info!(
+                                    target: "auto_schema_change",
+                                    "schema change success for tables: {:?}", table_ids);
+                                finish_tx.send(()).unwrap();
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    target: "auto_schema_change",
+                                    error = ?e.as_report(), "schema change error");
+                                finish_tx.send(()).unwrap();
+                            }
+                        }
+                    }
+                }
+            });
+            Some(schema_change_tx)
+        } else {
+            info!("auto schema change is disabled in config");
+            None
+        };
+
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
@@ -137,6 +181,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
+            schema_change_tx,
         );
         let stream = source_desc
             .source
@@ -145,6 +190,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error);
 
         Ok(apply_rate_limit(stream?, self.rate_limit_rps).boxed())
+    }
+
+    fn is_auto_schema_change_enable(&self) -> bool {
+        self.actor_ctx
+            .streaming_config
+            .developer
+            .enable_auto_schema_change
     }
 
     /// `source_id | source_name | actor_id | fragment_id`
@@ -396,22 +448,9 @@ impl<S: StateStore> SourceExecutor<S> {
         };
 
         let mut boot_state = Vec::default();
-        if let Some(
-            Mutation::Add(AddMutation { splits, .. })
-            | Mutation::Update(UpdateMutation {
-                actor_splits: splits,
-                ..
-            }),
-        ) = barrier.mutation.as_deref()
-        {
-            if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                tracing::debug!(
-                    "source exector: actor {:?} boot with splits: {:?}",
-                    self.actor_ctx.id,
-                    splits
-                );
-                boot_state.clone_from(splits);
-            }
+        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+            tracing::debug!(?splits, "boot with splits");
+            boot_state = splits.to_vec();
         }
 
         core.split_state_store.init_epoch(barrier.epoch);
@@ -784,6 +823,7 @@ impl WaitCheckpointTaskBuilder {
 struct WaitCheckpointWorker<S: StateStore> {
     wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
     state_store: S,
+    table_id: TableId,
 }
 
 impl<S: StateStore> WaitCheckpointWorker<S> {
@@ -796,7 +836,12 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                     tracing::debug!("start to wait epoch {}", epoch.0);
                     let ret = self
                         .state_store
-                        .try_wait_epoch(HummockReadEpoch::Committed(epoch.0))
+                        .try_wait_epoch(
+                            HummockReadEpoch::Committed(epoch.0),
+                            TryWaitEpochOptions {
+                                table_id: self.table_id,
+                            },
+                        )
                         .await;
 
                     match ret {
@@ -840,6 +885,7 @@ mod tests {
 
     use super::*;
     use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
+    use crate::executor::AddMutation;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 
@@ -909,6 +955,7 @@ mod tests {
                     ],
                 },
                 pause: false,
+                subscriptions_to_add: vec![],
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -998,6 +1045,7 @@ mod tests {
                     ],
                 },
                 pause: false,
+                subscriptions_to_add: vec![],
             }));
         barrier_tx.send(init_barrier).unwrap();
 

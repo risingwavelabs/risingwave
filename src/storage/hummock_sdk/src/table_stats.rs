@@ -29,6 +29,10 @@ pub struct TableStats {
     pub total_key_size: i64,
     pub total_value_size: i64,
     pub total_key_count: i64,
+
+    // `total_compressed_size`` represents the size that the table takes up in the output sst
+    //  and this field is only filled and used by CN flushes, not compactor compaction
+    pub total_compressed_size: u64,
 }
 
 impl From<&TableStats> for PbTableStats {
@@ -37,6 +41,7 @@ impl From<&TableStats> for PbTableStats {
             total_key_size: value.total_key_size,
             total_value_size: value.total_value_size,
             total_key_count: value.total_key_count,
+            total_compressed_size: value.total_compressed_size,
         }
     }
 }
@@ -53,6 +58,7 @@ impl From<&PbTableStats> for TableStats {
             total_key_size: value.total_key_size,
             total_value_size: value.total_value_size,
             total_key_count: value.total_key_count,
+            total_compressed_size: value.total_compressed_size,
         }
     }
 }
@@ -62,6 +68,7 @@ impl TableStats {
         self.total_key_size += other.total_key_size;
         self.total_value_size += other.total_value_size;
         self.total_key_count += other.total_key_count;
+        self.total_compressed_size += other.total_compressed_size;
     }
 }
 
@@ -69,6 +76,7 @@ pub fn add_prost_table_stats(this: &mut PbTableStats, other: &PbTableStats) {
     this.total_key_size += other.total_key_size;
     this.total_value_size += other.total_value_size;
     this.total_key_count += other.total_key_count;
+    this.total_compressed_size += other.total_compressed_size;
 }
 
 pub fn add_prost_table_stats_map(this: &mut PbTableStatsMap, other: &PbTableStatsMap) {

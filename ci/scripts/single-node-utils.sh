@@ -5,6 +5,7 @@ set -euo pipefail
 export RW_PREFIX=$PWD/.risingwave
 export PREFIX_BIN=./target/debug
 export PREFIX_LOG=$RW_PREFIX/log
+export PREFIX_CONFIG=$RW_PREFIX/config
 export RISEDEV=1 # as if we are running in RiseDev
 
 # You can fill up this section by consulting
@@ -18,7 +19,7 @@ start_single_node() {
 }
 
 stop_single_node() {
-  pkill risingwave
+  killall --wait risingwave
   rm -rf "$HOME/.risingwave/state_store"
   rm -rf "$HOME/.risingwave/meta_store"
 }
@@ -46,7 +47,6 @@ wait_single_node() {
 
 restart_single_node() {
   stop_single_node
-  sleep 5
   start_single_node "$PREFIX_LOG"/single-node-restarted.log &
   wait_single_node
 }

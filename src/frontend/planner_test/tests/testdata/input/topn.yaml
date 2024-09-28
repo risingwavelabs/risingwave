@@ -16,3 +16,28 @@
     SELECT * FROM t1_mv ORDER BY a DESC LIMIT 50 OFFSET 50;
   expected_outputs:
     - batch_plan
+- sql: |
+    WITH c1(k, v) AS (
+        VALUES
+            (1, 'foo'),
+            (2, 'bar')
+    ),
+    c2 AS (
+        SELECT
+            *,
+            row_number() over (
+                PARTITION by k
+                ORDER BY 1
+            ) AS rn
+        FROM
+            c1
+    )
+    SELECT
+        count(*)
+    FROM
+        c2
+    WHERE
+        rn <= 1;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch

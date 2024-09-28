@@ -254,7 +254,7 @@ impl DynamicLevelSelectorCore {
                 })
                 .map(|level| level.total_file_size)
                 .sum::<u64>()
-                - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
+                .saturating_sub(handlers[0].get_pending_output_file_size(ctx.base_level as u32));
             let base_level_size = levels.get_level(ctx.base_level).total_file_size;
             let base_level_sst_count = levels.get_level(ctx.base_level).table_infos.len() as u64;
 
@@ -528,7 +528,7 @@ pub mod tests {
         levels.levels[3].total_file_size = levels.levels[3]
             .table_infos
             .iter()
-            .map(|sst| sst.file_size)
+            .map(|sst| sst.sst_size)
             .sum::<u64>();
 
         let ctx = selector.calculate_level_base_size(&levels);
@@ -555,7 +555,7 @@ pub mod tests {
         levels.levels[0].total_file_size = levels.levels[0]
             .table_infos
             .iter()
-            .map(|sst| sst.file_size)
+            .map(|sst| sst.sst_size)
             .sum::<u64>();
 
         let ctx = selector.calculate_level_base_size(&levels);

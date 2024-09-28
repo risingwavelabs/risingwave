@@ -367,7 +367,27 @@ steps:
     timeout_in_minutes: 80
     retry: *auto-retry
 
-  - label: "recovery test (madsim)"
+  # sql backend recovery tests
+  - label: "recovery test (sql,madsim)"
+    key: "recovery-test-deterministic-sql"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 USE_SQL_BACKEND=true timeout 65m ci/scripts/deterministic-recovery-test.sh"
+    # NOTE(kwannoel): It will only run when the recovery tests label is added currently.
+    # This is because there are currently some bugs which cause the test to fail.
+    if: |
+      build.pull_request.labels includes "ci/run-sql-recovery-test-deterministic-simulation"
+      || build.env("CI_STEPS") =~ /(^|,)sql-recovery-tests?-deterministic-simulation(,|$$)/
+    depends_on: "build-simulation"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      # Only upload zipped files, otherwise the logs is too much.
+      - ./ci/plugins/upload-failure-logs-zipped
+    timeout_in_minutes: 70
+    retry: *auto-retry
+
+  - label: "recovery test (etcd,madsim)"
     key: "recovery-test-deterministic"
     command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 65m ci/scripts/deterministic-recovery-test.sh"
     if: |
@@ -386,9 +406,9 @@ steps:
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
-  - label: "background_ddl, arrangement_backfill recovery test (madsim)"
+  - label: "background_ddl, arrangement_backfill recovery test (etcd,madsim)"
     key: "background-ddl-arrangement-backfill-recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=--use-arrangement-backfill timeout 65m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 65m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -464,7 +484,7 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "S3_v2 source check on AWS (json parser)"
+  - label: "S3 source check on AWS (json parser)"
     key: "s3-v2-source-check-aws-json-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2.py -t json"
     if: |
@@ -486,7 +506,7 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source new file check on AWS (json)"
+  - label: "S3 source new file check on AWS (json)"
     key: "s3-v2-source-new-file-check-aws"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2_new_file.py"
     if: |
@@ -508,9 +528,9 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source check on parquet file"
-    key: "s3-v2-source-check-parquet-file"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_parquet_source.py"
+  - label: "S3 source and sink on parquet file"
+    key: "s3-source-and-sink-parquet-encode"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_parquet_source_and_sink.py"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
@@ -530,7 +550,7 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source batch read on AWS (json parser)"
+  - label: "S3 source batch read on AWS (json parser)"
     key: "s3-v2-source-batch-read-check-aws-json-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_batch.py -t json"
     if: |
@@ -552,7 +572,7 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source check on AWS (csv parser)"
+  - label: "S3 source check on AWS (csv parser)"
     key: "s3-v2-source-check-aws-csv-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2.py -t csv_without_header"
     if: |
@@ -692,6 +712,8 @@ steps:
           run: source-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+          environment:
+            - BUILDKITE_BRANCH
       - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
@@ -743,7 +765,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 24
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "e2e standalone binary test"
@@ -881,25 +903,24 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-# FIXME(xxhZs): https://github.com/risingwavelabs/risingwave/issues/17855
-#  - label: "end-to-end cassandra sink test"
-#    key: "e2e-cassandra-sink-tests"
-#    command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-release"
-#    if: |
-#      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-#      || build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests"
-#      || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
-#    depends_on:
-#      - "build"
-#      - "build-other"
-#    plugins:
-#      - docker-compose#v5.1.0:
-#          run: sink-test-env
-#          config: ci/docker-compose.yml
-#          mount-buildkite-agent: true
-#      - ./ci/plugins/upload-failure-logs
-#    timeout_in_minutes: 10
-#    retry: *auto-retry
+  - label: "end-to-end cassandra sink test"
+    key: "e2e-cassandra-sink-tests"
+    command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end clickhouse sink test"
     key: "e2e-clickhouse-sink-tests"
@@ -1040,6 +1061,26 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "release amd64 (dry-run)"
+    command: "SKIP_RELEASE=1 ci/scripts/release.sh"
+    if: |
+      build.pull_request.labels includes "ci/run-release-dry-run" || build.env("CI_STEPS") =~ /(^|,)release-dry-run(,|$$)/
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v5.1.0:
+          run: release-env-x86
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
+            - BUILDKITE_TAG
+            - BUILDKITE_SOURCE
+    timeout_in_minutes: 60
+    retry: *auto-retry
+
   - label: "release amd64"
     command: "ci/scripts/release.sh"
     if: build.tag != null
@@ -1056,6 +1097,28 @@ steps:
             - GITHUB_TOKEN
             - BUILDKITE_TAG
             - BUILDKITE_SOURCE
+    timeout_in_minutes: 60
+    retry: *auto-retry
+
+  - label: "release aarch64 (dry-run)"
+    command: "SKIP_RELEASE=1 ci/scripts/release.sh"
+    if: |
+      build.pull_request.labels includes "ci/run-release-dry-run" || build.env("CI_STEPS") =~ /(^|,)release-dry-run(,|$$)/
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v5.1.0:
+          run: release-env-arm
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
+            - BUILDKITE_TAG
+            - BUILDKITE_SOURCE
+    agents:
+      queue: "linux-arm64"
     timeout_in_minutes: 60
     retry: *auto-retry
 

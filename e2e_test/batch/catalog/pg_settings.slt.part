@@ -22,6 +22,7 @@ user backfill_rate_limit
 user background_ddl
 user batch_enable_distributed_dml
 user batch_parallelism
+user bypass_cluster_limits
 user bytea_output
 user cdc_source_wait_streaming_start_timeout
 user client_encoding
@@ -57,8 +58,10 @@ user sink_decouple
 user source_rate_limit
 user standard_conforming_strings
 user statement_timeout
+user streaming_max_parallelism
 user streaming_parallelism
 user streaming_use_arrangement_backfill
+user streaming_use_snapshot_backfill
 user synchronize_seqscans
 user timezone
 user transaction_isolation

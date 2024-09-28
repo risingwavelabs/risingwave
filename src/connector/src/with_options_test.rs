@@ -20,40 +20,42 @@ use itertools::Itertools;
 use quote::ToTokens;
 use serde::Serialize;
 use syn::{parse_file, Attribute, Field, Item, ItemFn, Lit, Meta, MetaNameValue, NestedMeta, Type};
+use walkdir::{DirEntry, WalkDir};
 
 fn connector_crate_path() -> PathBuf {
     let connector_crate_path = env::var("CARGO_MANIFEST_DIR").unwrap();
     Path::new(&connector_crate_path).to_path_buf()
 }
 
-fn source_mod_path() -> PathBuf {
-    connector_crate_path().join("src").join("source")
-}
-
-fn sink_mod_path() -> PathBuf {
-    connector_crate_path().join("src").join("sink")
-}
-
-fn common_mod_path() -> PathBuf {
-    connector_crate_path()
-        .join("src")
-        .join("connector_common")
-        .join("common.rs")
-}
-
-fn mqtt_common_mod_path() -> PathBuf {
-    connector_crate_path()
-        .join("src")
-        .join("connector_common")
-        .join("mqtt_common.rs")
+fn common_files() -> impl IntoIterator<Item = walkdir::Result<DirEntry>> {
+    WalkDir::new(
+        connector_crate_path()
+            .join("src")
+            .join("connector_common")
+            .join("common.rs"),
+    )
+    .into_iter()
+    .chain(WalkDir::new(
+        connector_crate_path()
+            .join("src")
+            .join("connector_common")
+            .join("mqtt_common.rs"),
+    ))
+    .chain(WalkDir::new(
+        connector_crate_path()
+            .join("src")
+            .join("connector_common")
+            .join("iceberg")
+            .join("mod.rs"),
+    ))
 }
 
 pub fn generate_with_options_yaml_source() -> String {
-    generate_with_options_yaml_inner(&source_mod_path())
+    generate_with_options_yaml_inner(&connector_crate_path().join("src").join("source"))
 }
 
 pub fn generate_with_options_yaml_sink() -> String {
-    generate_with_options_yaml_inner(&sink_mod_path())
+    generate_with_options_yaml_inner(&connector_crate_path().join("src").join("sink"))
 }
 
 /// Collect all structs with `#[derive(WithOptions)]` in the `.rs` files in `path` (plus `common.rs`),
@@ -72,8 +74,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
     // Recursively list all the .rs files
     for entry in walkdir::WalkDir::new(path)
         .into_iter()
-        .chain(walkdir::WalkDir::new(common_mod_path()))
-        .chain(walkdir::WalkDir::new(mqtt_common_mod_path()))
+        .chain(common_files())
     {
         let entry = entry.expect("Failed to read directory entry");
         if entry.path().extension() == Some("rs".as_ref()) {
@@ -170,7 +171,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
 
     // Generate the output
     format!(
-        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n\n{}",
+        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n# UPDATE WITH: ./risedev generate-with-options\n\n{}",
         serde_yaml::to_string(&struct_infos).unwrap()
     )
 }
@@ -238,14 +239,14 @@ fn extract_comments(attrs: &[Attribute]) -> String {
             if let Ok(Meta::NameValue(mnv)) = attr.parse_meta() {
                 if mnv.path.is_ident("doc") {
                     if let syn::Lit::Str(lit_str) = mnv.lit {
-                        return Some(lit_str.value());
+                        return Some(lit_str.value().trim().to_string());
                     }
                 }
             }
             None
         })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join("\n")
         .trim()
         .to_string()
 }

@@ -33,6 +33,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::{bail, current_cluster_version, ensure};
+use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
@@ -139,6 +140,7 @@ use self::utils::{
 use crate::controller::rename::{
     alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
 };
+use crate::controller::utils::extract_external_table_name_from_definition;
 use crate::manager::catalog::utils::{refcnt_dec_connection, refcnt_inc_connection};
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -219,7 +221,7 @@ impl CatalogManagerCore {
             .or_else(|| {
                 if self
                     .database
-                    .in_progress_creation_streaming_job
+                    .in_progress_creating_streaming_job
                     .contains_key(&job.id())
                 {
                     Some(false)
@@ -249,6 +251,9 @@ impl CatalogManagerCore {
         {
             let _ = tx.send(Err(err.clone()));
         }
+        // Clear in progress creation streaming job. Note that background job is not tracked here, so that
+        // it won't affect background jobs.
+        self.database.in_progress_creating_streaming_job.clear();
     }
 }
 
@@ -265,6 +270,7 @@ impl CatalogManager {
         self.init_database().await?;
         self.source_backward_compat_check().await?;
         self.table_sink_catalog_update().await?;
+        self.table_catalog_cdc_table_id_update().await?;
         Ok(())
     }
 
@@ -350,6 +356,47 @@ impl CatalogManager {
         }
         commit_meta!(self, sinks)?;
 
+        Ok(())
+    }
+
+    // Fill in the `cdc_table_id` that wasn't written in the previous version for the table.
+    async fn table_catalog_cdc_table_id_update(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let sources = BTreeMapTransaction::new(&mut core.database.sources);
+        let mut tables = BTreeMapTransaction::new(&mut core.database.tables);
+        let legacy_tables = tables
+            .tree_ref()
+            .iter()
+            .filter(|(_, table)| {
+                if let Some(rel_id) = table.dependent_relations.first()
+                    && sources.contains_key(rel_id)
+                    && table.table_type == TableType::Table as i32
+                    && table.cdc_table_id.is_none()
+                {
+                    true
+                } else {
+                    false
+                }
+            })
+            .map(|(_, table)| table.clone())
+            .collect_vec();
+        for mut table in legacy_tables {
+            let source_id = table.dependent_relations[0];
+            match extract_external_table_name_from_definition(&table.definition) {
+                None => {
+                    tracing::warn!(
+                        table_id = table.id,
+                        definition = table.definition,
+                        "failed to extract cdc table name from table definition.",
+                    )
+                }
+                Some(external_table_name) => {
+                    table.cdc_table_id = Some(build_cdc_table_id(source_id, &external_table_name));
+                }
+            }
+            tables.insert(table.id, table);
+        }
+        commit_meta!(self, tables)?;
         Ok(())
     }
 }
@@ -578,19 +625,20 @@ impl CatalogManager {
                 .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
-            let catalog_deleted_ids = tables_to_drop
+            let streaming_job_deleted_ids = tables_to_drop
                 .into_iter()
                 .filter(|table| valid_table_name(&table.name))
                 .map(|table| StreamingJobId::new(table.id))
+                .chain(sources_to_drop.iter().filter_map(|source| {
+                    source
+                        .info
+                        .as_ref()
+                        .and_then(|info| info.is_shared().then(|| StreamingJobId::new(source.id)))
+                }))
                 .chain(
                     sinks_to_drop
                         .into_iter()
                         .map(|sink| StreamingJobId::new(sink.id)),
-                )
-                .chain(
-                    subscriptions_to_drop
-                        .into_iter()
-                        .map(|subscription| StreamingJobId::new(subscription.id)),
                 )
                 .collect_vec();
             let source_deleted_ids = sources_to_drop
@@ -600,7 +648,7 @@ impl CatalogManager {
 
             Ok((
                 version,
-                catalog_deleted_ids,
+                streaming_job_deleted_ids,
                 source_deleted_ids,
                 connections_dropped,
             ))
@@ -1009,7 +1057,7 @@ impl CatalogManager {
         database_core.check_relation_name_duplicated(&key)?;
 
         if database_core.has_in_progress_creation(&key) {
-            bail!("table is in creating procedure");
+            bail!("The table is being created");
         } else {
             database_core.mark_creating(&key);
             database_core.mark_creating_streaming_job(table.id, key);
@@ -1388,7 +1436,7 @@ impl CatalogManager {
         );
         database_core.in_progress_creation_tracker.remove(&key);
         database_core
-            .in_progress_creation_streaming_job
+            .in_progress_creating_streaming_job
             .remove(&table.id);
 
         table.stream_job_status = PbStreamJobStatus::Created.into();
@@ -1763,15 +1811,11 @@ impl CatalogManager {
                     all_table_ids.extend(index_table_ids.iter().cloned());
 
                     for index_table_id in &index_table_ids {
-                        let internal_table_ids = match fragment_manager
+                        let internal_table_ids = fragment_manager
                             .select_table_fragments_by_table_id(&(index_table_id.into()))
                             .await
                             .map(|fragments| fragments.internal_table_ids())
-                        {
-                            Ok(v) => v,
-                            // Handle backwards compat with no state persistence.
-                            Err(_) => vec![],
-                        };
+                            .unwrap_or_default();
 
                         // 1 should be used by table scan.
                         if internal_table_ids.len() == 1 {
@@ -1853,15 +1897,11 @@ impl CatalogManager {
                     }
                     all_table_ids.insert(index.index_table_id);
 
-                    let internal_table_ids = match fragment_manager
+                    let internal_table_ids = fragment_manager
                         .select_table_fragments_by_table_id(&(index.index_table_id.into()))
                         .await
                         .map(|fragments| fragments.internal_table_ids())
-                    {
-                        Ok(v) => v,
-                        // Handle backwards compat with no state persistence.
-                        Err(_) => vec![],
-                    };
+                        .unwrap_or_default();
 
                     // 1 should be used by table scan.
                     if internal_table_ids.len() == 1 {
@@ -2592,7 +2632,7 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+    pub async fn alter_source(&self, source: Source) -> MetaResult<NotificationVersion> {
         let source_id = source.get_id();
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -3326,7 +3366,7 @@ impl CatalogManager {
             .in_progress_creation_tracker
             .remove(&mview_key);
         database_core
-            .in_progress_creation_streaming_job
+            .in_progress_creating_streaming_job
             .remove(&mview.id);
 
         sources.insert(source.id, source.clone());
@@ -3461,7 +3501,7 @@ impl CatalogManager {
 
         database_core.in_progress_creation_tracker.remove(&key);
         database_core
-            .in_progress_creation_streaming_job
+            .in_progress_creating_streaming_job
             .remove(&table.id);
 
         index.stream_job_status = PbStreamJobStatus::Created.into();
@@ -3547,7 +3587,7 @@ impl CatalogManager {
 
         database_core.in_progress_creation_tracker.remove(&key);
         database_core
-            .in_progress_creation_streaming_job
+            .in_progress_creating_streaming_job
             .remove(&sink.id);
 
         sink.stream_job_status = PbStreamJobStatus::Created.into();
@@ -3666,7 +3706,7 @@ impl CatalogManager {
 
         database_core.in_progress_creation_tracker.remove(&key);
         database_core
-            .in_progress_creation_streaming_job
+            .in_progress_creating_streaming_job
             .remove(&subscription.id);
 
         subscription.subscription_state = PbSubscriptionState::Created.into();
@@ -4116,6 +4156,14 @@ impl CatalogManager {
             .get_table_name_and_type_mapping()
     }
 
+    pub async fn get_table_by_cdc_table_id(&self, cdc_table_id: &String) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .get_table_by_cdc_table_id(cdc_table_id)
+    }
+
     /// `list_stream_job_ids` returns all running and creating stream job ids, this is for recovery
     /// clean up progress.
     pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<TableId>> {
@@ -4167,6 +4215,14 @@ impl CatalogManager {
                         referenced_object_id: *incoming_sinks,
                     });
                 }
+            }
+        }
+        for view in core.views.values() {
+            for referenced in &view.dependent_relations {
+                dependencies.push(PbObjectDependencies {
+                    object_id: view.id,
+                    referenced_object_id: *referenced,
+                });
             }
         }
         for sink in core.sinks.values() {
@@ -4843,5 +4899,56 @@ impl CatalogManager {
             }
         }
         users_need_update
+    }
+
+    pub async fn update_source_rate_limit_by_source_id(
+        &self,
+        source_id: SourceId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<()> {
+        let source_relation: PbSource;
+        {
+            let core = &mut *self.core.lock().await;
+            let database_core = &mut core.database;
+            let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+            let mut source = sources.get_mut(source_id);
+            let Some(source_catalog) = source.as_mut() else {
+                bail!("source {} not found", source_id)
+            };
+            source_relation = source_catalog.clone();
+            source_catalog.rate_limit = rate_limit;
+            commit_meta!(self, sources)?;
+        }
+
+        let _version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Source(source_relation).into(),
+                    }],
+                }),
+            )
+            .await;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::manager::catalog::extract_external_table_name_from_definition;
+
+    #[test]
+    fn test_extract_cdc_table_name() {
+        let ddl1 = "CREATE TABLE t1 () FROM pg_source TABLE 'public.t1'";
+        let ddl2 = "CREATE TABLE t2 (v1 int) FROM pg_source TABLE 'mydb.t2'";
+        assert_eq!(
+            extract_external_table_name_from_definition(ddl1),
+            Some("public.t1".into())
+        );
+        assert_eq!(
+            extract_external_table_name_from_definition(ddl2),
+            Some("mydb.t2".into())
+        );
     }
 }

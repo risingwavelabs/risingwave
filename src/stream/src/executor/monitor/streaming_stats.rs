@@ -23,8 +23,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounter,
-    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec,
-    RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
+    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec, MetricVecRelabelExt,
+    RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -32,7 +32,6 @@ use risingwave_common::{
     register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_connector::sink::SinkMetrics;
 
 use crate::common::log_store_impl::kv_log_store::{
     REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
@@ -45,7 +44,7 @@ pub struct StreamingMetrics {
     pub level: MetricLevel,
 
     // Executor metrics (disabled by default)
-    pub executor_row_count: LabelGuardedIntCounterVec<3>,
+    pub executor_row_count: RelabeledGuardedIntCounterVec<3>,
 
     // Streaming actor metrics from tokio (disabled by default)
     actor_execution_time: LabelGuardedGaugeVec<1>,
@@ -61,10 +60,11 @@ pub struct StreamingMetrics {
     actor_idle_cnt: LabelGuardedIntGaugeVec<1>,
 
     // Streaming actor
+    pub actor_count: LabelGuardedIntGaugeVec<1>,
     #[expect(dead_code)]
     actor_memory_usage: LabelGuardedIntGaugeVec<2>,
-    actor_in_record_cnt: LabelGuardedIntCounterVec<3>,
-    pub actor_out_record_cnt: LabelGuardedIntCounterVec<2>,
+    actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
+    pub actor_out_record_cnt: RelabeledGuardedIntCounterVec<2>,
 
     // Source
     pub source_output_row_count: LabelGuardedIntCounterVec<4>,
@@ -83,7 +83,7 @@ pub struct StreamingMetrics {
     pub merge_barrier_align_duration: RelabeledGuardedHistogramVec<2>,
 
     // Backpressure
-    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
+    pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec<3>,
     actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
 
     // Streaming Join
@@ -137,6 +137,9 @@ pub struct StreamingMetrics {
     cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
     cdc_backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
 
+    // Snapshot Backfill
+    pub(crate) snapshot_backfill_consume_row_count: LabelGuardedIntCounterVec<3>,
+
     // Over Window
     over_window_cached_entry_count: LabelGuardedIntGaugeVec<3>,
     over_window_cache_lookup_count: LabelGuardedIntCounterVec<3>,
@@ -155,16 +158,6 @@ pub struct StreamingMetrics {
     /// The progress made by the earliest in-flight barriers in the local barrier manager.
     pub barrier_manager_progress: IntCounter,
 
-    // Sink related metrics
-    sink_commit_duration: LabelGuardedHistogramVec<4>,
-    connector_sink_rows_received: LabelGuardedIntCounterVec<3>,
-    log_store_first_write_epoch: LabelGuardedIntGaugeVec<4>,
-    log_store_latest_write_epoch: LabelGuardedIntGaugeVec<4>,
-    log_store_write_rows: LabelGuardedIntCounterVec<4>,
-    log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
-    log_store_read_rows: LabelGuardedIntCounterVec<4>,
-    log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
-
     pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<4>,
     pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<4>,
     pub kv_log_store_rewind_count: LabelGuardedIntCounterVec<4>,
@@ -175,13 +168,6 @@ pub struct StreamingMetrics {
     pub kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec<4>,
     pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<4>,
     pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<4>,
-
-    // Sink iceberg metrics
-    iceberg_write_qps: LabelGuardedIntCounterVec<3>,
-    iceberg_write_latency: LabelGuardedHistogramVec<3>,
-    iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
-    iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
-    iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
 
     // Memory management
     pub lru_runtime_loop_count: IntCounter,
@@ -194,12 +180,12 @@ pub struct StreamingMetrics {
     pub jemalloc_metadata_bytes: IntGauge,
     pub jvm_allocated_bytes: IntGauge,
     pub jvm_active_bytes: IntGauge,
-    pub stream_memory_usage: LabelGuardedIntGaugeVec<3>,
+    pub stream_memory_usage: RelabeledGuardedIntGaugeVec<3>,
 
     // Materialized view
-    materialize_cache_hit_count: LabelGuardedIntCounterVec<3>,
-    materialize_cache_total_count: LabelGuardedIntCounterVec<3>,
-    materialize_input_row_count: LabelGuardedIntCounterVec<3>,
+    materialize_cache_hit_count: RelabeledGuardedIntCounterVec<3>,
+    materialize_cache_total_count: RelabeledGuardedIntCounterVec<3>,
+    materialize_input_row_count: RelabeledGuardedIntCounterVec<3>,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -218,7 +204,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id", "executor_identity"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
         let source_output_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
@@ -255,10 +242,11 @@ impl StreamingMetrics {
         let materialize_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_mview_input_row_count",
             "Total number of rows streamed into materialize executors",
-            &["table_id", "actor_id", "fragment_id"],
+            &["actor_id", "table_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
         let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_sink_chunk_buffer_size",
@@ -283,7 +271,9 @@ impl StreamingMetrics {
                 &["actor_id", "fragment_id", "downstream_fragment_id"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            // mask the first label `actor_id` if the level is less verbose than `Debug`
+            .relabel_debug_1(level);
 
         let actor_input_buffer_blocking_duration_ns =
             register_guarded_int_counter_vec_with_registry!(
@@ -388,7 +378,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id", "upstream_fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
         let actor_out_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_out_record_cnt",
@@ -396,8 +387,18 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id"],
             registry
         )
+        .unwrap()
+        .relabel_debug_1(level);
+
+        let actor_count = register_guarded_int_gauge_vec_with_registry!(
+            "stream_actor_count",
+            "Total number of actors (parallelism)",
+            &["fragment_id"],
+            registry
+        )
         .unwrap();
 
+        // dead code
         let actor_memory_usage = register_guarded_int_gauge_vec_with_registry!(
             "actor_memory_usage",
             "Memory usage (bytes)",
@@ -416,15 +417,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
-
-        let merge_barrier_align_duration =
-            RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
-                MetricLevel::Debug,
-                merge_barrier_align_duration,
-                level,
-                1,
-            );
+        .unwrap()
+        .relabel_debug_1(level);
 
         let join_lookup_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
@@ -472,14 +466,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id", "wait_side", "executor"],
             registry
         )
-        .unwrap();
-
-        let barrier_align_duration = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
-            MetricLevel::Debug,
-            barrier_align_duration,
-            level,
-            1,
-        );
+        .unwrap()
+        .relabel_debug_1(level);
 
         let join_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_join_cached_entry_count",
@@ -500,14 +488,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id", "table_id"],
             registry
         )
-        .unwrap();
-
-        let join_matched_join_keys = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
-            MetricLevel::Debug,
-            join_matched_join_keys,
-            level,
-            1,
-        );
+        .unwrap()
+        .relabel_debug_1(level);
 
         let agg_lookup_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_agg_lookup_miss_count",
@@ -722,6 +704,14 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let snapshot_backfill_consume_row_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_snapshot_backfill_consume_snapshot_row_count",
+            "Total number of rows that have been output from snapshot backfill",
+            &["table_id", "actor_id", "stage"],
+            registry
+        )
+        .unwrap();
+
         let over_window_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_over_window_cached_entry_count",
             "Total entry (partition) count in over window executor cache",
@@ -800,71 +790,6 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
-
-        let sink_commit_duration = register_guarded_histogram_vec_with_registry!(
-            "sink_commit_duration",
-            "Duration of commit op in sink",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let connector_sink_rows_received = register_guarded_int_counter_vec_with_registry!(
-            "connector_sink_rows_received",
-            "Number of rows received by sink",
-            &["connector_type", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_first_write_epoch = register_guarded_int_gauge_vec_with_registry!(
-            "log_store_first_write_epoch",
-            "The first write epoch of log store",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_latest_write_epoch = register_guarded_int_gauge_vec_with_registry!(
-            "log_store_latest_write_epoch",
-            "The latest write epoch of log store",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_write_rows = register_guarded_int_counter_vec_with_registry!(
-            "log_store_write_rows",
-            "The write rate of rows",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_latest_read_epoch = register_guarded_int_gauge_vec_with_registry!(
-            "log_store_latest_read_epoch",
-            "The latest read epoch of log store",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_read_rows = register_guarded_int_counter_vec_with_registry!(
-            "log_store_read_rows",
-            "The read rate of rows",
-            &["actor_id", "connector", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let log_store_reader_wait_new_future_duration_ns =
-            register_guarded_int_counter_vec_with_registry!(
-                "log_store_reader_wait_new_future_duration_ns",
-                "Accumulated duration of LogReader to wait for next call to create future",
-                &["actor_id", "connector", "sink_id", "sink_name"],
-                registry
-            )
-            .unwrap();
 
         let kv_log_store_storage_write_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_count",
@@ -1040,66 +965,29 @@ impl StreamingMetrics {
         let materialize_cache_hit_count = register_guarded_int_counter_vec_with_registry!(
             "stream_materialize_cache_hit_count",
             "Materialize executor cache hit count",
-            &["table_id", "actor_id", "fragment_id"],
+            &["actor_id", "table_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
         let materialize_cache_total_count = register_guarded_int_counter_vec_with_registry!(
             "stream_materialize_cache_total_count",
             "Materialize executor cache total operation",
-            &["table_id", "actor_id", "fragment_id"],
+            &["actor_id", "table_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
         let stream_memory_usage = register_guarded_int_gauge_vec_with_registry!(
             "stream_memory_usage",
             "Memory usage for stream executors",
-            &["table_id", "actor_id", "desc"],
+            &["actor_id", "table_id", "desc"],
             registry
         )
-        .unwrap();
-
-        let iceberg_write_qps = register_guarded_int_counter_vec_with_registry!(
-            "iceberg_write_qps",
-            "The qps of iceberg writer",
-            &["actor_id", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let iceberg_write_latency = register_guarded_histogram_vec_with_registry!(
-            "iceberg_write_latency",
-            "The latency of iceberg writer",
-            &["actor_id", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let iceberg_rolling_unflushed_data_file = register_guarded_int_gauge_vec_with_registry!(
-            "iceberg_rolling_unflushed_data_file",
-            "The unflushed data file count of iceberg rolling writer",
-            &["actor_id", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let iceberg_position_delete_cache_num = register_guarded_int_gauge_vec_with_registry!(
-            "iceberg_position_delete_cache_num",
-            "The delete cache num of iceberg position delete writer",
-            &["actor_id", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
-
-        let iceberg_partition_num = register_guarded_int_gauge_vec_with_registry!(
-            "iceberg_partition_num",
-            "The partition num of iceberg partition writer",
-            &["actor_id", "sink_id", "sink_name"],
-            registry
-        )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
         Self {
             level,
@@ -1115,6 +1003,7 @@ impl StreamingMetrics {
             actor_poll_cnt,
             actor_idle_duration,
             actor_idle_cnt,
+            actor_count,
             actor_memory_usage,
             actor_in_record_cnt,
             actor_out_record_cnt,
@@ -1161,6 +1050,7 @@ impl StreamingMetrics {
             backfill_upstream_output_row_count,
             cdc_backfill_snapshot_read_row_count,
             cdc_backfill_upstream_output_row_count,
+            snapshot_backfill_consume_row_count,
             over_window_cached_entry_count,
             over_window_cache_lookup_count,
             over_window_cache_miss_count,
@@ -1171,14 +1061,6 @@ impl StreamingMetrics {
             barrier_inflight_latency,
             barrier_sync_latency,
             barrier_manager_progress,
-            sink_commit_duration,
-            connector_sink_rows_received,
-            log_store_first_write_epoch,
-            log_store_latest_write_epoch,
-            log_store_write_rows,
-            log_store_latest_read_epoch,
-            log_store_read_rows,
-            log_store_reader_wait_new_future_duration_ns,
             kv_log_store_storage_write_count,
             kv_log_store_storage_write_size,
             kv_log_store_rewind_count,
@@ -1189,11 +1071,6 @@ impl StreamingMetrics {
             kv_log_store_buffer_unconsumed_row_count,
             kv_log_store_buffer_unconsumed_epoch_count,
             kv_log_store_buffer_unconsumed_min_epoch,
-            iceberg_write_qps,
-            iceberg_write_latency,
-            iceberg_rolling_unflushed_data_file,
-            iceberg_position_delete_cache_num,
-            iceberg_partition_num,
             lru_runtime_loop_count,
             lru_latest_sequence,
             lru_watermark_sequence,
@@ -1214,78 +1091,6 @@ impl StreamingMetrics {
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         global_streaming_metrics(MetricLevel::Disabled)
-    }
-
-    pub fn new_sink_metrics(
-        &self,
-        actor_id_str: &str,
-        sink_id_str: &str,
-        sink_name: &str,
-        connector: &str,
-    ) -> SinkMetrics {
-        let label_list = [actor_id_str, connector, sink_id_str, sink_name];
-        let sink_commit_duration_metrics = self
-            .sink_commit_duration
-            .with_guarded_label_values(&label_list);
-
-        let connector_sink_rows_received = self
-            .connector_sink_rows_received
-            .with_guarded_label_values(&[connector, sink_id_str, sink_name]);
-
-        let log_store_latest_read_epoch = self
-            .log_store_latest_read_epoch
-            .with_guarded_label_values(&label_list);
-
-        let log_store_latest_write_epoch = self
-            .log_store_latest_write_epoch
-            .with_guarded_label_values(&label_list);
-
-        let log_store_first_write_epoch = self
-            .log_store_first_write_epoch
-            .with_guarded_label_values(&label_list);
-
-        let log_store_write_rows = self
-            .log_store_write_rows
-            .with_guarded_label_values(&label_list);
-        let log_store_read_rows = self
-            .log_store_read_rows
-            .with_guarded_label_values(&label_list);
-        let log_store_reader_wait_new_future_duration_ns = self
-            .log_store_reader_wait_new_future_duration_ns
-            .with_guarded_label_values(&label_list);
-
-        let label_list = [actor_id_str, sink_id_str, sink_name];
-        let iceberg_write_qps = self
-            .iceberg_write_qps
-            .with_guarded_label_values(&label_list);
-        let iceberg_write_latency = self
-            .iceberg_write_latency
-            .with_guarded_label_values(&label_list);
-        let iceberg_rolling_unflushed_data_file = self
-            .iceberg_rolling_unflushed_data_file
-            .with_guarded_label_values(&label_list);
-        let iceberg_position_delete_cache_num = self
-            .iceberg_position_delete_cache_num
-            .with_guarded_label_values(&label_list);
-        let iceberg_partition_num = self
-            .iceberg_partition_num
-            .with_guarded_label_values(&label_list);
-
-        SinkMetrics {
-            sink_commit_duration_metrics,
-            connector_sink_rows_received,
-            log_store_first_write_epoch,
-            log_store_latest_write_epoch,
-            log_store_write_rows,
-            log_store_latest_read_epoch,
-            log_store_read_rows,
-            log_store_reader_wait_new_future_duration_ns,
-            iceberg_write_qps,
-            iceberg_write_latency,
-            iceberg_rolling_unflushed_data_file,
-            iceberg_position_delete_cache_num,
-            iceberg_partition_num,
-        }
     }
 
     pub fn new_actor_metrics(&self, actor_id: ActorId) -> ActorMetrics {
@@ -1610,8 +1415,8 @@ impl StreamingMetrics {
         fragment_id: FragmentId,
     ) -> MaterializeMetrics {
         let label_list: &[&str; 3] = &[
-            &table_id.to_string(),
             &actor_id.to_string(),
+            &table_id.to_string(),
             &fragment_id.to_string(),
         ];
         MaterializeMetrics {

@@ -161,13 +161,16 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 }
             };
             if !inited {
-                bail!("failed to start cdc connector");
+                bail!("failed to start cdc connector.\nHINT: increase `cdc_source_wait_streaming_start_timeout` session variable to a large value and retry.");
             }
         }
         tracing::info!(?source_id, "cdc connector started");
 
         let instance = match T::source_type() {
-            CdcSourceType::Mysql | CdcSourceType::Postgres | CdcSourceType::Mongodb => Self {
+            CdcSourceType::Mysql
+            | CdcSourceType::Postgres
+            | CdcSourceType::Mongodb
+            | CdcSourceType::SqlServer => Self {
                 source_id: split.split_id() as u64,
                 start_offset: split.start_offset().clone(),
                 server_addr: None,
@@ -210,15 +213,15 @@ impl<T: CdcSourceTypeTrait> CdcSplitReader<T> {
         let mut rx = self.rx;
         let source_id = self.source_id.to_string();
         let metrics = self.source_ctx.metrics.clone();
+        let connector_source_rows_received_metrics = metrics
+            .connector_source_rows_received
+            .with_guarded_label_values(&[source_type.as_str_name(), &source_id]);
 
         while let Some(result) = rx.recv().await {
             match result {
                 Ok(GetEventStreamResponse { events, .. }) => {
                     tracing::trace!("receive {} cdc events ", events.len());
-                    metrics
-                        .connector_source_rows_received
-                        .with_guarded_label_values(&[source_type.as_str_name(), &source_id])
-                        .inc_by(events.len() as u64);
+                    connector_source_rows_received_metrics.inc_by(events.len() as u64);
                     let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
                     yield msgs;
                 }

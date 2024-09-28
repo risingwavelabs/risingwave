@@ -50,7 +50,10 @@ public class HummockReadDemo {
             HummockVersion version = metaClient.pinVersion();
             Table tableCatalog = metaClient.getTable(dbName, tableName);
 
-            int vnodeCount = Binding.vnodeCount();
+            int vnodeCount = Binding.defaultVnodeCount();
+            if (tableCatalog.hasMaybeVnodeCount()) {
+                vnodeCount = tableCatalog.getMaybeVnodeCount();
+            }
 
             List<Integer> vnodeList = new ArrayList<>();
             for (int i = 0; i < vnodeCount; i++) {
