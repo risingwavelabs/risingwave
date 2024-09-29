@@ -310,11 +310,11 @@ impl ReplayWorker {
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
                 local_storage.init(options).await.unwrap();
             }
-            Operation::TryWaitEpoch(epoch) => {
+            Operation::TryWaitEpoch(epoch, options) => {
                 assert_eq!(storage_type, StorageType::Global);
                 let res = res_rx.recv().await.expect("recv result failed");
                 if let OperationResult::TryWaitEpoch(expected) = res {
-                    let actual = replay.try_wait_epoch(epoch.into()).await;
+                    let actual = replay.try_wait_epoch(epoch.into(), options).await;
                     assert_eq!(TraceResult::from(actual), expected, "try_wait_epoch wrong");
                 } else {
                     panic!(

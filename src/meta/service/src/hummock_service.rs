@@ -146,11 +146,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(
-                HummockVersionId::new(req.start_id),
-                req.num_limit,
-                req.committed_epoch_limit,
-            )
+            .list_version_deltas(HummockVersionId::new(req.start_id), req.num_limit)
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(PbHummockVersionDeltas {
@@ -249,17 +245,6 @@ impl HummockManagerService for HummockServiceImpl {
         }))
     }
 
-    async fn get_epoch(
-        &self,
-        _request: Request<GetEpochRequest>,
-    ) -> Result<Response<GetEpochResponse>, Status> {
-        let hummock_snapshot = self.hummock_manager.latest_snapshot();
-        Ok(Response::new(GetEpochResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
-        }))
-    }
-
     async fn report_full_scan_task(
         &self,
         request: Request<ReportFullScanTaskRequest>,
@@ -277,7 +262,10 @@ impl HummockManagerService for HummockServiceImpl {
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {
-            match hummock_manager.complete_full_gc(req.object_ids).await {
+            match hummock_manager
+                .complete_full_gc(req.object_ids, req.next_start_after)
+                .await
+            {
                 Ok(number) => {
                     tracing::info!("Full GC results {} SSTs to delete", number);
                 }

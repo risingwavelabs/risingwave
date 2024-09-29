@@ -13,40 +13,42 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::monitor::HummockStateStoreMetrics;
 
 pub struct RecentVersions {
     latest_version: PinnedVersion,
     is_latest_committed: bool,
     recent_versions: Vec<PinnedVersion>, // earlier version at the front
     max_version_num: usize,
+    metric: Arc<HummockStateStoreMetrics>,
 }
 
 impl RecentVersions {
-    pub fn new(version: PinnedVersion, max_version_num: usize) -> Self {
+    pub fn new(
+        version: PinnedVersion,
+        max_version_num: usize,
+        metric: Arc<HummockStateStoreMetrics>,
+    ) -> Self {
         assert!(max_version_num > 0);
         Self {
             latest_version: version,
             is_latest_committed: true, // The first version is always treated as committed epochs
             recent_versions: Vec::new(),
             max_version_num,
+            metric,
         }
     }
 
     fn has_table_committed(&self, new_version: &PinnedVersion) -> bool {
         let mut has_table_committed = false;
-        for (table_id, info) in new_version.version().state_table_info.info() {
-            if let Some(prev_info) = self
-                .latest_version
-                .version()
-                .state_table_info
-                .info()
-                .get(table_id)
-            {
+        for (table_id, info) in new_version.state_table_info.info() {
+            if let Some(prev_info) = self.latest_version.state_table_info.info().get(table_id) {
                 match info.committed_epoch.cmp(&prev_info.committed_epoch) {
                     Ordering::Less => {
                         unreachable!(
@@ -68,7 +70,7 @@ impl RecentVersions {
 
     #[must_use]
     pub fn with_new_version(&self, version: PinnedVersion) -> Self {
-        assert!(version.version().id > self.latest_version.version().id);
+        assert!(version.id > self.latest_version.id);
         let is_committed = self.has_table_committed(&version);
         let recent_versions = if self.is_latest_committed {
             let prev_recent_versions = if self.recent_versions.len() >= self.max_version_num {
@@ -89,6 +91,7 @@ impl RecentVersions {
             is_latest_committed: is_committed,
             recent_versions,
             max_version_num: self.max_version_num,
+            metric: self.metric.clone(),
         }
     }
 
@@ -104,12 +107,7 @@ impl RecentVersions {
         table_id: TableId,
         epoch: HummockEpoch,
     ) -> Option<PinnedVersion> {
-        if let Some(info) = self
-            .latest_version
-            .version()
-            .state_table_info
-            .info()
-            .get(&table_id)
+        let result = if let Some(info) = self.latest_version.state_table_info.info().get(&table_id)
         {
             if info.committed_epoch <= epoch {
                 Some(self.latest_version.clone())
@@ -118,7 +116,13 @@ impl RecentVersions {
             }
         } else {
             None
+        };
+        if result.is_some() {
+            self.metric.safe_version_hit.inc();
+        } else {
+            self.metric.safe_version_miss.inc();
         }
+        result
     }
 
     fn get_safe_version_from_recent(
@@ -131,7 +135,6 @@ impl RecentVersions {
                 epoch
                     < self
                         .latest_version
-                        .version()
                         .state_table_info
                         .info()
                         .get(&table_id)
@@ -140,12 +143,7 @@ impl RecentVersions {
             );
         }
         let result = self.recent_versions.binary_search_by(|version| {
-            let committed_epoch = version
-                .version()
-                .state_table_info
-                .info()
-                .get(&table_id)
-                .map(|info| info.committed_epoch);
+            let committed_epoch = version.table_committed_epoch(table_id);
             if let Some(committed_epoch) = committed_epoch {
                 committed_epoch.cmp(&epoch)
             } else {
@@ -169,12 +167,7 @@ impl RecentVersions {
                     self.recent_versions.get(index - 1).cloned()
                 };
                 version.and_then(|version| {
-                    if version
-                        .version()
-                        .state_table_info
-                        .info()
-                        .contains_key(&table_id)
-                    {
+                    if version.state_table_info.info().contains_key(&table_id) {
                         Some(version)
                     } else {
                         // if the table does not exist in the version, return `None` to try get a time travel version
@@ -197,6 +190,7 @@ mod tests {
 
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::local_version::recent_versions::RecentVersions;
+    use crate::monitor::HummockStateStoreMetrics;
 
     const TEST_TABLE_ID1: TableId = TableId::new(233);
     const TEST_TABLE_ID2: TableId = TableId::new(234);
@@ -251,7 +245,11 @@ mod tests {
         let epoch4 = epoch3 + 1;
         let version1 = gen_pin_version(1, [(TEST_TABLE_ID1, epoch1)]);
         // with at most 2 historical versions
-        let recent_versions = RecentVersions::new(version1.clone(), 2);
+        let recent_versions = RecentVersions::new(
+            version1.clone(),
+            2,
+            HummockStateStoreMetrics::unused().into(),
+        );
         assert!(recent_versions.recent_versions.is_empty());
         assert!(recent_versions.is_latest_committed);
         assert_query_equal(

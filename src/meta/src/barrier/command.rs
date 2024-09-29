@@ -22,7 +22,6 @@ use risingwave_common::hash::ActorMapping;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
-use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
@@ -442,6 +441,8 @@ pub struct CommandContext {
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
 
+    pub table_ids_to_commit: HashSet<TableId>,
+
     pub current_paused_reason: Option<PausedReason>,
 
     pub command: Command,
@@ -470,12 +471,12 @@ impl std::fmt::Debug for CommandContext {
 }
 
 impl CommandContext {
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         node_map: HashMap<WorkerId, PbWorkerNode>,
         subscription_info: InflightSubscriptionInfo,
         prev_epoch: TracedEpoch,
         curr_epoch: TracedEpoch,
+        table_ids_to_commit: HashSet<TableId>,
         current_paused_reason: Option<PausedReason>,
         command: Command,
         kind: BarrierKind,
@@ -487,6 +488,7 @@ impl CommandContext {
             subscription_info,
             prev_epoch,
             curr_epoch,
+            table_ids_to_commit,
             current_paused_reason,
             command,
             kind,
@@ -945,7 +947,13 @@ impl Command {
 }
 
 impl CommandContext {
-    pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
+    pub async fn wait_epoch_commit(&self) -> MetaResult<()> {
+        let table_id = self.table_ids_to_commit.iter().next().cloned();
+        // try wait epoch on an existing random table id
+        let Some(table_id) = table_id else {
+            // no need to wait epoch when there is no table id
+            return Ok(());
+        };
         let futures = self.node_map.values().map(|worker_node| async {
             let client = self
                 .barrier_manager_context
@@ -953,7 +961,10 @@ impl CommandContext {
                 .stream_client_pool()
                 .get(worker_node)
                 .await?;
-            let request = WaitEpochCommitRequest { epoch };
+            let request = WaitEpochCommitRequest {
+                epoch: self.prev_epoch.value().0,
+                table_id: table_id.table_id,
+            };
             client.wait_epoch_commit(request).await
         });
 
@@ -976,7 +987,7 @@ impl CommandContext {
                     // storage version with this epoch is synced to all compute nodes before the
                     // execution of the next command of `Update`, as some newly created operators
                     // may immediately initialize their states on that barrier.
-                    self.wait_epoch_commit(self.prev_epoch.value().0).await?;
+                    self.wait_epoch_commit().await?;
                 }
             }
 

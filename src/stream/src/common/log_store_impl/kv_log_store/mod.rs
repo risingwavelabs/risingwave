@@ -455,6 +455,7 @@ mod tests {
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::HummockStorage;
+    use risingwave_storage::store::TryWaitEpochOptions;
     use risingwave_storage::StateStore;
 
     use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
@@ -506,8 +507,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -616,8 +616,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -685,7 +684,10 @@ mod tests {
             .unwrap();
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch2),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -806,8 +808,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -901,7 +902,10 @@ mod tests {
         test_env.commit_epoch(epoch2).await;
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch2),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -1035,8 +1039,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -1137,7 +1140,10 @@ mod tests {
         test_env.commit_epoch(epoch2).await;
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch2),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -1230,8 +1236,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -1370,8 +1375,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -1401,7 +1405,10 @@ mod tests {
 
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch3))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch3),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -1707,8 +1714,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage

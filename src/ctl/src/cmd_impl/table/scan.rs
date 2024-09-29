@@ -127,7 +127,14 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
     let read_epoch = hummock
         .inner()
         .get_pinned_version()
-        .visible_table_committed_epoch();
+        .table_committed_epoch(table.id);
+    let Some(read_epoch) = read_epoch else {
+        println!(
+            "table {} with id {} not exist in the latest version",
+            table.name, table.id
+        );
+        return Ok(());
+    };
     let storage_table = make_storage_table(hummock, &table)?;
     let stream = storage_table
         .batch_iter(

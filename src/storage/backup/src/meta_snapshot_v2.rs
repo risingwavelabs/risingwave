@@ -127,9 +127,9 @@ impl Display for MetadataV2 {
         writeln!(f, "clusters: {:#?}", self.clusters)?;
         writeln!(
             f,
-            "Hummock version: id {}, max_committed_epoch: {}",
+            "Hummock version: id {}, committed_epoch: {:?}",
             self.hummock_version.id,
-            self.hummock_version.visible_table_committed_epoch()
+            self.hummock_version.state_table_info.info(),
         )?;
         // optionally dump other metadata
         Ok(())

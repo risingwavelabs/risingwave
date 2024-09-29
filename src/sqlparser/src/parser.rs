@@ -2793,9 +2793,11 @@ impl Parser<'_> {
 
     pub fn parse_handle_conflict_behavior(&mut self) -> PResult<Option<OnConflict>> {
         if self.parse_keyword(Keyword::OVERWRITE) {
-            Ok(Some(OnConflict::OverWrite))
+            // compatible with v1.9 - v2.0
+            Ok(Some(OnConflict::UpdateFull))
         } else if self.parse_keyword(Keyword::IGNORE) {
-            Ok(Some(OnConflict::Ignore))
+            // compatible with v1.9 - v2.0
+            Ok(Some(OnConflict::Nothing))
         } else if self.parse_keywords(&[
             Keyword::DO,
             Keyword::UPDATE,
@@ -2803,7 +2805,11 @@ impl Parser<'_> {
             Keyword::NOT,
             Keyword::NULL,
         ]) {
-            Ok(Some(OnConflict::DoUpdateIfNotNull))
+            Ok(Some(OnConflict::UpdateIfNotNull))
+        } else if self.parse_keywords(&[Keyword::DO, Keyword::UPDATE, Keyword::FULL]) {
+            Ok(Some(OnConflict::UpdateFull))
+        } else if self.parse_keywords(&[Keyword::DO, Keyword::NOTHING]) {
+            Ok(Some(OnConflict::Nothing))
         } else {
             Ok(None)
         }

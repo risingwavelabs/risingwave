@@ -74,6 +74,7 @@ use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
@@ -996,6 +997,15 @@ impl MetaClient {
         Ok(resp.states)
     }
 
+    pub async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
+        let resp = self
+            .inner
+            .list_actor_splits(ListActorSplitsRequest {})
+            .await?;
+
+        Ok(resp.actor_splits)
+    }
+
     pub async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
         let resp = self
             .inner
@@ -1510,12 +1520,6 @@ impl HummockMetaClient for MetaClient {
         ))
     }
 
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        let req = GetEpochRequest {};
-        let resp = self.inner.get_epoch(req).await?;
-        Ok(resp.snapshot.unwrap())
-    }
-
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         let resp = self
             .inner
@@ -1546,11 +1550,13 @@ impl HummockMetaClient for MetaClient {
         filtered_object_ids: Vec<HummockSstableObjectId>,
         total_object_count: u64,
         total_object_size: u64,
+        next_start_after: Option<String>,
     ) -> Result<()> {
         let req = ReportFullScanTaskRequest {
             object_ids: filtered_object_ids,
             total_object_count,
             total_object_size,
+            next_start_after,
         };
         self.inner.report_full_scan_task(req).await?;
         Ok(())
@@ -2061,6 +2067,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
+            ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
@@ -2075,14 +2082,14 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_subscription, CreateSubscriptionRequest, CreateSubscriptionResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
-             ,{ ddl_client, create_secret, CreateSecretRequest, CreateSecretResponse }
+            ,{ ddl_client, create_secret, CreateSecretRequest, CreateSecretResponse }
             ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
             ,{ ddl_client, create_function, CreateFunctionRequest, CreateFunctionResponse }
             ,{ ddl_client, drop_table, DropTableRequest, DropTableResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
-             , {ddl_client, drop_secret, DropSecretRequest, DropSecretResponse}
+            ,{ ddl_client, drop_secret, DropSecretRequest, DropSecretResponse}
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
@@ -2107,7 +2114,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_assigned_compact_task_num, GetAssignedCompactTaskNumRequest, GetAssignedCompactTaskNumResponse }
             ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
             ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
-            ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
