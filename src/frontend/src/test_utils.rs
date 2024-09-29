@@ -43,8 +43,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
-    ReplaceTablePlan, TableJobType,
+    alter_name_request, alter_set_schema_request, create_connection_request, DdlProgress,
+    PbTableJobType, ReplaceTablePlan, TableJobType,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -564,11 +564,22 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
-        self.catalog
-            .write()
-            .alter_table_name_by_id(&table_id.into(), table_name);
-        Ok(())
+    async fn alter_name(
+        &self,
+        object_id: alter_name_request::Object,
+        object_name: &str,
+    ) -> Result<()> {
+        match object_id {
+            alter_name_request::Object::TableId(table_id) => {
+                self.catalog
+                    .write()
+                    .alter_table_name_by_id(&table_id.into(), object_name);
+                Ok(())
+            }
+            _ => {
+                unimplemented!()
+            }
+        }
     }
 
     async fn alter_source(&self, source: PbSource) -> Result<()> {
@@ -620,38 +631,6 @@ impl CatalogWriter for MockCatalogWriter {
             }
             _ => unreachable!(),
         }
-    }
-
-    async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_index_name(&self, _index_id: u32, _index_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_sink_name(&self, _sink_id: u32, _sink_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_subscription_name(
-        &self,
-        _subscription_id: u32,
-        _subscription_name: &str,
-    ) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_source_name(&self, _source_id: u32, _source_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_schema_name(&self, _schema_id: u32, _schema_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_database_name(&self, _database_id: u32, _database_name: &str) -> Result<()> {
-        unreachable!()
     }
 
     async fn alter_parallelism(
