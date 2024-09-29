@@ -2607,6 +2607,7 @@ async fn test_commit_multi_epoch() {
                             })
                             .collect(),
                         sst_info: sst,
+                        created_at: u64::MAX,
                     }],
                     new_table_fragment_info,
                     change_log_delta: Default::default(),

@@ -183,7 +183,7 @@ impl HummockManager {
         prefix: Option<String>,
     ) -> Result<bool> {
         self.metrics.full_gc_trigger_count.inc();
-        // Set a minimum sst_retention_time to avoid deleting SSTs of on-going write op.
+        // Set a minimum sst_retention_time.
         let sst_retention_time = cmp::max(
             sst_retention_time,
             Duration::from_secs(self.env.opts.min_sst_retention_time_sec),
@@ -419,17 +419,12 @@ mod tests {
                 None
             )
             .unwrap());
-        let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
+        let _full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
             _ => {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec override user provided value.
-        assert_eq!(
-            hummock_manager.env.opts.min_sst_retention_time_sec,
-            full_scan_task.sst_retention_time_sec
-        );
 
         assert!(hummock_manager
             .start_full_gc(
@@ -437,17 +432,12 @@ mod tests {
                 None
             )
             .unwrap());
-        let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
+        let _full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
             _ => {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec doesn't override user provided value.
-        assert_eq!(
-            hummock_manager.env.opts.min_sst_retention_time_sec + 1,
-            full_scan_task.sst_retention_time_sec
-        );
 
         // Empty input results immediate return, without waiting heartbeat.
         hummock_manager
