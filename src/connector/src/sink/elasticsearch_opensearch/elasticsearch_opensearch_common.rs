@@ -37,7 +37,10 @@ use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::AsyncTruncateSinkWriter;
 use crate::sink::Result;
 
+pub const ES_OPTION_DELIMITER: &str = "delimiter";
 pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
+pub const ES_OPTION_INDEX: &str = "index";
+pub const ES_OPTION_ROUTING_COLUMN: &str = "routing_column";
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -108,8 +111,22 @@ impl ElasticSearchOpenSearchConfig {
         mut properties: BTreeMap<String, String>,
         schema: &Schema,
     ) -> Result<Self> {
+        Self::covert_name_to_index(&mut properties, ES_OPTION_INDEX_COLUMN, schema)?;
+        Self::covert_name_to_index(&mut properties, ES_OPTION_ROUTING_COLUMN, schema)?;
+        let config = serde_json::from_value::<ElasticSearchOpenSearchConfig>(
+            serde_json::to_value(properties).unwrap(),
+        )
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        Ok(config)
+    }
+
+    fn covert_name_to_index(
+        properties: &mut BTreeMap<String, String>,
+        key_name: &str,
+        schema: &Schema,
+    ) -> Result<()> {
         let index_column = properties
-                .get(ES_OPTION_INDEX_COLUMN)
+                .get(key_name)
                 .cloned()
                 .map(|n| {
                     schema
@@ -120,13 +137,9 @@ impl ElasticSearchOpenSearchConfig {
                 })
                 .transpose()?;
         if let Some(index_column) = index_column {
-            properties.insert(ES_OPTION_INDEX_COLUMN.to_string(), index_column.to_string());
+            properties.insert(key_name.to_string(), index_column.to_string());
         }
-        let config = serde_json::from_value::<ElasticSearchOpenSearchConfig>(
-            serde_json::to_value(properties).unwrap(),
-        )
-        .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        Ok(config)
+        Ok(())
     }
 
     pub fn build_client(&self, connector: &str) -> Result<ElasticSearchOpenSearchClient> {

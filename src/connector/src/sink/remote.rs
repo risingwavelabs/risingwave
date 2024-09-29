@@ -57,9 +57,8 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::elasticsearch_opensearch::elasticsearch_converter::{
-    is_es_sink, StreamChunkConverter, ES_OPTION_DELIMITER,
-};
+use super::elasticsearch_opensearch::elasticsearch_converter::{is_es_sink, StreamChunkConverter};
+use super::elasticsearch_opensearch::elasticsearch_opensearch_common::ES_OPTION_DELIMITER;
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
@@ -72,8 +71,8 @@ use crate::sink::{
 macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
-            { ElasticSearch, ElasticSearchSink, "elasticsearch_v1" }
-            { Opensearch, OpenSearchSink, "opensearch_v1"}
+            { ElasticSearchJava, ElasticSearchJavaSink, "elasticsearch_v1" }
+            { OpensearchJava, OpenSearchJavaSink, "opensearch_v1"}
             { Cassandra, CassandraSink, "cassandra" }
             { Jdbc, JdbcSink, "jdbc" }
             { DeltaLake, DeltaLakeSink, "deltalake" }
@@ -163,7 +162,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 }
 
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
-    if sink_name == OpenSearchSink::SINK_NAME {
+    if sink_name == OpenSearchJavaSink::SINK_NAME {
         risingwave_common::license::Feature::OpenSearchSink
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;

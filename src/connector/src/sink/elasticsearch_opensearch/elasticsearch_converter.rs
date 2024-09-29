@@ -22,13 +22,12 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::{JsonbVal, Scalar};
 use serde_json::Value;
 
-use super::super::remote::{ElasticSearchSink, OpenSearchSink};
-use super::elasticsearch_opensearch_common::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
+use super::super::remote::{ElasticSearchJavaSink, OpenSearchJavaSink};
+use super::elasticsearch_opensearch_common::{
+    BuildBulkPara, ElasticSearchOpenSearchFormatter, ES_OPTION_DELIMITER, ES_OPTION_INDEX,
+    ES_OPTION_INDEX_COLUMN, ES_OPTION_ROUTING_COLUMN,
+};
 use crate::sink::{Result, Sink};
-pub const ES_OPTION_DELIMITER: &str = "delimiter";
-pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
-pub const ES_OPTION_INDEX: &str = "index";
-pub const ES_OPTION_ROUTING_COLUMN: &str = "routing_column";
 
 pub enum StreamChunkConverter {
     Es(EsStreamChunkConverter),
@@ -155,5 +154,5 @@ impl EsStreamChunkConverter {
 }
 
 pub fn is_es_sink(sink_name: &str) -> bool {
-    sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpenSearchSink::SINK_NAME
+    sink_name == ElasticSearchJavaSink::SINK_NAME || sink_name == OpenSearchJavaSink::SINK_NAME
 }
