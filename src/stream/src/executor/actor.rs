@@ -103,9 +103,9 @@ impl ActorContext {
             fragment_id: stream_actor.fragment_id,
             mview_definition: stream_actor.mview_definition.clone(),
             vnode_count: (stream_actor.vnode_bitmap.as_ref())
-                // An unset `vnode_bitmap` means the actor is a singleton.
-                // For backwards compatibility, `VirtualNode::COUNT_FOR_COMPAT` is used for singleton.
-                .map_or(VirtualNode::COUNT_FOR_COMPAT, |b| Bitmap::from(b).len()),
+                // An unset `vnode_bitmap` means the actor is a singleton,
+                // where only `SINGLETON_VNODE` is set.
+                .map_or(1, |b| Bitmap::from(b).len()),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
