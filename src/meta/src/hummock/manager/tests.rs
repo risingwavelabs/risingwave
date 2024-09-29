@@ -52,6 +52,26 @@ use crate::manager::{MetaSrvEnv, MetaStoreImpl};
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
 
+pub fn version_max_committed_epoch(version: &HummockVersion) -> u64 {
+    let committed_epoch = version
+        .state_table_info
+        .info()
+        .values()
+        .next()
+        .unwrap()
+        .committed_epoch;
+    assert!(
+        version
+            .state_table_info
+            .info()
+            .values()
+            .all(|info| info.committed_epoch == committed_epoch),
+        "info: {:?}",
+        version.state_table_info.info()
+    );
+    committed_epoch
+}
+
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
 }
@@ -289,7 +309,7 @@ async fn test_hummock_transaction() {
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
         let current_version = hummock_manager.get_current_version().await;
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
-        assert_eq!(current_version.max_committed_epoch_for_test(), epoch1);
+        assert_eq!(version_max_committed_epoch(&current_version), epoch1);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),
             get_sorted_committed_object_ids(&current_version, compaction_group_id)
@@ -313,7 +333,7 @@ async fn test_hummock_transaction() {
         // tables_in_epoch2 should be invisible.
         let current_version = hummock_manager.get_current_version().await;
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
-        assert_eq!(current_version.max_committed_epoch_for_test(), epoch1);
+        assert_eq!(version_max_committed_epoch(&current_version), epoch1);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),
             get_sorted_committed_object_ids(&current_version, compaction_group_id)
@@ -337,7 +357,7 @@ async fn test_hummock_transaction() {
         // returned
         let current_version = hummock_manager.get_current_version().await;
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
-        assert_eq!(current_version.max_committed_epoch_for_test(), epoch2);
+        assert_eq!(version_max_committed_epoch(&current_version), epoch2);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),
             get_sorted_committed_object_ids(&current_version, compaction_group_id)
@@ -618,7 +638,7 @@ async fn test_pin_snapshot_response_lost() {
     // Pin a snapshot with smallest last_pin
     // [ e0 ] -> [ e0:pinned ]
     let mut epoch_recorded_in_frontend = hummock_manager
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(version_max_committed_epoch)
         .await;
     let prev_epoch = epoch.prev_epoch();
     assert_eq!(epoch_recorded_in_frontend, prev_epoch);
@@ -647,7 +667,7 @@ async fn test_pin_snapshot_response_lost() {
     // Assume the response of the previous rpc is lost.
     // [ e0:pinned, e1 ] -> [ e0, e1:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(version_max_committed_epoch)
         .await;
     let prev_epoch = epoch.prev_epoch();
     assert_eq!(epoch_recorded_in_frontend, prev_epoch);
@@ -655,7 +675,7 @@ async fn test_pin_snapshot_response_lost() {
     // Assume the response of the previous rpc is lost.
     // [ e0, e1:pinned ] -> [ e0, e1:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(version_max_committed_epoch)
         .await;
     assert_eq!(epoch_recorded_in_frontend, epoch.prev_epoch());
 
@@ -683,7 +703,7 @@ async fn test_pin_snapshot_response_lost() {
     // Use correct snapshot id.
     // [ e0, e1:pinned, e2 ] -> [ e0, e1:pinned, e2:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(version_max_committed_epoch)
         .await;
     assert_eq!(epoch_recorded_in_frontend, epoch.prev_epoch());
 
@@ -711,7 +731,7 @@ async fn test_pin_snapshot_response_lost() {
     // Use u64::MAX as epoch to pin greatest snapshot
     // [ e0, e1:pinned, e2:pinned, e3 ] -> [ e0, e1:pinned, e2:pinned, e3::pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(version_max_committed_epoch)
         .await;
     assert_eq!(epoch_recorded_in_frontend, epoch.prev_epoch());
 }
@@ -1193,7 +1213,7 @@ async fn test_extend_objects_to_delete() {
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
-    let new_epoch = pinned_version2.max_committed_epoch_for_test().next_epoch();
+    let new_epoch = version_max_committed_epoch(&pinned_version2).next_epoch();
     hummock_meta_client
         .commit_epoch(
             new_epoch,
@@ -1206,7 +1226,7 @@ async fn test_extend_objects_to_delete() {
         .await
         .unwrap();
     let pinned_version3: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
-    assert_eq!(new_epoch, pinned_version3.max_committed_epoch_for_test());
+    assert_eq!(new_epoch, version_max_committed_epoch(&pinned_version3));
     hummock_manager
         .unpin_version_before(context_id, pinned_version3.id)
         .await

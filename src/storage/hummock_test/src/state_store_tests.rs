@@ -1392,11 +1392,11 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 async fn test_replicated_local_hummock_storage() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
-    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(TEST_TABLE_ID).await;
 
     let epoch0 = meta_client
         .hummock_manager_ref()
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(|version| version.table_committed_epoch(TEST_TABLE_ID).unwrap())
         .await;
 
     let epoch0 = epoch0.next_epoch();
@@ -1407,9 +1407,7 @@ async fn test_replicated_local_hummock_storage() {
             sstables: vec![],
             new_table_watermarks: Default::default(),
             sst_to_context: Default::default(),
-            new_table_fragment_info: NewTableFragmentInfo::NewCompactionGroup {
-                table_ids: HashSet::from_iter([TEST_TABLE_ID]),
-            },
+            new_table_fragment_info: NewTableFragmentInfo::None,
             change_log_delta: Default::default(),
             committed_epoch: epoch0,
             tables_to_commit: HashSet::from_iter([TEST_TABLE_ID]),

@@ -417,26 +417,6 @@ impl HummockVersion {
         }
     }
 
-    #[cfg(any(test, feature = "test"))]
-    pub fn max_committed_epoch_for_test(&self) -> u64 {
-        let committed_epoch = self
-            .state_table_info
-            .info()
-            .values()
-            .next()
-            .unwrap()
-            .committed_epoch;
-        assert!(
-            self.state_table_info
-                .info()
-                .values()
-                .all(|info| info.committed_epoch == committed_epoch),
-            "info: {:?}",
-            self.state_table_info.info()
-        );
-        committed_epoch
-    }
-
     pub fn table_committed_epoch(&self, table_id: TableId) -> Option<u64> {
         self.state_table_info
             .info()

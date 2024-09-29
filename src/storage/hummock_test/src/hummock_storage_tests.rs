@@ -474,7 +474,8 @@ async fn test_state_store_sync() {
     let base_epoch = read_version
         .read()
         .committed()
-        .max_committed_epoch_for_test();
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
     let epoch1 = test_epoch(base_epoch.next_epoch());
     test_env
         .storage
@@ -845,7 +846,8 @@ async fn test_delete_get() {
         .read_version()
         .read()
         .committed()
-        .max_committed_epoch_for_test();
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
 
     let epoch1 = initial_epoch.next_epoch();
     test_env
@@ -947,7 +949,8 @@ async fn test_multiple_epoch_sync() {
         .read_version()
         .read()
         .committed()
-        .max_committed_epoch_for_test();
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
 
     let epoch1 = initial_epoch.next_epoch();
     test_env
@@ -1658,8 +1661,12 @@ async fn test_hummock_version_reader() {
                         .read_version()
                         .read()
                         .committed()
-                        .max_committed_epoch_for_test(),
-                    read_snapshot.2.max_committed_epoch_for_test()
+                        .table_committed_epoch(TEST_TABLE_ID)
+                        .unwrap(),
+                    read_snapshot
+                        .2
+                        .table_committed_epoch(TEST_TABLE_ID)
+                        .unwrap()
                 );
 
                 let iter = hummock_version_reader
@@ -2642,7 +2649,6 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 1);
         let sub_level = &sub_levels[0];
-        assert_eq!(sub_level.sub_level_id, epoch1);
         assert_eq!(sub_level.table_infos.len(), 1);
         assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch1.object_id);
 
@@ -2688,11 +2694,9 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 2);
         let sub_level = &sub_levels[0];
-        assert_eq!(sub_level.sub_level_id, epoch1);
         assert_eq!(sub_level.table_infos.len(), 1);
         assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch1.object_id);
         let sub_level = &sub_levels[1];
-        assert_eq!(sub_level.sub_level_id, epoch2);
         assert_eq!(sub_level.table_infos.len(), 1);
         assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch2.object_id);
 
@@ -2740,7 +2744,6 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &new_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 1);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
         assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
 
@@ -2775,11 +2778,9 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &new_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 2);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
         assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
         let sub_level2 = &sub_levels[1];
-        assert_eq!(sub_level2.sub_level_id, epoch2);
         assert_eq!(sub_level2.table_infos.len(), 1);
         assert_eq!(sub_level2.table_infos[0].object_id, sst2_epoch2.object_id);
 
@@ -2816,15 +2817,12 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &old_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 3);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
         assert_eq!(sub_level1.table_infos[0].object_id, sst1_epoch1.object_id);
         let sub_level2 = &sub_levels[1];
-        assert_eq!(sub_level2.sub_level_id, epoch2);
         assert_eq!(sub_level2.table_infos.len(), 1);
         assert_eq!(sub_level2.table_infos[0].object_id, sst1_epoch2.object_id);
         let sub_level3 = &sub_levels[2];
-        assert_eq!(sub_level3.sub_level_id, epoch3);
         assert_eq!(sub_level3.table_infos.len(), 1);
         assert_eq!(sub_level3.table_infos[0].object_id, sst_epoch3.object_id);
 
@@ -2832,15 +2830,12 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &new_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 3);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
         assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
         let sub_level2 = &sub_levels[1];
-        assert_eq!(sub_level2.sub_level_id, epoch2);
         assert_eq!(sub_level2.table_infos.len(), 1);
         assert_eq!(sub_level2.table_infos[0].object_id, sst2_epoch2.object_id);
         let sub_level3 = &sub_levels[1];
-        assert_eq!(sub_level3.sub_level_id, epoch2);
         assert_eq!(sub_level3.table_infos.len(), 1);
         assert_eq!(sub_level3.table_infos[0].object_id, sst2_epoch2.object_id);
 
