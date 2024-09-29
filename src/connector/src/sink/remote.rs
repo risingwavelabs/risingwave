@@ -57,8 +57,10 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::elasticsearch_opensearch::elasticsearch_converter::{is_es_sink, StreamChunkConverter};
-use super::elasticsearch_opensearch::elasticsearch_opensearch_common::ES_OPTION_DELIMITER;
+use super::elasticsearch_opensearch::elasticsearch_converter::{
+    is_remote_es_sink, StreamChunkConverter,
+};
+use super::elasticsearch_opensearch::elasticsearch_opensearch_config::ES_OPTION_DELIMITER;
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
@@ -167,7 +169,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
     }
-    if is_es_sink(sink_name)
+    if is_remote_es_sink(sink_name)
         && param.downstream_pk.len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
@@ -192,7 +194,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     | DataType::Jsonb
                     | DataType::Bytea => Ok(()),
             DataType::List(list) => {
-                if is_es_sink(sink_name) || matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
+                if is_remote_es_sink(sink_name) || matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
@@ -203,7 +205,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                 }
             },
             DataType::Struct(_) => {
-                if is_es_sink(sink_name){
+                if is_remote_es_sink(sink_name){
                     Ok(())
                 }else{
                     Err(SinkError::Remote(anyhow!(
@@ -267,7 +269,7 @@ impl RemoteLogSinker {
         sink_name: &str,
     ) -> Result<Self> {
         let sink_proto = sink_param.to_proto();
-        let payload_schema = if is_es_sink(sink_name) {
+        let payload_schema = if is_remote_es_sink(sink_name) {
             let columns = vec![
                 ColumnDesc::unnamed(ColumnId::from(0), DataType::Varchar).to_protobuf(),
                 ColumnDesc::unnamed(ColumnId::from(1), DataType::Varchar).to_protobuf(),

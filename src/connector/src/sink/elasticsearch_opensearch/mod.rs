@@ -14,5 +14,7 @@
 
 pub mod elasticsearch;
 pub mod elasticsearch_converter;
-pub mod elasticsearch_opensearch_common;
+pub mod elasticsearch_opensearch_client;
+pub mod elasticsearch_opensearch_config;
+pub mod elasticsearch_opensearch_formatter;
 pub mod opensearch;

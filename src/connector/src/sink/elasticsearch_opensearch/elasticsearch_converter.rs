@@ -23,10 +23,10 @@ use risingwave_common::types::{JsonbVal, Scalar};
 use serde_json::Value;
 
 use super::super::remote::{ElasticSearchJavaSink, OpenSearchJavaSink};
-use super::elasticsearch_opensearch_common::{
-    BuildBulkPara, ElasticSearchOpenSearchFormatter, ES_OPTION_DELIMITER, ES_OPTION_INDEX,
-    ES_OPTION_INDEX_COLUMN, ES_OPTION_ROUTING_COLUMN,
+use super::elasticsearch_opensearch_config::{
+    ES_OPTION_DELIMITER, ES_OPTION_INDEX, ES_OPTION_INDEX_COLUMN, ES_OPTION_ROUTING_COLUMN,
 };
+use super::elasticsearch_opensearch_formatter::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
 use crate::sink::{Result, Sink};
 
 pub enum StreamChunkConverter {
@@ -40,7 +40,7 @@ impl StreamChunkConverter {
         pk_indices: &Vec<usize>,
         properties: &BTreeMap<String, String>,
     ) -> Result<Self> {
-        if is_es_sink(sink_name) {
+        if is_remote_es_sink(sink_name) {
             let index_column = properties
                 .get(ES_OPTION_INDEX_COLUMN)
                 .cloned()
@@ -117,7 +117,7 @@ impl EsStreamChunkConverter {
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         let mut routing_builder =
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
-        for build_bulk_para in self.formatter.covert_chunk(chunk)? {
+        for build_bulk_para in self.formatter.convert_chunk(chunk)? {
             let BuildBulkPara {
                 key,
                 value,
@@ -153,6 +153,6 @@ impl EsStreamChunkConverter {
     }
 }
 
-pub fn is_es_sink(sink_name: &str) -> bool {
+pub fn is_remote_es_sink(sink_name: &str) -> bool {
     sink_name == ElasticSearchJavaSink::SINK_NAME || sink_name == OpenSearchJavaSink::SINK_NAME
 }

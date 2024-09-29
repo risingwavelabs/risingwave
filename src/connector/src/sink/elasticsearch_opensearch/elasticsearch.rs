@@ -17,9 +17,8 @@ use tonic::async_trait;
 
 use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
 use super::super::{DummySinkCommitCoordinator, Sink, SinkError, SinkParam, SinkWriterParam};
-use super::elasticsearch_opensearch_common::{
-    validate_config, ElasticSearchOpenSearchConfig, ElasticSearchOpenSearchSinkWriter,
-};
+use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchSinkWriter;
+use super::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
 use crate::sink::Result;
 
 pub const ES_SINK: &str = "elasticsearch";
@@ -37,7 +36,7 @@ impl TryFrom<SinkParam> for ElasticSearchSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = ElasticSearchOpenSearchConfig::from_btreemap(param.properties, &schema)?;
+        let config = ElasticSearchOpenSearchConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
@@ -53,7 +52,7 @@ impl Sink for ElasticSearchSink {
     const SINK_NAME: &'static str = ES_SINK;
 
     async fn validate(&self) -> Result<()> {
-        validate_config(&self.config, &self.schema)?;
+        self.config.validate_config(&self.schema)?;
         let client = self.config.build_client(Self::SINK_NAME)?;
         client.ping().await?;
         Ok(())
