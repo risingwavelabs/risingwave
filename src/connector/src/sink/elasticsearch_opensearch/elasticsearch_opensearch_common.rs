@@ -347,6 +347,16 @@ pub fn validate_config(config: &ElasticSearchOpenSearchConfig, schema: &Schema) 
             )));
         }
     }
+
+    if let Some(routing_column) = &config.routing_column {
+        let filed = schema.fields().get(*routing_column).unwrap();
+        if filed.data_type() != DataType::Varchar {
+            return Err(SinkError::Config(anyhow!(
+                "please ensure the data type of {} is varchar.",
+                routing_column
+            )));
+        }
+    }
     Ok(())
 }
 

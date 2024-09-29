@@ -257,9 +257,22 @@ ElasticSearchOpenSearchConfig:
     field_type: usize
     comments: It is used for dynamic index, if it is be set, the value of this column will be used as the index. It and `index` can only set one
     required: false
-  - name: max_task_num
+  - name: routing_column
     field_type: usize
+    comments: It is used for dynamic route, if it is be set, the value of this column will be used as the route
     required: false
+  - name: retry_on_conflict
+    field_type: i32
+    required: true
+  - name: batch_num_messages
+    field_type: usize
+    required: true
+  - name: batch_size_kb
+    field_type: usize
+    required: true
+  - name: concurrent_requests
+    field_type: usize
+    required: true
 FsConfig:
   fields:
   - name: fs.path
