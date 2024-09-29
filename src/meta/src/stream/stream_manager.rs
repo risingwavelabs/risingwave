@@ -686,7 +686,7 @@ impl GlobalStreamManager {
             .sum::<usize>();
         let max_parallelism = self
             .metadata_manager
-            .get_table_max_parallelism(table_id)
+            .get_job_max_parallelism(table_id)
             .await?;
 
         match parallelism {

@@ -892,7 +892,7 @@ impl MetadataManager {
         }
     }
 
-    pub async fn get_table_max_parallelism(&self, table_id: TableId) -> MetaResult<usize> {
+    pub async fn get_job_max_parallelism(&self, table_id: TableId) -> MetaResult<usize> {
         match self {
             MetadataManager::V1(mgr) => {
                 let fragments = mgr.fragment_manager.get_fragment_read_guard().await;
