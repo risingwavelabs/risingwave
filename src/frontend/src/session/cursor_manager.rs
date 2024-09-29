@@ -30,6 +30,7 @@ use risingwave_common::catalog::Field;
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use super::SessionImpl;
@@ -523,6 +524,18 @@ impl SubscriptionCursor {
         let init_query_timer = Instant::now();
         let (chunk_stream, fields) = if let Some(rw_timestamp) = rw_timestamp {
             let context = OptimizerContext::from_handler_args(handle_args);
+            let version_id = {
+                let version = session.env.hummock_snapshot_manager.acquire();
+                let version = version.version();
+                if !version
+                    .state_table_info
+                    .info()
+                    .contains_key(dependent_table_id)
+                {
+                    return Err(anyhow!("table id {dependent_table_id} has been dropped").into());
+                }
+                version.id
+            };
             let plan_fragmenter_result = gen_batch_plan_fragmenter(
                 &session,
                 Self::create_batch_plan_for_cursor(
@@ -531,6 +544,7 @@ impl SubscriptionCursor {
                     context.into(),
                     rw_timestamp,
                     rw_timestamp,
+                    version_id,
                 )?,
             )?;
             create_chunk_stream_for_cursor(session, plan_fragmenter_result).await?
@@ -606,6 +620,7 @@ impl SubscriptionCursor {
         context: OptimizerContextRef,
         old_epoch: u64,
         new_epoch: u64,
+        version_id: HummockVersionId,
     ) -> Result<BatchQueryPlanResult> {
         let out_col_idx = table_catalog
             .columns
@@ -621,6 +636,7 @@ impl SubscriptionCursor {
             context,
             old_epoch,
             new_epoch,
+            version_id,
         );
         let batch_log_seq_scan = BatchLogSeqScan::new(core);
         let schema = batch_log_seq_scan

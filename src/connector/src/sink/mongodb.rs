@@ -17,37 +17,96 @@ use std::ops::Deref;
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
+use futures::future::{try_join_all, TryJoinAll};
+use futures::prelude::TryFuture;
+use futures::TryFutureExt;
 use itertools::Itertools;
 use mongodb::bson::{bson, doc, Array, Bson, Document};
 use mongodb::{Client, Namespace};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::must_match;
 use risingwave_common::row::Row;
 use risingwave_common::types::ScalarRefImpl;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
-use tonic::async_trait;
 use with_options::WithOptions;
 
 use super::encoder::BsonEncoder;
+use super::log_store::DeliveryFutureManagerAddFuture;
+use super::writer::{
+    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
+};
 use crate::connector_common::MongodbCommon;
 use crate::deserialize_bool_from_string;
 use crate::sink::encoder::RowEncoder;
-use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 
-pub const MONGODB_SINK: &str = "mongodb";
+mod send_bulk_write_command_future {
+    use core::future::Future;
 
-// 65536 seems like a reasonable limit, but we may consider setting this limit to 100,000,
-// which is the actual limit imposed by the server.
-// see https://www.mongodb.com/docs/v4.2/reference/command/hello/#hello.maxWriteBatchSize for more details
-pub const MONGODB_BULK_WRITE_SIZE_LIMIT: usize = 65536;
+    use anyhow::anyhow;
+    use mongodb::bson::Document;
+    use mongodb::Database;
+
+    use crate::sink::{Result, SinkError};
+
+    pub(super) type SendBulkWriteCommandFuture = impl Future<Output = Result<()>> + 'static;
+
+    pub(super) fn send_bulk_write_commands(
+        db: Database,
+        upsert: Option<Document>,
+        delete: Option<Document>,
+    ) -> SendBulkWriteCommandFuture {
+        async move {
+            if let Some(upsert) = upsert {
+                send_bulk_write_command(db.clone(), upsert).await?;
+            }
+            if let Some(delete) = delete {
+                send_bulk_write_command(db, delete).await?;
+            }
+            Ok(())
+        }
+    }
+
+    async fn send_bulk_write_command(db: Database, command: Document) -> Result<()> {
+        let result = db.run_command(command, None).await.map_err(|err| {
+            SinkError::Mongodb(anyhow!(err).context(format!(
+                "sending bulk write command failed, database: {}",
+                db.name()
+            )))
+        })?;
+
+        if let Ok(write_errors) = result.get_array("writeErrors") {
+            return Err(SinkError::Mongodb(anyhow!(
+                "bulk write respond with write errors: {:?}",
+                write_errors,
+            )));
+        }
+
+        let n = result.get_i32("n").map_err(|err| {
+            SinkError::Mongodb(
+                anyhow!(err).context("can't extract field n from bulk write response"),
+            )
+        })?;
+        if n < 1 {
+            return Err(SinkError::Mongodb(anyhow!(
+                "bulk write respond with an abnormal state, n = {}",
+                n
+            )));
+        }
+
+        Ok(())
+    }
+}
+
+pub const MONGODB_SINK: &str = "mongodb";
+const MONGODB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 4096;
+
 pub const MONGODB_PK_NAME: &str = "_id";
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
@@ -55,7 +114,6 @@ static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::de
 const fn _default_bulk_write_max_entries() -> usize {
     1024
 }
-
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct MongodbConfig {
@@ -86,6 +144,7 @@ pub struct MongodbConfig {
         default = "_default_bulk_write_max_entries"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[deprecated]
     pub bulk_write_max_entries: usize,
 }
 
@@ -179,7 +238,7 @@ impl TryFrom<SinkParam> for MongodbSink {
 
 impl Sink for MongodbSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<MongodbSinkWriter>;
+    type LogSinker = AsyncTruncateLogSinkerOf<MongodbSinkWriter>;
 
     const SINK_NAME: &'static str = MONGODB_SINK;
 
@@ -222,14 +281,6 @@ impl Sink for MongodbSink {
                     "primary key fields must not contain a field named _id"
                 )));
             }
-        }
-
-        if self.config.bulk_write_max_entries > MONGODB_BULK_WRITE_SIZE_LIMIT {
-            return Err(SinkError::Config(anyhow!(
-                "mongodb.bulk_write.max_entries {} exceeds the limit {}",
-                self.config.bulk_write_max_entries,
-                MONGODB_BULK_WRITE_SIZE_LIMIT
-            )));
         }
 
         if let Err(err) = self.config.common.collection_name.parse::<Namespace>() {
@@ -302,16 +353,16 @@ impl Sink for MongodbSink {
             self.is_append_only,
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(MONGODB_SEND_FUTURE_BUFFER_MAX_SIZE))
     }
 }
+
+use send_bulk_write_command_future::*;
 
 pub struct MongodbSinkWriter {
     pub config: MongodbConfig,
     payload_writer: MongodbPayloadWriter,
     is_append_only: bool,
-    // TODO switching to bulk write API when mongodb driver supports it
-    command_builder: CommandBuilder,
 }
 
 impl MongodbSinkWriter {
@@ -356,19 +407,12 @@ impl MongodbSinkWriter {
 
         let row_encoder = BsonEncoder::new(schema.clone(), Some(col_indices), pk_indices.clone());
 
-        let command_builder = if is_append_only {
-            CommandBuilder::AppendOnly(HashMap::new())
-        } else {
-            CommandBuilder::Upsert(HashMap::new())
-        };
-
         let payload_writer = MongodbPayloadWriter::new(
             schema,
             pk_indices,
             default_namespace,
             coll_name_field_index,
             ClientGuard::new(name, client),
-            config.bulk_write_max_entries,
             row_encoder,
         );
 
@@ -376,13 +420,11 @@ impl MongodbSinkWriter {
             config,
             payload_writer,
             is_append_only,
-            command_builder,
         })
     }
 
-    async fn append(&mut self, chunk: StreamChunk) -> Result<()> {
-        let insert_builder =
-            must_match!(&mut self.command_builder, CommandBuilder::AppendOnly(builder) => builder);
+    fn append(&mut self, chunk: StreamChunk) -> Result<TryJoinAll<SendBulkWriteCommandFuture>> {
+        let mut insert_builder: HashMap<MongodbNamespace, InsertCommandBuilder> = HashMap::new();
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
                 if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
@@ -395,49 +437,42 @@ impl MongodbSinkWriter {
                 }
                 continue;
             }
-            self.payload_writer.append(insert_builder, row).await?;
+            self.payload_writer.append(&mut insert_builder, row)?;
         }
-        Ok(())
+        Ok(self.payload_writer.flush_insert(insert_builder))
     }
 
-    async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
-        let upsert_builder =
-            must_match!(&mut self.command_builder, CommandBuilder::Upsert(builder) => builder);
+    fn upsert(&mut self, chunk: StreamChunk) -> Result<TryJoinAll<SendBulkWriteCommandFuture>> {
+        let mut upsert_builder: HashMap<MongodbNamespace, UpsertCommandBuilder> = HashMap::new();
         for (op, row) in chunk.rows() {
             if op == Op::UpdateDelete {
                 // we should ignore the `UpdateDelete` in upsert mode
                 continue;
             }
-            self.payload_writer.upsert(upsert_builder, op, row).await?;
+            self.payload_writer.upsert(&mut upsert_builder, op, row)?;
         }
-        Ok(())
+        Ok(self.payload_writer.flush_upsert(upsert_builder))
     }
 }
 
-#[async_trait]
-impl SinkWriter for MongodbSinkWriter {
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        Ok(())
-    }
+pub type MongodbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_append_only {
-            self.append(chunk).await
+impl AsyncTruncateSinkWriter for MongodbSinkWriter {
+    type DeliveryFuture = MongodbSinkDeliveryFuture;
+
+    async fn write_chunk<'a>(
+        &'a mut self,
+        chunk: StreamChunk,
+        mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+    ) -> Result<()> {
+        let futures = if self.is_append_only {
+            self.append(chunk)?
         } else {
-            self.upsert(chunk).await
-        }
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        if is_checkpoint {
-            if self.is_append_only {
-                let insert_builder = must_match!(&mut self.command_builder, CommandBuilder::AppendOnly(builder) => builder);
-                self.payload_writer.flush_insert(insert_builder).await?;
-            } else {
-                let upsert_builder = must_match!(&mut self.command_builder, CommandBuilder::Upsert(builder) => builder);
-                self.payload_writer.flush_upsert(upsert_builder).await?;
-            }
-        }
+            self.upsert(chunk)?
+        };
+        add_future
+            .add_future_may_await(futures.map_ok(|_: Vec<()>| ()))
+            .await?;
         Ok(())
     }
 }
@@ -448,10 +483,10 @@ struct InsertCommandBuilder {
 }
 
 impl InsertCommandBuilder {
-    fn new(coll: String, capacity: usize) -> Self {
+    fn new(coll: String) -> Self {
         Self {
             coll,
-            inserts: Array::with_capacity(capacity),
+            inserts: Array::new(),
         }
     }
 
@@ -475,11 +510,11 @@ struct UpsertCommandBuilder {
 }
 
 impl UpsertCommandBuilder {
-    fn new(coll: String, capacity: usize) -> Self {
+    fn new(coll: String) -> Self {
         Self {
             coll,
-            updates: Array::with_capacity(capacity),
-            deletes: HashMap::with_capacity(capacity),
+            updates: Array::new(),
+            deletes: HashMap::new(),
         }
     }
 
@@ -541,11 +576,6 @@ impl UpsertCommandBuilder {
     }
 }
 
-enum CommandBuilder {
-    AppendOnly(HashMap<MongodbNamespace, InsertCommandBuilder>),
-    Upsert(HashMap<MongodbNamespace, UpsertCommandBuilder>),
-}
-
 type MongodbNamespace = (String, String);
 
 // In the future, we may build the payload into RawBSON to gain a better performance.
@@ -556,8 +586,6 @@ struct MongodbPayloadWriter {
     default_namespace: Namespace,
     coll_name_field_index: Option<usize>,
     client: ClientGuard,
-    buffered_entries: usize,
-    max_entries: usize,
     row_encoder: BsonEncoder,
 }
 
@@ -568,7 +596,6 @@ impl MongodbPayloadWriter {
         default_namespace: Namespace,
         coll_name_field_index: Option<usize>,
         client: ClientGuard,
-        max_entries: usize,
         row_encoder: BsonEncoder,
     ) -> Self {
         Self {
@@ -577,8 +604,6 @@ impl MongodbPayloadWriter {
             default_namespace,
             coll_name_field_index,
             client,
-            buffered_entries: 0,
-            max_entries,
             row_encoder,
         }
     }
@@ -620,7 +645,7 @@ impl MongodbPayloadWriter {
         }
     }
 
-    async fn append(
+    fn append(
         &mut self,
         insert_builder: &mut HashMap<MongodbNamespace, InsertCommandBuilder>,
         row: RowRef<'_>,
@@ -631,17 +656,12 @@ impl MongodbPayloadWriter {
 
         insert_builder
             .entry(ns)
-            .or_insert_with(|| InsertCommandBuilder::new(coll, self.max_entries))
+            .or_insert_with(|| InsertCommandBuilder::new(coll))
             .append(document);
-
-        self.buffered_entries += 1;
-        if self.buffered_entries >= self.max_entries {
-            self.flush_insert(insert_builder).await?;
-        }
         Ok(())
     }
 
-    async fn upsert(
+    fn upsert(
         &mut self,
         upsert_builder: &mut HashMap<MongodbNamespace, UpsertCommandBuilder>,
         op: Op,
@@ -665,88 +685,46 @@ impl MongodbPayloadWriter {
         match op {
             Op::Insert | Op::UpdateInsert => upsert_builder
                 .entry(ns)
-                .or_insert_with(|| UpsertCommandBuilder::new(coll, self.max_entries))
+                .or_insert_with(|| UpsertCommandBuilder::new(coll))
                 .add_upsert(pk, document)?,
             Op::UpdateDelete => (),
             Op::Delete => upsert_builder
                 .entry(ns)
-                .or_insert_with(|| UpsertCommandBuilder::new(coll, self.max_entries))
+                .or_insert_with(|| UpsertCommandBuilder::new(coll))
                 .add_delete(pk)?,
         }
-
-        self.buffered_entries += 1;
-        if self.buffered_entries >= self.max_entries {
-            self.flush_upsert(upsert_builder).await?;
-        }
         Ok(())
     }
 
-    async fn flush_insert(
-        &mut self,
-        insert_builder: &mut HashMap<MongodbNamespace, InsertCommandBuilder>,
-    ) -> Result<()> {
+    fn flush_insert(
+        &self,
+        insert_builder: HashMap<MongodbNamespace, InsertCommandBuilder>,
+    ) -> TryJoinAll<SendBulkWriteCommandFuture> {
         // TODO try sending bulk-write of each collection concurrently to improve the performance when
         // `dynamic collection` is enabled. We may need to provide best practice to guide user on setting
         // the MongoDB driver's connection properties.
-        for (ns, builder) in insert_builder.drain() {
-            self.send_bulk_write_command(&ns.0, builder.build()).await?;
-        }
-        self.buffered_entries = 0;
-        Ok(())
+        let futures = insert_builder.into_iter().map(|(ns, builder)| {
+            let db = self.client.database(&ns.0);
+            send_bulk_write_commands(db, Some(builder.build()), None)
+        });
+        try_join_all(futures)
     }
 
-    async fn flush_upsert(
-        &mut self,
-        upsert_builder: &mut HashMap<MongodbNamespace, UpsertCommandBuilder>,
-    ) -> Result<()> {
+    fn flush_upsert(
+        &self,
+        upsert_builder: HashMap<MongodbNamespace, UpsertCommandBuilder>,
+    ) -> TryJoinAll<SendBulkWriteCommandFuture> {
         // TODO try sending bulk-write of each collection concurrently to improve the performance when
         // `dynamic collection` is enabled. We may need to provide best practice to guide user on setting
         // the MongoDB driver's connection properties.
-        for (ns, builder) in upsert_builder.drain() {
+        let futures = upsert_builder.into_iter().map(|(ns, builder)| {
             let (upsert, delete) = builder.build();
             // we are sending the bulk upsert first because, under same pk, the `Insert` and `UpdateInsert`
             // should always appear before `Delete`. we have already ignored the `UpdateDelete`
             // which is useless in upsert mode.
-            if let Some(upsert) = upsert {
-                self.send_bulk_write_command(&ns.0, upsert).await?;
-            }
-            if let Some(delete) = delete {
-                self.send_bulk_write_command(&ns.0, delete).await?;
-            }
-        }
-        self.buffered_entries = 0;
-        Ok(())
-    }
-
-    async fn send_bulk_write_command(&self, database: &str, command: Document) -> Result<()> {
-        let db = self.client.database(database);
-
-        let result = db.run_command(command, None).await.map_err(|err| {
-            SinkError::Mongodb(anyhow!(err).context(format!(
-                "sending bulk write command failed, database: {}",
-                database
-            )))
-        })?;
-
-        if let Ok(write_errors) = result.get_array("writeErrors") {
-            return Err(SinkError::Mongodb(anyhow!(
-                "bulk write respond with write errors: {:?}",
-                write_errors,
-            )));
-        }
-
-        let n = result.get_i32("n").map_err(|err| {
-            SinkError::Mongodb(
-                anyhow!(err).context("can't extract field n from bulk write response"),
-            )
-        })?;
-        if n < 1 {
-            return Err(SinkError::Mongodb(anyhow!(
-                "bulk write respond with an abnormal state, n = {}",
-                n
-            )));
-        }
-
-        Ok(())
+            let db = self.client.database(&ns.0);
+            send_bulk_write_commands(db, upsert, delete)
+        });
+        try_join_all(futures)
     }
 }

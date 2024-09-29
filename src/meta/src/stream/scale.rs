@@ -2244,8 +2244,6 @@ impl ScaleController {
                         }
                         TableParallelism::Fixed(mut n) => {
                             if n > max_parallelism {
-                                // This should be unreachable as it was already checked and rewritten in the frontend.
-                                // We still intercept it to prevent accidental modifications.
                                 tracing::warn!("specified parallelism {n} for table {table_id} is larger than max parallelism, force limit to {max_parallelism}");
                                 n = max_parallelism
                             }

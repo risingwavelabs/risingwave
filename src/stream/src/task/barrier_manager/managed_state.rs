@@ -750,13 +750,6 @@ impl PartialGraphManagedBarrierState {
                         epoch = prev_epoch,
                         "ignore sealing data for the first barrier"
                     );
-                    if let Some(hummock) = self.state_store.as_hummock() {
-                        let mce = hummock.get_pinned_version().visible_table_committed_epoch();
-                        assert_eq!(
-                            mce, prev_epoch,
-                            "first epoch should match with the current version",
-                        );
-                    }
                     tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
                     None
                 }

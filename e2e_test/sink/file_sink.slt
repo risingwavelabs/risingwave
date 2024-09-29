@@ -1,0 +1,20 @@
+statement ok
+CREATE TABLE t (v1 int, v2 int);
+
+statement error
+CREATE table s3_4(
+     v1 int,
+     v2 int,
+)
+WITH (
+    connector = 's3',
+    match_pattern = '*.parquet',
+    s3.region_name = 'custom',
+    s3.bucket_name = 'hummock001',
+    s3.credentials.access = 'wrong_access',
+    s3.credentials.secret = 'wrong_secret',
+    s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+) FORMAT PLAIN ENCODE PARQUET;
+
+statement ok
+DROP TABLE t;

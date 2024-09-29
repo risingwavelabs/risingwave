@@ -224,6 +224,14 @@ DynamoDbConfig:
     required: false
     alias:
     - profile
+  - name: dynamodb.max_batch_item_nums
+    field_type: usize
+    required: false
+    default: '25'
+  - name: dynamodb.max_future_send_nums
+    field_type: usize
+    required: false
+    default: '256'
 ElasticSearchOpenSearchConfig:
   fields:
   - name: url

@@ -231,13 +231,21 @@ impl ObjectStore for OpendalObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        let object_lister = self
+    async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter> {
+        let mut object_lister = self
             .op
             .lister_with(prefix)
             .recursive(true)
-            .metakey(Metakey::ContentLength)
-            .await?;
+            .metakey(Metakey::ContentLength);
+        if let Some(start_after) = start_after {
+            object_lister = object_lister.start_after(&start_after);
+        }
+        let object_lister = object_lister.await?;
 
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
             match object_lister.next().await {
@@ -261,7 +269,7 @@ impl ObjectStore for OpendalObjectStore {
             }
         });
 
-        Ok(stream.boxed())
+        Ok(stream.take(limit.unwrap_or(usize::MAX)).boxed())
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -428,7 +436,7 @@ mod tests {
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
         store
-            .list(prefix)
+            .list(prefix, None, None)
             .await
             .unwrap()
             .try_collect::<Vec<_>>()

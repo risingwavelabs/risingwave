@@ -15,6 +15,7 @@ impl MigrationTrait for Migration {
                     .add_column(
                         ColumnDef::new(Table::VnodeCount)
                             .integer()
+                            .not_null()
                             .default(VNODE_COUNT),
                     )
                     .to_owned(),
@@ -28,6 +29,7 @@ impl MigrationTrait for Migration {
                     .add_column(
                         ColumnDef::new(Fragment::VnodeCount)
                             .integer()
+                            .not_null()
                             .default(VNODE_COUNT),
                     )
                     .to_owned(),
