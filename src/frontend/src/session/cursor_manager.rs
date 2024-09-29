@@ -499,11 +499,6 @@ impl SubscriptionCursor {
                     }
                 }
             }
-            println!(
-                "timeout_instant: {:?},{:?}",
-                timeout_instant,
-                Instant::now()
-            );
             // Timeout, return with current value
             if let Some(timeout_instant) = timeout_instant
                 && Instant::now() > timeout_instant
