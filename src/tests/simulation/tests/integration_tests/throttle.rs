@@ -38,7 +38,13 @@ async fn test_throttle_mv() {
         .unwrap();
     let mv_id: u32 = res.parse().unwrap();
     cluster
+        .throttle_mv(TableId::from(mv_id), Some(200))
+        .await
+        .unwrap();
+    cluster
         .throttle_mv(TableId::from(mv_id), None)
         .await
         .unwrap();
+
+    session.run("drop table t1 cascade").await.unwrap();
 }
