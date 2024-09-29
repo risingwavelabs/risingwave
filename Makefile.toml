@@ -713,7 +713,7 @@ ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
 | xargs -I {} ${TMUX} send-keys -t {} C-c
 
 # Stop docker components
-containers=$(docker ps -a -q -f name=risedev- 2>/dev/null) || true
+containers=$(docker ps -q -f name='risedev|risingwave'- 2>/dev/null) || true
 if [[ -n ${containers} ]]; then
   echo "Stopping docker components..."
   docker stop ${containers}
