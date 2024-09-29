@@ -213,7 +213,7 @@ fn match_delta(delta: &DeltaType, sst_id: HummockSstableObjectId) -> bool {
         return false;
     };
     delta
-        .inserted_sstable_infos
+        .inserted_table_infos
         .iter()
         .any(|sst| sst.sst_id == sst_id)
         || delta.removed_table_ids.iter().any(|sst| *sst == sst_id)

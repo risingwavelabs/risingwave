@@ -131,7 +131,7 @@ where
         Self {
             level_idx: pb_level.level_idx,
             level_type: PbLevelType::try_from(pb_level.level_type).unwrap(),
-            sstable_infos: pb_level.sstable_infos.iter().map(Into::into).collect_vec(),
+            sstable_infos: pb_level.table_infos.iter().map(Into::into).collect_vec(),
             total_file_size: pb_level.total_file_size,
             sub_level_id: pb_level.sub_level_id,
             uncompressed_file_size: pb_level.uncompressed_file_size,
@@ -148,7 +148,7 @@ where
         Self {
             level_idx: level.level_idx,
             level_type: level.level_type.into(),
-            sstable_infos: level.sstable_infos.iter().map(Into::into).collect_vec(),
+            table_infos: level.sstable_infos.iter().map(Into::into).collect_vec(),
             total_file_size: level.total_file_size,
             sub_level_id: level.sub_level_id,
             uncompressed_file_size: level.uncompressed_file_size,
@@ -165,7 +165,7 @@ where
         Self {
             level_idx: level.level_idx,
             level_type: level.level_type.into(),
-            sstable_infos: level
+            table_infos: level
                 .sstable_infos
                 .into_iter()
                 .map(Into::into)
@@ -187,7 +187,7 @@ where
             level_idx: pb_level.level_idx,
             level_type: PbLevelType::try_from(pb_level.level_type).unwrap(),
             sstable_infos: pb_level
-                .sstable_infos
+                .table_infos
                 .into_iter()
                 .map(Into::into)
                 .collect_vec(),
@@ -385,7 +385,7 @@ impl From<PbInputLevel> for InputLevel {
             level_idx: pb_input_level.level_idx,
             level_type: PbLevelType::try_from(pb_input_level.level_type).unwrap(),
             sstable_infos: pb_input_level
-                .sstable_infos
+                .table_infos
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
@@ -399,7 +399,7 @@ impl From<&PbInputLevel> for InputLevel {
             level_idx: pb_input_level.level_idx,
             level_type: PbLevelType::try_from(pb_input_level.level_type).unwrap(),
             sstable_infos: pb_input_level
-                .sstable_infos
+                .table_infos
                 .iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
@@ -412,7 +412,7 @@ impl From<InputLevel> for PbInputLevel {
         Self {
             level_idx: input_level.level_idx,
             level_type: input_level.level_type.into(),
-            sstable_infos: input_level
+            table_infos: input_level
                 .sstable_infos
                 .into_iter()
                 .map(|sst| sst.into())
@@ -426,7 +426,7 @@ impl From<&InputLevel> for PbInputLevel {
         Self {
             level_idx: input_level.level_idx,
             level_type: input_level.level_type.into(),
-            sstable_infos: input_level
+            table_infos: input_level
                 .sstable_infos
                 .iter()
                 .map(|sst| sst.into())

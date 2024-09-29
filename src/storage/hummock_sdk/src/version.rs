@@ -814,7 +814,7 @@ where
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
             removed_table_ids: pb_intra_level_delta.removed_table_ids,
             inserted_sstable_infos: pb_intra_level_delta
-                .inserted_sstable_infos
+                .inserted_table_infos
                 .into_iter()
                 .map(Into::into)
                 .collect_vec(),
@@ -832,7 +832,7 @@ where
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
             removed_table_ids: intra_level_delta.removed_table_ids,
-            inserted_sstable_infos: intra_level_delta
+            inserted_table_infos: intra_level_delta
                 .inserted_sstable_infos
                 .into_iter()
                 .map(Into::into)
@@ -851,7 +851,7 @@ where
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
             removed_table_ids: intra_level_delta.removed_table_ids.clone(),
-            inserted_sstable_infos: intra_level_delta
+            inserted_table_infos: intra_level_delta
                 .inserted_sstable_infos
                 .iter()
                 .map(Into::into)
@@ -871,7 +871,7 @@ where
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
             removed_table_ids: pb_intra_level_delta.removed_table_ids.clone(),
             inserted_sstable_infos: pb_intra_level_delta
-                .inserted_sstable_infos
+                .inserted_table_infos
                 .iter()
                 .map(Into::into)
                 .collect_vec(),
