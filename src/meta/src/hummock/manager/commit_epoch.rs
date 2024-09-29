@@ -65,7 +65,6 @@ pub struct CommitEpochInfo {
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
     pub committed_epoch: u64,
     pub tables_to_commit: HashSet<TableId>,
-    pub is_visible_table_committed_epoch: bool,
 }
 
 impl HummockManager {
@@ -79,7 +78,6 @@ impl HummockManager {
             change_log_delta,
             committed_epoch,
             tables_to_commit,
-            is_visible_table_committed_epoch,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
@@ -88,11 +86,12 @@ impl HummockManager {
             return Ok(());
         }
 
+        assert!(!tables_to_commit.is_empty());
+
         let versioning: &mut Versioning = &mut versioning_guard;
         self.commit_epoch_sanity_check(
             committed_epoch,
             &tables_to_commit,
-            is_visible_table_committed_epoch,
             &sstables,
             &sst_to_context,
             &versioning.current_version,
@@ -194,7 +193,6 @@ impl HummockManager {
         let time_travel_delta = version.pre_commit_epoch(
             committed_epoch,
             &tables_to_commit,
-            is_visible_table_committed_epoch,
             new_compaction_group,
             commit_sstables,
             &new_table_ids,

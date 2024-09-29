@@ -219,6 +219,7 @@ impl HummockVersionStateTableInfo {
 pub struct HummockVersionCommon<T> {
     pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, LevelsCommon<T>>,
+    #[deprecated]
     pub(crate) max_committed_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<T>>,
@@ -277,6 +278,7 @@ where
     T: for<'a> From<&'a PbSstableInfo>,
 {
     fn from(pb_version: &PbHummockVersion) -> Self {
+        #[expect(deprecated)]
         Self {
             id: HummockVersionId(pb_version.id),
             levels: pb_version
@@ -319,6 +321,7 @@ where
     PbSstableInfo: for<'a> From<&'a T>,
 {
     fn from(version: &HummockVersionCommon<T>) -> Self {
+        #[expect(deprecated)]
         Self {
             id: version.id.0,
             levels: version
@@ -348,6 +351,7 @@ where
     PbSstableInfo: for<'a> From<&'a T>,
 {
     fn from(version: HummockVersionCommon<T>) -> Self {
+        #[expect(deprecated)]
         Self {
             id: version.id.0,
             levels: version
@@ -413,13 +417,24 @@ impl HummockVersion {
         }
     }
 
-    pub fn max_committed_epoch_for_meta(&self) -> u64 {
-        self.max_committed_epoch
-    }
-
     #[cfg(any(test, feature = "test"))]
     pub fn max_committed_epoch_for_test(&self) -> u64 {
-        self.max_committed_epoch
+        let committed_epoch = self
+            .state_table_info
+            .info()
+            .values()
+            .next()
+            .unwrap()
+            .committed_epoch;
+        assert!(
+            self.state_table_info
+                .info()
+                .values()
+                .all(|info| info.committed_epoch == committed_epoch),
+            "info: {:?}",
+            self.state_table_info.info()
+        );
+        committed_epoch
     }
 
     pub fn table_committed_epoch(&self, table_id: TableId) -> Option<u64> {
@@ -430,6 +445,7 @@ impl HummockVersion {
     }
 
     pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
+        #[expect(deprecated)]
         let mut init_version = HummockVersion {
             id: FIRST_VERSION_ID,
             levels: Default::default(),
@@ -450,19 +466,13 @@ impl HummockVersion {
         init_version
     }
 
-    pub fn version_delta_after(&self, max_committed_epoch: Option<u64>) -> HummockVersionDelta {
-        let max_committed_epoch = max_committed_epoch.unwrap_or(self.max_committed_epoch);
-        assert!(
-            max_committed_epoch >= self.max_committed_epoch,
-            "new max_committed_epoch {} less than prev max_committed_epoch: {}",
-            max_committed_epoch,
-            self.max_committed_epoch
-        );
+    pub fn version_delta_after(&self) -> HummockVersionDelta {
+        #[expect(deprecated)]
         HummockVersionDelta {
             id: self.next_version_id(),
             prev_id: self.id,
             trivial_move: false,
-            max_committed_epoch,
+            max_committed_epoch: self.max_committed_epoch,
             group_deltas: Default::default(),
             new_table_watermarks: HashMap::new(),
             removed_table_ids: HashSet::new(),
@@ -477,6 +487,7 @@ pub struct HummockVersionDeltaCommon<T> {
     pub id: HummockVersionId,
     pub prev_id: HummockVersionId,
     pub group_deltas: HashMap<CompactionGroupId, GroupDeltasCommon<T>>,
+    #[deprecated]
     pub(crate) max_committed_epoch: u64,
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -600,6 +611,7 @@ impl HummockVersionDelta {
             }))
     }
 
+    #[expect(deprecated)]
     pub fn max_committed_epoch_for_migration(&self) -> HummockEpoch {
         self.max_committed_epoch
     }
@@ -610,6 +622,7 @@ where
     T: for<'a> From<&'a PbSstableInfo>,
 {
     fn from(pb_version_delta: &PbHummockVersionDelta) -> Self {
+        #[expect(deprecated)]
         Self {
             id: HummockVersionId(pb_version_delta.id),
             prev_id: HummockVersionId(pb_version_delta.prev_id),
@@ -665,6 +678,7 @@ where
     PbSstableInfo: for<'a> From<&'a T>,
 {
     fn from(version_delta: &HummockVersionDeltaCommon<T>) -> Self {
+        #[expect(deprecated)]
         Self {
             id: version_delta.id.0,
             prev_id: version_delta.prev_id.0,
@@ -704,6 +718,7 @@ where
     PbSstableInfo: From<T>,
 {
     fn from(version_delta: HummockVersionDeltaCommon<T>) -> Self {
+        #[expect(deprecated)]
         Self {
             id: version_delta.id.0,
             prev_id: version_delta.prev_id.0,
@@ -743,6 +758,7 @@ where
     T: From<PbSstableInfo>,
 {
     fn from(pb_version_delta: PbHummockVersionDelta) -> Self {
+        #[expect(deprecated)]
         Self {
             id: HummockVersionId(pb_version_delta.id),
             prev_id: HummockVersionId(pb_version_delta.prev_id),

@@ -29,7 +29,6 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::{bail, must_match};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -597,7 +596,7 @@ impl GlobalBarrierManager {
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
         let initial_invalid_state = BarrierManagerState::new(
-            TracedEpoch::new(Epoch(INVALID_EPOCH)),
+            None,
             InflightGraphInfo::default(),
             InflightSubscriptionInfo::default(),
             None,
@@ -949,7 +948,14 @@ impl GlobalBarrierManager {
             }
         }
 
-        let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
+        let Some((prev_epoch, curr_epoch)) = self.state.next_epoch_pair(&command) else {
+            // skip the command when there is nothing to do with the barrier
+            for mut notifier in notifiers {
+                notifier.notify_started();
+                notifier.notify_collected();
+            }
+            return Ok(());
+        };
 
         // Insert newly added creating job
         if let Command::CreateStreamingJob {
@@ -1175,7 +1181,6 @@ impl GlobalBarrierManagerContext {
             change_log_delta: Default::default(),
             committed_epoch: epoch,
             tables_to_commit,
-            is_visible_table_committed_epoch: false,
         };
         self.hummock_manager.commit_epoch(info).await?;
         Ok(())
@@ -1770,6 +1775,5 @@ fn collect_commit_epoch_info(
         change_log_delta: table_new_change_log,
         committed_epoch: epoch,
         tables_to_commit,
-        is_visible_table_committed_epoch: true,
     }
 }

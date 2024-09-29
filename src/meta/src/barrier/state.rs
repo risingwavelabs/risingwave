@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 
 use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
@@ -23,7 +24,7 @@ pub struct BarrierManagerState {
     ///
     /// There's no need to persist this field. On recovery, we will restore this from the latest
     /// committed snapshot in `HummockManager`.
-    in_flight_prev_epoch: TracedEpoch,
+    in_flight_prev_epoch: Option<TracedEpoch>,
 
     /// Inflight running actors info.
     pub(crate) inflight_graph_info: InflightGraphInfo,
@@ -36,7 +37,7 @@ pub struct BarrierManagerState {
 
 impl BarrierManagerState {
     pub fn new(
-        in_flight_prev_epoch: TracedEpoch,
+        in_flight_prev_epoch: Option<TracedEpoch>,
         inflight_graph_info: InflightGraphInfo,
         inflight_subscription_info: InflightSubscriptionInfo,
         paused_reason: Option<PausedReason>,
@@ -60,16 +61,24 @@ impl BarrierManagerState {
         }
     }
 
-    pub fn in_flight_prev_epoch(&self) -> &TracedEpoch {
-        &self.in_flight_prev_epoch
+    pub fn in_flight_prev_epoch(&self) -> Option<&TracedEpoch> {
+        self.in_flight_prev_epoch.as_ref()
     }
 
     /// Returns the epoch pair for the next barrier, and updates the state.
-    pub fn next_epoch_pair(&mut self) -> (TracedEpoch, TracedEpoch) {
-        let prev_epoch = self.in_flight_prev_epoch.clone();
+    pub fn next_epoch_pair(&mut self, command: &Command) -> Option<(TracedEpoch, TracedEpoch)> {
+        if self.inflight_graph_info.is_empty()
+            && !matches!(&command, Command::CreateStreamingJob { .. })
+        {
+            return None;
+        };
+        let in_flight_prev_epoch = self
+            .in_flight_prev_epoch
+            .get_or_insert_with(|| TracedEpoch::new(Epoch::now()));
+        let prev_epoch = in_flight_prev_epoch.clone();
         let next_epoch = prev_epoch.next();
-        self.in_flight_prev_epoch = next_epoch.clone();
-        (prev_epoch, next_epoch)
+        *in_flight_prev_epoch = next_epoch.clone();
+        Some((prev_epoch, next_epoch))
     }
 
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors

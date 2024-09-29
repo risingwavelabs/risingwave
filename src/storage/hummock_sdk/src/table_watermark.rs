@@ -726,8 +726,9 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
-    use risingwave_pb::hummock::PbHummockVersion;
+    use risingwave_pb::hummock::{PbHummockVersion, StateTableInfo};
 
+    use crate::compaction_group::StaticCompactionGroupId;
     use crate::key::{is_empty_key_range, prefixed_range_with_vnode, TableKeyRange};
     use crate::table_watermark::{
         merge_multiple_new_table_watermarks, TableWatermarks, TableWatermarksIndex, VnodeWatermark,
@@ -1184,11 +1185,18 @@ mod tests {
             watermark3.clone(),
         );
 
+        let test_table_id = TableId::from(233);
+
         let mut version = HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-            max_committed_epoch: EPOCH1,
+            state_table_info: HashMap::from_iter([(
+                test_table_id.table_id,
+                StateTableInfo {
+                    committed_epoch: EPOCH1,
+                    compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                },
+            )]),
             ..Default::default()
         });
-        let test_table_id = TableId::from(233);
         version.table_watermarks.insert(
             test_table_id,
             TableWatermarks {

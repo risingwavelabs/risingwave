@@ -255,7 +255,7 @@ impl HummockManager {
                 self.env.notification_manager(),
                 &self.metrics,
             );
-            let mut new_version_delta = version.new_delta(None);
+            let mut new_version_delta = version.new_delta();
             new_version_delta.with_latest_version(|version, delta| {
                 version.may_fill_backward_compatible_state_table_info_delta(delta)
             });

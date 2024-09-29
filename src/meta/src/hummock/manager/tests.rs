@@ -22,7 +22,7 @@ use itertools::Itertools;
 use prometheus::Registry;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
@@ -269,10 +269,6 @@ async fn test_hummock_transaction() {
         .await;
         // Get tables before committing epoch1. No tables should be returned.
         let current_version = hummock_manager.get_current_version().await;
-        assert_eq!(
-            current_version.max_committed_epoch_for_test(),
-            INVALID_EPOCH
-        );
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
         assert!(get_sorted_committed_object_ids(&current_version, compaction_group_id).is_empty());
 

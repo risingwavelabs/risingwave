@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt, MAX_EPOCH};
+use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH, MAX_EPOCH};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
 use risingwave_hummock_sdk::{
     HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
@@ -423,10 +423,7 @@ async fn test_basic_v2() {
 async fn test_state_store_sync_v2() {
     let (hummock_storage, _meta_client) = with_hummock_storage_v2(Default::default()).await;
 
-    let mut epoch = hummock_storage
-        .get_pinned_version()
-        .max_committed_epoch_for_test()
-        .next_epoch();
+    let mut epoch = INVALID_EPOCH.next_epoch();
 
     // ingest 16B batch
     let mut batch1 = vec![
@@ -1040,9 +1037,7 @@ async fn test_reload_storage() {
 async fn test_delete_get_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
 
-    let initial_epoch = hummock_storage
-        .get_pinned_version()
-        .max_committed_epoch_for_test();
+    let initial_epoch = INVALID_EPOCH;
     let epoch1 = initial_epoch.next_epoch();
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     let batch1 = vec![
@@ -1132,9 +1127,7 @@ async fn test_delete_get_v2() {
 async fn test_multiple_epoch_sync_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
 
-    let initial_epoch = hummock_storage
-        .get_pinned_version()
-        .max_committed_epoch_for_test();
+    let initial_epoch = INVALID_EPOCH;
     let epoch1 = initial_epoch.next_epoch();
     let batch1 = vec![
         (
@@ -1310,9 +1303,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .await;
     let table_id_set = HashSet::from_iter([local_hummock_storage.table_id()]);
 
-    let initial_epoch = hummock_storage
-        .get_pinned_version()
-        .max_committed_epoch_for_test();
+    let initial_epoch = INVALID_EPOCH;
     let epoch1 = initial_epoch.next_epoch();
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     local_hummock_storage.init_for_test(epoch1).await.unwrap();
@@ -1421,8 +1412,7 @@ async fn test_replicated_local_hummock_storage() {
             },
             change_log_delta: Default::default(),
             committed_epoch: epoch0,
-            tables_to_commit: Default::default(),
-            is_visible_table_committed_epoch: true,
+            tables_to_commit: HashSet::from_iter([TEST_TABLE_ID]),
         })
         .await
         .unwrap();

@@ -175,7 +175,7 @@ message HummockVersion {
   uint64 id = 1;
   // Levels of each compaction group
   map<uint64, Levels> levels = 2;
-  uint64 max_committed_epoch = 3;
+  uint64 max_committed_epoch = 3 [deprecated = true];
   reserved 4;
   reserved 'safe_epoch';
   map<uint32, TableWatermarks> table_watermarks = 5;
@@ -191,7 +191,7 @@ message HummockVersionDelta {
   uint64 prev_id = 2;
   // Levels of each compaction group
   map<uint64, GroupDeltas> group_deltas = 3;
-  uint64 max_committed_epoch = 4;
+  uint64 max_committed_epoch = 4 [deprecated = true];
   reserved 5;
   reserved 'safe_epoch';
   bool trivial_move = 6;
