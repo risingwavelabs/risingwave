@@ -432,7 +432,7 @@ pub mod group_split {
                 SstSplitType::Right => {
                     assert_eq!(0, pos);
                     insert_table_infos.extend_from_slice(&level.table_infos[pos..]); // the sst at pos has been split to the right
-                    level.table_infos = level.table_infos[0..pos].to_vec();
+                    level.table_infos.clear();
                 }
                 SstSplitType::Both => {
                     // split the sst
