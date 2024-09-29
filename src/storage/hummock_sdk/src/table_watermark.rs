@@ -726,6 +726,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_pb::hummock::PbHummockVersion;
 
     use crate::key::{is_empty_key_range, prefixed_range_with_vnode, TableKeyRange};
     use crate::table_watermark::{
@@ -1183,8 +1184,10 @@ mod tests {
             watermark3.clone(),
         );
 
-        let mut version = HummockVersion::default();
-        version.set_max_committed_epoch(EPOCH1);
+        let mut version = HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+            max_committed_epoch: EPOCH1,
+            ..Default::default()
+        });
         let test_table_id = TableId::from(233);
         version.table_watermarks.insert(
             test_table_id,

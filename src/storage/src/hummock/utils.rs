@@ -589,7 +589,7 @@ pub(crate) async fn wait_for_epoch(
     wait_for_update(
         notifier,
         |version| {
-            let committed_epoch = version.version().table_committed_epoch(table_id);
+            let committed_epoch = version.table_committed_epoch(table_id);
             let ret = if let Some(committed_epoch) = committed_epoch {
                 if committed_epoch >= wait_epoch {
                     Ok(true)

@@ -18,9 +18,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, SstObjectIdRange, SyncResult};
-use risingwave_pb::hummock::{
-    HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest, VacuumTask,
-};
+use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest, VacuumTask};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
 use tokio::sync::mpsc::UnboundedSender;
@@ -54,10 +52,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
         self.meta_client.get_current_version().await
-    }
-
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        self.meta_client.get_snapshot().await
     }
 
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
