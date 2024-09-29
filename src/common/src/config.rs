@@ -192,6 +192,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_interval_sec")]
     pub full_gc_interval_sec: u64,
 
+    /// Max number of object per full GC job can fetch.
+    #[serde(default = "default::meta::full_gc_object_limit")]
+    pub full_gc_object_limit: u64,
+
     /// The spin interval when collecting global GC watermark in hummock.
     #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
     pub collect_gc_watermark_spin_interval_sec: u64,
@@ -476,6 +480,10 @@ pub struct MetaDeveloperConfig {
     /// CREATE MV/Table will be rejected when the number of actors exceeds this limit.
     #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
+    /// Max number of SSTs fetched from meta store per SELECT, during time travel Hummock version replay.
+    pub hummock_time_travel_sst_info_fetch_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1346,6 +1354,10 @@ pub mod default {
             86400
         }
 
+        pub fn full_gc_object_limit() -> u64 {
+            100_000
+        }
+
         pub fn collect_gc_watermark_spin_interval_sec() -> u64 {
             5
         }
@@ -1885,6 +1897,10 @@ pub mod default {
 
         pub fn actor_cnt_per_worker_parallelism_hard_limit() -> usize {
             400
+        }
+
+        pub fn hummock_time_travel_sst_info_fetch_batch_size() -> usize {
+            10_000
         }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {

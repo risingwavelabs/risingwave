@@ -262,7 +262,10 @@ impl HummockManagerService for HummockServiceImpl {
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {
-            match hummock_manager.complete_full_gc(req.object_ids).await {
+            match hummock_manager
+                .complete_full_gc(req.object_ids, req.next_start_after)
+                .await
+            {
                 Ok(number) => {
                     tracing::info!("Full GC results {} SSTs to delete", number);
                 }

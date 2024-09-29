@@ -664,7 +664,7 @@ impl NatsCommon {
 
         let deliver_policy = match start_sequence {
             NatsOffset::Earliest => DeliverPolicy::All,
-            NatsOffset::Latest => DeliverPolicy::Last,
+            NatsOffset::Latest => DeliverPolicy::New,
             NatsOffset::SequenceNumber(v) => {
                 let parsed = v
                     .parse::<u64>()

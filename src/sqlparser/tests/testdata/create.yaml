@@ -64,25 +64,25 @@
                                  ^
 - input: CREATE TABLE T ("FULL" INT)
   formatted_sql: CREATE TABLE T ("FULL" INT)
-- input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN("FULL")
-  formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN(FULL)
-- input: CREATE TABLE T ("FULL" INT) ON CONFLICT IGNORE
-  formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT IGNORE
-- input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN("FULL")
+  formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(FULL)
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO NOTHING
+  formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO NOTHING
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN
   error_msg: |-
     sql parser error: expected (, found: EOF
-    LINE 1: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN
-                                                                                 ^
-- input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN(FULL
+    LINE 1: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN
+                                                                                      ^
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(FULL
   error_msg: |-
     sql parser error: syntax error at or near FULL
-    LINE 1: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN(FULL
-                                                                                      ^
-- input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMNFULL)
+    LINE 1: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(FULL
+                                                                                           ^
+- input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMNFULL)
   error_msg: |-
     sql parser error: expected (, found: VERSION
-    LINE 1: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMNFULL)
-                                                                   ^
+    LINE 1: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMNFULL)
+                                                                        ^
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
 - input: CREATE TABLE t (a int, b int, ts timestamptz as proctime(), primary key (a)) ON CONFLICT DO UPDATE IF NOT NULL INCLUDE timestamp AS ts_col WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') FORMAT PLAIN ENCODE JSON

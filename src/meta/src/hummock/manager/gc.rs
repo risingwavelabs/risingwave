@@ -188,14 +188,19 @@ impl HummockManager {
             sst_retention_time,
             Duration::from_secs(self.env.opts.min_sst_retention_time_sec),
         );
+        let start_after = self.full_gc_state.next_start_after();
+        let limit = self.full_gc_state.limit;
         tracing::info!(
             retention_sec = sst_retention_time.as_secs(),
             prefix = prefix.as_ref().unwrap_or(&String::from("")),
+            start_after,
+            limit,
             "run full GC"
         );
+
         let compactor = match self.compactor_manager.next_compactor() {
             None => {
-                tracing::warn!("Try full GC but no available idle worker.");
+                tracing::warn!("full GC attempt but no available idle worker");
                 return Ok(false);
             }
             Some(compactor) => compactor,
@@ -204,6 +209,8 @@ impl HummockManager {
             .send_event(ResponseEvent::FullScanTask(FullScanTask {
                 sst_retention_time_sec: sst_retention_time.as_secs(),
                 prefix,
+                start_after,
+                limit,
             }))
             .map_err(|_| Error::CompactorUnreachable(compactor.context_id()))?;
         Ok(true)
@@ -211,7 +218,12 @@ impl HummockManager {
 
     /// Given candidate SSTs to GC, filter out false positive.
     /// Returns number of SSTs to GC.
-    pub async fn complete_full_gc(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<usize> {
+    pub async fn complete_full_gc(
+        &self,
+        object_ids: Vec<HummockSstableObjectId>,
+        next_start_after: Option<String>,
+    ) -> Result<usize> {
+        self.full_gc_state.set_next_start_after(next_start_after);
         if object_ids.is_empty() {
             tracing::info!("SST full scan returns no SSTs.");
             return Ok(0);
@@ -230,6 +242,9 @@ impl HummockManager {
             .all_object_ids_in_time_travel()
             .await?
             .collect::<HashSet<_>>();
+        self.metrics
+            .time_travel_object_count
+            .set(pinned_object_ids.len() as _);
         // 1. filter by watermark
         let object_ids = object_ids
             .into_iter()
@@ -249,6 +264,28 @@ impl HummockManager {
             .observe(selected_object_number as _);
         tracing::info!("GC watermark is {watermark}. Object full scan returns {candidate_object_number} objects. {after_watermark} remains after filtered by GC watermark. {after_time_travel} remains after filtered by time travel archives. {selected_object_number} remains after filtered by hummock version.");
         Ok(selected_object_number)
+    }
+}
+
+pub struct FullGcState {
+    next_start_after: Mutex<Option<String>>,
+    limit: Option<u64>,
+}
+
+impl FullGcState {
+    pub fn new(limit: Option<u64>) -> Self {
+        Self {
+            next_start_after: Mutex::new(None),
+            limit,
+        }
+    }
+
+    pub fn set_next_start_after(&self, next_start_after: Option<String>) {
+        *self.next_start_after.lock() = next_start_after;
+    }
+
+    pub fn next_start_after(&self) -> Option<String> {
+        self.next_start_after.lock().clone()
     }
 }
 
@@ -403,7 +440,10 @@ mod tests {
         );
 
         // Empty input results immediate return, without waiting heartbeat.
-        hummock_manager.complete_full_gc(vec![]).await.unwrap();
+        hummock_manager
+            .complete_full_gc(vec![], None)
+            .await
+            .unwrap();
 
         // mimic CN heartbeat
         use risingwave_pb::meta::heartbeat_request::extra_info::Info;
@@ -428,7 +468,7 @@ mod tests {
         assert_eq!(
             3,
             hummock_manager
-                .complete_full_gc(vec![1, 2, 3])
+                .complete_full_gc(vec![1, 2, 3], None)
                 .await
                 .unwrap()
         );
@@ -452,7 +492,8 @@ mod tests {
             1,
             hummock_manager
                 .complete_full_gc(
-                    [committed_object_ids, vec![max_committed_object_id + 1]].concat()
+                    [committed_object_ids, vec![max_committed_object_id + 1]].concat(),
+                    None
                 )
                 .await
                 .unwrap()

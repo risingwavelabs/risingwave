@@ -29,6 +29,7 @@ use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
+use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
@@ -65,6 +66,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
+
+    async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
 
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
@@ -170,6 +173,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
         self.0.list_actor_states().await
+    }
+
+    async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
+        self.0.list_actor_splits().await
     }
 
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {

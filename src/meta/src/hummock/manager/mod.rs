@@ -42,7 +42,7 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::DeleteObjectTracker;
+use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager};
 use crate::model::{ClusterId, MetadataModel, MetadataModelError};
@@ -108,6 +108,7 @@ pub struct HummockManager {
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
+    full_gc_state: FullGcState,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -241,7 +242,7 @@ impl HummockManager {
         let version_checkpoint_path = version_checkpoint_path(state_store_dir);
         let version_archive_dir = version_archive_dir(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
+        let full_gc_object_limit = env.opts.full_gc_object_limit;
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -277,6 +278,7 @@ impl HummockManager {
             history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
+            full_gc_state: FullGcState::new(Some(full_gc_object_limit)),
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
