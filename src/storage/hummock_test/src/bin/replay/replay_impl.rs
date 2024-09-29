@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId, SyncResult};
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, LocalReplayRead, ReplayItem, ReplayRead, ReplayStateStore,
     ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions, TracedSealCurrentEpochOptions, TracedSubResp,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedSubResp, TracedTryWaitEpochOptions,
 };
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_pb::common::WorkerNode;
@@ -147,10 +147,6 @@ impl ReplayStateStore for GlobalReplayImpl {
         Ok(result.sync_size)
     }
 
-    fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
-        self.store.seal_epoch(epoch_id, is_checkpoint);
-    }
-
     async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64) -> Result<u64> {
         let prev_version_id = match &info {
             Info::HummockVersionDeltas(deltas) => deltas.version_deltas.last().map(|d| d.prev_id),
@@ -174,18 +170,15 @@ impl ReplayStateStore for GlobalReplayImpl {
         Box::new(LocalReplayImpl(local_storage))
     }
 
-    async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Result<()> {
+    async fn try_wait_epoch(
+        &self,
+        epoch: HummockReadEpoch,
+        options: TracedTryWaitEpochOptions,
+    ) -> Result<()> {
         self.store
-            .try_wait_epoch(epoch)
+            .try_wait_epoch(epoch, options.into())
             .await
             .map_err(|_| TraceError::TryWaitEpochFailed)?;
-        Ok(())
-    }
-
-    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> Result<()> {
-        self.store
-            .validate_read_epoch(epoch)
-            .map_err(|_| TraceError::ValidateReadEpochFailed)?;
         Ok(())
     }
 }

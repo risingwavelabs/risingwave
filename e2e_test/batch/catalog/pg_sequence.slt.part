@@ -1,0 +1,4 @@
+query ????????
+select seqrelid, seqtypid, seqstart, seqincrement, seqmax, seqmin, seqcache, seqcycle from pg_catalog.pg_sequence;
+----
+

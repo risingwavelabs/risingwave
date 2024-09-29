@@ -289,6 +289,7 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                 return Data.DataType.TypeName.INT16_VALUE <= val
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "integer":
+            case "int":
                 return Data.DataType.TypeName.INT32_VALUE <= val
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "bigint":
@@ -305,9 +306,15 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             case "decimal":
             case "numeric":
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
+            case "char":
+            case "nchar":
             case "varchar":
-            case "character varying":
+            case "nvarchar":
+            case "text":
+            case "ntext":
+            case "uniqueidentifier":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "binary":
             case "varbinary":
                 return val == Data.DataType.TypeName.BYTEA_VALUE;
             case "date":

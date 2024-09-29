@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
+use std::cell::LazyCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
-use std::future::{poll_fn, Future};
+use std::future::{pending, poll_fn, Future};
 use std::mem::replace;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
@@ -31,17 +32,17 @@ use risingwave_common::must_match;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use super::progress::BackfillState;
-use super::{BarrierCompleteResult, SubscribeMutationItem};
-use crate::error::StreamResult;
+use super::BarrierCompleteResult;
+use crate::error::{StreamError, StreamResult};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, Mutation};
-use crate::task::{await_tree_key, ActorId, PartialGraphId};
+use crate::task::{ActorId, PartialGraphId, SharedContext, StreamActorManager};
 
 struct IssuedState {
     pub mutation: Option<Arc<Mutation>>,
@@ -83,12 +84,65 @@ enum ManagedBarrierStateInner {
 
 #[derive(Debug)]
 pub(super) struct BarrierState {
-    curr_epoch: u64,
+    barrier: Barrier,
     inner: ManagedBarrierStateInner,
 }
 
-type AwaitEpochCompletedFuture =
-    impl Future<Output = (u64, StreamResult<BarrierCompleteResult>)> + 'static;
+mod await_epoch_completed_future {
+    use std::future::Future;
+
+    use futures::future::BoxFuture;
+    use futures::FutureExt;
+    use risingwave_hummock_sdk::SyncResult;
+    use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
+
+    use crate::error::StreamResult;
+    use crate::executor::Barrier;
+    use crate::task::{await_tree_key, BarrierCompleteResult};
+
+    pub(super) type AwaitEpochCompletedFuture =
+        impl Future<Output = (Barrier, StreamResult<BarrierCompleteResult>)> + 'static;
+
+    pub(super) fn instrument_complete_barrier_future(
+        complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
+        barrier: Barrier,
+        barrier_await_tree_reg: Option<&await_tree::Registry>,
+        create_mview_progress: Vec<PbCreateMviewProgress>,
+    ) -> AwaitEpochCompletedFuture {
+        let prev_epoch = barrier.epoch.prev;
+        let future = async move {
+            if let Some(future) = complete_barrier_future {
+                let result = future.await;
+                result.map(Some)
+            } else {
+                Ok(None)
+            }
+        }
+        .map(move |result| {
+            (
+                barrier,
+                result.map(|sync_result| BarrierCompleteResult {
+                    sync_result,
+                    create_mview_progress,
+                }),
+            )
+        });
+        if let Some(reg) = barrier_await_tree_reg {
+            reg.register(
+                await_tree_key::BarrierAwait { prev_epoch },
+                format!("SyncEpoch({})", prev_epoch),
+            )
+            .instrument(future)
+            .left_future()
+        } else {
+            future.right_future()
+        }
+    }
+}
+
+use await_epoch_completed_future::*;
+use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
+use risingwave_pb::stream_service::InjectBarrierRequest;
 
 fn sync_epoch<S: StateStore>(
     state_store: &S,
@@ -192,65 +246,56 @@ impl Display for &'_ PartialGraphManagedBarrierState {
 }
 
 enum InflightActorStatus {
-    /// The actor is just spawned and not issued any barrier yet
-    NotStarted,
-    /// The actor has been issued some barriers, and not issued any stop barrier yet
+    /// The actor has been issued some barriers, but has not collected the first barrier
+    IssuedFirst(Vec<Barrier>),
+    /// The actor has been issued some barriers, and has collected the first barrier
     Running(u64),
-    /// The actor has been issued a stop barrier
-    Stopping(u64),
 }
 
 impl InflightActorStatus {
-    pub(super) fn is_stopping(&self) -> bool {
-        matches!(self, InflightActorStatus::Stopping(_))
-    }
-
-    fn max_issued_epoch(&self) -> Option<u64> {
+    fn max_issued_epoch(&self) -> u64 {
         match self {
-            InflightActorStatus::NotStarted => None,
-            InflightActorStatus::Running(epoch) | InflightActorStatus::Stopping(epoch) => {
-                Some(*epoch)
+            InflightActorStatus::Running(epoch) => *epoch,
+            InflightActorStatus::IssuedFirst(issued_barriers) => {
+                issued_barriers.last().expect("non-empty").epoch.prev
             }
         }
     }
 }
 
 pub(crate) struct InflightActorState {
-    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<SubscribeMutationItem>>>,
+    actor_id: ActorId,
+    barrier_senders: Vec<mpsc::UnboundedSender<Barrier>>,
     /// `prev_epoch` -> partial graph id
     pub(super) inflight_barriers: BTreeMap<u64, PartialGraphId>,
-    /// `prev_epoch` -> (`mutation`, `curr_epoch`)
-    barrier_mutations: BTreeMap<u64, (Option<Arc<Mutation>>, u64)>,
     status: InflightActorStatus,
+    /// Whether the actor has been issued a stop barrier
+    is_stopping: bool,
+
+    join_handle: JoinHandle<()>,
+    monitor_task_handle: Option<JoinHandle<()>>,
 }
 
 impl InflightActorState {
-    pub(super) fn not_started() -> Self {
+    pub(super) fn start(
+        actor_id: ActorId,
+        initial_partial_graph_id: PartialGraphId,
+        initial_barrier: &Barrier,
+        join_handle: JoinHandle<()>,
+        monitor_task_handle: Option<JoinHandle<()>>,
+    ) -> Self {
         Self {
-            pending_subscribers: Default::default(),
-            inflight_barriers: BTreeMap::default(),
-            barrier_mutations: Default::default(),
-            status: InflightActorStatus::NotStarted,
+            actor_id,
+            barrier_senders: vec![],
+            inflight_barriers: BTreeMap::from_iter([(
+                initial_barrier.epoch.prev,
+                initial_partial_graph_id,
+            )]),
+            status: InflightActorStatus::IssuedFirst(vec![initial_barrier.clone()]),
+            is_stopping: false,
+            join_handle,
+            monitor_task_handle,
         }
-    }
-
-    pub(super) fn sync_barrier(&mut self, barrier: &Barrier) {
-        if let Some(mut subscribers) = self.pending_subscribers.remove(&barrier.epoch.prev) {
-            subscribers.retain(|tx| {
-                tx.send((barrier.epoch.prev, barrier.mutation.clone()))
-                    .is_ok()
-            });
-            if !subscribers.is_empty() {
-                self.pending_subscribers
-                    .entry(barrier.epoch.curr)
-                    .or_default()
-                    .extend(subscribers);
-            }
-        }
-        self.barrier_mutations.insert(
-            barrier.epoch.prev,
-            (barrier.mutation.clone(), barrier.epoch.curr),
-        );
     }
 
     pub(super) fn issue_barrier(
@@ -258,31 +303,17 @@ impl InflightActorState {
         partial_graph_id: PartialGraphId,
         barrier: &Barrier,
         is_stop: bool,
-    ) {
-        if let Some(max_issued_epoch) = self.status.max_issued_epoch() {
-            assert!(barrier.epoch.prev > max_issued_epoch);
-        }
+    ) -> StreamResult<()> {
+        assert!(barrier.epoch.prev > self.status.max_issued_epoch());
 
-        if let Some((first_epoch, _)) = self.pending_subscribers.first_key_value() {
-            assert!(
-                *first_epoch >= barrier.epoch.prev,
-                "barrier epoch {:?} skip subscribed epoch {}",
-                barrier.epoch,
-                first_epoch
-            );
-            if *first_epoch == barrier.epoch.prev {
-                let (_, mut subscribers) = self.pending_subscribers.pop_first().expect("non empty");
-                subscribers.retain(|tx| {
-                    tx.send((barrier.epoch.prev, barrier.mutation.clone()))
-                        .is_ok()
-                });
-                if !is_stop && !subscribers.is_empty() {
-                    self.pending_subscribers
-                        .entry(barrier.epoch.curr)
-                        .or_default()
-                        .extend(subscribers);
-                }
-            }
+        for barrier_sender in &self.barrier_senders {
+            barrier_sender.send(barrier.clone()).map_err(|_| {
+                StreamError::barrier_send(
+                    barrier.clone(),
+                    self.actor_id,
+                    "failed to send to registered sender",
+                )
+            })?;
         }
 
         assert!(self
@@ -290,34 +321,41 @@ impl InflightActorState {
             .insert(barrier.epoch.prev, partial_graph_id)
             .is_none());
 
-        if let Some((_, curr_epoch)) = self.barrier_mutations.insert(
-            barrier.epoch.prev,
-            (barrier.mutation.clone(), barrier.epoch.curr),
-        ) {
-            assert_eq!(curr_epoch, barrier.epoch.curr);
-        }
+        match &mut self.status {
+            InflightActorStatus::IssuedFirst(pending_barriers) => {
+                pending_barriers.push(barrier.clone());
+            }
+            InflightActorStatus::Running(prev_epoch) => {
+                *prev_epoch = barrier.epoch.prev;
+            }
+        };
 
         if is_stop {
-            assert!(self.pending_subscribers.is_empty());
-            assert!(
-                !self.status.is_stopping(),
-                "stopped actor should not issue barrier"
-            );
-            self.status = InflightActorStatus::Stopping(barrier.epoch.prev);
-        } else {
-            self.status = InflightActorStatus::Running(barrier.epoch.prev);
+            assert!(!self.is_stopping, "stopped actor should not issue barrier");
+            self.is_stopping = true;
         }
+        Ok(())
     }
 
     pub(super) fn collect(&mut self, epoch: EpochPair) -> (PartialGraphId, bool) {
         let (prev_epoch, prev_partial_graph_id) =
             self.inflight_barriers.pop_first().expect("should exist");
         assert_eq!(prev_epoch, epoch.prev);
-        let (min_mutation_epoch, _) = self.barrier_mutations.pop_first().expect("should exist");
-        assert_eq!(min_mutation_epoch, epoch.prev);
+        match &self.status {
+            InflightActorStatus::IssuedFirst(pending_barriers) => {
+                assert_eq!(
+                    prev_epoch,
+                    pending_barriers.first().expect("non-empty").epoch.prev
+                );
+                self.status = InflightActorStatus::Running(
+                    pending_barriers.last().expect("non-empty").epoch.prev,
+                );
+            }
+            InflightActorStatus::Running(_) => {}
+        }
         (
             prev_partial_graph_id,
-            self.inflight_barriers.is_empty() && self.status.is_stopping(),
+            self.inflight_barriers.is_empty() && self.is_stopping,
         )
     }
 
@@ -327,9 +365,6 @@ impl InflightActorState {
 }
 
 pub(super) struct PartialGraphManagedBarrierState {
-    /// This is a temporary workaround for the need to still calling `seal_epoch` for storage.
-    /// Can be removed after `seal_epoch` is deprecated in storage.
-    need_seal_epoch: bool,
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
     /// The key is `prev_epoch`, and the first value is `curr_epoch`
@@ -338,6 +373,9 @@ pub(super) struct PartialGraphManagedBarrierState {
     prev_barrier_table_ids: Option<(EpochPair, HashSet<TableId>)>,
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
+    ///
+    /// This is updated by [`super::CreateMviewProgressReporter::update`] and will be reported to meta
+    /// in [`BarrierCompleteResult`].
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
     pub(super) state_store: StateStoreImpl,
@@ -353,13 +391,11 @@ pub(super) struct PartialGraphManagedBarrierState {
 
 impl PartialGraphManagedBarrierState {
     fn new(
-        need_seal_epoch: bool,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         barrier_await_tree_reg: Option<await_tree::Registry>,
     ) -> Self {
         Self {
-            need_seal_epoch,
             epoch_barrier_state_map: Default::default(),
             prev_barrier_table_ids: None,
             create_mview_progress: Default::default(),
@@ -373,7 +409,6 @@ impl PartialGraphManagedBarrierState {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         Self::new(
-            true,
             StateStoreImpl::for_test(),
             Arc::new(StreamingMetrics::unused()),
             None,
@@ -385,32 +420,30 @@ impl PartialGraphManagedBarrierState {
     }
 }
 
-pub(super) struct ManagedBarrierState {
+pub(crate) struct ManagedBarrierState {
     pub(super) actor_states: HashMap<ActorId, InflightActorState>,
 
     pub(super) graph_states: HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
 
-    pub(super) state_store: StateStoreImpl,
+    mv_depended_subscriptions: HashMap<TableId, HashSet<u32>>,
 
-    pub(super) streaming_metrics: Arc<StreamingMetrics>,
+    actor_manager: Arc<StreamActorManager>,
 
-    /// Manages the await-trees of all barriers.
-    barrier_await_tree_reg: Option<await_tree::Registry>,
+    current_shared_context: Arc<SharedContext>,
 }
 
 impl ManagedBarrierState {
     /// Create a barrier manager state. This will be called only once.
     pub(super) fn new(
-        state_store: StateStoreImpl,
-        streaming_metrics: Arc<StreamingMetrics>,
-        barrier_await_tree_reg: Option<await_tree::Registry>,
+        actor_manager: Arc<StreamActorManager>,
+        current_shared_context: Arc<SharedContext>,
     ) -> Self {
         Self {
             actor_states: Default::default(),
             graph_states: Default::default(),
-            state_store,
-            streaming_metrics,
-            barrier_await_tree_reg,
+            mv_depended_subscriptions: Default::default(),
+            actor_manager,
+            current_shared_context,
         }
     }
 
@@ -419,121 +452,211 @@ impl ManagedBarrierState {
             graph_states: &self.graph_states,
         }
     }
-}
 
-impl InflightActorState {
-    pub(super) fn subscribe_actor_mutation(
-        &mut self,
-        start_prev_epoch: u64,
-        tx: mpsc::UnboundedSender<SubscribeMutationItem>,
-    ) {
-        if let Some((mutation, start_curr_epoch)) = self.barrier_mutations.get(&start_prev_epoch) {
-            if tx.send((start_prev_epoch, mutation.clone())).is_err() {
-                return;
+    pub(crate) async fn abort_actors(&mut self) {
+        for (actor_id, state) in &self.actor_states {
+            tracing::debug!("force stopping actor {}", actor_id);
+            state.join_handle.abort();
+            if let Some(monitor_task_handle) = &state.monitor_task_handle {
+                monitor_task_handle.abort();
             }
-            let mut prev_epoch = *start_curr_epoch;
-            for (mutation_prev_epoch, (mutation, mutation_curr_epoch)) in
-                self.barrier_mutations.range(start_curr_epoch..)
-            {
-                if prev_epoch == *mutation_prev_epoch {
-                    if tx.send((prev_epoch, mutation.clone())).is_err() {
-                        // No more subscribe on the mutation. Simply return.
-                        return;
-                    }
-                    prev_epoch = *mutation_curr_epoch;
-                } else {
-                    assert!(prev_epoch < *mutation_prev_epoch);
-                    break;
-                }
-            }
-            if !self.status.is_stopping() {
-                // Only add the subscribers when the actor is not stopped yet.
-                self.pending_subscribers
-                    .entry(prev_epoch)
-                    .or_default()
-                    .push(tx);
-            }
-        } else {
-            // Barrier has not issued yet. Store the pending tx
-            if let Some(max_issued_epoch) = self.status.max_issued_epoch() {
-                assert!(
-                    max_issued_epoch < start_prev_epoch,
-                    "later barrier {} has been issued, but skip the start epoch {:?}",
-                    max_issued_epoch,
-                    start_prev_epoch
-                );
-            } else {
-                assert!(!self.status.is_stopping(), "actor has been stopped and has not inflight barrier. unlikely to get further barrier");
-            }
-            self.pending_subscribers
-                .entry(start_prev_epoch)
-                .or_default()
-                .push(tx);
+        }
+        for (actor_id, state) in self.actor_states.drain() {
+            tracing::debug!("join actor {}", actor_id);
+            let result = state.join_handle.await;
+            assert!(result.is_ok() || result.unwrap_err().is_cancelled());
         }
     }
 }
 
+impl InflightActorState {
+    pub(super) fn register_barrier_sender(
+        &mut self,
+        tx: mpsc::UnboundedSender<Barrier>,
+    ) -> StreamResult<()> {
+        match &self.status {
+            InflightActorStatus::IssuedFirst(pending_barriers) => {
+                for barrier in pending_barriers {
+                    tx.send(barrier.clone()).map_err(|_| {
+                        StreamError::barrier_send(
+                            barrier.clone(),
+                            self.actor_id,
+                            "failed to send pending barriers to newly registered sender",
+                        )
+                    })?;
+                }
+                self.barrier_senders.push(tx);
+            }
+            InflightActorStatus::Running(_) => {
+                unreachable!("should not register barrier sender when entering Running status")
+            }
+        }
+        Ok(())
+    }
+}
+
 impl ManagedBarrierState {
-    pub(super) fn subscribe_actor_mutation(
+    pub(super) fn register_barrier_sender(
         &mut self,
         actor_id: ActorId,
-        start_prev_epoch: u64,
-        tx: mpsc::UnboundedSender<SubscribeMutationItem>,
-    ) {
+        tx: mpsc::UnboundedSender<Barrier>,
+    ) -> StreamResult<()> {
         self.actor_states
-            .entry(actor_id)
-            .or_insert_with(InflightActorState::not_started)
-            .subscribe_actor_mutation(start_prev_epoch, tx);
+            .get_mut(&actor_id)
+            .expect("should exist")
+            .register_barrier_sender(tx)
+    }
+
+    pub(super) fn add_subscriptions(&mut self, subscriptions: Vec<SubscriptionUpstreamInfo>) {
+        for subscription_to_add in subscriptions {
+            if !self
+                .mv_depended_subscriptions
+                .entry(TableId::new(subscription_to_add.upstream_mv_table_id))
+                .or_default()
+                .insert(subscription_to_add.subscriber_id)
+            {
+                if cfg!(debug_assertions) {
+                    panic!("add an existing subscription: {:?}", subscription_to_add);
+                }
+                warn!(?subscription_to_add, "add an existing subscription");
+            }
+        }
+    }
+
+    pub(super) fn remove_subscriptions(&mut self, subscriptions: Vec<SubscriptionUpstreamInfo>) {
+        for subscription_to_remove in subscriptions {
+            let upstream_table_id = TableId::new(subscription_to_remove.upstream_mv_table_id);
+            let Some(subscribers) = self.mv_depended_subscriptions.get_mut(&upstream_table_id)
+            else {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "unable to find upstream mv table to remove: {:?}",
+                        subscription_to_remove
+                    );
+                }
+                warn!(
+                    ?subscription_to_remove,
+                    "unable to find upstream mv table to remove"
+                );
+                continue;
+            };
+            if !subscribers.remove(&subscription_to_remove.subscriber_id) {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "unable to find subscriber to remove: {:?}",
+                        subscription_to_remove
+                    );
+                }
+                warn!(
+                    ?subscription_to_remove,
+                    "unable to find subscriber to remove"
+                );
+            }
+            if subscribers.is_empty() {
+                self.mv_depended_subscriptions.remove(&upstream_table_id);
+            }
+        }
     }
 
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,
-        actor_ids_to_collect: HashSet<ActorId>,
-        table_ids: HashSet<TableId>,
-        partial_graph_id: PartialGraphId,
-        actor_ids_to_pre_sync_barrier: HashSet<ActorId>,
-    ) {
+        request: InjectBarrierRequest,
+    ) -> StreamResult<()> {
+        self.add_subscriptions(request.subscriptions_to_add);
+        self.remove_subscriptions(request.subscriptions_to_remove);
+        let partial_graph_id = PartialGraphId::new(request.partial_graph_id);
         let actor_to_stop = barrier.all_stop_actors();
+        let is_stop_actor = |actor_id| {
+            actor_to_stop
+                .map(|actors| actors.contains(&actor_id))
+                .unwrap_or(false)
+        };
         let graph_state = self
             .graph_states
             .entry(partial_graph_id)
             .or_insert_with(|| {
                 PartialGraphManagedBarrierState::new(
-                    partial_graph_id.is_global_graph(),
-                    self.state_store.clone(),
-                    self.streaming_metrics.clone(),
-                    self.barrier_await_tree_reg.clone(),
+                    self.actor_manager.env.state_store(),
+                    self.actor_manager.streaming_metrics.clone(),
+                    self.actor_manager.await_tree_reg.clone(),
                 )
             });
 
-        graph_state.transform_to_issued(barrier, actor_ids_to_collect.clone(), table_ids);
+        graph_state.transform_to_issued(
+            barrier,
+            request.actor_ids_to_collect.iter().cloned(),
+            HashSet::from_iter(request.table_ids_to_sync.iter().cloned().map(TableId::new)),
+        );
+
+        let mut new_actors = HashSet::new();
+        let subscriptions = LazyCell::new(|| Arc::new(self.mv_depended_subscriptions.clone()));
+        for actor in request.actors_to_build {
+            let actor_id = actor.actor_id;
+            assert!(!is_stop_actor(actor_id));
+            assert!(new_actors.insert(actor_id));
+            assert!(request.actor_ids_to_collect.contains(&actor_id));
+            let (join_handle, monitor_join_handle) = self.actor_manager.spawn_actor(
+                actor,
+                (*subscriptions).clone(),
+                self.current_shared_context.clone(),
+            );
+            assert!(self
+                .actor_states
+                .try_insert(
+                    actor_id,
+                    InflightActorState::start(
+                        actor_id,
+                        partial_graph_id,
+                        barrier,
+                        join_handle,
+                        monitor_join_handle
+                    )
+                )
+                .is_ok());
+        }
+
+        // Spawn a trivial join handle to be compatible with the unit test
+        if cfg!(test) {
+            for actor_id in &request.actor_ids_to_collect {
+                if !self.actor_states.contains_key(actor_id) {
+                    let join_handle = self.actor_manager.runtime.spawn(async { pending().await });
+                    assert!(self
+                        .actor_states
+                        .try_insert(
+                            *actor_id,
+                            InflightActorState::start(
+                                *actor_id,
+                                partial_graph_id,
+                                barrier,
+                                join_handle,
+                                None,
+                            )
+                        )
+                        .is_ok());
+                    new_actors.insert(*actor_id);
+                }
+            }
+        }
 
         // Note: it's important to issue barrier to actor after issuing to graph to ensure that
         // we call `start_epoch` on the graph before the actors receive the barrier
-        for actor_id in actor_ids_to_collect {
+        for actor_id in &request.actor_ids_to_collect {
+            if new_actors.contains(actor_id) {
+                continue;
+            }
             self.actor_states
-                .entry(actor_id)
-                .or_insert_with(InflightActorState::not_started)
-                .issue_barrier(
-                    partial_graph_id,
-                    barrier,
-                    actor_to_stop
-                        .map(|actors| actors.contains(&actor_id))
-                        .unwrap_or(false),
-                );
+                .get_mut(actor_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "should exist: {} {:?}",
+                        actor_id, request.actor_ids_to_collect
+                    );
+                })
+                .issue_barrier(partial_graph_id, barrier, is_stop_actor(*actor_id))?;
         }
 
-        if partial_graph_id.is_global_graph() {
-            for actor_id in actor_ids_to_pre_sync_barrier {
-                self.actor_states
-                    .entry(actor_id)
-                    .or_insert_with(InflightActorState::not_started)
-                    .sync_barrier(barrier);
-            }
-        } else {
-            assert!(actor_ids_to_pre_sync_barrier.is_empty());
-        }
+        Ok(())
     }
 
     pub(super) fn next_completed_epoch(
@@ -541,9 +664,12 @@ impl ManagedBarrierState {
     ) -> impl Future<Output = (PartialGraphId, u64)> + '_ {
         poll_fn(|cx| {
             for (partial_graph_id, graph_state) in &mut self.graph_states {
-                if let Poll::Ready(epoch) = graph_state.poll_next_completed_epoch(cx) {
+                if let Poll::Ready(barrier) = graph_state.poll_next_completed_barrier(cx) {
+                    if let Some(actors_to_stop) = barrier.all_stop_actors() {
+                        self.current_shared_context.drop_actors(actors_to_stop);
+                    }
                     let partial_graph_id = *partial_graph_id;
-                    return Poll::Ready((partial_graph_id, epoch));
+                    return Poll::Ready((partial_graph_id, barrier.epoch.prev));
                 }
             }
             Poll::Pending
@@ -557,7 +683,10 @@ impl ManagedBarrierState {
             .expect("should exist")
             .collect(epoch);
         if is_finished {
-            self.actor_states.remove(&actor_id);
+            let state = self.actor_states.remove(&actor_id).expect("should exist");
+            if let Some(monitor_task_handle) = state.monitor_task_handle {
+                monitor_task_handle.abort();
+            }
         }
         let prev_graph_state = self
             .graph_states
@@ -608,21 +737,10 @@ impl PartialGraphManagedBarrierState {
 
             let create_mview_progress = self
                 .create_mview_progress
-                .remove(&barrier_state.curr_epoch)
+                .remove(&barrier_state.barrier.epoch.curr)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(actor, state)| CreateMviewProgress {
-                    backfill_actor_id: actor,
-                    done: matches!(state, BackfillState::Done(_)),
-                    consumed_epoch: match state {
-                        BackfillState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
-                        BackfillState::Done(_) => barrier_state.curr_epoch,
-                    },
-                    consumed_rows: match state {
-                        BackfillState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
-                        BackfillState::Done(consumed_rows) => consumed_rows,
-                    },
-                })
+                .map(|(actor, state)| state.to_pb(actor))
                 .collect();
 
             let complete_barrier_future = match kind {
@@ -632,29 +750,12 @@ impl PartialGraphManagedBarrierState {
                         epoch = prev_epoch,
                         "ignore sealing data for the first barrier"
                     );
-                    if let Some(hummock) = self.state_store.as_hummock() {
-                        let mce = hummock.get_pinned_version().visible_table_committed_epoch();
-                        assert_eq!(
-                            mce, prev_epoch,
-                            "first epoch should match with the current version",
-                        );
-                    }
                     tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
                     None
                 }
-                BarrierKind::Barrier => {
-                    if self.need_seal_epoch {
-                        dispatch_state_store!(&self.state_store, state_store, {
-                            state_store.seal_epoch(prev_epoch, kind.is_checkpoint());
-                        });
-                    }
-                    None
-                }
+                BarrierKind::Barrier => None,
                 BarrierKind::Checkpoint => {
                     dispatch_state_store!(&self.state_store, state_store, {
-                        if self.need_seal_epoch {
-                            state_store.seal_epoch(prev_epoch, kind.is_checkpoint());
-                        }
                         Some(sync_epoch(
                             state_store,
                             &self.streaming_metrics,
@@ -665,34 +766,15 @@ impl PartialGraphManagedBarrierState {
                 }
             };
 
+            let barrier = barrier_state.barrier.clone();
+
             self.await_epoch_completed_futures.push_back({
-                let future = async move {
-                    if let Some(future) = complete_barrier_future {
-                        let result = future.await;
-                        result.map(Some)
-                    } else {
-                        Ok(None)
-                    }
-                }
-                .map(move |result| {
-                    (
-                        prev_epoch,
-                        result.map(|sync_result| BarrierCompleteResult {
-                            sync_result,
-                            create_mview_progress,
-                        }),
-                    )
-                });
-                if let Some(reg) = &self.barrier_await_tree_reg {
-                    reg.register(
-                        await_tree_key::BarrierAwait { prev_epoch },
-                        format!("SyncEpoch({})", prev_epoch),
-                    )
-                    .instrument(future)
-                    .left_future()
-                } else {
-                    future.right_future()
-                }
+                instrument_complete_barrier_future(
+                    complete_barrier_future,
+                    barrier,
+                    self.barrier_await_tree_reg.as_ref(),
+                    create_mview_progress,
+                )
             });
         }
     }
@@ -716,7 +798,7 @@ impl PartialGraphManagedBarrierState {
                 )
             }
             Some(&mut BarrierState {
-                curr_epoch,
+                ref barrier,
                 inner:
                     ManagedBarrierStateInner::Issued(IssuedState {
                         ref mut remaining_actors,
@@ -730,7 +812,7 @@ impl PartialGraphManagedBarrierState {
                     "the actor doesn't exist. actor_id: {:?}, curr_epoch: {:?}",
                     actor_id, epoch.curr
                 );
-                assert_eq!(curr_epoch, epoch.curr);
+                assert_eq!(barrier.epoch.curr, epoch.curr);
                 self.may_have_collected_all(epoch.prev);
             }
             Some(BarrierState { inner, .. }) => {
@@ -747,7 +829,7 @@ impl PartialGraphManagedBarrierState {
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,
-        actor_ids_to_collect: HashSet<ActorId>,
+        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
         table_ids: HashSet<TableId>,
     ) {
         let timer = self
@@ -812,7 +894,7 @@ impl PartialGraphManagedBarrierState {
         self.epoch_barrier_state_map.insert(
             barrier.epoch.prev,
             BarrierState {
-                curr_epoch: barrier.epoch.curr,
+                barrier: barrier.clone(),
                 inner: ManagedBarrierStateInner::Issued(IssuedState {
                     remaining_actors: BTreeSet::from_iter(actor_ids_to_collect),
                     mutation: barrier.mutation.clone(),
@@ -826,17 +908,17 @@ impl PartialGraphManagedBarrierState {
     }
 
     /// Return a future that yields the next completed epoch. The future is cancellation safe.
-    pub(crate) fn poll_next_completed_epoch(&mut self, cx: &mut Context<'_>) -> Poll<u64> {
+    pub(crate) fn poll_next_completed_barrier(&mut self, cx: &mut Context<'_>) -> Poll<Barrier> {
         ready!(self.await_epoch_completed_futures.next().poll_unpin(cx))
-            .map(|(prev_epoch, result)| {
+            .map(|(barrier, result)| {
                 let state = self
                     .epoch_barrier_state_map
-                    .get_mut(&prev_epoch)
+                    .get_mut(&barrier.epoch.prev)
                     .expect("should exist");
                 // sanity check on barrier state
                 assert_matches!(&state.inner, ManagedBarrierStateInner::AllCollected);
                 state.inner = ManagedBarrierStateInner::Completed(result);
-                prev_epoch
+                barrier
             })
             .map(Poll::Ready)
             .unwrap_or(Poll::Pending)
@@ -882,9 +964,12 @@ impl PartialGraphManagedBarrierState {
 
     #[cfg(test)]
     async fn pop_next_completed_epoch(&mut self) -> u64 {
-        let epoch = poll_fn(|cx| self.poll_next_completed_epoch(cx)).await;
-        let _ = self.pop_completed_epoch(epoch).unwrap().unwrap();
-        epoch
+        let barrier = poll_fn(|cx| self.poll_next_completed_barrier(cx)).await;
+        let _ = self
+            .pop_completed_epoch(barrier.epoch.prev)
+            .unwrap()
+            .unwrap();
+        barrier.epoch.prev
     }
 }
 

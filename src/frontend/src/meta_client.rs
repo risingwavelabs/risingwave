@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -26,9 +27,9 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
+use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
@@ -47,11 +48,7 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 pub trait FrontendMetaClient: Send + Sync {
     async fn try_unregister(&self);
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
-
-    async fn get_snapshot(&self) -> Result<HummockSnapshot>;
-
-    async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
+    async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId>;
 
     async fn wait(&self) -> Result<()>;
 
@@ -70,11 +67,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
+    async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
+
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
-
-    async fn unpin_snapshot(&self) -> Result<()>;
-
-    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
 
@@ -90,15 +85,12 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String>;
 
-    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
+    async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
     async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>>;
 
     /// Returns vector of (worker_id, min_pinned_version_id)
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
-
-    /// Returns vector of (worker_id, min_pinned_snapshot_id)
-    async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
@@ -136,6 +128,8 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<Vec<u64>>;
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
+
+    async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -146,15 +140,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.try_unregister().await;
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.0.pin_snapshot().await
-    }
-
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        self.0.get_snapshot().await
-    }
-
-    async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
+    async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId> {
         self.0.flush(checkpoint).await
     }
 
@@ -189,16 +175,12 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_actor_states().await
     }
 
+    async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
+        self.0.list_actor_splits().await
+    }
+
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
         self.0.list_object_dependencies().await
-    }
-
-    async fn unpin_snapshot(&self) -> Result<()> {
-        self.0.unpin_snapshot().await
-    }
-
-    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()> {
-        self.0.unpin_snapshot_before(epoch).await
     }
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
@@ -229,7 +211,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.set_session_param(param, value).await
     }
 
-    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+    async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
         let ddl_progress = self.0.get_ddl_progress().await?;
         Ok(ddl_progress)
     }
@@ -250,21 +232,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         let ret = pinned_versions
             .into_iter()
             .map(|v| (v.context_id, v.min_pinned_id))
-            .collect();
-        Ok(ret)
-    }
-
-    async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>> {
-        let pinned_snapshots = self
-            .0
-            .risectl_get_pinned_snapshots_summary()
-            .await?
-            .summary
-            .unwrap()
-            .pinned_snapshots;
-        let ret = pinned_snapshots
-            .into_iter()
-            .map(|s| (s.context_id, s.minimal_pinned_snapshot))
             .collect();
         Ok(ret)
     }
@@ -344,5 +311,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
         self.0.get_cluster_recovery_status().await
+    }
+
+    async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>> {
+        self.0.get_cluster_limits().await
     }
 }

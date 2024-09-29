@@ -282,10 +282,20 @@ message ExprNode {
     JSONB_POPULATE_RECORD = 629;
     JSONB_TO_RECORD = 630;
     JSONB_SET = 631;
+    JSONB_POPULATE_MAP = 632;
 
     // Map functions
     MAP_FROM_ENTRIES = 700;
     MAP_ACCESS = 701;
+    MAP_KEYS = 702;
+    MAP_VALUES = 703;
+    MAP_ENTRIES = 704;
+    MAP_FROM_KEY_VALUES = 705;
+    MAP_LENGTH = 706;
+    MAP_CONTAINS = 707;
+    MAP_CAT = 708;
+    MAP_INSERT = 709;
+    MAP_DELETE = 710;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -412,7 +422,7 @@ message FunctionCall {
 
 // Aggregate Function Calls for Aggregation
 message AggCall {
-  enum Type {
+  enum Kind {
     UNSPECIFIED = 0;
     SUM = 1;
     MIN = 2;
@@ -448,17 +458,31 @@ message AggCall {
     // wraps a scalar function that takes a list as input as an aggregate function.
     WRAP_SCALAR = 101;
   }
-  Type type = 1;
+  Kind kind = 1;
   repeated InputRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
   repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
   repeated Constant direct_args = 7;
-  // optional. only used when the type is USER_DEFINED.
+  // optional. only used when the kind is USER_DEFINED.
   UserDefinedFunctionMetadata udf = 8;
-  // optional. only used when the type is WRAP_SCALAR.
+  // optional. only used when the kind is WRAP_SCALAR.
   ExprNode scalar = 9;
+}
+
+// The aggregation type.
+//
+// Ideally this should be used to encode the Rust `AggCall::agg_type` field, but historically we
+// flattened it into multiple fields in proto `AggCall` - `kind` + `udf` + `scalar`. So this
+// `AggType` proto type is only used by `WindowFunction` currently.
+message AggType {
+  AggCall.Kind kind = 1;
+
+  // UDF metadata. Only present when the kind is `USER_DEFINED`.
+  optional UserDefinedFunctionMetadata udf_meta = 8;
+  // Wrapped scalar expression. Only present when the kind is `WRAP_SCALAR`.
+  optional ExprNode scalar_expr = 9;
 }
 
 message WindowFrame {
@@ -552,7 +576,8 @@ message WindowFunction {
 
   oneof type {
     GeneralType general = 1;
-    AggCall.Type aggregate = 2;
+    AggCall.Kind aggregate = 2 [deprecated = true]; // Deprecated since we have a new `aggregate2` variant.
+    AggType aggregate2 = 103;
   }
   repeated InputRef args = 3;
   data.DataType return_type = 4;

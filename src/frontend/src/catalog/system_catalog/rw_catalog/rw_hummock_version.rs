@@ -28,8 +28,6 @@ use crate::error::Result;
 struct RwHummockVersion {
     #[primary_key]
     version_id: i64,
-    max_committed_epoch: i64,
-    safe_epoch: i64,
     compaction_group: JsonbVal,
 }
 
@@ -55,6 +53,7 @@ struct RwHummockSstable {
     range_tombstone_count: i64,
     bloom_filter_kind: i32,
     table_ids: JsonbVal,
+    sst_size: i64,
 }
 
 #[system_catalog(table, "rw_catalog.rw_hummock_current_version")]
@@ -101,8 +100,6 @@ fn version_to_compaction_group_rows(version: &HummockVersion) -> Vec<RwHummockVe
         .values()
         .map(|cg| RwHummockVersion {
             version_id: version.id.to_u64() as _,
-            max_committed_epoch: version.visible_table_committed_epoch() as _,
-            safe_epoch: version.visible_table_safe_epoch() as _,
             compaction_group: json!(cg.to_protobuf()).into(),
         })
         .collect()
@@ -134,6 +131,7 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     range_tombstone_count: sst.range_tombstone_count as _,
                     bloom_filter_kind: sst.bloom_filter_kind as _,
                     table_ids: json!(sst.table_ids).into(),
+                    sst_size: sst.sst_size as _,
                 });
             }
         }
@@ -205,7 +203,6 @@ async fn read_hummock_table_watermarks(
 struct RwHummockSnapshot {
     #[primary_key]
     table_id: i32,
-    safe_epoch: i64,
     committed_epoch: i64,
 }
 
@@ -221,7 +218,6 @@ async fn read_hummock_snapshot_groups(
         .map(|(table_id, info)| RwHummockSnapshot {
             table_id: table_id.table_id as _,
             committed_epoch: info.committed_epoch as _,
-            safe_epoch: info.safe_epoch as _,
         })
         .collect())
 }

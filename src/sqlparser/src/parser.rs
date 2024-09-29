@@ -29,12 +29,12 @@ use winnow::{PResult, Parser as _};
 
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
-use crate::parser_v2;
 use crate::parser_v2::{
     dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, token_number,
     ParserExt as _,
 };
 use crate::tokenizer::*;
+use crate::{impl_parse_to, parser_v2};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 
@@ -824,6 +824,27 @@ impl Parser<'_> {
         };
         let name = self.parse_object_name()?;
         let arg_list = self.parse_argument_list()?;
+
+        let within_group = if self.parse_keywords(&[Keyword::WITHIN, Keyword::GROUP]) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
+            let order_by = self.parse_order_by_expr()?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(order_by.clone()))
+        } else {
+            None
+        };
+
+        let filter = if self.parse_keyword(Keyword::FILTER) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keyword(Keyword::WHERE)?;
+            let filter_expr = self.parse_expr()?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(filter_expr))
+        } else {
+            None
+        };
+
         let over = if self.parse_keyword(Keyword::OVER) {
             // TODO: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
@@ -855,33 +876,13 @@ impl Parser<'_> {
             None
         };
 
-        let filter = if self.parse_keyword(Keyword::FILTER) {
-            self.expect_token(&Token::LParen)?;
-            self.expect_keyword(Keyword::WHERE)?;
-            let filter_expr = self.parse_expr()?;
-            self.expect_token(&Token::RParen)?;
-            Some(Box::new(filter_expr))
-        } else {
-            None
-        };
-
-        let within_group = if self.parse_keywords(&[Keyword::WITHIN, Keyword::GROUP]) {
-            self.expect_token(&Token::LParen)?;
-            self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
-            let order_by = self.parse_order_by_expr()?;
-            self.expect_token(&Token::RParen)?;
-            Some(Box::new(order_by.clone()))
-        } else {
-            None
-        };
-
         Ok(Expr::Function(Function {
             scalar_as_agg,
             name,
             arg_list,
-            over,
-            filter,
             within_group,
+            filter,
+            over,
         }))
     }
 
@@ -2007,7 +2008,7 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
             parser_err!("CREATE MATERIALIZED SOURCE has been deprecated, use CREATE TABLE instead")
         } else if self.parse_keyword(Keyword::SOURCE) {
-            self.parse_create_source(or_replace)
+            self.parse_create_source(or_replace, temporary)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
         } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
@@ -2101,17 +2102,54 @@ impl Parser<'_> {
     }
 
     // CREATE [OR REPLACE]?
-    // [MATERIALIZED] SOURCE
+    // [TEMPORARY] SOURCE
     // [IF NOT EXISTS]?
     // <source_name: Ident>
     // [COLUMNS]?
     // [WITH (properties)]?
     // ROW FORMAT <row_format: Ident>
     // [ROW SCHEMA LOCATION <row_schema_location: String>]?
-    pub fn parse_create_source(&mut self, _or_replace: bool) -> PResult<Statement> {
-        Ok(Statement::CreateSource {
-            stmt: CreateSourceStatement::parse_to(self)?,
-        })
+    pub fn parse_create_source(
+        &mut self,
+        _or_replace: bool,
+        temporary: bool,
+    ) -> PResult<Statement> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
+        impl_parse_to!(source_name: ObjectName, self);
+
+        // parse columns
+        let (columns, constraints, source_watermarks, wildcard_idx) =
+            self.parse_columns_with_watermark()?;
+        let include_options = self.parse_include_options()?;
+
+        let with_options = self.parse_with_properties()?;
+        let option = with_options
+            .iter()
+            .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
+        let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
+        let cdc_source_job = connector.contains("-cdc");
+        if cdc_source_job && (!columns.is_empty() || !constraints.is_empty()) {
+            parser_err!("CDC source cannot define columns and constraints");
+        }
+
+        // row format for nexmark source must be native
+        // default row format for datagen source is native
+        let source_schema = self.parse_source_schema_with_connector(&connector, cdc_source_job)?;
+
+        let stmt = CreateSourceStatement {
+            temporary,
+            if_not_exists,
+            columns,
+            wildcard_idx,
+            constraints,
+            source_name,
+            with_properties: WithProperties(with_options),
+            source_schema,
+            source_watermarks,
+            include_column_options: include_options,
+        };
+
+        Ok(Statement::CreateSource { stmt })
     }
 
     // CREATE [OR REPLACE]?
@@ -2755,9 +2793,11 @@ impl Parser<'_> {
 
     pub fn parse_handle_conflict_behavior(&mut self) -> PResult<Option<OnConflict>> {
         if self.parse_keyword(Keyword::OVERWRITE) {
-            Ok(Some(OnConflict::OverWrite))
+            // compatible with v1.9 - v2.0
+            Ok(Some(OnConflict::UpdateFull))
         } else if self.parse_keyword(Keyword::IGNORE) {
-            Ok(Some(OnConflict::Ignore))
+            // compatible with v1.9 - v2.0
+            Ok(Some(OnConflict::Nothing))
         } else if self.parse_keywords(&[
             Keyword::DO,
             Keyword::UPDATE,
@@ -2765,7 +2805,11 @@ impl Parser<'_> {
             Keyword::NOT,
             Keyword::NULL,
         ]) {
-            Ok(Some(OnConflict::DoUpdateIfNotNull))
+            Ok(Some(OnConflict::UpdateIfNotNull))
+        } else if self.parse_keywords(&[Keyword::DO, Keyword::UPDATE, Keyword::FULL]) {
+            Ok(Some(OnConflict::UpdateFull))
+        } else if self.parse_keywords(&[Keyword::DO, Keyword::NOTHING]) {
+            Ok(Some(OnConflict::Nothing))
         } else {
             Ok(None)
         }
@@ -2909,7 +2953,7 @@ impl Parser<'_> {
         Ok(SqlOption { name, value })
     }
 
-    pub fn parse_since(&mut self) -> PResult<Option<Since>> {
+    pub fn parse_since(&mut self) -> PResult<Since> {
         if self.parse_keyword(Keyword::SINCE) {
             let checkpoint = *self;
             let token = self.next_token();
@@ -2920,11 +2964,11 @@ impl Parser<'_> {
                     if ident.real_value() == "proctime" || ident.real_value() == "now" {
                         self.expect_token(&Token::LParen)?;
                         self.expect_token(&Token::RParen)?;
-                        Ok(Some(Since::ProcessTime))
+                        Ok(Since::ProcessTime)
                     } else if ident.real_value() == "begin" {
                         self.expect_token(&Token::LParen)?;
                         self.expect_token(&Token::RParen)?;
-                        Ok(Some(Since::Begin))
+                        Ok(Since::Begin)
                     } else {
                         parser_err!(
                             "Expected proctime(), begin() or now(), found: {}",
@@ -2936,12 +2980,14 @@ impl Parser<'_> {
                     let num = s
                         .parse::<u64>()
                         .map_err(|e| StrError(format!("Could not parse '{}' as u64: {}", s, e)))?;
-                    Ok(Some(Since::TimestampMsNum(num)))
+                    Ok(Since::TimestampMsNum(num))
                 }
                 _ => self.expected_at(checkpoint, "proctime(), begin() , now(), Number"),
             }
+        } else if self.parse_word("FULL") {
+            Ok(Since::Full)
         } else {
-            Ok(None)
+            Ok(Since::ProcessTime)
         }
     }
 
@@ -4249,6 +4295,26 @@ impl Parser<'_> {
             let value = alt((
                 Keyword::DEFAULT.value(SetTimeZoneValue::Default),
                 Keyword::LOCAL.value(SetTimeZoneValue::Local),
+                preceded(
+                    Keyword::INTERVAL,
+                    cut_err(Self::parse_literal_interval.try_map(|e| match e {
+                        // support a special case for clients which would send when initializing the connection
+                        // like: SET TIME ZONE INTERVAL '+00:00' HOUR TO MINUTE;
+                        Expr::Value(v) => match v {
+                            Value::Interval { value, .. } => {
+                                if value != "+00:00" {
+                                    return Err(StrError("only support \"+00:00\" ".into()));
+                                }
+                                Ok(SetTimeZoneValue::Ident(Ident::with_quote_unchecked(
+                                    '\'',
+                                    "UTC".to_string(),
+                                )))
+                            }
+                            _ => Err(StrError("expect Value::Interval".into())),
+                        },
+                        _ => Err(StrError("expect Expr::Value".into())),
+                    })),
+                ),
                 Self::parse_identifier.map(SetTimeZoneValue::Ident),
                 Self::parse_value.map(SetTimeZoneValue::Literal),
             ))
@@ -4446,6 +4512,19 @@ impl Parser<'_> {
                 Keyword::TRANSACTION => {
                     self.expect_keywords(&[Keyword::ISOLATION, Keyword::LEVEL])?;
                     return Ok(Statement::ShowTransactionIsolationLevel);
+                }
+                Keyword::CURSORS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Cursor,
+                        filter: None,
+                    });
+                }
+                Keyword::SUBSCRIPTION => {
+                    self.expect_keyword(Keyword::CURSORS)?;
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::SubscriptionCursor,
+                        filter: None,
+                    });
                 }
                 _ => {}
             }

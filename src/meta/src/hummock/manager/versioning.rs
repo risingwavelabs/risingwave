@@ -25,14 +25,11 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
-    HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
-use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
-};
+use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats, TableStats};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::check_cg_write_limit;
@@ -118,16 +115,6 @@ impl HummockManager {
             .collect_vec()
     }
 
-    pub async fn list_pinned_snapshot(&self) -> Vec<HummockPinnedSnapshot> {
-        self.context_info
-            .read()
-            .await
-            .pinned_snapshots
-            .values()
-            .cloned()
-            .collect_vec()
-    }
-
     pub async fn list_workers(
         &self,
         context_ids: &[HummockContextId],
@@ -158,6 +145,10 @@ impl HummockManager {
         f(&self.versioning.read().await.current_version)
     }
 
+    pub async fn get_version_id(&self) -> HummockVersionId {
+        self.on_current_version(|version| version.id).await
+    }
+
     /// Gets the mapping from table id to compaction group id
     pub async fn get_table_compaction_group_id_mapping(
         &self,
@@ -171,14 +162,12 @@ impl HummockManager {
         &self,
         start_id: HummockVersionId,
         num_limit: u32,
-        committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
         let versioning = self.versioning.read().await;
         let version_deltas = versioning
             .hummock_version_deltas
             .range(start_id..)
             .map(|(_id, delta)| delta)
-            .filter(|delta| delta.visible_table_committed_epoch() <= committed_epoch_limit)
             .take(num_limit as _)
             .cloned()
             .collect();
@@ -266,7 +255,7 @@ impl HummockManager {
                 self.env.notification_manager(),
                 &self.metrics,
             );
-            let mut new_version_delta = version.new_delta();
+            let mut new_version_delta = version.new_delta(None);
             new_version_delta.with_latest_version(|version, delta| {
                 version.may_fill_backward_compatible_state_table_info_delta(delta)
             });
@@ -274,27 +263,6 @@ impl HummockManager {
             commit_multi_var!(self.meta_store_ref(), version)?;
         }
         Ok(())
-    }
-
-    pub fn latest_snapshot(&self) -> HummockSnapshot {
-        let snapshot = self.latest_snapshot.load();
-        HummockSnapshot::clone(&snapshot)
-    }
-
-    /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
-    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> HummockSnapshot {
-        // We only update `max_current_epoch`!
-        let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
-            committed_epoch: snapshot.committed_epoch,
-            current_epoch: max_current_epoch,
-        });
-        assert!(prev_snapshot.current_epoch < max_current_epoch);
-
-        tracing::trace!("new current epoch {}", max_current_epoch);
-        HummockSnapshot {
-            committed_epoch: prev_snapshot.committed_epoch,
-            current_epoch: max_current_epoch,
-        }
     }
 
     pub async fn list_change_log_epochs(
@@ -310,7 +278,7 @@ impl HummockManager {
             .get(&TableId::new(table_id))
         {
             let table_change_log = table_change_log.clone();
-            table_change_log.get_epochs(min_epoch, max_count as usize)
+            table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
         } else {
             vec![]
         }

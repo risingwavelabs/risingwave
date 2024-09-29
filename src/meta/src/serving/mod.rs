@@ -20,11 +20,14 @@ use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::{FragmentWorkerSlotMapping, FragmentWorkerSlotMappings};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::manager::{LocalNotification, MetadataManager, NotificationManagerRef};
+use crate::manager::{
+    FragmentParallelismInfo, LocalNotification, MetadataManager, NotificationManagerRef,
+};
 use crate::model::FragmentId;
 
 pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
@@ -43,21 +46,21 @@ impl ServingVnodeMapping {
     /// Returns (successful updates, failed updates).
     pub fn upsert(
         &self,
-        streaming_parallelisms: HashMap<FragmentId, usize>,
+        streaming_parallelisms: HashMap<FragmentId, FragmentParallelismInfo>,
         workers: &[WorkerNode],
     ) -> (HashMap<FragmentId, WorkerSlotMapping>, Vec<FragmentId>) {
         let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
         let mut upserted: HashMap<FragmentId, WorkerSlotMapping> = HashMap::default();
         let mut failed: Vec<FragmentId> = vec![];
-        for (fragment_id, streaming_parallelism) in streaming_parallelisms {
+        for (fragment_id, info) in streaming_parallelisms {
             let new_mapping = {
                 let old_mapping = serving_vnode_mappings.get(&fragment_id);
-                let max_parallelism = if streaming_parallelism == 1 {
-                    Some(1)
-                } else {
-                    None
+                let max_parallelism = match info.distribution_type {
+                    FragmentDistributionType::Unspecified => unreachable!(),
+                    FragmentDistributionType::Single => Some(1),
+                    FragmentDistributionType::Hash => None,
                 };
-                place_vnode(old_mapping, workers, max_parallelism)
+                place_vnode(old_mapping, workers, max_parallelism, info.vnode_count)
             };
             match new_mapping {
                 None => {
@@ -128,7 +131,10 @@ pub async fn on_meta_start(
 
 async fn fetch_serving_infos(
     metadata_manager: &MetadataManager,
-) -> (Vec<WorkerNode>, HashMap<FragmentId, usize>) {
+) -> (
+    Vec<WorkerNode>,
+    HashMap<FragmentId, FragmentParallelismInfo>,
+) {
     match metadata_manager {
         MetadataManager::V1(mgr) => (
             mgr.cluster_manager
@@ -154,7 +160,7 @@ async fn fetch_serving_infos(
                 serving_compute_nodes,
                 parallelisms
                     .into_iter()
-                    .map(|(fragment_id, cnt)| (fragment_id as FragmentId, cnt))
+                    .map(|(fragment_id, info)| (fragment_id as FragmentId, info))
                     .collect(),
             )
         }
@@ -192,7 +198,16 @@ pub async fn start_serving_vnode_mapping_worker(
                                         continue;
                                     }
                                     let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
-                                    let (upserted, failed) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
+                                    let filtered_streaming_parallelisms = fragment_ids.iter().filter_map(|frag_id| {
+                                        match streaming_parallelisms.get(frag_id) {
+                                            Some(info) => Some((*frag_id, info.clone())),
+                                            None => {
+                                                tracing::warn!(fragment_id = *frag_id, "streaming parallelism not found");
+                                                None
+                                            }
+                                        }
+                                    }).collect();
+                                    let (upserted, failed) = serving_vnode_mapping.upsert(filtered_streaming_parallelisms, &workers);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
                                         notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&upserted) }));

@@ -18,9 +18,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, SstObjectIdRange, SyncResult};
-use risingwave_pb::hummock::{
-    HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest, VacuumTask,
-};
+use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest, VacuumTask};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
 use tokio::sync::mpsc::UnboundedSender;
@@ -56,22 +54,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.get_current_version().await
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.meta_client.pin_snapshot().await
-    }
-
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        self.meta_client.get_snapshot().await
-    }
-
-    async fn unpin_snapshot(&self) -> Result<()> {
-        self.meta_client.unpin_snapshot().await
-    }
-
-    async fn unpin_snapshot_before(&self, _min_epoch: HummockEpoch) -> Result<()> {
-        unreachable!("Currently CNs should not call this function")
-    }
-
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         self.stats.get_new_sst_ids_counts.inc();
         let timer = self.stats.get_new_sst_ids_latency.start_timer();
@@ -80,7 +62,12 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch, _sync_result: SyncResult) -> Result<()> {
+    async fn commit_epoch(
+        &self,
+        _epoch: HummockEpoch,
+        _sync_result: SyncResult,
+        _is_log_store: bool,
+    ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
 
@@ -105,9 +92,15 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         filtered_object_ids: Vec<HummockSstableObjectId>,
         total_object_count: u64,
         total_object_size: u64,
+        next_start_after: Option<String>,
     ) -> Result<()> {
         self.meta_client
-            .report_full_scan_task(filtered_object_ids, total_object_count, total_object_size)
+            .report_full_scan_task(
+                filtered_object_ids,
+                total_object_count,
+                total_object_size,
+                next_start_after,
+            )
             .await
     }
 
@@ -121,10 +114,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        self.meta_client.update_current_epoch(epoch).await
-    }
-
     async fn subscribe_compaction_event(
         &self,
     ) -> Result<(
@@ -134,7 +123,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.subscribe_compaction_event().await
     }
 
-    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
-        self.meta_client.get_version_by_epoch(epoch).await
+    async fn get_version_by_epoch(
+        &self,
+        epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<PbHummockVersion> {
+        self.meta_client.get_version_by_epoch(epoch, table_id).await
     }
 }

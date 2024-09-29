@@ -21,7 +21,7 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::agg_call::PbType as AggregateFunctionType;
+use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::PbType as ScalarFunctionType;
 use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 
@@ -113,9 +113,38 @@ impl FunctionRegistry {
         name: impl Into<FuncName>,
         args: &[DataType],
         ret: &DataType,
-    ) -> Option<&FuncSign> {
-        let v = self.0.get(&name.into())?;
-        v.iter().find(|d| d.match_args_ret(args, ret))
+    ) -> Result<&FuncSign, ExprError> {
+        let name = name.into();
+        let err = |candidates: &Vec<FuncSign>| {
+            // Note: if we return error here, it probably means there is a bug in frontend type inference,
+            // because such error should be caught in the frontend.
+            ExprError::UnsupportedFunction(format!(
+                "{}({}) -> {}{}",
+                name,
+                args.iter().format(", "),
+                ret,
+                if candidates.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(
+                        "\nHINT: Supported functions:\n{}",
+                        candidates
+                            .iter()
+                            .map(|d| format!(
+                                "  {}({}) -> {}",
+                                d.name,
+                                d.inputs_type.iter().format(", "),
+                                d.ret_type
+                            ))
+                            .format("\n")
+                    )
+                }
+            ))
+        };
+        let v = self.0.get(&name).ok_or_else(|| err(&vec![]))?;
+        v.iter()
+            .find(|d| d.match_args_ret(args, ret))
+            .ok_or_else(|| err(v))
     }
 
     /// Returns all function signatures with the same type and number of arguments.
@@ -325,7 +354,7 @@ impl FuncSign {
 pub enum FuncName {
     Scalar(ScalarFunctionType),
     Table(TableFunctionType),
-    Aggregate(AggregateFunctionType),
+    Aggregate(PbAggKind),
     Udf(String),
 }
 
@@ -341,8 +370,8 @@ impl From<TableFunctionType> for FuncName {
     }
 }
 
-impl From<AggregateFunctionType> for FuncName {
-    fn from(ty: AggregateFunctionType) -> Self {
+impl From<PbAggKind> for FuncName {
+    fn from(ty: PbAggKind) -> Self {
         Self::Aggregate(ty)
     }
 }
@@ -376,9 +405,9 @@ impl FuncName {
         }
     }
 
-    pub fn as_aggregate(&self) -> AggregateFunctionType {
+    pub fn as_aggregate(&self) -> PbAggKind {
         match self {
-            Self::Aggregate(ty) => *ty,
+            Self::Aggregate(kind) => *kind,
             _ => panic!("Expected an aggregate function"),
         }
     }

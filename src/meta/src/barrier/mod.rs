@@ -41,7 +41,6 @@ use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -55,7 +54,6 @@ use self::command::CommandContext;
 use self::notifier::Notifier;
 use crate::barrier::creating_job::CreatingStreamingJobControl;
 use crate::barrier::info::InflightGraphInfo;
-use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::state::BarrierManagerState;
@@ -86,7 +84,6 @@ pub use self::command::{
     Reschedule, SnapshotBackfillInfo,
 };
 pub use self::info::InflightSubscriptionInfo;
-pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -171,8 +168,6 @@ pub struct GlobalBarrierManagerContext {
     sink_manager: SinkCoordinatorManager,
 
     pub(super) metrics: Arc<MetaMetrics>,
-
-    stream_rpc_manager: StreamRpcManager,
 
     env: MetaSrvEnv,
 }
@@ -596,7 +591,6 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
-        stream_rpc_manager: StreamRpcManager,
         scale_controller: ScaleControllerRef,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
@@ -624,7 +618,6 @@ impl GlobalBarrierManager {
             scale_controller,
             sink_manager,
             metrics,
-            stream_rpc_manager,
             env: env.clone(),
         };
 
@@ -719,20 +712,13 @@ impl GlobalBarrierManager {
         }
 
         {
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            assert_eq!(
-                latest_snapshot.committed_epoch, latest_snapshot.current_epoch,
-                "persisted snapshot must be from a checkpoint barrier"
-            );
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
-
             // Bootstrap recovery. Here we simply trigger a recovery process to achieve the
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
             self.context
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap));
-            let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+            let span = tracing::info_span!("bootstrap_recovery");
             crate::telemetry::report_event(
                 risingwave_pb::telemetry::TelemetryEventStage::Recovery,
                 "normal_recovery",
@@ -772,7 +758,9 @@ impl GlobalBarrierManager {
                     if let Some(request) = request {
                         match request {
                             BarrierManagerRequest::GetDdlProgress(result_tx) => {
+                                // Progress of normal backfill
                                 let mut progress = self.checkpoint_control.create_mview_tracker.gen_ddl_progress();
+                                // Progress of snapshot backfill
                                 for creating_job in self.checkpoint_control.creating_streaming_job_controls.values() {
                                     progress.extend([(creating_job.info.table_fragments.table_id().table_id, creating_job.gen_ddl_progress())]);
                                 }
@@ -806,7 +794,7 @@ impl GlobalBarrierManager {
                                             r#type: node.r#type,
                                             host: node.host.clone(),
                                             parallelism: node.parallelism,
-                                            property: node.property,
+                                            property: node.property.clone(),
                                             resource: node.resource.clone(),
                                             ..Default::default()
                                         },
@@ -840,7 +828,7 @@ impl GlobalBarrierManager {
                         .on_new_worker_node_map(self.active_streaming_nodes.current());
                     self.checkpoint_control.creating_streaming_job_controls.values().for_each(|job| job.on_new_worker_node_map(self.active_streaming_nodes.current()));
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node).await;
+                        self.control_stream_manager.add_worker(node, &self.state.inflight_subscription_info).await;
                     }
                 }
 
@@ -969,6 +957,19 @@ impl GlobalBarrierManager {
             info,
         } = &command
         {
+            if self.state.paused_reason().is_some() {
+                warn!("cannot create streaming job with snapshot backfill when paused");
+                for notifier in notifiers {
+                    notifier.notify_start_failed(
+                        anyhow!("cannot create streaming job with snapshot backfill when paused",)
+                            .into(),
+                    );
+                }
+                return Ok(());
+            }
+            let mutation = command
+                .to_mutation(None)
+                .expect("should have some mutation in `CreateStreamingJob` command");
             self.checkpoint_control
                 .creating_streaming_job_controls
                 .insert(
@@ -979,6 +980,7 @@ impl GlobalBarrierManager {
                         prev_epoch.value().0,
                         &self.checkpoint_control.hummock_version_stats,
                         &self.context.metrics,
+                        mutation,
                     ),
                 );
         }
@@ -1023,11 +1025,14 @@ impl GlobalBarrierManager {
         });
         span.record("epoch", curr_epoch.value().0);
 
+        let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
+
         let command_ctx = Arc::new(CommandContext::new(
             self.active_streaming_nodes.current().clone(),
             pre_applied_subscription_info,
             prev_epoch.clone(),
             curr_epoch.clone(),
+            table_ids_to_commit.clone(),
             self.state.paused_reason(),
             command,
             kind,
@@ -1037,19 +1042,10 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
-
-        let mut actors_to_pre_sync_barrier: HashMap<_, Vec<_>> = HashMap::new();
         let mut jobs_to_wait = HashSet::new();
 
         for (table_id, creating_job) in &mut self.checkpoint_control.creating_streaming_job_controls
         {
-            for (worker_id, actors) in creating_job.actors_to_pre_sync_barrier() {
-                actors_to_pre_sync_barrier
-                    .entry(*worker_id)
-                    .or_default()
-                    .extend(actors.iter().cloned())
-            }
             if let Some(wait_job) =
                 creating_job.on_new_command(&mut self.control_stream_manager, &command_ctx)?
             {
@@ -1064,7 +1060,6 @@ impl GlobalBarrierManager {
             &command_ctx,
             &pre_applied_graph_info,
             Some(&self.state.inflight_graph_info),
-            actors_to_pre_sync_barrier,
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
@@ -1077,16 +1072,9 @@ impl GlobalBarrierManager {
         };
 
         // Notify about the injection.
-        let prev_paused_reason = self.state.paused_reason();
         let curr_paused_reason = command_ctx.next_paused_reason();
 
-        let info = BarrierInfo {
-            prev_epoch: prev_epoch.value(),
-            curr_epoch: curr_epoch.value(),
-            prev_paused_reason,
-            curr_paused_reason,
-        };
-        notifiers.iter_mut().for_each(|n| n.notify_started(info));
+        notifiers.iter_mut().for_each(|n| n.notify_started());
 
         // Update the paused state after the barrier is injected.
         self.state.set_paused_reason(curr_paused_reason);
@@ -1111,12 +1099,9 @@ impl GlobalBarrierManager {
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
                     err.clone(),
                 )));
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
                 error = %err.as_report(),
-                prev_epoch = prev_epoch.value().0
             );
 
             crate::telemetry::report_event(
@@ -1143,12 +1128,9 @@ impl GlobalBarrierManager {
 
         self.context
             .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
-        let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-        let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
         let span = tracing::info_span!(
             "adhoc_recovery",
             error = %err.as_report(),
-            prev_epoch = prev_epoch.value().0
         );
 
         crate::telemetry::report_event(
@@ -1199,7 +1181,6 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
-    /// Try to commit this node. If err, returns
     async fn complete_barrier(
         self,
         node: EpochNode,
@@ -1254,7 +1235,7 @@ impl GlobalBarrierManagerContext {
         });
         try_join_all(finished_jobs.into_iter().map(|finished_job| {
             let metadata_manager = &self.metadata_manager;
-            async move { finished_job.pre_finish(metadata_manager).await }
+            async move { finished_job.finish(metadata_manager).await }
         }))
         .await?;
         let duration_sec = enqueue_time.stop_and_record();
@@ -1275,14 +1256,6 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<Option<HummockVersionStats>> {
         {
             {
-                let prev_epoch = command_ctx.prev_epoch.value().0;
-                // We must ensure all epochs are committed in ascending order,
-                // because the storage engine will query from new to old in the order in which
-                // the L0 layer files are generated.
-                // See https://github.com/risingwave-labs/risingwave/issues/1251
-                // hummock_manager commit epoch.
-                let mut new_snapshot = None;
-
                 match &command_ctx.kind {
                     BarrierKind::Initial => {}
                     BarrierKind::Checkpoint(epochs) => {
@@ -1293,10 +1266,9 @@ impl GlobalBarrierManagerContext {
                             backfill_pinned_log_epoch,
                             tables_to_commit,
                         );
-                        new_snapshot = self.hummock_manager.commit_epoch(commit_info).await?;
+                        self.hummock_manager.commit_epoch(commit_info).await?;
                     }
                     BarrierKind::Barrier => {
-                        new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));
                         // if we collect a barrier(checkpoint = false),
                         // we need to ensure that command is Plain and the notifier's checkpoint is
                         // false
@@ -1305,16 +1277,6 @@ impl GlobalBarrierManagerContext {
                 }
 
                 command_ctx.post_collect().await?;
-                // Notify new snapshot after fragment_mapping changes have been notified in
-                // `post_collect`.
-                if let Some(snapshot) = new_snapshot {
-                    self.env
-                        .notification_manager()
-                        .notify_frontend_without_version(
-                            Operation::Update, // Frontends don't care about operation.
-                            Info::HummockSnapshot(snapshot),
-                        );
-                }
                 Ok(if command_ctx.kind.is_checkpoint() {
                     Some(self.hummock_manager.get_version_stats().await)
                 } else {
@@ -1322,6 +1284,10 @@ impl GlobalBarrierManagerContext {
                 })
             }
         }
+    }
+
+    pub fn hummock_manager(&self) -> &HummockManagerRef {
+        &self.hummock_manager
     }
 }
 
@@ -1632,6 +1598,7 @@ impl GlobalBarrierManagerContext {
         Ok(info)
     }
 
+    /// Serving `SHOW JOBS / SELECT * FROM rw_ddl_progress`
     pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
         let mut ddl_progress = {
             let (tx, rx) = oneshot::channel();

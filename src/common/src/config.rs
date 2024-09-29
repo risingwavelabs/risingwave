@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{LfuConfig, LruConfig, RecoverMode, S3FifoConfig};
+use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeConfig, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -33,7 +33,6 @@ use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
 use crate::for_all_params;
-use crate::hash::VirtualNode;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
@@ -193,6 +192,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_interval_sec")]
     pub full_gc_interval_sec: u64,
 
+    /// Max number of object per full GC job can fetch.
+    #[serde(default = "default::meta::full_gc_object_limit")]
+    pub full_gc_object_limit: u64,
+
     /// The spin interval when collecting global GC watermark in hummock.
     #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
     pub collect_gc_watermark_spin_interval_sec: u64,
@@ -299,8 +302,11 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    #[serde(default = "default::meta::periodic_split_compact_group_interval_sec")]
-    pub periodic_split_compact_group_interval_sec: u64,
+    #[serde(
+        default = "default::meta::periodic_scheduling_compaction_group_interval_sec",
+        alias = "periodic_split_compact_group_interval_sec"
+    )]
+    pub periodic_scheduling_compaction_group_interval_sec: u64,
 
     #[serde(default = "default::meta::move_table_size_limit")]
     pub move_table_size_limit: u64,
@@ -309,6 +315,7 @@ pub struct MetaConfig {
     pub split_group_size_limit: u64,
 
     #[serde(default = "default::meta::cut_table_size_limit")]
+    #[deprecated]
     pub cut_table_size_limit: u64,
 
     #[serde(default, flatten)]
@@ -319,7 +326,7 @@ pub struct MetaConfig {
     pub do_not_config_object_storage_lifecycle: bool,
 
     /// Count of partition in split group. Meta will assign this value to every new group when it splits from default-group by automatically.
-    /// Each partition contains aligned data of `VirtualNode::COUNT / partition_vnode_count` consecutive virtual-nodes of one state table.
+    /// Each partition contains aligned data of `vnode_count / partition_vnode_count` consecutive virtual-nodes of one state table.
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
 
@@ -348,7 +355,7 @@ pub struct MetaConfig {
 
     /// Count of partitions of tables in default group and materialized view group.
     /// The meta node will decide according to some strategy whether to cut the boundaries of the file according to the vnode alignment.
-    /// Each partition contains aligned data of `VirtualNode::COUNT / hybrid_partition_vnode_count` consecutive virtual-nodes of one state table.
+    /// Each partition contains aligned data of `vnode_count / hybrid_partition_vnode_count` consecutive virtual-nodes of one state table.
     /// Set it zero to disable this feature.
     #[serde(default = "default::meta::hybrid_partition_vnode_count")]
     pub hybrid_partition_vnode_count: u32,
@@ -427,16 +434,13 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
                     )))
                 }
             }
-            Parallelism::Int(i) => Ok(DefaultParallelism::Default(if i > VirtualNode::COUNT {
-                Err(serde::de::Error::custom(format!(
-                    "default parallelism should be not great than {}",
-                    VirtualNode::COUNT
-                )))?
-            } else {
+            Parallelism::Int(i) => Ok(DefaultParallelism::Default(
+                // Note: we won't check whether this exceeds the maximum parallelism (i.e., vnode count)
+                // here because it requires extra context. The check will be done when scheduling jobs.
                 NonZeroUsize::new(i).ok_or_else(|| {
-                    serde::de::Error::custom("default parallelism should be greater than 0")
-                })?
-            })),
+                    serde::de::Error::custom("default parallelism should not be 0")
+                })?,
+            )),
         }
     }
 }
@@ -466,6 +470,20 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default = "default::developer::max_get_task_probe_times")]
     pub max_get_task_probe_times: usize,
+
+    /// Max number of actor allowed per parallelism (default = 100).
+    /// CREATE MV/Table will be noticed when the number of actors exceeds this limit.
+    #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_soft_limit")]
+    pub actor_cnt_per_worker_parallelism_soft_limit: usize,
+
+    /// Max number of actor allowed per parallelism (default = 400).
+    /// CREATE MV/Table will be rejected when the number of actors exceeds this limit.
+    #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
+    pub actor_cnt_per_worker_parallelism_hard_limit: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
+    /// Max number of SSTs fetched from meta store per SELECT, during time travel Hummock version replay.
+    pub hummock_time_travel_sst_info_fetch_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -693,6 +711,9 @@ pub struct StorageConfig {
     #[serde(default)]
     pub prefetch_buffer_capacity_mb: Option<usize>,
 
+    #[serde(default)]
+    pub max_cached_recent_versions_number: Option<usize>,
+
     /// max prefetch block number
     #[serde(default = "default::storage::max_prefetch_block_number")]
     pub max_prefetch_block_number: usize,
@@ -858,7 +879,7 @@ pub struct FileCacheConfig {
     pub indexer_shards: usize,
 
     #[serde(default = "default::file_cache::compression")]
-    pub compression: String,
+    pub compression: Compression,
 
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
@@ -874,6 +895,9 @@ pub struct FileCacheConfig {
     /// More details, see [`RecoverMode::None`], [`RecoverMode::Quiet`] and [`RecoverMode::Strict`],
     #[serde(default = "default::file_cache::recover_mode")]
     pub recover_mode: RecoverMode,
+
+    #[serde(default = "default::file_cache::runtime_config")]
+    pub runtime_config: RuntimeConfig,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1027,6 +1051,10 @@ pub struct StreamingDeveloperConfig {
     /// If not specified, the value of `server.connection_pool_size` will be used.
     #[serde(default = "default::developer::stream_exchange_connection_pool_size")]
     pub exchange_connection_pool_size: Option<u16>,
+
+    /// A flag to allow disabling the auto schema change handling
+    #[serde(default = "default::developer::stream_enable_auto_schema_change")]
+    pub enable_auto_schema_change: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1161,7 +1189,7 @@ pub struct S3ObjectStoreDeveloperConfig {
     )]
     pub retryable_service_error_codes: Vec<String>,
 
-    // TODO: the following field will be deprecated after opendal is stablized
+    // TODO: deprecate this config when we are completely deprecate aws sdk.
     #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
     pub use_opendal: bool,
 }
@@ -1326,6 +1354,10 @@ pub mod default {
             86400
         }
 
+        pub fn full_gc_object_limit() -> u64 {
+            100_000
+        }
+
         pub fn collect_gc_watermark_spin_interval_sec() -> u64 {
             5
         }
@@ -1386,7 +1418,7 @@ pub mod default {
             1800 // 30mi
         }
 
-        pub fn periodic_split_compact_group_interval_sec() -> u64 {
+        pub fn periodic_scheduling_compaction_group_interval_sec() -> u64 {
             10 // 10s
         }
 
@@ -1685,7 +1717,7 @@ pub mod default {
     }
 
     pub mod file_cache {
-        use foyer::RecoverMode;
+        use foyer::{Compression, RecoverMode, RuntimeConfig, TokioRuntimeConfig};
 
         pub fn dir() -> String {
             "".to_string()
@@ -1719,8 +1751,8 @@ pub mod default {
             64
         }
 
-        pub fn compression() -> String {
-            "none".to_string()
+        pub fn compression() -> Compression {
+            Compression::None
         }
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
@@ -1729,6 +1761,10 @@ pub mod default {
 
         pub fn recover_mode() -> RecoverMode {
             RecoverMode::None
+        }
+
+        pub fn runtime_config() -> RuntimeConfig {
+            RuntimeConfig::Unified(TokioRuntimeConfig::default())
         }
     }
 
@@ -1855,6 +1891,18 @@ pub mod default {
             5
         }
 
+        pub fn actor_cnt_per_worker_parallelism_soft_limit() -> usize {
+            100
+        }
+
+        pub fn actor_cnt_per_worker_parallelism_hard_limit() -> usize {
+            400
+        }
+
+        pub fn hummock_time_travel_sst_info_fetch_batch_size() -> usize {
+            10_000
+        }
+
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
@@ -1903,6 +1951,10 @@ pub mod default {
         pub fn enable_actor_tokio_metrics() -> bool {
             false
         }
+
+        pub fn stream_enable_auto_schema_change() -> bool {
+            true
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1945,17 +1997,19 @@ pub mod default {
     }
 
     pub mod compaction_config {
-        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
-        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
+        const MB: u64 = 1024 * 1024;
+        const GB: u64 = 1024 * 1024 * 1024;
+        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * GB; // 2GB
+        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * MB; // 128MB
+        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * MB; // 512MB
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
         const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
-        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024;
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * MB;
         // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
-        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
+        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * MB; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
@@ -1964,6 +2018,7 @@ pub mod default {
         const DEFAULT_EMERGENCY_PICKER: bool = true;
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
+        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -2033,6 +2088,10 @@ pub mod default {
 
         pub fn max_l0_compact_level_count() -> u32 {
             DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT
+        }
+
+        pub fn sst_allowed_trivial_move_min_size() -> u64 {
+            DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
         }
     }
 
@@ -2125,7 +2184,7 @@ pub mod default {
         }
 
         pub fn opendal_upload_concurrency() -> usize {
-            8
+            256
         }
 
         pub fn upload_part_size() -> usize {
@@ -2159,10 +2218,6 @@ pub mod default {
             }
 
             pub mod developer {
-                use crate::util::env_var::env_var_is_true_or;
-
-                const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
-
                 pub fn retry_unknown_service_error() -> bool {
                     false
                 }
@@ -2172,11 +2227,7 @@ pub mod default {
                 }
 
                 pub fn use_opendal() -> bool {
-                    // TODO: deprecate this config when we are completely switch from aws sdk to opendal.
-                    // The reason why we use !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) here is
-                    // 1. Maintain compatibility so that there is no behavior change in cluster with RW_USE_OPENDAL_FOR_S3 set.
-                    // 2. Change the default behavior to use opendal for s3 if RW_USE_OPENDAL_FOR_S3 is not set.
-                    env_var_is_true_or(RW_USE_OPENDAL_FOR_S3, false)
+                    true
                 }
             }
         }
@@ -2598,6 +2649,27 @@ mod tests {
                     .developer
                     .retryable_service_error_codes,
                 vec!["dummy".to_string()]
+            );
+        }
+    }
+
+    #[test]
+    fn test_meta_configs_backward_compatibility() {
+        // Test periodic_space_reclaim_compaction_interval_sec
+        {
+            let config: RwConfig = toml::from_str(
+                r#"
+            [meta]
+            periodic_split_compact_group_interval_sec = 1
+            "#,
+            )
+            .unwrap();
+
+            assert_eq!(
+                config
+                    .meta
+                    .periodic_scheduling_compaction_group_interval_sec,
+                1
             );
         }
     }

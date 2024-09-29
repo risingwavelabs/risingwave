@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::time::Duration;
@@ -38,8 +37,6 @@ use crate::deserialize_duration_from_string;
 use crate::error::ConnectorResult;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
-// The file describes the common abstractions for each connector and can be used in both source and
-// sink.
 
 pub const PRIVATE_LINK_BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
@@ -192,13 +189,25 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.ssl.ca.location")]
     ssl_ca_location: Option<String>,
 
+    /// CA certificate string (PEM format) for verifying the broker's key.
+    #[serde(rename = "properties.ssl.ca.pem")]
+    ssl_ca_pem: Option<String>,
+
     /// Path to client's certificate file (PEM).
     #[serde(rename = "properties.ssl.certificate.location")]
     ssl_certificate_location: Option<String>,
 
+    /// Client's public key string (PEM format) used for authentication.
+    #[serde(rename = "properties.ssl.certificate.pem")]
+    ssl_certificate_pem: Option<String>,
+
     /// Path to client's private key file (PEM).
     #[serde(rename = "properties.ssl.key.location")]
     ssl_key_location: Option<String>,
+
+    /// Client's private key string (PEM format) used for authentication.
+    #[serde(rename = "properties.ssl.key.pem")]
+    ssl_key_pem: Option<String>,
 
     /// Passphrase of client's private key.
     #[serde(rename = "properties.ssl.key.password")]
@@ -325,11 +334,20 @@ impl KafkaCommon {
         if let Some(ssl_ca_location) = self.ssl_ca_location.as_ref() {
             config.set("ssl.ca.location", ssl_ca_location);
         }
+        if let Some(ssl_ca_pem) = self.ssl_ca_pem.as_ref() {
+            config.set("ssl.ca.pem", ssl_ca_pem);
+        }
         if let Some(ssl_certificate_location) = self.ssl_certificate_location.as_ref() {
             config.set("ssl.certificate.location", ssl_certificate_location);
         }
+        if let Some(ssl_certificate_pem) = self.ssl_certificate_pem.as_ref() {
+            config.set("ssl.certificate.pem", ssl_certificate_pem);
+        }
         if let Some(ssl_key_location) = self.ssl_key_location.as_ref() {
             config.set("ssl.key.location", ssl_key_location);
+        }
+        if let Some(ssl_key_pem) = self.ssl_key_pem.as_ref() {
+            config.set("ssl.key.pem", ssl_key_pem);
         }
         if let Some(ssl_key_password) = self.ssl_key_password.as_ref() {
             config.set("ssl.key.password", ssl_key_password);
@@ -542,13 +560,6 @@ impl KinesisCommon {
         Ok(KinesisClient::from_conf(builder.build()))
     }
 }
-#[derive(Debug, Deserialize)]
-pub struct UpsertMessage<'a> {
-    #[serde(borrow)]
-    pub primary_key: Cow<'a, [u8]>,
-    #[serde(borrow)]
-    pub record: Cow<'a, [u8]>,
-}
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -639,6 +650,7 @@ impl NatsCommon {
         stream: String,
         split_id: String,
         start_sequence: NatsOffset,
+        mut config: jetstream::consumer::pull::Config,
     ) -> ConnectorResult<
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
     > {
@@ -649,14 +661,10 @@ impl NatsCommon {
             .replace(',', "-")
             .replace(['.', '>', '*', ' ', '\t'], "_");
         let name = format!("risingwave-consumer-{}-{}", subject_name, split_id);
-        let mut config = jetstream::consumer::pull::Config {
-            ack_policy: jetstream::consumer::AckPolicy::None,
-            ..Default::default()
-        };
 
         let deliver_policy = match start_sequence {
             NatsOffset::Earliest => DeliverPolicy::All,
-            NatsOffset::Latest => DeliverPolicy::Last,
+            NatsOffset::Latest => DeliverPolicy::New,
             NatsOffset::SequenceNumber(v) => {
                 let parsed = v
                     .parse::<u64>()
@@ -666,11 +674,12 @@ impl NatsCommon {
                 }
             }
             NatsOffset::Timestamp(v) => DeliverPolicy::ByStartTime {
-                start_time: OffsetDateTime::from_unix_timestamp_nanos(v * 1_000_000)
+                start_time: OffsetDateTime::from_unix_timestamp_nanos(v as i128 * 1_000_000)
                     .context("invalid timestamp for nats offset")?,
             },
             NatsOffset::None => DeliverPolicy::All,
         };
+
         let consumer = stream
             .get_or_create_consumer(&name, {
                 config.deliver_policy = deliver_policy;

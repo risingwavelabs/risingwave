@@ -251,7 +251,7 @@ impl From<&PbDataType> for DataType {
                 // Map is physically the same as a list.
                 // So the first (and only) item is the list element type.
                 let list_entries_type: DataType = (&proto.field_type[0]).into();
-                DataType::Map(MapType::from_list_entries(list_entries_type))
+                DataType::Map(MapType::from_entries(list_entries_type))
             }
             PbTypeName::Int256 => DataType::Int256,
         }
@@ -849,6 +849,12 @@ impl From<Bytes> for ScalarImpl {
     }
 }
 
+impl From<ListRef<'_>> for ScalarImpl {
+    fn from(list: ListRef<'_>) -> Self {
+        Self::List(list.to_owned_scalar())
+    }
+}
+
 impl ScalarImpl {
     /// Creates a scalar from pgwire "BINARY" format.
     ///
@@ -911,12 +917,17 @@ impl ScalarImpl {
             DataType::Time => Time::from_str(s)?.into(),
             DataType::Interval => Interval::from_str(s)?.into(),
             DataType::List(_) => ListValue::from_str(s, data_type)?.into(),
-            DataType::Struct(_) => StructValue::from_str(s, data_type)?.into(),
+            DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
-            DataType::Map(_) => {
-                todo!()
-            }
+            DataType::Map(_m) => return Err("map from text is not supported".into()),
+        })
+    }
+
+    pub fn from_text_for_test(s: &str, data_type: &DataType) -> Result<Self, BoxedError> {
+        Ok(match data_type {
+            DataType::Map(map_type) => MapValue::from_str_for_test(s, map_type)?.into(),
+            _ => ScalarImpl::from_text(s, data_type)?,
         })
     }
 }

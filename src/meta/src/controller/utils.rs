@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash;
@@ -27,8 +27,8 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
-    view, ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
+    view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
@@ -42,6 +42,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
+use risingwave_sqlparser::ast::Statement as SqlStatement;
+use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
     WithClause,
@@ -50,6 +52,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DerivePartialModel, EntityTrait, FromQueryResult, JoinType,
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
+use thiserror_ext::AsReport;
 
 use crate::{MetaError, MetaResult};
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -227,7 +230,7 @@ pub fn construct_sink_cycle_check_query(
         .to_owned()
 }
 
-#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[derive(Clone, DerivePartialModel, FromQueryResult, Debug)]
 #[sea_orm(entity = "Object")]
 pub struct PartialObject {
     pub oid: ObjectId,
@@ -251,6 +254,14 @@ pub struct PartialActorLocation {
     pub fragment_id: FragmentId,
     pub worker_id: WorkerId,
     pub status: ActorStatus,
+}
+
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Actor")]
+pub struct PartialActorSplits {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub splits: Option<ConnectorSplits>,
 }
 
 #[derive(FromQueryResult)]
@@ -1136,4 +1147,25 @@ pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> Noti
         }
     }
     NotificationInfo::RelationGroup(PbRelationGroup { relations })
+}
+
+pub fn extract_external_table_name_from_definition(table_definition: &str) -> Option<String> {
+    let [mut definition]: [_; 1] = Parser::parse_sql(table_definition)
+        .context("unable to parse table definition")
+        .inspect_err(|e| {
+            tracing::error!(
+                target: "auto_schema_change",
+                error = %e.as_report(),
+                "failed to parse table definition")
+        })
+        .unwrap()
+        .try_into()
+        .unwrap();
+    if let SqlStatement::CreateTable { cdc_table_info, .. } = &mut definition {
+        cdc_table_info
+            .clone()
+            .map(|cdc_table_info| cdc_table_info.external_table_name)
+    } else {
+        None
+    }
 }

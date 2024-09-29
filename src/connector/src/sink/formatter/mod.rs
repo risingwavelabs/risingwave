@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use risingwave_common::array::StreamChunk;
 
 use crate::sink::{Result, SinkError};
@@ -279,8 +279,12 @@ impl<KE: EncoderBuild, VE: EncoderBuild> FormatterBuild for AppendOnlyFormatter<
 
 impl<KE: EncoderBuild, VE: EncoderBuild> FormatterBuild for UpsertFormatter<KE, VE> {
     async fn build(b: FormatterParams<'_>) -> Result<Self> {
-        let key_encoder = KE::build(b.builder.clone(), Some(b.pk_indices)).await?;
-        let val_encoder = VE::build(b.builder, None).await?;
+        let key_encoder = KE::build(b.builder.clone(), Some(b.pk_indices))
+            .await
+            .with_context(|| "Failed to build key encoder")?;
+        let val_encoder = VE::build(b.builder, None)
+            .await
+            .with_context(|| "Failed to build value encoder")?;
         Ok(UpsertFormatter::new(key_encoder, val_encoder))
     }
 }
@@ -375,6 +379,8 @@ impl SinkFormatterImpl {
                 | (F::Upsert, E::Protobuf, _)
                 | (F::Debezium, E::Json, Some(_))
                 | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text, _)
+                | (_, E::Parquet, _)
+                | (_, _, Some(E::Parquet))
                 | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
                 => {
                     return Err(SinkError::Config(anyhow!(

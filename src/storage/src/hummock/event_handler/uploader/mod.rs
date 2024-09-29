@@ -32,12 +32,11 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{HistogramTimer, IntGauge};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use task_manager::{TaskManager, UploadingTaskStatus};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
@@ -88,7 +87,6 @@ pub struct UploadTaskInfo {
     pub task_size: usize,
     pub epochs: Vec<HummockEpoch>,
     pub imm_ids: HashMap<LocalInstanceId, Vec<ImmId>>,
-    pub compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
 }
 
 impl Display for UploadTaskInfo {
@@ -249,7 +247,6 @@ impl UploadingTask {
             task_size,
             epochs,
             imm_ids,
-            compaction_group_index: context.pinned_version.compaction_group_index(),
         };
         context
             .buffer_tracker
@@ -341,6 +338,14 @@ impl TableUnsyncData {
         table_watermarks: Vec<VnodeWatermark>,
         direction: WatermarkDirection,
     ) {
+        if table_watermarks.is_empty() {
+            return;
+        }
+        let vnode_count = table_watermarks[0].vnode_count();
+        for watermark in &table_watermarks {
+            assert_eq!(vnode_count, watermark.vnode_count());
+        }
+
         fn apply_new_vnodes(
             vnode_bitmap: &mut BitmapBuilder,
             vnode_watermarks: &Vec<VnodeWatermark>,
@@ -370,14 +375,14 @@ impl TableUnsyncData {
                         prev_watermarks.extend(table_watermarks);
                     }
                     Entry::Vacant(entry) => {
-                        let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::COUNT);
+                        let mut vnode_bitmap = BitmapBuilder::zeroed(vnode_count);
                         apply_new_vnodes(&mut vnode_bitmap, &table_watermarks);
                         entry.insert((table_watermarks, vnode_bitmap));
                     }
                 }
             }
             None => {
-                let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::COUNT);
+                let mut vnode_bitmap = BitmapBuilder::zeroed(vnode_count);
                 apply_new_vnodes(&mut vnode_bitmap, &table_watermarks);
                 self.table_watermarks = Some((
                     direction,
@@ -1138,11 +1143,6 @@ impl HummockUploader {
         &self.context.buffer_tracker
     }
 
-    #[cfg(test)]
-    pub(super) fn max_committed_epoch(&self) -> HummockEpoch {
-        self.context.pinned_version.max_committed_epoch()
-    }
-
     pub(super) fn hummock_version(&self) -> &PinnedVersion {
         &self.context.pinned_version
     }
@@ -1194,13 +1194,7 @@ impl HummockUploader {
                 .or_insert_with(|| {
                     TableUnsyncData::new(
                         *table_id,
-                        self.context
-                            .pinned_version
-                            .version()
-                            .state_table_info
-                            .info()
-                            .get(table_id)
-                            .map(|info| info.committed_epoch),
+                        self.context.pinned_version.table_committed_epoch(*table_id),
                     )
                 });
             table_data.new_epoch(epoch);
@@ -1249,7 +1243,7 @@ impl HummockUploader {
     pub(crate) fn update_pinned_version(&mut self, pinned_version: PinnedVersion) {
         if let UploaderState::Working(data) = &mut self.state {
             // TODO: may only `ack_committed` on table whose `committed_epoch` is changed.
-            for (table_id, info) in pinned_version.version().state_table_info.info() {
+            for (table_id, info) in pinned_version.state_table_info.info() {
                 if let Some(table_data) = data.unsync_data.table_data.get_mut(table_id) {
                     table_data.ack_committed(info.committed_epoch);
                 }
@@ -1645,9 +1639,16 @@ pub(crate) mod tests {
         let new_pinned_version = uploader
             .context
             .pinned_version
-            .new_pin_version(test_hummock_version(epoch1));
+            .new_pin_version(test_hummock_version(epoch1))
+            .unwrap();
         uploader.update_pinned_version(new_pinned_version);
-        assert_eq!(epoch1, uploader.max_committed_epoch());
+        assert_eq!(
+            epoch1,
+            uploader
+                .context
+                .pinned_version
+                .max_committed_epoch_for_test()
+        );
     }
 
     #[tokio::test]
@@ -1674,10 +1675,17 @@ pub(crate) mod tests {
         let new_pinned_version = uploader
             .context
             .pinned_version
-            .new_pin_version(test_hummock_version(epoch1));
+            .new_pin_version(test_hummock_version(epoch1))
+            .unwrap();
         uploader.update_pinned_version(new_pinned_version);
         assert!(uploader.data().syncing_data.is_empty());
-        assert_eq!(epoch1, uploader.max_committed_epoch());
+        assert_eq!(
+            epoch1,
+            uploader
+                .context
+                .pinned_version
+                .max_committed_epoch_for_test()
+        );
     }
 
     #[tokio::test]
@@ -1708,10 +1716,17 @@ pub(crate) mod tests {
         let new_pinned_version = uploader
             .context
             .pinned_version
-            .new_pin_version(test_hummock_version(epoch1));
+            .new_pin_version(test_hummock_version(epoch1))
+            .unwrap();
         uploader.update_pinned_version(new_pinned_version);
         assert!(uploader.data().syncing_data.is_empty());
-        assert_eq!(epoch1, uploader.max_committed_epoch());
+        assert_eq!(
+            epoch1,
+            uploader
+                .context
+                .pinned_version
+                .max_committed_epoch_for_test()
+        );
     }
 
     #[tokio::test]
@@ -1732,11 +1747,21 @@ pub(crate) mod tests {
         let epoch4 = epoch3.next_epoch();
         let epoch5 = epoch4.next_epoch();
         let epoch6 = epoch5.next_epoch();
-        let version1 = initial_pinned_version.new_pin_version(test_hummock_version(epoch1));
-        let version2 = initial_pinned_version.new_pin_version(test_hummock_version(epoch2));
-        let version3 = initial_pinned_version.new_pin_version(test_hummock_version(epoch3));
-        let version4 = initial_pinned_version.new_pin_version(test_hummock_version(epoch4));
-        let version5 = initial_pinned_version.new_pin_version(test_hummock_version(epoch5));
+        let version1 = initial_pinned_version
+            .new_pin_version(test_hummock_version(epoch1))
+            .unwrap();
+        let version2 = initial_pinned_version
+            .new_pin_version(test_hummock_version(epoch2))
+            .unwrap();
+        let version3 = initial_pinned_version
+            .new_pin_version(test_hummock_version(epoch3))
+            .unwrap();
+        let version4 = initial_pinned_version
+            .new_pin_version(test_hummock_version(epoch4))
+            .unwrap();
+        let version5 = initial_pinned_version
+            .new_pin_version(test_hummock_version(epoch5))
+            .unwrap();
 
         uploader.start_epochs_for_test([epoch6]);
         uploader.init_instance(TEST_LOCAL_INSTANCE_ID, TEST_TABLE_ID, epoch6);

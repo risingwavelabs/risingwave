@@ -37,7 +37,7 @@ use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
     TracedInitOptions, TracedNewLocalOptions, TracedReadOptions, TracedSealCurrentEpochOptions,
-    TracedSubResp, UniqueIdGenerator,
+    TracedSubResp, TracedTryWaitEpochOptions, UniqueIdGenerator,
 };
 
 // Global collector instance used for trace collection
@@ -216,15 +216,14 @@ impl TraceSpan {
         Self::new_global_op(Operation::SealCurrentEpoch { epoch, opts }, storage_type)
     }
 
-    pub fn new_validate_read_epoch_span(epoch: HummockReadEpoch) -> MayTraceSpan {
+    pub fn new_try_wait_epoch_span(
+        epoch: HummockReadEpoch,
+        options: TracedTryWaitEpochOptions,
+    ) -> MayTraceSpan {
         Self::new_global_op(
-            Operation::ValidateReadEpoch(epoch.into()),
+            Operation::TryWaitEpoch(epoch.into(), options),
             StorageType::Global,
         )
-    }
-
-    pub fn new_try_wait_epoch_span(epoch: HummockReadEpoch) -> MayTraceSpan {
-        Self::new_global_op(Operation::TryWaitEpoch(epoch.into()), StorageType::Global)
     }
 
     pub fn new_get_span(
@@ -293,14 +292,6 @@ impl TraceSpan {
             ),
             storage_type,
         )
-    }
-
-    pub fn new_seal_span(
-        epoch: u64,
-        is_checkpoint: bool,
-        storage_type: StorageType,
-    ) -> MayTraceSpan {
-        Self::new_global_op(Operation::Seal(epoch, is_checkpoint), storage_type)
     }
 
     pub fn new_local_storage_span(

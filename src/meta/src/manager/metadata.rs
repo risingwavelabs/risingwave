@@ -26,12 +26,12 @@ use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode,
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
-use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
 use tracing::warn;
 
+use super::FragmentParallelismInfo;
 use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
@@ -42,7 +42,7 @@ use crate::manager::{
 use crate::model::{
     ActorId, ClusterId, FragmentId, MetadataModel, TableFragments, TableParallelism,
 };
-use crate::stream::{to_build_actor_info, SplitAssignment};
+use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
@@ -356,6 +356,16 @@ impl MetadataManager {
         }
     }
 
+    pub async fn list_active_serving_compute_nodes(&self) -> MetaResult<Vec<PbWorkerNode>> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr
+                .cluster_manager
+                .list_active_serving_compute_nodes()
+                .await),
+            MetadataManager::V2(mgr) => mgr.cluster_controller.list_active_serving_workers().await,
+        }
+    }
+
     pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
         match self {
             MetadataManager::V1(mgr) => {
@@ -427,15 +437,12 @@ impl MetadataManager {
     pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> MetaResult<HashMap<FragmentId, usize>> {
+    ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         match self {
             MetadataManager::V1(mgr) => Ok(mgr
                 .fragment_manager
                 .running_fragment_parallelisms(id_filter)
-                .await
-                .into_iter()
-                .map(|(k, v)| (k as FragmentId, v))
-                .collect()),
+                .await),
             MetadataManager::V2(mgr) => {
                 let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
                 Ok(mgr
@@ -560,6 +567,23 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller
                     .get_sink_by_ids(ids.iter().map(|id| *id as _).collect())
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_table_catalog_by_cdc_table_id(
+        &self,
+        cdc_table_id: &String,
+    ) -> MetaResult<Vec<PbTable>> {
+        match &self {
+            MetadataManager::V1(mgr) => Ok(mgr
+                .catalog_manager
+                .get_table_by_cdc_table_id(cdc_table_id)
+                .await),
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_table_by_cdc_table_id(cdc_table_id)
                     .await
             }
         }
@@ -733,26 +757,19 @@ impl MetadataManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-        subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
-    ) -> MetaResult<HashMap<WorkerId, Vec<BuildActorInfo>>> {
+    ) -> MetaResult<HashMap<WorkerId, Vec<StreamActor>>> {
         match &self {
-            MetadataManager::V1(mgr) => Ok(mgr
-                .fragment_manager
-                .all_node_actors(include_inactive, subscriptions)
-                .await),
+            MetadataManager::V1(mgr) => {
+                Ok(mgr.fragment_manager.all_node_actors(include_inactive).await)
+            }
             MetadataManager::V2(mgr) => {
                 let table_fragments = mgr.catalog_controller.table_fragments().await?;
                 let mut actor_maps = HashMap::new();
                 for (_, fragments) in table_fragments {
                     let tf = TableFragments::from_protobuf(fragments);
-                    let table_id = tf.table_id();
                     for (node_id, actors) in tf.worker_actors(include_inactive) {
                         let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                        node_actors.extend(
-                            actors
-                                .into_iter()
-                                .map(|actor| to_build_actor_info(actor, subscriptions, table_id)),
-                        )
+                        node_actors.extend(actors)
                     }
                 }
                 Ok(actor_maps)
@@ -884,10 +901,13 @@ impl MetadataManager {
 }
 
 impl MetadataManager {
+    /// Wait for job finishing notification in `TrackingJob::pre_finish`.
+    /// The progress is updated per barrier.
     pub(crate) async fn wait_streaming_job_finished(
         &self,
         job: &StreamingJob,
     ) -> MetaResult<NotificationVersion> {
+        tracing::debug!("wait_streaming_job_finished: {job:?}");
         match self {
             MetadataManager::V1(mgr) => mgr.wait_streaming_job_finished(job).await,
             MetadataManager::V2(mgr) => mgr.wait_streaming_job_finished(job.id() as _).await,

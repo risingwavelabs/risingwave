@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
+use std::time::Duration;
 
 use futures::TryStreamExt;
 use itertools::Itertools;
@@ -51,6 +52,13 @@ struct DispatcherWithMetrics {
     actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
 }
 
+impl DispatcherWithMetrics {
+    pub fn record_output_buffer_blocking_duration(&self, duration: Duration) {
+        let ns = duration.as_nanos() as u64;
+        self.actor_output_buffer_blocking_duration_ns.inc_by(ns);
+    }
+}
+
 impl Debug for DispatcherWithMetrics {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.dispatcher.fmt(f)
@@ -71,14 +79,14 @@ impl DerefMut for DispatcherWithMetrics {
     }
 }
 
-struct DispatcherMetrics {
+struct DispatchExecutorMetrics {
     actor_id_str: String,
     fragment_id_str: String,
     metrics: Arc<StreamingMetrics>,
     actor_out_record_cnt: LabelGuardedIntCounter<2>,
 }
 
-impl DispatcherMetrics {
+impl DispatchExecutorMetrics {
     fn monitor_dispatcher(&self, dispatcher: DispatcherImpl) -> DispatcherWithMetrics {
         DispatcherWithMetrics {
             actor_output_buffer_blocking_duration_ns: self
@@ -98,7 +106,7 @@ struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: u32,
     context: Arc<SharedContext>,
-    metrics: DispatcherMetrics,
+    metrics: DispatchExecutorMetrics,
 }
 
 impl DispatchExecutorInner {
@@ -112,9 +120,7 @@ impl DispatchExecutorInner {
                     .try_for_each_concurrent(limit, |dispatcher| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_watermark(watermark.clone()).await?;
-                        dispatcher
-                            .actor_output_buffer_blocking_duration_ns
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -125,9 +131,7 @@ impl DispatchExecutorInner {
                     .try_for_each_concurrent(limit, |dispatcher| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_data(chunk.clone()).await?;
-                        dispatcher
-                            .actor_output_buffer_blocking_duration_ns
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -147,9 +151,7 @@ impl DispatchExecutorInner {
                         dispatcher
                             .dispatch_barrier(barrier.clone().into_dispatcher())
                             .await?;
-                        dispatcher
-                            .actor_output_buffer_blocking_duration_ns
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -361,7 +363,7 @@ impl DispatchExecutor {
         let actor_out_record_cnt = metrics
             .actor_out_record_cnt
             .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
-        let metrics = DispatcherMetrics {
+        let metrics = DispatchExecutorMetrics {
             actor_id_str,
             fragment_id_str,
             metrics,
@@ -753,7 +755,8 @@ impl Dispatcher for HashDataDispatcher {
         let num_outputs = self.outputs.len();
 
         // get hash value of every line by its key
-        let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys);
+        let vnode_count = self.hash_mapping.len();
+        let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys, vnode_count);
 
         tracing::debug!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty(), self.keys, vnodes);
 
@@ -1100,8 +1103,8 @@ mod tests {
     }
 
     async fn test_hash_dispatcher_complex_inner() {
-        // This test only works when VirtualNode::COUNT is 256.
-        static_assertions::const_assert_eq!(VirtualNode::COUNT, 256);
+        // This test only works when vnode count is 256.
+        assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
 
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
@@ -1116,9 +1119,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT_FOR_TEST, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
@@ -1177,10 +1180,6 @@ mod tests {
         let actor_id = 233;
         let fragment_id = 666;
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let input = Executor::new(
-            Default::default(),
-            ReceiverExecutor::for_test(233, rx, barrier_test_env.shared_context.clone()).boxed(),
-        );
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
@@ -1223,6 +1222,37 @@ mod tests {
         )
         .unwrap();
 
+        let dispatcher_updates = maplit::hashmap! {
+            actor_id => vec![PbDispatcherUpdate {
+                actor_id,
+                dispatcher_id: broadcast_dispatcher_id,
+                added_downstream_actor_id: vec![new],
+                removed_downstream_actor_id: vec![old],
+                hash_mapping: Default::default(),
+            }]
+        };
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: dispatcher_updates,
+                merges: Default::default(),
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
+        barrier_test_env.inject_barrier(&b1, [actor_id]);
+        barrier_test_env
+            .shared_context
+            .local_barrier_manager
+            .flush_all_events()
+            .await;
+
+        let input = Executor::new(
+            Default::default(),
+            ReceiverExecutor::for_test(actor_id, rx, barrier_test_env.shared_context.clone())
+                .boxed(),
+        );
         let executor = Box::new(DispatchExecutor::new(
             input,
             vec![broadcast_dispatcher, simple_dispatcher],
@@ -1251,27 +1281,6 @@ mod tests {
             .await
             .unwrap();
 
-        // 4. Send a configuration change barrier for broadcast dispatcher.
-        let dispatcher_updates = maplit::hashmap! {
-            actor_id => vec![PbDispatcherUpdate {
-                actor_id,
-                dispatcher_id: broadcast_dispatcher_id,
-                added_downstream_actor_id: vec![new],
-                removed_downstream_actor_id: vec![old],
-                hash_mapping: Default::default(),
-            }]
-        };
-        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
-            UpdateMutation {
-                dispatchers: dispatcher_updates,
-                merges: Default::default(),
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-            },
-        ));
-        barrier_test_env.inject_barrier(&b1, [], [actor_id]);
         tx.send(Message::Barrier(b1.clone().into_dispatcher()))
             .await
             .unwrap();
@@ -1291,7 +1300,7 @@ mod tests {
 
         // 6. Send another barrier.
         let b2 = Barrier::new_test_barrier(test_epoch(2));
-        barrier_test_env.inject_barrier(&b2, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b2, [actor_id]);
         tx.send(Message::Barrier(b2.into_dispatcher()))
             .await
             .unwrap();
@@ -1330,7 +1339,7 @@ mod tests {
                 actor_new_dispatchers: Default::default(),
             },
         ));
-        barrier_test_env.inject_barrier(&b3, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b3, [actor_id]);
         tx.send(Message::Barrier(b3.into_dispatcher()))
             .await
             .unwrap();
@@ -1344,7 +1353,7 @@ mod tests {
 
         // 11. Send another barrier.
         let b4 = Barrier::new_test_barrier(test_epoch(4));
-        barrier_test_env.inject_barrier(&b4, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b4, [actor_id]);
         tx.send(Message::Barrier(b4.into_dispatcher()))
             .await
             .unwrap();
@@ -1357,6 +1366,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_dispatcher() {
+        // This test only works when vnode count is 256.
+        assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
+
         let num_outputs = 5; // actor id ranges from 1 to 5
         let cardinality = 10;
         let dimension = 4;
@@ -1372,9 +1384,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT_FOR_TEST, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
@@ -1408,7 +1420,7 @@ mod tests {
                 hasher.update(&bytes);
             }
             let output_idx =
-                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT] as usize - 1;
+                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT_FOR_TEST] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq_fast(one_row.iter()) {
                 builder.append(Some(*val));
             }

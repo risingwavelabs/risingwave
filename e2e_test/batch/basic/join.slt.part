@@ -57,6 +57,8 @@ create index i1 on t1(v1) include(v2);
 statement ok
 create index i2 on t2(v1) include(v3);
 
+sleep 1s
+
 query II
 select * from i1 join i2 using(v1);
 ----
@@ -87,6 +89,8 @@ create table t(x int);
 
 statement ok
 create index i on t(x);
+
+sleep 1s
 
 statement ok
 insert into t values (1),(2),(3),(4),(5);

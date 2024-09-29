@@ -17,7 +17,7 @@ use fixedbitset::FixedBitSet;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, JsonbVal, MapType, Scalar, ScalarImpl};
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -321,6 +321,19 @@ impl ExprImpl {
         match self.return_type() {
             DataType::List(_) => Ok(()),
             t => Err(ErrorCode::BindError(format!("expects array but got {t}"))),
+        }
+    }
+
+    /// Ensure the return type of this expression is a map of some type.
+    pub fn try_into_map_type(&self) -> Result<MapType, ErrorCode> {
+        if self.is_untyped() {
+            return Err(ErrorCode::BindError(
+                "could not determine polymorphic type because input has type unknown".into(),
+            ));
+        }
+        match self.return_type() {
+            DataType::Map(m) => Ok(m),
+            t => Err(ErrorCode::BindError(format!("expects map but got {t}"))),
         }
     }
 
@@ -975,10 +988,9 @@ impl ExprImpl {
                 _ => return None,
             };
             let list: Vec<_> = inputs
-                .map(|expr| {
+                .inspect(|expr| {
                     // Non constant IN will be bound to OR
                     assert!(expr.is_const());
-                    expr
                 })
                 .collect();
 

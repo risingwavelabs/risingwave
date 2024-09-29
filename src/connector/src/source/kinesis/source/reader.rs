@@ -42,9 +42,9 @@ pub struct KinesisSplitReader {
     shard_id: SplitId,
     latest_offset: Option<String>,
     shard_iter: Option<String>,
-    start_position: KinesisOffset,
+    next_offset: KinesisOffset,
     #[expect(dead_code)]
-    end_position: KinesisOffset,
+    end_offset: KinesisOffset,
 
     split_id: SplitId,
     parser_config: ParserConfig,
@@ -67,29 +67,29 @@ impl SplitReader for KinesisSplitReader {
 
         let split = splits.into_iter().next().unwrap();
 
-        let start_position = match &split.start_position {
+        let next_offset = match &split.next_offset {
             KinesisOffset::None => match &properties.scan_startup_mode {
                 None => KinesisOffset::Earliest,
                 Some(mode) => match mode.as_str() {
                     "earliest" => KinesisOffset::Earliest,
                     "latest" => KinesisOffset::Latest,
                     "timestamp" => {
-                        if let Some(ts) = &properties.timestamp_offset {
+                        if let Some(ts) = &properties.start_timestamp_millis {
                             KinesisOffset::Timestamp(*ts)
                         } else {
                             bail!("scan.startup.timestamp.millis is required");
                         }
                     }
                     _ => {
-                        bail!("invalid scan_startup_mode, accept earliest/latest/timestamp")
+                        bail!("invalid scan.startup.mode, accept earliest/latest/timestamp")
                     }
                 },
             },
-            start_position => start_position.to_owned(),
+            next_offset => next_offset.to_owned(),
         };
 
-        if !matches!(start_position, KinesisOffset::Timestamp(_))
-            && properties.timestamp_offset.is_some()
+        if !matches!(next_offset, KinesisOffset::Timestamp(_))
+            && properties.start_timestamp_millis.is_some()
         {
             // cannot bail! here because all new split readers will fail to start if user set 'scan.startup.mode' to 'timestamp'
             tracing::warn!("scan.startup.mode needs to be set to 'timestamp' if you want to start with a specific timestamp, starting shard {} from the beginning",
@@ -107,8 +107,8 @@ impl SplitReader for KinesisSplitReader {
             shard_id: split.shard_id,
             shard_iter: None,
             latest_offset: None,
-            start_position,
-            end_position: split.end_position,
+            next_offset,
+            end_offset: split.end_offset,
             split_id,
             parser_config,
             source_ctx,
@@ -126,7 +126,6 @@ impl KinesisSplitReader {
     #[try_stream(ok = Vec < SourceMessage >, error = crate::error::ConnectorError)]
     async fn into_data_stream(mut self) {
         self.new_shard_iter().await?;
-        let mut finish_flag = false;
         loop {
             if self.shard_iter.is_none() {
                 tracing::warn!(
@@ -139,22 +138,39 @@ impl KinesisSplitReader {
             }
             match self.get_records().await {
                 Ok(resp) => {
-                    if resp.millis_behind_latest.is_none()
-                        && let Some(shard) = &resp.child_shards
+                    tracing::trace!(?self.shard_id, ?resp);
+                    self.shard_iter = resp.next_shard_iterator().map(String::from);
+                    let chunk = (resp.records().iter())
+                        .map(|r| from_kinesis_record(r, self.split_id.clone()))
+                        .collect::<Vec<SourceMessage>>();
+                    if let Some(shard) = &resp.child_shards
                         && !shard.is_empty()
                     {
                         // according to the doc https://docs.rs/aws-sdk-kinesis/latest/aws_sdk_kinesis/operation/get_records/struct.GetRecordsOutput.html
                         //
                         // > The list of the current shard's child shards, returned in the GetRecords API's response only when the end of the current shard is reached.
-                        //
-                        // It means the current shard is finished, ie. inactive, and we should stop reading it. Checking `millis_behind_latest` is a double check.
+
+                        // The response will be like:
+                        // {
+                        //     "Records": [], // empty
+                        //     "MillisBehindLatest": 2665000, // non-zero
+                        //     "ChildShards": [...] // non-empty
+                        //     // no NextShardIterator
+                        // }
+
                         // Other executors are going to read the child shards.
-                        finish_flag = true;
+
+                        if !chunk.is_empty() {
+                            // This should not happen. But be extra safe here.
+                            yield chunk;
+                        }
+
+                        tracing::info!(
+                            "shard {:?} reaches the end and is inactive, stop reading",
+                            self.shard_id
+                        );
+                        break;
                     }
-                    self.shard_iter = resp.next_shard_iterator().map(String::from);
-                    let chunk = (resp.records().iter())
-                        .map(|r| from_kinesis_record(r, self.split_id.clone()))
-                        .collect::<Vec<SourceMessage>>();
                     if chunk.is_empty() {
                         tokio::time::sleep(Duration::from_millis(200)).await;
                         continue;
@@ -166,13 +182,6 @@ impl KinesisSplitReader {
                         self.latest_offset
                     );
                     yield chunk;
-                    if finish_flag {
-                        tracing::info!(
-                            "shard {:?} reaches the end and is inactive, stop reading",
-                            self.shard_id
-                        );
-                        break;
-                    }
                 }
                 Err(SdkError::ServiceError(e)) if e.err().is_resource_not_found_exception() => {
                     tracing::warn!("shard {:?} is closed, stop reading", self.shard_id);
@@ -241,9 +250,9 @@ impl KinesisSplitReader {
                 ShardIteratorType::AfterSequenceNumber,
             )
         } else {
-            match &self.start_position {
+            match &self.next_offset {
                 KinesisOffset::Earliest => (None, None, ShardIteratorType::TrimHorizon),
-                KinesisOffset::SequenceNumber(seq) => (
+                KinesisOffset::AfterSequenceNumber(seq) => (
                     Some(seq.clone()),
                     None,
                     ShardIteratorType::AfterSequenceNumber,
@@ -347,7 +356,7 @@ mod tests {
             },
 
             scan_startup_mode: None,
-            timestamp_offset: None,
+            start_timestamp_millis: None,
 
             unknown_fields: Default::default(),
         };
@@ -356,8 +365,8 @@ mod tests {
             properties.clone(),
             vec![KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
-                start_position: KinesisOffset::Earliest,
-                end_position: KinesisOffset::None,
+                next_offset: KinesisOffset::Earliest,
+                end_offset: KinesisOffset::None,
             }],
             Default::default(),
             SourceContext::dummy().into(),
@@ -372,10 +381,10 @@ mod tests {
             properties.clone(),
             vec![KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
-                start_position: KinesisOffset::SequenceNumber(
+                next_offset: KinesisOffset::AfterSequenceNumber(
                     "49629139817504901062972448413535783695568426186596941842".to_string(),
                 ),
-                end_position: KinesisOffset::None,
+                end_offset: KinesisOffset::None,
             }],
             Default::default(),
             SourceContext::dummy().into(),

@@ -44,7 +44,7 @@ if [[ "$profile" == "ci-dev" ]]; then
     RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
 else
     RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
-    export OPENSSL_STATIC=1
+    configure_static_openssl
 fi
 
 cargo build \
@@ -60,10 +60,10 @@ cargo build \
     --timings
 
 
-artifacts=(risingwave sqlsmith compaction-test risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test)
+artifacts=(risingwave sqlsmith compaction-test risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev)
 
-echo "--- Show link info"
-ldd target/"$profile"/risingwave
+echo "--- Check link info"
+check_link_info "$profile"
 
 echo "--- Upload artifacts"
 echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile && compress-and-upload-artifact ./{}-$profile"

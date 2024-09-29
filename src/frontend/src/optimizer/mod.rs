@@ -29,7 +29,8 @@ pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
+    SysTableVisitor,
 };
 use risingwave_sqlparser::ast::OnConflict;
 
@@ -243,7 +244,7 @@ impl PlanRoot {
         let return_type = DataType::List(input_column_type.clone().into());
         let agg = Agg::new(
             vec![PlanAggCall {
-                agg_kind: PbAggKind::ArrayAgg.into(),
+                agg_type: PbAggKind::ArrayAgg.into(),
                 return_type: return_type.clone(),
                 inputs: vec![InputRef::new(select_idx, input_column_type.clone())],
                 distinct: false,
@@ -637,6 +638,7 @@ impl PlanRoot {
         version: Option<TableVersion>,
         with_external_source: bool,
         retention_seconds: Option<NonZeroU32>,
+        cdc_table_id: Option<String>,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
@@ -674,8 +676,8 @@ impl PlanRoot {
         #[derive(PartialEq, Debug, Copy, Clone)]
         enum PrimaryKeyKind {
             UserDefinedPrimaryKey,
-            RowIdAsPrimaryKey,
-            AppendOnly,
+            NonAppendOnlyRowIdPk,
+            AppendOnlyRowIdPk,
         }
 
         fn inject_dml_node(
@@ -692,25 +694,28 @@ impl PlanRoot {
             dml_node = inject_project_for_generated_column_if_needed(columns, dml_node)?;
 
             dml_node = match kind {
-                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
+                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::NonAppendOnlyRowIdPk => {
                     RequiredDist::hash_shard(pk_column_indices)
                         .enforce_if_not_satisfies(dml_node, &Order::any())?
                 }
-                PrimaryKeyKind::AppendOnly => StreamExchange::new_no_shuffle(dml_node).into(),
+                PrimaryKeyKind::AppendOnlyRowIdPk => {
+                    StreamExchange::new_no_shuffle(dml_node).into()
+                }
             };
 
             Ok(dml_node)
         }
 
-        let kind = if append_only {
-            assert!(row_id_index.is_some());
-            PrimaryKeyKind::AppendOnly
-        } else if let Some(row_id_index) = row_id_index {
+        let kind = if let Some(row_id_index) = row_id_index {
             assert_eq!(
                 pk_column_indices.iter().exactly_one().copied().unwrap(),
                 row_id_index
             );
-            PrimaryKeyKind::RowIdAsPrimaryKey
+            if append_only {
+                PrimaryKeyKind::AppendOnlyRowIdPk
+            } else {
+                PrimaryKeyKind::NonAppendOnlyRowIdPk
+            }
         } else {
             PrimaryKeyKind::UserDefinedPrimaryKey
         };
@@ -737,7 +742,7 @@ impl PlanRoot {
                         .enforce_if_not_satisfies(external_source_node, &Order::any())?
                 }
 
-                PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
+                PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
             };
@@ -813,7 +818,7 @@ impl PlanRoot {
                 PrimaryKeyKind::UserDefinedPrimaryKey => {
                     unreachable!()
                 }
-                PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
+                PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
                     stream_plan = StreamRowIdGen::new_with_dist(
                         stream_plan,
                         row_id_index,
@@ -826,9 +831,9 @@ impl PlanRoot {
 
         let conflict_behavior = match on_conflict {
             Some(on_conflict) => match on_conflict {
-                OnConflict::OverWrite => ConflictBehavior::Overwrite,
-                OnConflict::Ignore => ConflictBehavior::IgnoreConflict,
-                OnConflict::DoUpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
+                OnConflict::UpdateFull => ConflictBehavior::Overwrite,
+                OnConflict::Nothing => ConflictBehavior::IgnoreConflict,
+                OnConflict::UpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
             },
             None => match append_only {
                 true => ConflictBehavior::NoCheck,
@@ -867,6 +872,7 @@ impl PlanRoot {
             row_id_index,
             version,
             retention_seconds,
+            cdc_table_id,
         )
     }
 

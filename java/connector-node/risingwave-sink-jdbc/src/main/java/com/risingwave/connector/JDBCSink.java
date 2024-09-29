@@ -71,12 +71,13 @@ public class JDBCSink implements SinkWriter {
                             .collect(Collectors.toList());
 
             LOG.info(
-                    "schema = {}, table = {}, tableSchema = {}, columnSqlTypes = {}, pkIndices = {}",
+                    "schema = {}, table = {}, tableSchema = {}, columnSqlTypes = {}, pkIndices = {}, queryTimeout = {}",
                     config.getSchemaName(),
                     config.getTableName(),
                     tableSchema,
                     columnSqlTypes,
-                    pkIndices);
+                    pkIndices,
+                    config.getQueryTimeout());
 
             if (factory.isPresent()) {
                 this.jdbcDialect = factory.get().create(columnSqlTypes, pkIndices);
@@ -92,7 +93,7 @@ public class JDBCSink implements SinkWriter {
             // Commit the `getTransactionIsolation`
             conn.commit();
 
-            jdbcStatements = new JdbcStatements(conn);
+            jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -173,7 +174,7 @@ public class JDBCSink implements SinkWriter {
                         conn = JdbcUtils.getConnection(config.getJdbcUrl());
                         // reset the flag since we will retry to prepare the batch again
                         updateFlag = false;
-                        jdbcStatements = new JdbcStatements(conn);
+                        jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
                     } else {
                         throw io.grpc.Status.INTERNAL
                                 .withDescription(
@@ -206,13 +207,15 @@ public class JDBCSink implements SinkWriter {
      * across multiple batches if only the JDBC connection is valid.
      */
     class JdbcStatements implements AutoCloseable {
+        private final int queryTimeoutSecs;
         private PreparedStatement deleteStatement;
         private PreparedStatement upsertStatement;
         private PreparedStatement insertStatement;
 
         private final Connection conn;
 
-        public JdbcStatements(Connection conn) throws SQLException {
+        public JdbcStatements(Connection conn, int queryTimeoutSecs) throws SQLException {
+            this.queryTimeoutSecs = queryTimeoutSecs;
             this.conn = conn;
             var schemaTableName =
                     jdbcDialect.createSchemaTableName(
@@ -339,6 +342,9 @@ public class JDBCSink implements SinkWriter {
             if (stmt == null) {
                 return;
             }
+            // if timeout occurs, a SQLTimeoutException will be thrown
+            // and we will retry to write the stream chunk in `JDBCSink.write`
+            stmt.setQueryTimeout(queryTimeoutSecs);
             LOG.debug("Executing statement: {}", stmt);
             stmt.executeBatch();
             stmt.clearParameters();

@@ -25,10 +25,8 @@ use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::metrics::LabelGuardedIntCounter;
+use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
-
-use crate::sink::SinkMetrics;
 
 pub type LogStoreResult<T> = Result<T, anyhow::Error>;
 pub type ChunkId = usize;
@@ -268,11 +266,17 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
 pub struct MonitoredLogReader<R: LogReader> {
     inner: R,
     read_epoch: u64,
-    metrics: SinkMetrics,
+    metrics: LogReaderMetrics,
+}
+
+pub struct LogReaderMetrics {
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_read_rows: LabelGuardedIntCounter<4>,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
 }
 
 impl<R: LogReader> MonitoredLogReader<R> {
-    pub fn new(inner: R, metrics: SinkMetrics) -> Self {
+    pub fn new(inner: R, metrics: LogReaderMetrics) -> Self {
         Self {
             inner,
             read_epoch: INVALID_EPOCH,
@@ -327,7 +331,8 @@ where
         TransformChunkLogReader { f, inner: self }
     }
 
-    pub fn monitored(self, metrics: SinkMetrics) -> impl LogReader {
+    pub fn monitored(self, metrics: LogReaderMetrics) -> impl LogReader {
+        // TODO: The `clone()` can be avoided if move backpressure inside `MonitoredLogReader`
         let wait_new_future_duration = metrics.log_store_reader_wait_new_future_duration_ns.clone();
         BackpressureMonitoredLogReader::new(
             MonitoredLogReader::new(self, metrics),
@@ -338,7 +343,13 @@ where
 
 pub struct MonitoredLogWriter<W: LogWriter> {
     inner: W,
-    metrics: SinkMetrics,
+    metrics: LogWriterMetrics,
+}
+
+pub struct LogWriterMetrics {
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_write_rows: LabelGuardedIntCounter<4>,
 }
 
 impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
@@ -395,7 +406,7 @@ impl<T> T
 where
     T: LogWriter + Sized,
 {
-    pub fn monitored(self, metrics: SinkMetrics) -> MonitoredLogWriter<T> {
+    pub fn monitored(self, metrics: LogWriterMetrics) -> MonitoredLogWriter<T> {
         MonitoredLogWriter {
             inner: self,
             metrics,

@@ -238,7 +238,7 @@ async fn init_metadata_for_replay(
             std::process::exit(0);
         },
         ret = MetaClient::register_new(cluster_meta_endpoint.parse()?, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
-            (meta_client, _) = ret.unwrap();
+            (meta_client, _) = ret;
         },
     }
     let worker_id = meta_client.worker_id();
@@ -254,7 +254,7 @@ async fn init_metadata_for_replay(
         Default::default(),
         &meta_config,
     )
-    .await?;
+    .await;
     new_meta_client.activate(advertise_addr).await.unwrap();
     if ci_mode {
         let table_to_check = tables.iter().find(|t| t.name == "nexmark_q7").unwrap();
@@ -286,7 +286,7 @@ async fn pull_version_deltas(
         Default::default(),
         &MetaConfig::default(),
     )
-    .await?;
+    .await;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned pull worker id {}", worker_id);
     meta_client.activate(advertise_addr).await.unwrap();
@@ -335,7 +335,7 @@ async fn start_replay(
         Default::default(),
         &config.meta,
     )
-    .await?;
+    .await;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned replay worker id {}", worker_id);
     meta_client.activate(&advertise_addr).await.unwrap();
@@ -374,12 +374,16 @@ async fn start_replay(
 
     for delta in version_delta_logs {
         let (current_version, compaction_groups) = meta_client.replay_version_delta(delta).await?;
-        let (version_id, max_committed_epoch) =
-            (current_version.id, current_version.max_committed_epoch());
+        let (version_id, committed_epoch) = (
+            current_version.id,
+            current_version
+                .table_committed_epoch(table_to_check.into())
+                .unwrap_or_default(),
+        );
         tracing::info!(
-            "Replayed version delta version_id: {}, max_committed_epoch: {}, compaction_groups: {:?}",
+            "Replayed version delta version_id: {}, committed_epoch: {}, compaction_groups: {:?}",
             version_id,
-            max_committed_epoch,
+            committed_epoch,
             compaction_groups
         );
 
@@ -389,7 +393,7 @@ async fn start_replay(
             .await;
 
         replay_count += 1;
-        replayed_epochs.push(max_committed_epoch);
+        replayed_epochs.push(committed_epoch);
         compaction_groups
             .into_iter()
             .map(|c| modified_compaction_groups.insert(c))
@@ -408,12 +412,8 @@ async fn start_replay(
 
             // pop the latest epoch
             replayed_epochs.pop();
-            let mut epochs = vec![max_committed_epoch];
-            epochs.extend(
-                pin_old_snapshots(&meta_client, &replayed_epochs, 1)
-                    .await
-                    .into_iter(),
-            );
+            let mut epochs = vec![committed_epoch];
+            epochs.extend(pin_old_snapshots(&meta_client, &replayed_epochs, 1).into_iter());
             tracing::info!("===== Prepare to check snapshots: {:?}", epochs);
 
             let old_version_iters = open_hummock_iters(&hummock, &epochs, table_to_check).await?;
@@ -421,7 +421,7 @@ async fn start_replay(
             tracing::info!(
                 "Trigger compaction for version {}, epoch {} compaction_groups: {:?}",
                 version_id,
-                max_committed_epoch,
+                committed_epoch,
                 modified_compaction_groups,
             );
             // Try trigger multiple rounds of compactions but doesn't wait for finish
@@ -463,15 +463,12 @@ async fn start_replay(
                 compaction_ok,
             );
 
-            let (new_version_id, new_committed_epoch) =
-                (new_version.id, new_version.max_committed_epoch());
+            let new_version_id = new_version.id;
             assert!(
                 new_version_id >= version_id,
-                "new_version_id: {}, epoch: {}",
+                "new_version_id: {}",
                 new_version_id,
-                new_committed_epoch
             );
-            assert_eq!(max_committed_epoch, new_committed_epoch);
 
             if new_version_id != version_id {
                 hummock.inner().update_version_and_wait(new_version).await;
@@ -519,15 +516,14 @@ async fn start_replay(
     Ok(())
 }
 
-async fn pin_old_snapshots(
-    meta_client: &MetaClient,
+fn pin_old_snapshots(
+    _meta_client: &MetaClient,
     replayed_epochs: &[HummockEpoch],
     num: usize,
 ) -> Vec<HummockEpoch> {
     let mut old_epochs = vec![];
     for &epoch in replayed_epochs.iter().rev().take(num) {
         old_epochs.push(epoch);
-        let _ = meta_client.pin_specific_snapshot(epoch).await;
     }
     old_epochs
 }

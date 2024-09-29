@@ -58,19 +58,6 @@ select * from m1;
 ----
 -982.5779489474152 -804.4614206837127 0 804.4614206837127 982.5779489474152
 
-# Test state encode / decode
-onlyif can-use-recover
-statement ok
-recover;
-
-onlyif can-use-recover
-sleep 10s
-
-query I
-select * from m1;
-----
--982.5779489474152 -804.4614206837127 0 804.4614206837127 982.5779489474152
-
 # Test 0<x<1 values
 statement ok
 insert into t select 0.001, 1 from generate_series(1, 500);
@@ -96,6 +83,26 @@ select
 from t group by grp_col;
 ----
 -970 -700 0.0001 700 970
+
+statement ok
+delete from t;
+
+statement ok
+insert into t select 0.0001, 1 from generate_series(1, 501);
+
+statement ok
+flush;
+
+query I
+select
+ round(p01::numeric, 6) as p01,
+ round(p10::numeric, 6) as p10,
+ round(p50::numeric, 6) as p50,
+ round(p90::numeric, 6) as p90,
+ round(p99::numeric, 6) as p99
+ from m1;
+----
+0.000100 0.000100 0.000100 0.000100 0.000100
 
 statement ok
 drop materialized view m1;

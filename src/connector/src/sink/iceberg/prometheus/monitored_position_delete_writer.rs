@@ -17,6 +17,7 @@ use icelake::io_v2::{
     PositionDeleteMetrics, PositionDeleteWriter, PositionDeleteWriterBuilder,
 };
 use icelake::Result;
+use risingwave_common::array::arrow::arrow_schema_iceberg;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]

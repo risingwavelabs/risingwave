@@ -27,10 +27,11 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::log_store::{
-    LogReader, LogReaderExt, LogStoreFactory, LogWriter, LogWriterExt,
+    LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory, LogWriter, LogWriterExt,
+    LogWriterMetrics,
 };
 use risingwave_connector::sink::{
-    build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
+    build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam, GLOBAL_SINK_METRICS,
 };
 use thiserror_ext::AsReport;
 
@@ -218,18 +219,39 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         if self.sink.is_sink_into_table() {
             processed_input.boxed()
         } else {
+            let labels = [
+                &actor_id.to_string(),
+                "NA", // TODO: remove the connector label for log writer metrics
+                &sink_id.to_string(),
+                self.sink_param.sink_name.as_str(),
+            ];
+            let log_store_first_write_epoch = GLOBAL_SINK_METRICS
+                .log_store_first_write_epoch
+                .with_guarded_label_values(&labels);
+            let log_store_latest_write_epoch = GLOBAL_SINK_METRICS
+                .log_store_latest_write_epoch
+                .with_guarded_label_values(&labels);
+            let log_store_write_rows = GLOBAL_SINK_METRICS
+                .log_store_write_rows
+                .with_guarded_label_values(&labels);
+            let log_writer_metrics = LogWriterMetrics {
+                log_store_first_write_epoch,
+                log_store_latest_write_epoch,
+                log_store_write_rows,
+            };
+
             self.log_store_factory
                 .build()
                 .map(move |(log_reader, log_writer)| {
                     let write_log_stream = Self::execute_write_log(
                         processed_input,
-                        log_writer.monitored(self.sink_writer_param.sink_metrics.clone()),
+                        log_writer.monitored(log_writer_metrics),
                         actor_id,
                     );
 
-                    dispatch_sink!(self.sink, sink, {
+                    let consume_log_stream_future = dispatch_sink!(self.sink, sink, {
                         let consume_log_stream = Self::execute_consume_log(
-                            sink,
+                            *sink,
                             log_reader,
                             self.input_columns,
                             self.sink_param,
@@ -239,9 +261,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         .instrument_await(format!("consume_log (sink_id {sink_id})"))
                         .map_ok(|never| match never {}); // unify return type to `Message`
 
-                        // TODO: may try to remove the boxed
-                        select(consume_log_stream.into_stream(), write_log_stream).boxed()
-                    })
+                        consume_log_stream.boxed()
+                    });
+                    select(consume_log_stream_future.into_stream(), write_log_stream)
                 })
                 .into_stream()
                 .flatten()
@@ -443,13 +465,32 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
     ) -> StreamExecutorResult<!> {
-        let metrics = sink_writer_param.sink_metrics.clone();
-
         let visible_columns = columns
             .iter()
             .enumerate()
             .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
             .collect_vec();
+
+        let labels = [
+            &actor_context.id.to_string(),
+            sink_writer_param.connector.as_str(),
+            &sink_writer_param.sink_id.to_string(),
+            sink_writer_param.sink_name.as_str(),
+        ];
+        let log_store_reader_wait_new_future_duration_ns = GLOBAL_SINK_METRICS
+            .log_store_reader_wait_new_future_duration_ns
+            .with_guarded_label_values(&labels);
+        let log_store_read_rows = GLOBAL_SINK_METRICS
+            .log_store_read_rows
+            .with_guarded_label_values(&labels);
+        let log_store_latest_read_epoch = GLOBAL_SINK_METRICS
+            .log_store_latest_read_epoch
+            .with_guarded_label_values(&labels);
+        let metrics = LogReaderMetrics {
+            log_store_latest_read_epoch,
+            log_store_read_rows,
+            log_store_reader_wait_new_future_duration_ns,
+        };
 
         let mut log_reader = log_reader
             .transform_chunk(move |chunk| {

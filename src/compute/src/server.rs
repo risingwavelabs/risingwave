@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use risingwave_batch::monitor::{
     GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_SPILL_METRICS,
-    GLOBAL_BATCH_TASK_METRICS,
 };
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::spill::spill_op::SpillOp;
@@ -55,7 +54,8 @@ use risingwave_storage::hummock::compactor::{
     new_compaction_await_tree_reg_ref, start_compactor, CompactionExecutor, CompactorContext,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
+use risingwave_storage::hummock::utils::HummockMemoryCollector;
+use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{
     global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
     GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, GLOBAL_OBJECT_STORE_METRICS,
@@ -127,11 +127,11 @@ pub async fn compute_node_serve(
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
             is_unschedulable: false,
+            internal_rpc_host_addr: "".to_string(),
         },
         &config.meta,
     )
-    .await
-    .unwrap();
+    .await;
 
     let state_store_url = system_params.state_store();
 
@@ -176,7 +176,6 @@ pub async fn compute_node_serve(
     let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
     let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
     let streaming_metrics = Arc::new(global_streaming_metrics(config.server.metrics_level));
-    let batch_task_metrics = Arc::new(GLOBAL_BATCH_TASK_METRICS.clone());
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = Arc::new(GLOBAL_BATCH_MANAGER_METRICS.clone());
     let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
@@ -287,7 +286,7 @@ pub async fn compute_node_serve(
     let batch_mgr = Arc::new(BatchManager::new(
         config.batch.clone(),
         batch_manager_metrics,
-        batch_mem_limit(compute_memory_bytes),
+        batch_mem_limit(compute_memory_bytes, opts.role.for_serving()),
     ));
 
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
@@ -354,7 +353,6 @@ pub async fn compute_node_serve(
         batch_config,
         worker_id,
         state_store.clone(),
-        batch_task_metrics.clone(),
         batch_executor_metrics.clone(),
         batch_client_pool,
         dml_mgr.clone(),

@@ -21,7 +21,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(lint_reasons)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
@@ -38,6 +37,7 @@
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 
+pub mod common;
 /// Converts JSON/AVRO/Protobuf data to RisingWave datum.
 /// The core API is [`decoder::Access`].
 pub mod decoder;

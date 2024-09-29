@@ -455,6 +455,7 @@ mod tests {
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::HummockStorage;
+    use risingwave_storage::store::TryWaitEpochOptions;
     use risingwave_storage::StateStore;
 
     use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
@@ -506,8 +507,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -526,8 +526,11 @@ mod tests {
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
-        test_env.storage.seal_epoch(epoch1, false);
-        let sync_result = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
+        let sync_result = test_env
+            .storage
+            .seal_and_sync_epoch(epoch2, HashSet::from_iter([table.id.into()]))
+            .await
+            .unwrap();
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
         reader.init().await.unwrap();
@@ -613,8 +616,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -632,8 +634,6 @@ mod tests {
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
-
-        test_env.storage.seal_epoch(epoch1, false);
 
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
@@ -684,7 +684,10 @@ mod tests {
             .unwrap();
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch2),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -805,8 +808,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -900,7 +902,10 @@ mod tests {
         test_env.commit_epoch(epoch2).await;
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch2),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -1000,15 +1005,15 @@ mod tests {
         test_env.register_table(table.clone()).await;
 
         fn build_bitmap(indexes: impl Iterator<Item = usize>) -> Arc<Bitmap> {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
             for i in indexes {
                 builder.set(i, true);
             }
             Arc::new(builder.finish())
         }
 
-        let vnodes1 = build_bitmap((0..VirtualNode::COUNT).filter(|i| i % 2 == 0));
-        let vnodes2 = build_bitmap((0..VirtualNode::COUNT).filter(|i| i % 2 == 1));
+        let vnodes1 = build_bitmap((0..VirtualNode::COUNT_FOR_TEST).filter(|i| i % 2 == 0));
+        let vnodes2 = build_bitmap((0..VirtualNode::COUNT_FOR_TEST).filter(|i| i % 2 == 1));
 
         let factory1 = KvLogStoreFactory::new(
             test_env.storage.clone(),
@@ -1034,8 +1039,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -1133,11 +1137,13 @@ mod tests {
         }
 
         // Truncation of reader1 on epoch1 should work because it is before this sync
-        test_env.storage.seal_epoch(epoch1, false);
         test_env.commit_epoch(epoch2).await;
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch2),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -1150,7 +1156,7 @@ mod tests {
             .clear_shared_buffer(test_env.manager.get_current_version().await.id)
             .await;
 
-        let vnodes = build_bitmap(0..VirtualNode::COUNT);
+        let vnodes = build_bitmap(0..VirtualNode::COUNT_FOR_TEST);
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
@@ -1230,8 +1236,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -1370,8 +1375,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -1401,7 +1405,10 @@ mod tests {
 
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch3))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch3),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -1513,6 +1520,13 @@ mod tests {
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
         assert_eq!(2, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch2,
+                chunk_id: chunk_ids[0],
+            })
+            .unwrap();
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
@@ -1700,8 +1714,7 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .max_committed_epoch_for_test()
             .next_epoch();
         test_env
             .storage
@@ -1720,7 +1733,6 @@ mod tests {
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
-        test_env.storage.seal_epoch(epoch1, false);
         test_env.commit_epoch(epoch2).await;
 
         reader.init().await.unwrap();

@@ -215,6 +215,7 @@ async fn test_ddl_cancel() -> Result<()> {
             let pid = line.split_whitespace().next().unwrap();
             let pid = pid.parse::<usize>().unwrap();
             session.run(format!("kill {};", pid)).await?;
+            sleep(Duration::from_secs(10)).await;
             break;
         }
         sleep(Duration::from_secs(2)).await;

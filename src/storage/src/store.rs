@@ -35,7 +35,8 @@ use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection
 use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
-    TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
+    TracedWriteOptions,
 };
 use risingwave_pb::hummock::PbVnodeWatermark;
 
@@ -344,6 +345,34 @@ pub trait StateStoreWrite: StaticSendSync {
 
 pub trait SyncFuture = Future<Output = StorageResult<SyncResult>> + Send + 'static;
 
+#[derive(Clone)]
+pub struct TryWaitEpochOptions {
+    pub table_id: TableId,
+}
+
+impl TryWaitEpochOptions {
+    #[cfg(any(test, feature = "test"))]
+    pub fn for_test(table_id: TableId) -> Self {
+        Self { table_id }
+    }
+}
+
+impl From<TracedTryWaitEpochOptions> for TryWaitEpochOptions {
+    fn from(value: TracedTryWaitEpochOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+        }
+    }
+}
+
+impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
+    fn from(value: TryWaitEpochOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+        }
+    }
+}
+
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
@@ -352,12 +381,10 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn try_wait_epoch(
         &self,
         epoch: HummockReadEpoch,
+        options: TryWaitEpochOptions,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture;
-
-    /// update max current epoch in storage.
-    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, storage_metrics: Arc<MonitoredStorageMetrics>) -> MonitoredStateStore<Self> {
@@ -365,9 +392,6 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     }
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_;
-
-    /// Validates whether store can serve `epoch` at the moment.
-    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
@@ -499,7 +523,6 @@ pub struct ReadOptions {
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Bytes>,
-    pub ignore_range_tombstone: bool,
     pub prefetch_options: PrefetchOptions,
     pub cache_policy: CachePolicy,
 
@@ -508,20 +531,19 @@ pub struct ReadOptions {
     /// Read from historical hummock version of meta snapshot backup.
     /// It should only be used by `StorageTable` for batch query.
     pub read_version_from_backup: bool,
-    pub read_version_from_time_travel: bool,
+    pub read_committed: bool,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
     fn from(value: TracedReadOptions) -> Self {
         Self {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
-            ignore_range_tombstone: value.ignore_range_tombstone,
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
             retention_seconds: value.retention_seconds,
             table_id: value.table_id.into(),
             read_version_from_backup: value.read_version_from_backup,
-            read_version_from_time_travel: value.read_version_from_time_travel,
+            read_committed: value.read_committed,
         }
     }
 }
@@ -530,13 +552,12 @@ impl From<ReadOptions> for TracedReadOptions {
     fn from(value: ReadOptions) -> Self {
         Self {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
-            ignore_range_tombstone: value.ignore_range_tombstone,
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
             retention_seconds: value.retention_seconds,
             table_id: value.table_id.into(),
             read_version_from_backup: value.read_version_from_backup,
-            read_version_from_time_travel: value.read_version_from_time_travel,
+            read_committed: value.read_committed,
         }
     }
 }
@@ -733,7 +754,7 @@ impl NewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
-            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT)),
+            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
         }
     }
 }

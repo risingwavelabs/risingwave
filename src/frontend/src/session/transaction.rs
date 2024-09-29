@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
+use risingwave_common::session_config::VisibilityMode;
 use risingwave_hummock_sdk::EpochWithGap;
 
 use super::SessionImpl;
@@ -137,6 +138,11 @@ impl SessionImpl {
             // explicit transaction.
             State::Initial => unreachable!("no implicit transaction in progress"),
             State::Implicit(ctx) => {
+                if self.config().visibility_mode() == VisibilityMode::All {
+                    self.notice_to_user(
+                        "`visibility_mode` is set to `All`, and there is no consistency ensured in the transaction",
+                    );
+                }
                 *txn = State::Explicit(Context {
                     id: ctx.id,
                     access_mode,
@@ -219,15 +225,15 @@ impl SessionImpl {
 
                 if let Some(query_epoch) = query_epoch {
                     ReadSnapshot::Other(query_epoch)
+                } else if self.is_barrier_read() {
+                    ReadSnapshot::ReadUncommitted
                 } else {
                     // Acquire hummock snapshot for execution.
-                    let is_barrier_read = self.is_barrier_read();
                     let hummock_snapshot_manager = self.env().hummock_snapshot_manager();
                     let pinned_snapshot = hummock_snapshot_manager.acquire();
 
                     ReadSnapshot::FrontendPinned {
                         snapshot: pinned_snapshot,
-                        is_barrier_read,
                     }
                 }
             })

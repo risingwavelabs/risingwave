@@ -9,66 +9,17 @@ import "stream_plan.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-message BuildActorInfo {
-  stream_plan.StreamActor actor = 1;
-  message SubscriptionIds {
-    repeated uint32 subscription_ids = 1;
-  }
-  map<uint32, SubscriptionIds> related_subscriptions = 2;
-}
-
-// Describe the fragments which will be running on this node
-message UpdateActorsRequest {
-  string request_id = 1;
-  repeated BuildActorInfo actors = 2;
-}
-
-message UpdateActorsResponse {
-  common.Status status = 1;
-}
-
-message BroadcastActorInfoTableRequest {
-  repeated common.ActorInfo info = 1;
-}
-
-// Create channels and gRPC connections for a fragment
-message BuildActorsRequest {
-  string request_id = 1;
-  repeated uint32 actor_id = 2;
-}
-
-message BuildActorsResponse {
-  string request_id = 1;
-  common.Status status = 2;
-}
-
-message DropActorsRequest {
-  string request_id = 1;
-  repeated uint32 actor_ids = 2;
-}
-
-message DropActorsResponse {
-  string request_id = 1;
-  common.Status status = 2;
-}
-
 message InjectBarrierRequest {
   string request_id = 1;
   stream_plan.Barrier barrier = 2;
-  repeated uint32 actor_ids_to_send = 3;
   repeated uint32 actor_ids_to_collect = 4;
   repeated uint32 table_ids_to_sync = 5;
   uint32 partial_graph_id = 6;
-  // Actors in the partial graphs of the creating jobs that need to be pre-synced the barrier mutation to.
-  //
-  // This is required because in snapshot backfill, the snapshot backfill executor receive barriers from
-  // both local barrier manager and upstream. If we don't pre-sync the barrier mutations, when an input executor
-  // of an snapshot backfill actor receive a barrier, it will be blocked when trying the fetch the mutation
-  // of this upstream barrier. The reason for blocking is that, the snapshot backfill have slower progress,
-  // and therefore won't be synced with the mutation of barrier in upstream. To solve this issue of blocking,
-  // we specify the set of snapshot backfill actors that needs to be pre-synced with the upstream barrier mutation,
-  // so that the input executor won't be blocked at waiting for the mutation of upstream barriers.
-  repeated uint32 actor_ids_to_pre_sync_barrier_mutation = 7;
+
+  repeated common.ActorInfo broadcast_info = 8;
+  repeated stream_plan.StreamActor actors_to_build = 9;
+  repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_add = 10;
+  repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_remove = 11;
 }
 
 message BarrierCompleteResponse {
@@ -96,13 +47,9 @@ message BarrierCompleteResponse {
   uint64 epoch = 9;
 }
 
-// Before starting streaming, the leader node broadcast the actor-host table to needed workers.
-message BroadcastActorInfoTableResponse {
-  common.Status status = 1;
-}
-
 message WaitEpochCommitRequest {
   uint64 epoch = 1;
+  uint32 table_id = 2;
 }
 
 message WaitEpochCommitResponse {
@@ -112,6 +59,7 @@ message WaitEpochCommitResponse {
 message StreamingControlStreamRequest {
   message InitRequest {
     uint64 version_id = 1;
+    repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
   }
 
   message RemovePartialGraphRequest {
@@ -137,10 +85,6 @@ message StreamingControlStreamResponse {
 }
 
 service StreamService {
-  rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
-  rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
-  rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
-  rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
   rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
 }

@@ -23,10 +23,12 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{
     GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, FrontendHummockVersionDelta, HummockEpoch, HummockVersionId,
+};
 use risingwave_pb::hummock::{
-    CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionStats,
-    StateTableInfoDelta,
+    CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionDeltas,
+    HummockVersionStats, StateTableInfoDelta,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -43,13 +45,10 @@ fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
 fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
     metrics
         .max_committed_epoch
-        .set(current_version.visible_table_committed_epoch() as i64);
+        .set(current_version.max_committed_epoch_for_meta() as i64);
     metrics
         .version_size
         .set(current_version.estimated_encode_len() as i64);
-    metrics
-        .safe_epoch
-        .set(current_version.visible_table_safe_epoch() as i64);
     metrics
         .current_version_id
         .set(current_version.id.to_u64() as i64);
@@ -98,8 +97,13 @@ impl<'a> HummockVersionTransaction<'a> {
         }
     }
 
-    pub(super) fn new_delta<'b>(&'b mut self) -> SingleDeltaTransaction<'a, 'b> {
-        let delta = self.latest_version().version_delta_after();
+    pub(super) fn new_delta<'b>(
+        &'b mut self,
+        max_committed_epoch: Option<u64>,
+    ) -> SingleDeltaTransaction<'a, 'b> {
+        let delta = self
+            .latest_version()
+            .version_delta_after(max_committed_epoch);
         SingleDeltaTransaction {
             version_txn: self,
             delta: Some(delta),
@@ -122,14 +126,16 @@ impl<'a> HummockVersionTransaction<'a> {
         is_visible_table_committed_epoch: bool,
         new_compaction_group: Option<(CompactionGroupId, CompactionConfig)>,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
-        new_table_ids: HashMap<TableId, CompactionGroupId>,
+        new_table_ids: &HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
     ) -> HummockVersionDelta {
-        let mut new_version_delta = self.new_delta();
-        if is_visible_table_committed_epoch {
-            new_version_delta.set_max_committed_epoch(committed_epoch);
-        }
+        let new_max_committed_epoch = if is_visible_table_committed_epoch {
+            Some(committed_epoch)
+        } else {
+            None
+        };
+        let mut new_version_delta = self.new_delta(new_max_committed_epoch);
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
@@ -175,7 +181,7 @@ impl<'a> HummockVersionTransaction<'a> {
 
         // update state table info
         new_version_delta.with_latest_version(|version, delta| {
-            for (table_id, cg_id) in &new_table_ids {
+            for (table_id, cg_id) in new_table_ids {
                 assert!(
                     !version.state_table_info.info().contains_key(table_id),
                     "newly added table exists previously: {:?}",
@@ -185,7 +191,6 @@ impl<'a> HummockVersionTransaction<'a> {
                     *table_id,
                     StateTableInfoDelta {
                         committed_epoch,
-                        safe_epoch: committed_epoch,
                         compaction_group_id: *cg_id,
                     },
                 );
@@ -204,7 +209,6 @@ impl<'a> HummockVersionTransaction<'a> {
                         *table_id,
                         StateTableInfoDelta {
                             committed_epoch,
-                            safe_epoch: info.safe_epoch,
                             compaction_group_id: info.compaction_group_id,
                         }
                     )
@@ -228,6 +232,17 @@ impl<'a> InMemValTransaction for HummockVersionTransaction<'a> {
                     Operation::Add,
                     Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                         version_deltas: pb_deltas,
+                    }),
+                );
+                self.notification_manager.notify_frontend_without_version(
+                    Operation::Update,
+                    Info::HummockVersionDeltas(HummockVersionDeltas {
+                        version_deltas: deltas
+                            .iter()
+                            .map(|delta| {
+                                FrontendHummockVersionDelta::from_delta(delta).to_protobuf()
+                            })
+                            .collect(),
                     }),
                 );
             }

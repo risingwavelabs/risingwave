@@ -350,9 +350,9 @@ fn parse_select_count_wildcard() {
             arg_list: FunctionArgList::args_only(vec![FunctionArg::Unnamed(
                 FunctionArgExpr::Wildcard(None)
             )]),
-            over: None,
-            filter: None,
             within_group: None,
+            filter: None,
+            over: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -374,9 +374,9 @@ fn parse_select_count_distinct() {
                 }))],
                 vec![]
             ),
-            over: None,
-            filter: None,
             within_group: None,
+            filter: None,
+            over: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1169,9 +1169,9 @@ fn parse_select_having() {
                 arg_list: FunctionArgList::args_only(vec![FunctionArg::Unnamed(
                     FunctionArgExpr::Wildcard(None)
                 )]),
-                over: None,
-                filter: None,
                 within_group: None,
+                filter: None,
+                over: None,
             })),
             op: BinaryOperator::Gt,
             right: Box::new(Expr::Value(number("1"))),
@@ -1921,9 +1921,9 @@ fn parse_named_argument_function() {
                     ))),
                 },
             ]),
-            over: None,
-            filter: None,
             within_group: None,
+            filter: None,
+            over: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1931,23 +1931,39 @@ fn parse_named_argument_function() {
 
 #[test]
 fn parse_window_functions() {
-    let sql = "SELECT row_number() OVER (ORDER BY dt DESC), \
-               sum(foo) OVER (PARTITION BY a, b ORDER BY c, d \
-               ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), \
-               avg(bar) OVER (ORDER BY a \
-               RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING), \
-               max(baz) OVER (ORDER BY a \
-               ROWS UNBOUNDED PRECEDING), \
-               sum(qux) OVER (ORDER BY a \
-               GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING) \
-               FROM foo";
+    let sql = "\
+    SELECT \
+        row_number() OVER (ORDER BY dt DESC), \
+        sum(foo) OVER (\
+            PARTITION BY a, b \
+            ORDER BY c, d \
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\
+        ), \
+        avg(bar) OVER (\
+            ORDER BY a \
+            RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING\
+        ), \
+        max(baz) OVER (\
+            ORDER BY a \
+            ROWS UNBOUNDED PRECEDING\
+        ), \
+        sum(qux) OVER (\
+            ORDER BY a \
+            GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING\
+        ), \
+        AGGREGATE:my_func(abc) OVER (), \
+        rank(foo IGNORE NULLS) FILTER (WHERE bar > 0) OVER (ORDER BY a) \
+    FROM foo\
+    ";
     let select = verified_only_select(sql);
-    assert_eq!(5, select.projection.len());
+    assert_eq!(7, select.projection.len());
     assert_eq!(
         &Expr::Function(Function {
             scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("row_number")]),
             arg_list: FunctionArgList::empty(),
+            within_group: None,
+            filter: None,
             over: Some(WindowSpec {
                 partition_by: vec![],
                 order_by: vec![OrderByExpr {
@@ -1957,10 +1973,62 @@ fn parse_window_functions() {
                 }],
                 window_frame: None,
             }),
-            filter: None,
-            within_group: None,
         }),
         expr_from_projection(&select.projection[0])
+    );
+    assert_eq!(
+        &Expr::Function(Function {
+            scalar_as_agg: true,
+            name: ObjectName(vec![Ident::new_unchecked("my_func")]),
+            arg_list: FunctionArgList {
+                distinct: false,
+                args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                    Expr::Identifier(Ident::new_unchecked("abc"))
+                ))],
+                variadic: false,
+                order_by: vec![],
+                ignore_nulls: false,
+            },
+            within_group: None,
+            filter: None,
+            over: Some(WindowSpec {
+                partition_by: vec![],
+                order_by: vec![],
+                window_frame: None,
+            }),
+        }),
+        expr_from_projection(&select.projection[5])
+    );
+    assert_eq!(
+        &Expr::Function(Function {
+            scalar_as_agg: false,
+            name: ObjectName(vec![Ident::new_unchecked("rank")]),
+            arg_list: FunctionArgList {
+                distinct: false,
+                args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                    Expr::Identifier(Ident::new_unchecked("foo"))
+                ))],
+                variadic: false,
+                order_by: vec![],
+                ignore_nulls: true,
+            },
+            within_group: None,
+            filter: Some(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Identifier(Ident::new_unchecked("bar"))),
+                op: BinaryOperator::Gt,
+                right: Box::new(Expr::Value(Value::Number("0".to_string()))),
+            })),
+            over: Some(WindowSpec {
+                partition_by: vec![],
+                order_by: vec![OrderByExpr {
+                    expr: Expr::Identifier(Ident::new_unchecked("a")),
+                    asc: None,
+                    nulls_first: None,
+                }],
+                window_frame: None,
+            }),
+        }),
+        expr_from_projection(&select.projection[6])
     );
 }
 
@@ -2002,9 +2070,9 @@ fn parse_aggregate_with_order_by() {
                     }
                 ]
             ),
-            over: None,
-            filter: None,
             within_group: None,
+            filter: None,
+            over: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -2012,7 +2080,7 @@ fn parse_aggregate_with_order_by() {
 
 #[test]
 fn parse_aggregate_with_filter() {
-    let sql = "SELECT sum(a) FILTER(WHERE (a > 0) AND (a IS NOT NULL)) FROM foo";
+    let sql = "SELECT sum(a) FILTER (WHERE (a > 0) AND (a IS NOT NULL)) FROM foo";
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
@@ -2021,7 +2089,7 @@ fn parse_aggregate_with_filter() {
             arg_list: FunctionArgList::args_only(vec![FunctionArg::Unnamed(
                 FunctionArgExpr::Expr(Expr::Identifier(Ident::new_unchecked("a")))
             )]),
-            over: None,
+            within_group: None,
             filter: Some(Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
@@ -2033,7 +2101,35 @@ fn parse_aggregate_with_filter() {
                     Expr::Identifier(Ident::new_unchecked("a"))
                 )))))
             })),
-            within_group: None,
+            over: None,
+        }),
+        expr_from_projection(only(&select.projection)),
+    );
+}
+
+#[test]
+fn parse_aggregate_with_within_group() {
+    let sql =
+        "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY a DESC NULLS FIRST) FILTER (WHERE b > 0) FROM foo";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        &Expr::Function(Function {
+            scalar_as_agg: false,
+            name: ObjectName(vec![Ident::new_unchecked("percentile_cont")]),
+            arg_list: FunctionArgList::args_only(vec![FunctionArg::Unnamed(
+                FunctionArgExpr::Expr(Expr::Value(Value::Number("0.5".to_string())))
+            )]),
+            within_group: Some(Box::new(OrderByExpr {
+                expr: Expr::Identifier(Ident::new_unchecked("a")),
+                asc: Some(false),
+                nulls_first: Some(true),
+            },)),
+            filter: Some(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Identifier(Ident::new_unchecked("b"))),
+                op: BinaryOperator::Gt,
+                right: Box::new(Expr::Value(Value::Number("0".to_string())))
+            })),
+            over: None,
         }),
         expr_from_projection(only(&select.projection)),
     );
@@ -2274,9 +2370,9 @@ fn parse_delimited_identifiers() {
             scalar_as_agg: false,
             name: ObjectName(vec![Ident::with_quote_unchecked('"', "myfun")]),
             arg_list: FunctionArgList::empty(),
-            over: None,
-            filter: None,
             within_group: None,
+            filter: None,
+            over: None,
         }),
         expr_from_projection(&select.projection[1]),
     );
@@ -3252,7 +3348,7 @@ fn parse_create_materialized_view_emit_immediately() {
 
 #[test]
 fn parse_create_table_on_conflict() {
-    let sql = "CREATE TABLE myschema.myview ON CONFLICT OVERWRITE AS SELECT foo FROM bar";
+    let sql = "CREATE TABLE myschema.myview ON CONFLICT DO UPDATE FULL AS SELECT foo FROM bar";
     match verified_stmt(sql) {
         Statement::CreateTable {
             name,
@@ -3262,12 +3358,12 @@ fn parse_create_table_on_conflict() {
         } => {
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
-            assert_eq!(on_conflict, Some(OnConflict::OverWrite));
+            assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
         }
         _ => unreachable!(),
     }
 
-    let sql = "CREATE TABLE myschema.myview ON CONFLICT IGNORE AS SELECT foo FROM bar";
+    let sql = "CREATE TABLE myschema.myview ON CONFLICT DO NOTHING AS SELECT foo FROM bar";
     match verified_stmt(sql) {
         Statement::CreateTable {
             name,
@@ -3277,7 +3373,7 @@ fn parse_create_table_on_conflict() {
         } => {
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
-            assert_eq!(on_conflict, Some(OnConflict::Ignore));
+            assert_eq!(on_conflict, Some(OnConflict::Nothing));
         }
         _ => unreachable!(),
     }
@@ -3300,7 +3396,7 @@ fn parse_create_table_on_conflict() {
 
 #[test]
 fn parse_create_table_on_conflict_with_version_column() {
-    let sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN(v2)";
+    let sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(v2)";
     match verified_stmt(sql1) {
         Statement::CreateTable {
             name,
@@ -3309,21 +3405,21 @@ fn parse_create_table_on_conflict_with_version_column() {
             ..
         } => {
             assert_eq!("t", name.to_string());
-            assert_eq!(on_conflict, Some(OnConflict::OverWrite));
+            assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
             assert_eq!(with_version_column, Some("v2".to_string()));
         }
         _ => unreachable!(),
     }
 
-    let invalid_sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN(v2";
+    let invalid_sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(v2";
     let res = parse_sql_statements(invalid_sql1);
     assert!(res.is_err());
 
-    let invalid_sql2 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN";
+    let invalid_sql2 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN";
     let res = parse_sql_statements(invalid_sql2);
     assert!(res.is_err());
 
-    let invalid_sql3 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH COLUMN";
+    let invalid_sql3 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH COLUMN";
     let res = parse_sql_statements(invalid_sql3);
     assert!(res.is_err());
 }

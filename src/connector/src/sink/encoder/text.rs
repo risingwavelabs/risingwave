@@ -17,6 +17,7 @@ use risingwave_common::types::{DataType, ToText};
 
 use super::RowEncoder;
 
+/// Encode with [`ToText`]. Only used to encode key.
 pub struct TextEncoder {
     pub schema: Schema,
     // the column must contain only one element

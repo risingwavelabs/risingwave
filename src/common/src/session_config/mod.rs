@@ -30,6 +30,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
+use crate::hash::VirtualNode;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -139,8 +140,11 @@ pub struct SessionConfig {
     #[parameter(default = "UTC", check_hook = check_timezone)]
     timezone: String,
 
-    /// If `STREAMING_PARALLELISM` is non-zero, CREATE MATERIALIZED VIEW/TABLE/INDEX will use it as
-    /// streaming parallelism.
+    /// The execution parallelism for streaming queries, including tables, materialized views, indexes,
+    /// and sinks. Defaults to 0, which means they will be scheduled adaptively based on the cluster size.
+    ///
+    /// If a non-zero value is set, streaming queries will be scheduled to use a fixed number of parallelism.
+    /// Note that the value will be bounded at `STREAMING_MAX_PARALLELISM`.
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     streaming_parallelism: ConfigNonZeroU64,
@@ -292,6 +296,24 @@ pub struct SessionConfig {
 
     #[parameter(default = "hex", check_hook = check_bytea_output)]
     bytea_output: String,
+
+    /// Bypass checks on cluster limits
+    ///
+    /// When enabled, `CREATE MATERIALIZED VIEW` will not fail if the cluster limit is hit.
+    #[parameter(default = false)]
+    bypass_cluster_limits: bool,
+
+    /// The maximum number of parallelism a streaming query can use. Defaults to 256.
+    ///
+    /// Compared to `STREAMING_PARALLELISM`, which configures the initial parallelism, this configures
+    /// the maximum parallelism a streaming query can use in the future, if the cluster size changes or
+    /// users manually change the parallelism with `ALTER .. SET PARALLELISM`.
+    ///
+    /// It's not always a good idea to set this to a very large number, as it may cause performance
+    /// degradation when performing range scans on the table or the materialized view.
+    // a.k.a. vnode count
+    #[parameter(default = VirtualNode::COUNT_FOR_COMPAT, check_hook = check_vnode_count)]
+    streaming_max_parallelism: usize,
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {
@@ -315,6 +337,19 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err("Only support 'hex' for BYTEA_OUTPUT".to_string())
+    }
+}
+
+/// Check if the provided value is a valid vnode count.
+/// Note that we use term `max_parallelism` when it's user-facing.
+fn check_vnode_count(val: &usize) -> Result<(), String> {
+    match val {
+        0 => Err("STREAMING_MAX_PARALLELISM must be greater than 0".to_owned()),
+        1..=VirtualNode::MAX_COUNT => Ok(()),
+        _ => Err(format!(
+            "STREAMING_MAX_PARALLELISM must be less than or equal to {}",
+            VirtualNode::MAX_COUNT
+        )),
     }
 }
 

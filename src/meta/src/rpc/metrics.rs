@@ -25,10 +25,13 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
-use risingwave_common::metrics::{LabelGuardedHistogramVec, LabelGuardedIntGaugeVec};
+use risingwave_common::metrics::{
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
-    register_guarded_histogram_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_meta_model_v2::WorkerId;
@@ -140,6 +143,8 @@ pub struct MetaMetrics {
     pub old_version_object_count: IntGauge,
     /// Total size of objects that is still referenced by non-current versions.
     pub old_version_object_size: IntGauge,
+    /// Total number of objects that is referenced by time travel.
+    pub time_travel_object_count: IntGauge,
     /// Total number of objects that is referenced by current version.
     pub current_version_object_count: IntGauge,
     /// Total size of objects that is referenced by current version.
@@ -195,6 +200,16 @@ pub struct MetaMetrics {
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
+
+    /// The number of compaction groups that have been triggered to move
+    pub merge_compaction_group_count: IntCounterVec,
+
+    // ********************************** Auto Schema Change ************************************
+    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec<2>,
+    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec<2>,
+    pub auto_schema_change_latency: LabelGuardedHistogramVec<2>,
+
+    pub time_travel_version_replay_latency: Histogram,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -489,6 +504,13 @@ impl MetaMetrics {
             registry
         ).unwrap();
 
+        let time_travel_object_count = register_int_gauge_with_registry!(
+            "storage_time_travel_object_count",
+            "total number of objects that is referenced by time travel.",
+            registry
+        )
+        .unwrap();
+
         let delta_log_count = register_int_gauge_with_registry!(
             "storage_delta_log_count",
             "total number of hummock version delta log",
@@ -572,6 +594,34 @@ impl MetaMetrics {
             exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
         let recovery_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let auto_schema_change_failure_cnt = register_guarded_int_counter_vec_with_registry!(
+            "auto_schema_change_failure_cnt",
+            "Number of failed auto schema change",
+            &["table_id", "table_name"],
+            registry
+        )
+        .unwrap();
+
+        let auto_schema_change_success_cnt = register_guarded_int_counter_vec_with_registry!(
+            "auto_schema_change_success_cnt",
+            "Number of success auto schema change",
+            &["table_id", "table_name"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "auto_schema_change_latency",
+            "Latency of the auto schema change process",
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+        );
+        let auto_schema_change_latency = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "table_name"],
+            registry
+        )
+        .unwrap();
 
         let source_is_up = register_guarded_int_gauge_vec_with_registry!(
             "source_status_is_up",
@@ -693,6 +743,22 @@ impl MetaMetrics {
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let merge_compaction_group_count = register_int_counter_vec_with_registry!(
+            "storage_merge_compaction_group_count",
+            "Count of trigger merge compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "storage_time_travel_version_replay_latency",
+            "The latency(ms) of replaying a hummock version for time travel",
+            exponential_buckets(0.01, 10.0, 6).unwrap()
+        );
+        let time_travel_version_replay_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -724,6 +790,7 @@ impl MetaMetrics {
             stale_object_size,
             old_version_object_count,
             old_version_object_size,
+            time_travel_object_count,
             current_version_object_count,
             current_version_object_size,
             total_object_count,
@@ -763,6 +830,11 @@ impl MetaMetrics {
             branched_sst_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
+            auto_schema_change_failure_cnt,
+            auto_schema_change_success_cnt,
+            auto_schema_change_latency,
+            merge_compaction_group_count,
+            time_travel_version_replay_latency,
         }
     }
 

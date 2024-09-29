@@ -12,23 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Display;
 use std::future::pending;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
-use futures::stream::{BoxStream, FuturesUnordered};
+use anyhow::anyhow;
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use itertools::Itertools;
-use parking_lot::Mutex;
 use risingwave_common::error::tonic::extra::Score;
 use risingwave_pb::stream_service::barrier_complete_response::{
     GroupedSstableInfo, PbCreateMviewProgress,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
-use rw_futures_util::{pending_on_none, AttachedFuture};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -39,8 +37,7 @@ use tonic::{Code, Status};
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
 use crate::task::{
-    ActorHandle, ActorId, AtomicU64Ref, PartialGraphId, SharedContext, StreamEnvironment,
-    UpDownActorIds,
+    ActorId, AtomicU64Ref, PartialGraphId, SharedContext, StreamEnvironment, UpDownActorIds,
 };
 
 mod managed_state;
@@ -48,29 +45,24 @@ mod progress;
 #[cfg(test)]
 mod tests;
 
-pub use progress::CreateMviewProgress;
-use risingwave_common::catalog::TableId;
+pub use progress::CreateMviewProgressReporter;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{HummockVersionId, LocalSstableInfo, SyncResult};
-use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
 use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ShutdownResponse,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo,
+    streaming_control_stream_response, BarrierCompleteResponse, InjectBarrierRequest,
     StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    Actor, Barrier, BarrierInner, DispatchExecutor, DispatcherBarrier, Mutation,
-    StreamExecutorError,
-};
+use crate::executor::{Barrier, BarrierInner, StreamExecutorError};
 use crate::task::barrier_manager::managed_state::ManagedBarrierStateDebugInfo;
 use crate::task::barrier_manager::progress::BackfillState;
 
@@ -185,41 +177,6 @@ impl ControlStreamHandle {
     }
 }
 
-#[derive(Clone)]
-pub struct CreateActorContext {
-    #[expect(clippy::type_complexity)]
-    barrier_sender: Arc<Mutex<Option<HashMap<ActorId, Vec<UnboundedSender<Barrier>>>>>>,
-}
-
-impl Default for CreateActorContext {
-    fn default() -> Self {
-        Self {
-            barrier_sender: Arc::new(Mutex::new(Some(HashMap::new()))),
-        }
-    }
-}
-
-impl CreateActorContext {
-    pub fn register_sender(&self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
-        self.barrier_sender
-            .lock()
-            .as_mut()
-            .expect("should not register after collecting sender")
-            .entry(actor_id)
-            .or_default()
-            .push(sender)
-    }
-
-    pub(super) fn collect_senders(&self) -> HashMap<ActorId, Vec<UnboundedSender<Barrier>>> {
-        self.barrier_sender
-            .lock()
-            .take()
-            .expect("should not collect senders for twice")
-    }
-}
-
-pub(crate) type SubscribeMutationItem = (u64, Option<Arc<Mutation>>);
-
 pub(super) enum LocalBarrierEvent {
     ReportActorCollected {
         actor_id: ActorId,
@@ -230,10 +187,9 @@ pub(super) enum LocalBarrierEvent {
         actor: ActorId,
         state: BackfillState,
     },
-    SubscribeBarrierMutation {
+    RegisterBarrierSender {
         actor_id: ActorId,
-        epoch: EpochPair,
-        mutation_sender: mpsc::UnboundedSender<SubscribeMutationItem>,
+        barrier_sender: mpsc::UnboundedSender<Barrier>,
     },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
@@ -245,90 +201,18 @@ pub(super) enum LocalActorOperation {
         handle: ControlStreamHandle,
         init_request: InitRequest,
     },
-    DropActors {
-        actors: Vec<ActorId>,
-        result_sender: oneshot::Sender<()>,
-    },
-    UpdateActors {
-        actors: Vec<BuildActorInfo>,
-        result_sender: oneshot::Sender<StreamResult<()>>,
-    },
-    BuildActors {
-        actors: Vec<ActorId>,
-        result_sender: oneshot::Sender<StreamResult<()>>,
-    },
-    UpdateActorInfo {
-        new_actor_infos: Vec<ActorInfo>,
-        result_sender: oneshot::Sender<StreamResult<()>>,
-    },
     TakeReceiver {
         ids: UpDownActorIds,
         result_sender: oneshot::Sender<StreamResult<Receiver>>,
     },
     #[cfg(test)]
     GetCurrentSharedContext(oneshot::Sender<Arc<SharedContext>>),
-    #[cfg(test)]
-    RegisterSenders {
-        actor_id: ActorId,
-        senders: Vec<UnboundedSender<Barrier>>,
-        result_sender: oneshot::Sender<()>,
-    },
     InspectState {
         result_sender: oneshot::Sender<String>,
     },
     Shutdown {
         result_sender: oneshot::Sender<()>,
     },
-}
-
-pub(super) struct CreateActorOutput {
-    pub(super) actors: Vec<Actor<DispatchExecutor>>,
-    pub(super) senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
-}
-
-pub(crate) struct StreamActorManagerState {
-    /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
-    /// `handles` store join handles of these futures, and therefore we could wait their
-    /// termination.
-    pub(super) handles: HashMap<ActorId, ActorHandle>,
-
-    /// Stores all actor information, taken after actor built.
-    pub(super) actors: HashMap<ActorId, BuildActorInfo>,
-
-    /// Stores all actor tokio runtime monitoring tasks.
-    pub(super) actor_monitor_tasks: HashMap<ActorId, ActorHandle>,
-
-    #[expect(clippy::type_complexity)]
-    pub(super) creating_actors: FuturesUnordered<
-        AttachedFuture<
-            JoinHandle<StreamResult<CreateActorOutput>>,
-            (BTreeSet<ActorId>, oneshot::Sender<StreamResult<()>>),
-        >,
-    >,
-}
-
-impl StreamActorManagerState {
-    fn new() -> Self {
-        Self {
-            handles: HashMap::new(),
-            actors: HashMap::new(),
-            actor_monitor_tasks: HashMap::new(),
-            creating_actors: FuturesUnordered::new(),
-        }
-    }
-
-    async fn next_created_actors(
-        &mut self,
-    ) -> (
-        oneshot::Sender<StreamResult<()>>,
-        StreamResult<CreateActorOutput>,
-    ) {
-        let (join_result, (_, sender)) = pending_on_none(self.creating_actors.next()).await;
-        (
-            sender,
-            try { join_result.context("failed to join creating actors futures")?? },
-        )
-    }
 }
 
 pub(crate) struct StreamActorManager {
@@ -346,9 +230,7 @@ pub(crate) struct StreamActorManager {
 }
 
 pub(super) struct LocalBarrierWorkerDebugInfo<'a> {
-    actor_to_send: BTreeSet<ActorId>,
     running_actors: BTreeSet<ActorId>,
-    creating_actors: Vec<BTreeSet<ActorId>>,
     managed_barrier_state: ManagedBarrierStateDebugInfo<'a>,
     has_control_stream_connected: bool,
 }
@@ -358,18 +240,6 @@ impl Display for LocalBarrierWorkerDebugInfo<'_> {
         write!(f, "running_actors: ")?;
         for actor_id in &self.running_actors {
             write!(f, "{}, ", actor_id)?;
-        }
-
-        write!(f, "\nactor_to_send: ")?;
-        for actor_id in &self.actor_to_send {
-            write!(f, "{}, ", actor_id)?;
-        }
-
-        write!(f, "\ncreating_actors: ")?;
-        for actors in &self.creating_actors {
-            for actor_id in actors {
-                write!(f, "{}, ", actor_id)?;
-            }
         }
 
         writeln!(
@@ -387,11 +257,8 @@ impl Display for LocalBarrierWorkerDebugInfo<'_> {
 /// Specifically, [`LocalBarrierWorker`] serve barrier injection from meta server, send the
 /// barriers to and collect them from all actors, and finally report the progress.
 pub(super) struct LocalBarrierWorker {
-    /// Stores all streaming job source sender.
-    barrier_senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
-
     /// Current barrier collection state.
-    state: ManagedBarrierState,
+    pub(super) state: ManagedBarrierState,
 
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
@@ -399,8 +266,6 @@ pub(super) struct LocalBarrierWorker {
     control_stream_handle: ControlStreamHandle,
 
     pub(super) actor_manager: Arc<StreamActorManager>,
-
-    pub(super) actor_manager_state: StreamActorManagerState,
 
     pub(super) current_shared_context: Arc<SharedContext>,
 
@@ -424,16 +289,10 @@ impl LocalBarrierWorker {
             },
         ));
         Self {
-            barrier_senders: HashMap::new(),
             failure_actors: HashMap::default(),
-            state: ManagedBarrierState::new(
-                actor_manager.env.state_store(),
-                actor_manager.streaming_metrics.clone(),
-                actor_manager.await_tree_reg.clone(),
-            ),
+            state: ManagedBarrierState::new(actor_manager.clone(), shared_context.clone()),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
-            actor_manager_state: StreamActorManagerState::new(),
             current_shared_context: shared_context,
             barrier_event_rx: event_rx,
             actor_failure_rx: failure_rx,
@@ -443,14 +302,7 @@ impl LocalBarrierWorker {
 
     fn to_debug_info(&self) -> LocalBarrierWorkerDebugInfo<'_> {
         LocalBarrierWorkerDebugInfo {
-            actor_to_send: self.barrier_senders.keys().cloned().collect(),
-            running_actors: self.actor_manager_state.handles.keys().cloned().collect(),
-            creating_actors: self
-                .actor_manager_state
-                .creating_actors
-                .iter()
-                .map(|fut| fut.item().0.clone())
-                .collect(),
+            running_actors: self.state.actor_states.keys().cloned().collect(),
             managed_barrier_state: self.state.to_debug_info(),
             has_control_stream_connected: self.control_stream_handle.connected(),
         }
@@ -460,9 +312,6 @@ impl LocalBarrierWorker {
         loop {
             select! {
                 biased;
-                (sender, create_actors_result) = self.actor_manager_state.next_created_actors() => {
-                    self.handle_actor_created(sender, create_actors_result);
-                }
                 (partial_graph_id, completed_epoch) = self.state.next_completed_epoch() => {
                     let result = self.on_epoch_completed(partial_graph_id, completed_epoch);
                     if let Err(err) = result {
@@ -470,11 +319,15 @@ impl LocalBarrierWorker {
                     }
                 },
                 event = self.barrier_event_rx.recv() => {
-                    self.handle_barrier_event(event.expect("should not be none"));
+                    // event should not be None because the LocalBarrierManager holds a copy of tx
+                    let result = self.handle_barrier_event(event.expect("should not be none"));
+                    if let Err((actor_id, err)) = result {
+                        self.notify_actor_failure(actor_id, err, "failed to handle barrier event").await;
+                    }
                 },
                 failure = self.actor_failure_rx.recv() => {
                     let (actor_id, err) = failure.unwrap();
-                    self.notify_actor_failure(actor_id, err).await;
+                    self.notify_actor_failure(actor_id, err, "recv actor failure").await;
                 },
                 actor_op = actor_op_rx.recv() => {
                     if let Some(actor_op) = actor_op {
@@ -482,13 +335,14 @@ impl LocalBarrierWorker {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
                                 self.reset(HummockVersionId::new(init_request.version_id)).await;
+                                self.state.add_subscriptions(init_request.subscriptions);
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
                                 });
                             }
                             LocalActorOperation::Shutdown { result_sender } => {
-                                if !self.actor_manager_state.handles.is_empty() {
+                                if !self.state.actor_states.is_empty() {
                                     tracing::warn!(
                                         "shutdown with running actors, scaling or migration will be triggered"
                                     );
@@ -515,21 +369,6 @@ impl LocalBarrierWorker {
         }
     }
 
-    fn handle_actor_created(
-        &mut self,
-        sender: oneshot::Sender<StreamResult<()>>,
-        create_actor_result: StreamResult<CreateActorOutput>,
-    ) {
-        let result = create_actor_result.map(|output| {
-            for (actor_id, senders) in output.senders {
-                self.register_sender(actor_id, senders);
-            }
-            self.spawn_actors(output.actors);
-        });
-
-        let _ = sender.send(result);
-    }
-
     fn handle_streaming_control_request(
         &mut self,
         request: StreamingControlStreamRequest,
@@ -537,19 +376,8 @@ impl LocalBarrierWorker {
         match request.request.expect("should not be empty") {
             Request::InjectBarrier(req) => {
                 let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
-                self.send_barrier(
-                    &barrier,
-                    req.actor_ids_to_send.into_iter().collect(),
-                    req.actor_ids_to_collect.into_iter().collect(),
-                    req.table_ids_to_sync
-                        .into_iter()
-                        .map(TableId::new)
-                        .collect(),
-                    PartialGraphId::new(req.partial_graph_id),
-                    req.actor_ids_to_pre_sync_barrier_mutation
-                        .into_iter()
-                        .collect(),
-                )?;
+                self.update_actor_info(req.broadcast_info.iter().cloned())?;
+                self.send_barrier(&barrier, req)?;
                 Ok(())
             }
             Request::RemovePartialGraph(req) => {
@@ -564,7 +392,10 @@ impl LocalBarrierWorker {
         }
     }
 
-    fn handle_barrier_event(&mut self, event: LocalBarrierEvent) {
+    fn handle_barrier_event(
+        &mut self,
+        event: LocalBarrierEvent,
+    ) -> Result<(), (ActorId, StreamError)> {
         match event {
             LocalBarrierEvent::ReportActorCollected { actor_id, epoch } => {
                 self.collect(actor_id, epoch)
@@ -576,17 +407,24 @@ impl LocalBarrierWorker {
             } => {
                 self.update_create_mview_progress(epoch, actor, state);
             }
-            LocalBarrierEvent::SubscribeBarrierMutation {
+            LocalBarrierEvent::RegisterBarrierSender {
                 actor_id,
-                epoch,
-                mutation_sender,
+                barrier_sender,
             } => {
                 self.state
-                    .subscribe_actor_mutation(actor_id, epoch.prev, mutation_sender);
+                    .register_barrier_sender(actor_id, barrier_sender)
+                    .map_err(|e| (actor_id, e))?;
             }
             #[cfg(test)]
-            LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
+            LocalBarrierEvent::Flush(sender) => {
+                use futures::FutureExt;
+                while let Some(request) = self.control_stream_handle.next_request().now_or_never() {
+                    self.handle_streaming_control_request(request).unwrap();
+                }
+                sender.send(()).unwrap()
+            }
         }
+        Ok(())
     }
 
     fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
@@ -594,45 +432,12 @@ impl LocalBarrierWorker {
             LocalActorOperation::NewControlStream { .. } | LocalActorOperation::Shutdown { .. } => {
                 unreachable!("event {actor_op} should be handled separately in async context")
             }
-            LocalActorOperation::DropActors {
-                actors,
-                result_sender,
-            } => {
-                self.drop_actors(&actors);
-                let _ = result_sender.send(());
-            }
-            LocalActorOperation::UpdateActors {
-                actors,
-                result_sender,
-            } => {
-                let result = self.update_actors(actors);
-                let _ = result_sender.send(result);
-            }
-            LocalActorOperation::BuildActors {
-                actors,
-                result_sender,
-            } => self.start_create_actors(&actors, result_sender),
-            LocalActorOperation::UpdateActorInfo {
-                new_actor_infos,
-                result_sender,
-            } => {
-                let _ = result_sender.send(self.update_actor_info(new_actor_infos));
-            }
             LocalActorOperation::TakeReceiver { ids, result_sender } => {
                 let _ = result_sender.send(self.current_shared_context.take_receiver(ids));
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentSharedContext(sender) => {
                 let _ = sender.send(self.current_shared_context.clone());
-            }
-            #[cfg(test)]
-            LocalActorOperation::RegisterSenders {
-                actor_id,
-                senders,
-                result_sender,
-            } => {
-                self.register_sender(actor_id, senders);
-                let _ = result_sender.send(());
             }
             LocalActorOperation::InspectState { result_sender } => {
                 let debug_info = self.to_debug_info();
@@ -713,19 +518,6 @@ impl LocalBarrierWorker {
         Ok(())
     }
 
-    /// Register sender for source actors, used to send barriers.
-    fn register_sender(&mut self, actor_id: ActorId, senders: Vec<UnboundedSender<Barrier>>) {
-        tracing::debug!(
-            target: "events::stream::barrier::manager",
-            actor_id = actor_id,
-            "register sender"
-        );
-        self.barrier_senders
-            .entry(actor_id)
-            .or_default()
-            .extend(senders);
-    }
-
     /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
     /// barrier is finished, in managed mode.
     ///
@@ -735,31 +527,8 @@ impl LocalBarrierWorker {
     fn send_barrier(
         &mut self,
         barrier: &Barrier,
-        to_send: HashSet<ActorId>,
-        to_collect: HashSet<ActorId>,
-        table_ids: HashSet<TableId>,
-        partial_graph_id: PartialGraphId,
-        actor_ids_to_pre_sync_barrier: HashSet<ActorId>,
+        request: InjectBarrierRequest,
     ) -> StreamResult<()> {
-        if !cfg!(test) {
-            // The barrier might be outdated and been injected after recovery in some certain extreme
-            // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
-            // recovery. Check it here and return an error here if some actors are not found to
-            // avoid collection hang. We need some refine in meta side to remove this workaround since
-            // it will cause another round of unnecessary recovery.
-            let missing_actor_ids = to_collect
-                .iter()
-                .filter(|id| !self.actor_manager_state.handles.contains_key(id))
-                .collect_vec();
-            if !missing_actor_ids.is_empty() {
-                tracing::warn!(
-                    "to collect actors not found, they should be cleaned when recovering: {:?}",
-                    missing_actor_ids
-                );
-                return Err(anyhow!("to collect actors not found: {:?}", to_collect).into());
-            }
-        }
-
         if barrier.kind == BarrierKind::Initial {
             self.actor_manager
                 .watermark_epoch
@@ -767,13 +536,12 @@ impl LocalBarrierWorker {
         }
         debug!(
             target: "events::stream::barrier::manager::send",
-            "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
+            "send barrier {:?}, actor_ids_to_collect = {:?}",
             barrier,
-            to_send,
-            to_collect
+            request.actor_ids_to_collect
         );
 
-        for actor_id in &to_collect {
+        for actor_id in &request.actor_ids_to_collect {
             if self.failure_actors.contains_key(actor_id) {
                 // The failure actors could exit before the barrier is issued, while their
                 // up-downstream actors could be stuck somehow. Return error directly to trigger the
@@ -786,49 +554,7 @@ impl LocalBarrierWorker {
             }
         }
 
-        self.state.transform_to_issued(
-            barrier,
-            to_collect,
-            table_ids,
-            partial_graph_id,
-            actor_ids_to_pre_sync_barrier,
-        );
-
-        for actor_id in to_send {
-            match self.barrier_senders.get(&actor_id) {
-                Some(senders) => {
-                    for sender in senders {
-                        if let Err(_err) = sender.send(barrier.clone()) {
-                            // return err to trigger recovery.
-                            return Err(StreamError::barrier_send(
-                                barrier.clone(),
-                                actor_id,
-                                "channel closed",
-                            ));
-                        }
-                    }
-                }
-                None => {
-                    return Err(StreamError::barrier_send(
-                        barrier.clone(),
-                        actor_id,
-                        "sender not found",
-                    ));
-                }
-            }
-        }
-
-        // Actors to stop should still accept this barrier, but won't get sent to in next times.
-        if let Some(actors) = barrier.all_stop_actors() {
-            debug!(
-                target: "events::stream::barrier::manager",
-                "remove actors {:?} from senders",
-                actors
-            );
-            for actor in actors {
-                self.barrier_senders.remove(actor);
-            }
-        }
+        self.state.transform_to_issued(barrier, request)?;
         Ok(())
     }
 
@@ -862,7 +588,12 @@ impl LocalBarrierWorker {
 
     /// When a actor exit unexpectedly, the error is reported using this function. The control stream
     /// will be reset and the meta service will then trigger recovery.
-    async fn notify_actor_failure(&mut self, actor_id: ActorId, err: StreamError) {
+    async fn notify_actor_failure(
+        &mut self,
+        actor_id: ActorId,
+        err: StreamError,
+        err_context: &'static str,
+    ) {
         self.add_failure(actor_id, err.clone());
         let root_err = self.try_find_root_failure().await.unwrap(); // always `Some` because we just added one
 
@@ -871,7 +602,7 @@ impl LocalBarrierWorker {
         {
             self.control_stream_handle.reset_stream_with_err(
                 anyhow!(root_err)
-                    .context("failed to collect barrier")
+                    .context(err_context)
                     .to_status_unnamed(Code::Internal),
             );
         }
@@ -1019,17 +750,11 @@ impl LocalBarrierManager {
             .send((actor_id, err.into_unexpected_exit(actor_id)));
     }
 
-    /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
-    pub fn subscribe_barrier_mutation(
-        &self,
-        actor_id: ActorId,
-        first_barrier: &DispatcherBarrier,
-    ) -> mpsc::UnboundedReceiver<SubscribeMutationItem> {
+    pub fn subscribe_barrier(&self, actor_id: ActorId) -> UnboundedReceiver<Barrier> {
         let (tx, rx) = mpsc::unbounded_channel();
-        self.send_event(LocalBarrierEvent::SubscribeBarrierMutation {
+        self.send_event(LocalBarrierEvent::RegisterBarrierSender {
             actor_id,
-            epoch: first_barrier.epoch,
-            mutation_sender: tx,
+            barrier_sender: tx,
         });
         rx
     }
@@ -1170,6 +895,7 @@ pub(crate) mod barrier_test_utils {
 
     pub(crate) struct LocalBarrierTestEnv {
         pub shared_context: Arc<SharedContext>,
+        #[expect(dead_code)]
         pub(super) actor_op_tx: EventSender<LocalActorOperation>,
         pub request_tx: UnboundedSender<Result<StreamingControlStreamRequest, Status>>,
         pub response_rx: UnboundedReceiver<Result<StreamingControlStreamResponse, Status>>,
@@ -1187,7 +913,10 @@ pub(crate) mod barrier_test_utils {
                     response_tx,
                     UnboundedReceiverStream::new(request_rx).boxed(),
                 ),
-                init_request: InitRequest { version_id: 0 },
+                init_request: InitRequest {
+                    version_id: 0,
+                    subscriptions: vec![],
+                },
             });
 
             assert_matches!(
@@ -1211,7 +940,6 @@ pub(crate) mod barrier_test_utils {
         pub(crate) fn inject_barrier(
             &self,
             barrier: &Barrier,
-            actor_to_send: impl IntoIterator<Item = ActorId>,
             actor_to_collect: impl IntoIterator<Item = ActorId>,
         ) {
             self.request_tx
@@ -1220,11 +948,13 @@ pub(crate) mod barrier_test_utils {
                         InjectBarrierRequest {
                             request_id: "".to_string(),
                             barrier: Some(barrier.to_protobuf()),
-                            actor_ids_to_send: actor_to_send.into_iter().collect(),
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: u32::MAX,
-                            actor_ids_to_pre_sync_barrier_mutation: vec![],
+                            broadcast_info: vec![],
+                            actors_to_build: vec![],
+                            subscriptions_to_add: vec![],
+                            subscriptions_to_remove: vec![],
                         },
                     )),
                 }))

@@ -28,7 +28,6 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::compact_task::{self};
-use risingwave_pb::hummock::HummockSnapshot;
 use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
@@ -70,42 +69,8 @@ pub struct CommitEpochInfo {
 }
 
 impl HummockManager {
-    #[cfg(any(test, feature = "test"))]
-    pub async fn commit_epoch_for_test(
-        &self,
-        epoch: u64,
-        sstables: Vec<impl Into<LocalSstableInfo>>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-    ) -> Result<()> {
-        let tables = self
-            .versioning
-            .read()
-            .await
-            .current_version
-            .state_table_info
-            .info()
-            .keys()
-            .cloned()
-            .collect();
-        let info = CommitEpochInfo {
-            sstables: sstables.into_iter().map(Into::into).collect(),
-            new_table_watermarks: HashMap::new(),
-            sst_to_context,
-            new_table_fragment_info: NewTableFragmentInfo::None,
-            change_log_delta: HashMap::new(),
-            committed_epoch: epoch,
-            tables_to_commit: tables,
-            is_visible_table_committed_epoch: true,
-        };
-        self.commit_epoch(info).await?;
-        Ok(())
-    }
-
     /// Caller should ensure `epoch` > `max_committed_epoch`
-    pub async fn commit_epoch(
-        &self,
-        commit_info: CommitEpochInfo,
-    ) -> Result<Option<HummockSnapshot>> {
+    pub async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> Result<()> {
         let CommitEpochInfo {
             mut sstables,
             new_table_watermarks,
@@ -120,7 +85,7 @@ impl HummockManager {
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
-            return Ok(None);
+            return Ok(());
         }
 
         let versioning: &mut Versioning = &mut versioning_guard;
@@ -139,7 +104,7 @@ impl HummockManager {
         for s in &mut sstables {
             add_prost_table_stats_map(
                 &mut table_stats_change,
-                &to_prost_table_stats_map(std::mem::take(&mut s.table_stats)),
+                &to_prost_table_stats_map(s.table_stats.clone()),
             );
         }
 
@@ -158,7 +123,6 @@ impl HummockManager {
         );
 
         let state_table_info = &version.latest_version().state_table_info;
-
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
 
         // Add new table
@@ -233,7 +197,7 @@ impl HummockManager {
             is_visible_table_committed_epoch,
             new_compaction_group,
             commit_sstables,
-            new_table_ids,
+            &new_table_ids,
             new_table_watermarks,
             change_log_delta,
         );
@@ -290,6 +254,9 @@ impl HummockManager {
                 .values()
                 .map(|g| (g.group_id, g.parent_group_id))
                 .collect();
+            let time_travel_tables_to_commit = table_compaction_group_mapping
+                .iter()
+                .filter(|(table_id, _)| tables_to_commit.contains(table_id));
             let mut txn = sql_store.conn.begin().await?;
             let version_snapshot_sst_ids = self
                 .write_time_travel_metadata(
@@ -298,6 +265,8 @@ impl HummockManager {
                     time_travel_delta,
                     &group_parents,
                     &versioning.last_time_travel_snapshot_sst_ids,
+                    time_travel_tables_to_commit,
+                    committed_epoch,
                 )
                 .await?;
             commit_multi_var_with_provided_txn!(
@@ -317,19 +286,6 @@ impl HummockManager {
                 compaction_group_manager_txn
             )?;
         }
-
-        let snapshot = if is_visible_table_committed_epoch {
-            let snapshot = HummockSnapshot {
-                committed_epoch,
-                current_epoch: committed_epoch,
-            };
-            let prev_snapshot = self.latest_snapshot.swap(snapshot.into());
-            assert!(prev_snapshot.committed_epoch < committed_epoch);
-            assert!(prev_snapshot.current_epoch < committed_epoch);
-            Some(snapshot)
-        } else {
-            None
-        };
 
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
@@ -360,7 +316,7 @@ impl HummockManager {
         {
             self.check_state_consistency().await;
         }
-        Ok(snapshot)
+        Ok(())
     }
 
     fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
@@ -402,7 +358,7 @@ impl HummockManager {
                 }
             }
 
-            new_sst_id_number += group_table_ids.len();
+            new_sst_id_number += group_table_ids.len() * 2; // `split_sst` will split the SST into two parts and consumer 2 SST IDs
             sst_to_cg_vec.push((commit_sst, group_table_ids));
         }
 
@@ -413,8 +369,35 @@ impl HummockManager {
         let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
-            for (group_id, _match_ids) in group_table_ids {
-                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
+            let len = group_table_ids.len();
+            for (index, (group_id, match_ids)) in group_table_ids.into_iter().enumerate() {
+                if sst.sst_info.table_ids == match_ids {
+                    // The SST contains all the tables in the group should be last key
+                    assert!(index == len - 1);
+                    commit_sstables
+                        .entry(group_id)
+                        .or_default()
+                        .push(sst.sst_info);
+                    break;
+                }
+
+                let origin_sst_size = sst.sst_info.sst_size;
+                let new_sst_size = match_ids
+                    .iter()
+                    .map(|id| {
+                        let stat = sst.table_stats.get(id).unwrap();
+                        stat.total_compressed_size
+                    })
+                    .sum();
+
+                let branch_sst = split_sst(
+                    &mut sst.sst_info,
+                    &mut new_sst_id,
+                    origin_sst_size - new_sst_size,
+                    new_sst_size,
+                    match_ids,
+                );
+
                 commit_sstables
                     .entry(group_id)
                     .or_default()

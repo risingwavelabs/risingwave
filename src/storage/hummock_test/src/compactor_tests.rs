@@ -14,7 +14,6 @@
 
 #[cfg(test)]
 pub(crate) mod tests {
-
     use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
     use std::ops::Bound;
     use std::sync::Arc;
@@ -29,7 +28,6 @@ pub(crate) mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt};
     use risingwave_common_service::NotificationClient;
-    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compact_task::CompactTask;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{
@@ -44,18 +42,16 @@ pub(crate) mod tests {
         ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection,
     };
     use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
     use risingwave_meta::hummock::compaction::selector::{
         default_compaction_selector, ManualCompactionOption,
     };
     use risingwave_meta::hummock::test_utils::{
-        register_table_ids_to_compaction_group, setup_compute_env, setup_compute_env_with_config,
-        unregister_table_ids_from_compaction_group,
+        get_compaction_group_id_by_table_id, register_table_ids_to_compaction_group,
+        setup_compute_env, unregister_table_ids_from_compaction_group,
     };
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
-    use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::hummock::TableOption;
-    use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{
         FilterKeyExtractorImpl, FilterKeyExtractorManager, FixedLengthFilterKeyExtractor,
@@ -75,7 +71,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
         BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, FilterBuilder,
-        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
+        HummockStorage as GlobalHummockStorage, HummockStorage, LocalHummockStorage, MemoryLimiter,
         SharedComapctorObjectIdManager, Sstable, SstableBuilder, SstableBuilderOptions,
         SstableIteratorReadOptions, SstableObjectIdManager, SstableWriterOptions,
     };
@@ -92,7 +88,7 @@ pub(crate) mod tests {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
         hummock_manager_ref: &HummockManagerRef,
-        table_id: TableId,
+        table_ids: &[u32],
     ) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_string();
         let options = Arc::new(StorageOpts {
@@ -117,7 +113,7 @@ pub(crate) mod tests {
         register_tables_with_id_for_test(
             hummock.filter_key_extractor_manager(),
             hummock_manager_ref,
-            &[table_id.table_id()],
+            table_ids,
         )
         .await;
 
@@ -162,6 +158,8 @@ pub(crate) mod tests {
         let mut local = storage
             .new_local(NewLocalOptions::for_test(TableId::default()))
             .await;
+        let table_id = local.table_id();
+        let table_id_set = HashSet::from_iter([table_id]);
         // 1. add sstables
         let val = b"0"[..].repeat(value_size);
         local.init_for_test(epochs[0]).await.unwrap();
@@ -188,9 +186,14 @@ pub(crate) mod tests {
             } else {
                 local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
             }
-            let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
-
-            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+            let res = storage
+                .seal_and_sync_epoch(epoch, table_id_set.clone())
+                .await
+                .unwrap();
+            hummock_meta_client
+                .commit_epoch(epoch, res, false)
+                .await
+                .unwrap();
         }
     }
 
@@ -215,185 +218,6 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn test_compaction_watermark() {
-        let config = CompactionConfigBuilder::new()
-            .level0_tier_compact_file_number(1)
-            .level0_max_compact_file_number(130)
-            .level0_overlapping_sub_level_compact_level_count(1)
-            .build();
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env_with_config(8080, config).await;
-        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        ));
-
-        // 1. add sstables
-        let mut key = BytesMut::default();
-        key.put_u16(0);
-        key.put_slice(b"same_key");
-        let storage = get_hummock_storage(
-            hummock_meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
-            &hummock_manager_ref,
-            Default::default(),
-        )
-        .await;
-        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
-        {
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                rpc_filter_key_extractor_manager,
-            ) => rpc_filter_key_extractor_manager,
-            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
-        };
-        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            rpc_filter_key_extractor_manager,
-        );
-        let compact_ctx = get_compactor_context(&storage);
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
-            hummock_meta_client.clone(),
-            storage
-                .storage_opts()
-                .clone()
-                .sstable_id_remote_fetch_number,
-        ));
-        let worker_node_id2 = hummock_manager_ref
-            .metadata_manager()
-            .add_worker_node(
-                WorkerType::ComputeNode,
-                HostAddress::default(),
-                Property::default(),
-                Default::default(),
-            )
-            .await
-            .unwrap();
-        let _snapshot = hummock_manager_ref
-            .pin_snapshot(worker_node_id2)
-            .await
-            .unwrap();
-        let key = key.freeze();
-        const SST_COUNT: u64 = 32;
-        const TEST_WATERMARK: u64 = 8;
-        prepare_test_put_data(
-            &storage,
-            &hummock_meta_client,
-            &key,
-            1 << 10,
-            (1..SST_COUNT + 1)
-                .map(|v| test_epoch(v * 1000))
-                .collect_vec(),
-        )
-        .await;
-        // 2. get compact task
-        while let Some(mut compact_task) = hummock_manager_ref
-            .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                &mut default_compaction_selector(),
-            )
-            .await
-            .unwrap()
-        {
-            let compaction_filter_flag = CompactionFilterFlag::TTL;
-            compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
-            compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-            compact_task.table_options = BTreeMap::from([(
-                0,
-                TableOption {
-                    retention_seconds: Some(64),
-                },
-            )]);
-            compact_task.current_epoch_time = 0;
-
-            let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats), _) = compact(
-                compact_ctx.clone(),
-                compact_task.clone(),
-                rx,
-                Box::new(sstable_object_id_manager.clone()),
-                filter_key_extractor_manager.clone(),
-            )
-            .await;
-
-            hummock_manager_ref
-                .report_compact_task_for_test(
-                    result_task.task_id,
-                    Some(compact_task),
-                    result_task.task_status,
-                    result_task.sorted_output_ssts,
-                    Some(to_prost_table_stats_map(task_stats)),
-                )
-                .await
-                .unwrap();
-        }
-
-        let mut val = b"0"[..].repeat(1 << 10);
-        val.extend_from_slice(&(TEST_WATERMARK * 1000).to_be_bytes());
-
-        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        let _recv = compactor_manager.add_compactor(worker_node.id);
-
-        // 4. get the latest version and check
-        let version = hummock_manager_ref.get_current_version().await;
-        let group =
-            version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
-
-        // base level
-        let output_tables = group
-            .levels
-            .iter()
-            .flat_map(|level| level.table_infos.clone())
-            .chain(
-                group
-                    .l0
-                    .sub_levels
-                    .iter()
-                    .flat_map(|level| level.table_infos.clone()),
-            )
-            .collect_vec();
-
-        storage.wait_version(version).await;
-        let mut table_key_count = 0;
-        for output_sst in output_tables {
-            let table = storage
-                .sstable_store()
-                .sstable(&output_sst, &mut StoreLocalStatistic::default())
-                .await
-                .unwrap();
-            table_key_count += table.meta.key_count;
-        }
-
-        // we have removed these 31 keys before watermark 32.
-        assert_eq!(table_key_count, (SST_COUNT - TEST_WATERMARK + 1) as u32);
-        let read_epoch = (TEST_WATERMARK * 1000) << 16;
-
-        let get_ret = storage
-            .get(
-                TableKey(key.clone()),
-                read_epoch,
-                ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
-                    ..Default::default()
-                },
-            )
-            .await;
-        let get_val = get_ret.unwrap().unwrap().to_vec();
-
-        assert_eq!(get_val, val);
-        let ret = storage
-            .get(
-                TableKey(key.clone()),
-                ((TEST_WATERMARK - 1) * 1000) << 16,
-                ReadOptions {
-                    prefix_hint: Some(key.clone()),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
-                    ..Default::default()
-                },
-            )
-            .await;
-        assert!(ret.is_err());
-    }
-
-    #[tokio::test]
     async fn test_compaction_same_key_not_split() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -402,11 +226,12 @@ pub(crate) mod tests {
             worker_node.id,
         ));
 
+        let table_id = 0;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            Default::default(),
+            &[table_id],
         )
         .await;
 
@@ -448,12 +273,10 @@ pub(crate) mod tests {
 
         // 2. get compact task
 
-        // 3. compact
+        let compaction_group_id =
+            get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), table_id).await;
         while let Some(compact_task) = hummock_manager_ref
-            .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                &mut default_compaction_selector(),
-            )
+            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
             .await
             .unwrap()
         {
@@ -482,7 +305,7 @@ pub(crate) mod tests {
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
         let output_tables = version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .get_compaction_group_levels(compaction_group_id)
             .levels
             .iter()
             .flat_map(|level| level.table_infos.clone())
@@ -524,9 +347,16 @@ pub(crate) mod tests {
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         storage: &HummockStorage,
         epoch: u64,
+        table_id: TableId,
     ) {
-        let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
-        hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+        let res = storage
+            .seal_and_sync_epoch(epoch, HashSet::from([table_id]))
+            .await
+            .unwrap();
+        hummock_meta_client
+            .commit_epoch(epoch, res, false)
+            .await
+            .unwrap();
     }
 
     async fn prepare_data(
@@ -539,8 +369,9 @@ pub(crate) mod tests {
         let kv_count: u16 = 128;
         let mut epoch = test_epoch(1);
         let mut local = storage.new_local(NewLocalOptions::for_test(table_id)).await;
+        let table_id_set = HashSet::from_iter([table_id]);
 
-        storage.start_epoch(epoch, HashSet::from_iter([table_id]));
+        storage.start_epoch(epoch, table_id_set);
 
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
@@ -562,7 +393,7 @@ pub(crate) mod tests {
             storage.start_epoch(next_epoch, HashSet::from_iter([table_id]));
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
-            flush_and_commit(&hummock_meta_client, storage, epoch).await;
+            flush_and_commit(&hummock_meta_client, storage, epoch, table_id).await;
             epoch.inc_epoch();
         }
     }
@@ -604,7 +435,7 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
             &hummock_manager_ref,
-            TableId::from(existing_table_id),
+            &[existing_table_id],
         )
         .await;
 
@@ -616,6 +447,10 @@ pub(crate) mod tests {
         )
         .await;
 
+        let compaction_group_id =
+            get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), existing_table_id)
+                .await;
+
         // Mimic dropping table
         unregister_table_ids_from_compaction_group(&hummock_manager_ref, &[existing_table_id])
             .await;
@@ -626,34 +461,19 @@ pub(crate) mod tests {
         };
         // 2. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .manual_get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                manual_compcation_option,
-            )
+            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
             .await
             .unwrap();
 
         assert!(compact_task.is_none());
 
-        // 3. get the latest version and check
-        let version = hummock_manager_ref.get_current_version().await;
-        let output_level_info = version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
-            .levels
-            .last()
-            .unwrap();
-        assert_eq!(0, output_level_info.total_file_size);
+        let current_version = hummock_manager_ref.get_current_version().await;
+        assert!(current_version
+            .get_sst_ids_by_group_id(compaction_group_id)
+            .collect_vec()
+            .is_empty());
 
-        // 5. get compact task
-        let compact_task = hummock_manager_ref
-            .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                &mut default_compaction_selector(),
-            )
-            .await
-            .unwrap();
-
-        assert!(compact_task.is_none());
+        // assert_eq!(0, current_version.num_levels(compaction_group_id));
     }
 
     #[tokio::test]
@@ -679,6 +499,10 @@ pub(crate) mod tests {
             .new_local(NewLocalOptions::for_test(TableId::from(2)))
             .await;
 
+        let table_id_1 = storage_1.table_id();
+        let table_id_2 = storage_2.table_id();
+        let table_id_set = HashSet::from_iter([table_id_1, table_id_2]);
+
         let rpc_filter_key_extractor_manager =
             match global_storage.filter_key_extractor_manager().clone() {
                 FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
@@ -688,12 +512,12 @@ pub(crate) mod tests {
             };
 
         rpc_filter_key_extractor_manager.update(
-            1,
+            table_id_1.table_id(),
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
         rpc_filter_key_extractor_manager.update(
-            2,
+            table_id_2.table_id(),
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
         let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
@@ -713,13 +537,13 @@ pub(crate) mod tests {
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
 
-        let drop_table_id = 1;
-        let existing_table_ids = 2;
+        let drop_table_id = table_id_1.table_id();
+        let existing_table_id = table_id_2.table_id();
         let kv_count: usize = 128;
         let mut epoch = test_epoch(1);
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
-            &[drop_table_id, existing_table_ids],
+            &[drop_table_id, existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
         .await;
@@ -729,10 +553,10 @@ pub(crate) mod tests {
             .await;
 
         let vnode = VirtualNode::from_index(1);
-        global_storage.start_epoch(epoch, HashSet::from_iter([1.into(), 2.into()]));
+        global_storage.start_epoch(epoch, table_id_set.clone());
         for index in 0..kv_count {
             let next_epoch = epoch.next_epoch();
-            global_storage.start_epoch(next_epoch, HashSet::from_iter([1.into(), 2.into()]));
+            global_storage.start_epoch(next_epoch, table_id_set.clone());
             if index == 0 {
                 storage_1.init_for_test(epoch).await.unwrap();
                 storage_2.init_for_test(epoch).await.unwrap();
@@ -756,8 +580,14 @@ pub(crate) mod tests {
             storage.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
             other.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
-            let res = global_storage.seal_and_sync_epoch(epoch).await.unwrap();
-            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+            let res = global_storage
+                .seal_and_sync_epoch(epoch, table_id_set.clone())
+                .await
+                .unwrap();
+            hummock_meta_client
+                .commit_epoch(epoch, res, false)
+                .await
+                .unwrap();
             epoch.inc_epoch();
         }
 
@@ -768,12 +598,12 @@ pub(crate) mod tests {
             level: 0,
             ..Default::default()
         };
+        let compaction_group_id =
+            get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), existing_table_id)
+                .await;
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .manual_get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                manual_compcation_option,
-            )
+            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
             .await
             .unwrap()
             .unwrap();
@@ -814,7 +644,7 @@ pub(crate) mod tests {
         // 5. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
         let mut tables_from_version = vec![];
-        version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
+        version.level_iter(compaction_group_id, |level| {
             tables_from_version.extend(level.table_infos.iter().cloned());
             true
         });
@@ -833,10 +663,7 @@ pub(crate) mod tests {
 
         // 6. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                &mut default_compaction_selector(),
-            )
+            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -854,7 +681,7 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    table_id: TableId::from(existing_table_ids),
+                    table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
@@ -865,7 +692,7 @@ pub(crate) mod tests {
         let mut scan_count = 0;
         for (k, _) in scan_result {
             let table_id = k.user_key.table_id.table_id();
-            assert_eq!(table_id, existing_table_ids);
+            assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }
         assert_eq!(key_count, scan_count);
@@ -885,7 +712,7 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            TableId::from(existing_table_id),
+            &[existing_table_id],
         )
         .await;
 
@@ -906,7 +733,7 @@ pub(crate) mod tests {
                 .sstable_id_remote_fetch_number,
         ));
         rpc_filter_key_extractor_manager.update(
-            2,
+            existing_table_id,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
         let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
@@ -923,14 +750,15 @@ pub(crate) mod tests {
         let vnode = VirtualNode::from_index(1);
         let mut epoch_set = BTreeSet::new();
 
-        storage.start_epoch(epoch, HashSet::from_iter([existing_table_id.into()]));
+        let table_id_set = HashSet::from_iter([existing_table_id.into()]);
+        storage.start_epoch(epoch, table_id_set.clone());
 
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
         for i in 0..kv_count {
             let next_epoch = epoch + millisec_interval_epoch;
-            storage.start_epoch(next_epoch, HashSet::from_iter([existing_table_id.into()]));
+            storage.start_epoch(next_epoch, table_id_set.clone());
             if i == 0 {
                 local.init_for_test(epoch).await.unwrap();
             }
@@ -946,8 +774,14 @@ pub(crate) mod tests {
             local.flush().await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
-            let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
-            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+            let res = storage
+                .seal_and_sync_epoch(epoch, table_id_set.clone())
+                .await
+                .unwrap();
+            hummock_meta_client
+                .commit_epoch(epoch, res, false)
+                .await
+                .unwrap();
             epoch += millisec_interval_epoch;
         }
 
@@ -955,12 +789,12 @@ pub(crate) mod tests {
             level: 0,
             ..Default::default()
         };
+        let compaction_group_id =
+            get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), existing_table_id)
+                .await;
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .manual_get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                manual_compcation_option,
-            )
+            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
             .await
             .unwrap()
             .unwrap();
@@ -977,7 +811,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = hummock_manager_ref
             .get_current_version()
             .await
-            .max_committed_epoch();
+            .max_committed_epoch_for_test();
 
         // assert compact_task
         assert_eq!(
@@ -1013,7 +847,7 @@ pub(crate) mod tests {
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
         let mut tables_from_version = vec![];
-        version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
+        version.level_iter(compaction_group_id, |level| {
             tables_from_version.extend(level.table_infos.iter().cloned());
             true
         });
@@ -1033,10 +867,7 @@ pub(crate) mod tests {
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                &mut default_compaction_selector(),
-            )
+            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -1090,7 +921,7 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            TableId::from(existing_table_id),
+            &[existing_table_id],
         )
         .await;
 
@@ -1131,13 +962,14 @@ pub(crate) mod tests {
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
-        storage.start_epoch(epoch, HashSet::from_iter([existing_table_id.into()]));
+        let table_id_set = HashSet::from_iter([existing_table_id.into()]);
+        storage.start_epoch(epoch, table_id_set.clone());
         for i in 0..kv_count {
             if i == 0 {
                 local.init_for_test(epoch).await.unwrap();
             }
             let next_epoch = epoch + millisec_interval_epoch;
-            storage.start_epoch(next_epoch, HashSet::from_iter([existing_table_id.into()]));
+            storage.start_epoch(next_epoch, table_id_set.clone());
             epoch_set.insert(epoch);
 
             let ramdom_key = [key_prefix.as_ref(), &rand::thread_rng().gen::<[u8; 32]>()].concat();
@@ -1146,8 +978,14 @@ pub(crate) mod tests {
                 .unwrap();
             local.flush().await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
-            let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
-            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+            let res = storage
+                .seal_and_sync_epoch(epoch, table_id_set.clone())
+                .await
+                .unwrap();
+            hummock_meta_client
+                .commit_epoch(epoch, res, false)
+                .await
+                .unwrap();
             epoch += millisec_interval_epoch;
         }
 
@@ -1155,12 +993,12 @@ pub(crate) mod tests {
             level: 0,
             ..Default::default()
         };
+        let compaction_group_id =
+            get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), existing_table_id)
+                .await;
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .manual_get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                manual_compcation_option,
-            )
+            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
             .await
             .unwrap()
             .unwrap();
@@ -1179,7 +1017,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = hummock_manager_ref
             .get_current_version()
             .await
-            .max_committed_epoch();
+            .max_committed_epoch_for_test();
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
@@ -1205,7 +1043,7 @@ pub(crate) mod tests {
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
         let tables_from_version: Vec<_> = version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .get_compaction_group_levels(compaction_group_id)
             .levels
             .iter()
             .flat_map(|level| level.table_infos.iter())
@@ -1226,10 +1064,7 @@ pub(crate) mod tests {
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                &mut default_compaction_selector(),
-            )
+            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -1290,7 +1125,7 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            TableId::from(existing_table_id),
+            &[existing_table_id],
         )
         .await;
         let (compact_ctx, filter_key_extractor_manager) =
@@ -1324,18 +1159,24 @@ pub(crate) mod tests {
         //     .unwrap();
         local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
-        flush_and_commit(&hummock_meta_client, &storage, epoch).await;
+        flush_and_commit(
+            &hummock_meta_client,
+            &storage,
+            epoch,
+            existing_table_id.into(),
+        )
+        .await;
 
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
             ..Default::default()
         };
         // 2. get compact task
+        let compaction_group_id =
+            get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), existing_table_id)
+                .await;
         let mut compact_task = hummock_manager_ref
-            .manual_get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                manual_compcation_option,
-            )
+            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
             .await
             .unwrap()
             .unwrap();
@@ -1376,7 +1217,7 @@ pub(crate) mod tests {
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
         let output_level_info = version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .get_compaction_group_levels(compaction_group_id)
             .levels
             .last()
             .unwrap();
@@ -1505,7 +1346,7 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            TableId::from(existing_table_id),
+            &[existing_table_id],
         )
         .await;
         hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
@@ -1550,7 +1391,6 @@ pub(crate) mod tests {
             ],
             existing_table_ids: vec![1],
             task_id: 1,
-            watermark: 1000,
             splits: vec![KeyRange::inf()],
             target_level: 6,
             base_level: 4,
@@ -1680,7 +1520,7 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            TableId::from(existing_table_id),
+            &[existing_table_id],
         )
         .await;
         hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
@@ -1772,7 +1612,6 @@ pub(crate) mod tests {
             ],
             existing_table_ids: vec![1],
             task_id: 1,
-            watermark: 1000,
             splits: vec![KeyRange::inf()],
             target_level: 6,
             base_level: 4,
@@ -1798,7 +1637,7 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            TableId::from(existing_table_id),
+            &[existing_table_id],
         )
         .await;
         hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
@@ -1836,8 +1675,8 @@ pub(crate) mod tests {
                 Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
                 None,
             );
-            let key_count = KEY_COUNT / VirtualNode::COUNT * 2;
-            for vnode_id in 0..VirtualNode::COUNT / 2 {
+            let key_count = KEY_COUNT / VirtualNode::COUNT_FOR_TEST * 2;
+            for vnode_id in 0..VirtualNode::COUNT_FOR_TEST / 2 {
                 let mut last_k: u64 = 1;
                 let init_epoch = test_epoch(100 * object_id);
                 let mut last_epoch = init_epoch;
@@ -1880,9 +1719,9 @@ pub(crate) mod tests {
 
         let target_file_size = max_sst_file_size / 4;
         let mut table_watermarks = BTreeMap::default();
-        let key_count = KEY_COUNT / VirtualNode::COUNT * 2;
-        let mut vnode_builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-        for i in 0..VirtualNode::COUNT / 2 {
+        let key_count = KEY_COUNT / VirtualNode::COUNT_FOR_TEST * 2;
+        let mut vnode_builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+        for i in 0..VirtualNode::COUNT_FOR_TEST / 2 {
             if i % 2 == 0 {
                 vnode_builder.set(i, true);
             } else {
@@ -1918,7 +1757,6 @@ pub(crate) mod tests {
             ],
             existing_table_ids: vec![1],
             task_id: 1,
-            watermark: 1000,
             splits: vec![KeyRange::inf()],
             target_level: 6,
             base_level: 4,
@@ -1947,7 +1785,7 @@ pub(crate) mod tests {
             direction: WatermarkDirection::Ascending,
             vnode_watermarks: BTreeMap::default(),
         };
-        for i in 0..VirtualNode::COUNT {
+        for i in 0..VirtualNode::COUNT_FOR_TEST {
             if i % 2 == 0 {
                 watermark
                     .vnode_watermarks
@@ -1979,5 +1817,511 @@ pub(crate) mod tests {
             fast_iter.next().await.unwrap();
             count += 1;
         }
+    }
+
+    #[tokio::test]
+    async fn test_split_and_merge() {
+        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+            setup_compute_env(8080).await;
+        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_node.id,
+        ));
+
+        let table_id_1 = TableId::from(1);
+        let table_id_2 = TableId::from(2);
+
+        let storage = get_hummock_storage(
+            hummock_meta_client.clone(),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            &hummock_manager_ref,
+            &[table_id_1.table_id(), table_id_2.table_id()],
+        )
+        .await;
+
+        // basic cg2 -> [1, 2]
+        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
+        {
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                rpc_filter_key_extractor_manager,
+            ) => rpc_filter_key_extractor_manager,
+            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+        };
+
+        let mut key = BytesMut::default();
+        key.put_u16(1);
+        key.put_slice(b"key_prefix");
+        let key_prefix = key.freeze();
+
+        rpc_filter_key_extractor_manager.update(
+            table_id_1.table_id(),
+            Arc::new(FilterKeyExtractorImpl::FixedLength(
+                FixedLengthFilterKeyExtractor::new(TABLE_PREFIX_LEN + key_prefix.len()),
+            )),
+        );
+        rpc_filter_key_extractor_manager.update(
+            table_id_2.table_id(),
+            Arc::new(FilterKeyExtractorImpl::FixedLength(
+                FixedLengthFilterKeyExtractor::new(TABLE_PREFIX_LEN + key_prefix.len()),
+            )),
+        );
+
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        );
+        let compact_ctx = get_compactor_context(&storage);
+        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+            hummock_meta_client.clone(),
+            storage
+                .storage_opts()
+                .clone()
+                .sstable_id_remote_fetch_number,
+        ));
+
+        let base_epoch = Epoch::now();
+        let mut epoch: u64 = base_epoch.0;
+        let millisec_interval_epoch: u64 = (1 << 16) * 100;
+
+        let mut local_1 = storage
+            .new_local(NewLocalOptions::for_test(table_id_1))
+            .await;
+        let mut local_2 = storage
+            .new_local(NewLocalOptions::for_test(table_id_2))
+            .await;
+
+        let val = Bytes::from(b"0"[..].to_vec());
+
+        async fn write_data(
+            storage: &HummockStorage,
+            local_1: (&mut LocalHummockStorage, bool),
+            local_2: (&mut LocalHummockStorage, bool),
+            epoch: &mut u64,
+            val: Bytes,
+            kv_count: u64,
+            millisec_interval_epoch: u64,
+            key_prefix: Bytes,
+            hummock_meta_client: Arc<dyn HummockMetaClient>,
+            is_init: &mut bool,
+        ) {
+            let table_id_set =
+                HashSet::from_iter(vec![local_1.0.table_id(), local_2.0.table_id()].into_iter());
+
+            storage.start_epoch(*epoch, table_id_set.clone());
+            for i in 0..kv_count {
+                if i == 0 && *is_init {
+                    local_1.0.init_for_test(*epoch).await.unwrap();
+                    local_2.0.init_for_test(*epoch).await.unwrap();
+
+                    *is_init = false;
+                }
+                let next_epoch = *epoch + millisec_interval_epoch;
+                storage.start_epoch(next_epoch, table_id_set.clone());
+
+                let ramdom_key =
+                    [key_prefix.as_ref(), &rand::thread_rng().gen::<[u8; 32]>()].concat();
+
+                if local_1.1 {
+                    local_1
+                        .0
+                        .insert(TableKey(Bytes::from(ramdom_key.clone())), val.clone(), None)
+                        .unwrap();
+                }
+                local_1.0.flush().await.unwrap();
+                local_1
+                    .0
+                    .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+
+                if local_2.1 {
+                    local_2
+                        .0
+                        .insert(TableKey(Bytes::from(ramdom_key.clone())), val.clone(), None)
+                        .unwrap();
+                }
+                local_2.0.flush().await.unwrap();
+                local_2
+                    .0
+                    .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+
+                let res = storage
+                    .seal_and_sync_epoch(*epoch, table_id_set.clone())
+                    .await
+                    .unwrap();
+                hummock_meta_client
+                    .commit_epoch(*epoch, res, false)
+                    .await
+                    .unwrap();
+                *epoch += millisec_interval_epoch;
+            }
+        }
+
+        let mut is_init = true;
+        write_data(
+            &storage,
+            (&mut local_1, true),
+            (&mut local_2, true),
+            &mut epoch,
+            val.clone(),
+            1,
+            millisec_interval_epoch,
+            key_prefix.clone(),
+            hummock_meta_client.clone(),
+            &mut is_init,
+        )
+        .await;
+        epoch += millisec_interval_epoch;
+
+        let parent_group_id = 2;
+        let split_table_ids = vec![table_id_2.table_id()];
+
+        async fn compact_once(
+            group_id: CompactionGroupId,
+            level: usize,
+            hummock_manager_ref: HummockManagerRef,
+            compact_ctx: CompactorContext,
+            filter_key_extractor_manager: FilterKeyExtractorManager,
+            sstable_object_id_manager: Arc<SstableObjectIdManager>,
+        ) {
+            // compact left group
+            let manual_compcation_option = ManualCompactionOption {
+                level,
+                ..Default::default()
+            };
+            // 2. get compact task
+            let compact_task = hummock_manager_ref
+                .manual_get_compact_task(group_id, manual_compcation_option)
+                .await
+                .unwrap();
+
+            if compact_task.is_none() {
+                return;
+            }
+
+            let mut compact_task = compact_task.unwrap();
+
+            let compaction_filter_flag =
+                CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
+            compact_task.compaction_filter_mask = compaction_filter_flag.bits();
+            compact_task.current_epoch_time = hummock_manager_ref
+                .get_current_version()
+                .await
+                .max_committed_epoch_for_test();
+
+            // 3. compact
+            let (_tx, rx) = tokio::sync::oneshot::channel();
+            let ((result_task, task_stats), _) = compact(
+                compact_ctx,
+                compact_task.clone(),
+                rx,
+                Box::new(sstable_object_id_manager.clone()),
+                filter_key_extractor_manager.clone(),
+            )
+            .await;
+
+            hummock_manager_ref
+                .report_compact_task(
+                    result_task.task_id,
+                    result_task.task_status,
+                    result_task.sorted_output_ssts,
+                    Some(to_prost_table_stats_map(task_stats)),
+                )
+                .await
+                .unwrap();
+        }
+
+        // compact
+        compact_once(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        let new_cg_id = hummock_manager_ref
+            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .await
+            .unwrap();
+
+        assert_ne!(parent_group_id, new_cg_id);
+        assert!(hummock_manager_ref
+            .merge_compaction_group(parent_group_id, new_cg_id)
+            .await
+            .is_err());
+
+        write_data(
+            &storage,
+            (&mut local_1, true),
+            (&mut local_2, true),
+            &mut epoch,
+            val.clone(),
+            100,
+            millisec_interval_epoch,
+            key_prefix.clone(),
+            hummock_meta_client.clone(),
+            &mut is_init,
+        )
+        .await;
+        epoch += millisec_interval_epoch;
+
+        compact_once(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        compact_once(
+            new_cg_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        // try merge
+        hummock_manager_ref
+            .merge_compaction_group(parent_group_id, new_cg_id)
+            .await
+            .unwrap();
+
+        let new_cg_id = hummock_manager_ref
+            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .await
+            .unwrap();
+
+        compact_once(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        compact_once(
+            new_cg_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        // write left
+        write_data(
+            &storage,
+            (&mut local_1, true),
+            (&mut local_2, false),
+            &mut epoch,
+            val.clone(),
+            16,
+            millisec_interval_epoch,
+            key_prefix.clone(),
+            hummock_meta_client.clone(),
+            &mut is_init,
+        )
+        .await;
+
+        epoch += millisec_interval_epoch;
+
+        // try merge
+        hummock_manager_ref
+            .merge_compaction_group(parent_group_id, new_cg_id)
+            .await
+            .unwrap();
+
+        // compact
+        compact_once(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        // try split
+        let new_cg_id = hummock_manager_ref
+            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .await
+            .unwrap();
+
+        // write right
+        write_data(
+            &storage,
+            (&mut local_1, false),
+            (&mut local_2, true),
+            &mut epoch,
+            val.clone(),
+            16,
+            millisec_interval_epoch,
+            key_prefix.clone(),
+            hummock_meta_client.clone(),
+            &mut is_init,
+        )
+        .await;
+
+        epoch += millisec_interval_epoch;
+
+        hummock_manager_ref
+            .merge_compaction_group(parent_group_id, new_cg_id)
+            .await
+            .unwrap();
+
+        // write left and right
+
+        write_data(
+            &storage,
+            (&mut local_1, true),
+            (&mut local_2, true),
+            &mut epoch,
+            val.clone(),
+            1,
+            millisec_interval_epoch,
+            key_prefix.clone(),
+            hummock_meta_client.clone(),
+            &mut is_init,
+        )
+        .await;
+
+        epoch += millisec_interval_epoch;
+
+        compact_once(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        compact_once(
+            new_cg_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        async fn compact_all(
+            group_id: CompactionGroupId,
+            level: usize,
+            hummock_manager_ref: HummockManagerRef,
+            compact_ctx: CompactorContext,
+            filter_key_extractor_manager: FilterKeyExtractorManager,
+            sstable_object_id_manager: Arc<SstableObjectIdManager>,
+        ) {
+            loop {
+                let manual_compcation_option = ManualCompactionOption {
+                    level,
+                    ..Default::default()
+                };
+                let compact_task = hummock_manager_ref
+                    .manual_get_compact_task(group_id, manual_compcation_option)
+                    .await
+                    .unwrap();
+
+                if compact_task.is_none() {
+                    break;
+                }
+
+                let mut compact_task = compact_task.unwrap();
+                let compaction_filter_flag =
+                    CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
+                compact_task.compaction_filter_mask = compaction_filter_flag.bits();
+                compact_task.current_epoch_time = hummock_manager_ref
+                    .get_current_version()
+                    .await
+                    .max_committed_epoch_for_test();
+
+                // 3. compact
+                let (_tx, rx) = tokio::sync::oneshot::channel();
+                let ((result_task, task_stats), _) = compact(
+                    compact_ctx.clone(),
+                    compact_task.clone(),
+                    rx,
+                    Box::new(sstable_object_id_manager.clone()),
+                    filter_key_extractor_manager.clone(),
+                )
+                .await;
+
+                hummock_manager_ref
+                    .report_compact_task(
+                        result_task.task_id,
+                        result_task.task_status,
+                        result_task.sorted_output_ssts,
+                        Some(to_prost_table_stats_map(task_stats)),
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
+
+        // try split
+        let new_cg_id = hummock_manager_ref
+            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .await
+            .unwrap();
+
+        // try merge
+        assert!(hummock_manager_ref
+            .merge_compaction_group(parent_group_id, new_cg_id)
+            .await
+            .is_err());
+
+        // write left and write
+
+        write_data(
+            &storage,
+            (&mut local_1, true),
+            (&mut local_2, true),
+            &mut epoch,
+            val.clone(),
+            200,
+            millisec_interval_epoch,
+            key_prefix.clone(),
+            hummock_meta_client.clone(),
+            &mut is_init,
+        )
+        .await;
+
+        compact_all(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        compact_all(
+            new_cg_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        // try merge
+        hummock_manager_ref
+            .merge_compaction_group(parent_group_id, new_cg_id)
+            .await
+            .unwrap();
     }
 }

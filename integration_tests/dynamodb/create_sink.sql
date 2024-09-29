@@ -1,3 +1,5 @@
+set sink_decouple = false;
+
 CREATE SINK dyn_sink
 FROM
   movies

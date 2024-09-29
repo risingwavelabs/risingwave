@@ -136,10 +136,7 @@ impl<'a> AvroParseOptions<'a> {
                 let expected_field_name = avro_schema_to_struct_field_name(variant_schema)?;
 
                 let mut fields = Vec::with_capacity(struct_type_info.len());
-                for (field_name, field_type) in struct_type_info
-                    .names()
-                    .zip_eq_fast(struct_type_info.types())
-                {
+                for (field_name, field_type) in struct_type_info.iter() {
                     if field_name == expected_field_name {
                         let datum = Self {
                             schema: Some(variant_schema),
@@ -344,7 +341,7 @@ impl<'a> AvroParseOptions<'a> {
                     );
                 }
                 let list = ListValue::new(builder.finish());
-                MapValue::from_list_entries(list).into()
+                MapValue::from_entries(list).into()
             }
 
             (_expected, _got) => Err(create_error())?,

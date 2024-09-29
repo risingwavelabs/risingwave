@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context as _;
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -62,22 +61,25 @@ impl SplitReader for NatsSplitReader {
                 Some(mode) => match mode.as_str() {
                     "latest" => NatsOffset::Latest,
                     "earliest" => NatsOffset::Earliest,
-                    "timestamp_millis" => {
-                        if let Some(time) = &properties.start_time {
-                            NatsOffset::Timestamp(time.parse().context(
-                                "failed to parse the start time as nats offset timestamp",
-                            )?)
+                    "timestamp" | "timestamp_millis" /* backward-compat */ => {
+                        if let Some(ts) = &properties.start_timestamp_millis {
+                            NatsOffset::Timestamp(*ts)
                         } else {
-                            bail!("scan_startup_timestamp_millis is required");
+                            bail!("scan.startup.timestamp.millis is required");
                         }
                     }
                     _ => {
-                        bail!("invalid scan_startup_mode, accept earliest/latest/timestamp_millis")
+                        bail!("invalid scan.startup.mode, accept earliest/latest/timestamp")
                     }
                 },
             },
             start_position => start_position.to_owned(),
         };
+
+        let mut config = consumer::pull::Config {
+            ..Default::default()
+        };
+        properties.set_config(&mut config);
 
         let consumer = properties
             .common
@@ -85,8 +87,10 @@ impl SplitReader for NatsSplitReader {
                 properties.stream.clone(),
                 split_id.to_string(),
                 start_position.clone(),
+                config,
             )
             .await?;
+
         Ok(Self {
             consumer,
             properties,
