@@ -423,8 +423,8 @@ pub mod group_split {
                 return insert_table_infos;
             }
 
-            let sst = &mut level.table_infos[pos];
-            let sst_split_type = need_to_split(sst, split_key.clone());
+            // let sst = &mut level.table_infos[pos];
+            let sst_split_type = need_to_split(&mut level.table_infos[pos], split_key.clone());
             match sst_split_type {
                 SstSplitType::Left => {
                     insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
@@ -437,12 +437,14 @@ pub mod group_split {
                 }
                 SstSplitType::Both => {
                     // split the sst
+                    let sst = level.table_infos[pos].clone();
+                    let sst_size = sst.sst_size;
                     let (left, right) = split_sst(
-                        sst.clone(),
+                        sst,
                         new_sst_id,
                         split_key.clone(),
-                        sst.sst_size / 2,
-                        sst.sst_size / 2,
+                        sst_size / 2,
+                        sst_size / 2,
                     );
 
                     if let Some(branch_sst) = right {
@@ -450,18 +452,17 @@ pub mod group_split {
                     }
 
                     let right_start = pos + 1;
-                    let mut left_end = pos;
-
-                    if let Some(origin_sst) = left {
-                        *sst = origin_sst;
-                    } else {
-                        left_end -= 1;
-                    }
-
+                    let left_end = pos;
                     // the sst at pos has been split to both left and right
                     // the branched sst has been inserted to the `insert_table_infos`
                     insert_table_infos.extend_from_slice(&level.table_infos[right_start..]);
                     level.table_infos = level.table_infos[0..=left_end].to_vec();
+                    if let Some(origin_sst) = left {
+                        // replace the origin sst with the left part
+                        level.table_infos[left_end] = origin_sst;
+                    } else {
+                        level.table_infos.pop();
+                    }
                 }
             };
         }
