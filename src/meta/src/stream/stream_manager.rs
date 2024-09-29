@@ -636,9 +636,6 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
-                if let MetadataManager::V1(mgr) = &self.metadata_manager {
-                    mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
-                }
                 match &self.metadata_manager {
                     MetadataManager::V1(mgr) => {
                         mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
