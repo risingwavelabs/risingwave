@@ -128,19 +128,21 @@ public class SourceTestClient {
             ConnectorServiceProto.SourceType sourceType,
             String databaseName,
             String tableName) {
+        String port = String.valueOf(URI.create(container.getJdbcUrl().substring(5)).getPort());
         ConnectorServiceProto.GetEventStreamRequest req =
                 ConnectorServiceProto.GetEventStreamRequest.newBuilder()
                         .setSourceId(1005)
                         .setSourceType(sourceType)
                         .setStartOffset("")
-                        .putProperties("hostname", "localhost")
-                        .putProperties("port", "8432")
-                        .putProperties("username", "myuser")
-                        .putProperties("password", "123456")
+                        .putProperties("hostname", container.getHost())
+                        .putProperties("port", port)
+                        .putProperties("username", container.getUsername())
+                        .putProperties("password", container.getPassword())
                         .putProperties("database.name", databaseName)
                         .putProperties("table.name", tableName)
                         .putProperties("schema.name", "public") // pg only
-                        .putProperties("slot.name", "pg_slot") // pg only
+                        .putProperties("slot.name", "orders") // pg only
+                        .putProperties("server.id", "1") // mysql only
                         .build();
         Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;
         try {
