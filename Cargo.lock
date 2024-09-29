@@ -2219,7 +2219,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -5497,16 +5497,16 @@ dependencies = [
 
 [[package]]
 name = "ginepro"
-version = "0.7.2"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b00ef897d4082727a53ea1111cd19bfa4ccdc476a5eb9f49087047113a43891"
+checksum = "cae77099e2399aea466bba05f0d23a150b4f34ed7ce535835e71d91399e65b58"
 dependencies = [
  "anyhow",
  "async-trait",
- "http 0.2.9",
+ "http 1.1.0",
  "thiserror",
  "tokio",
- "tonic 0.11.0",
+ "tonic 0.12.2",
  "tower",
  "tracing",
  "trust-dns-resolver 0.23.2",
@@ -9363,7 +9363,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.66",
@@ -9555,7 +9555,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -14561,10 +14561,7 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.6",
- "rustls-pemfile 2.1.1",
- "rustls-pki-types",
  "tokio",
- "tokio-rustls 0.25.0",
  "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower",
  "tower-layer",
