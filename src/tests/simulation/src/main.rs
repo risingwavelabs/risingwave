@@ -168,17 +168,9 @@ async fn main() {
         meta_nodes: args.meta_nodes,
         sqlite_data_dir: args.sqlite_data_dir,
         per_session_queries: if args.use_arrangement_backfill {
-            vec![
-                "SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_string(),
-                "SET bypass_cluster_limits TO true;".to_string(),
-            ]
-            .into()
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_string()].into()
         } else {
-            vec![
-                "SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_string(),
-                "SET bypass_cluster_limits TO true;".to_string(),
-            ]
-            .into()
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_string()].into()
         },
         ..Default::default()
     };
