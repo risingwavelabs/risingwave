@@ -276,8 +276,13 @@ impl SourceManagerCore {
             let backfill_fragment_ids = self.backfill_fragments.get(source_id);
 
             let Some(discovered_splits) = handle.discovered_splits().await else {
-                return Ok(split_assignment);
+                tracing::info!(
+                    "The discover loop for source {} is not ready yet; we'll wait for the next run",
+                    source_id
+                );
+                continue;
             };
+
             if discovered_splits.is_empty() {
                 tracing::warn!("No splits discovered for source {}", source_id);
             }
