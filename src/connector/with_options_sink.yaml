@@ -254,11 +254,11 @@ ElasticSearchOpenSearchConfig:
     comments: The username of elasticsearch or openserach
     required: true
   - name: index_column
-    field_type: usize
+    field_type: String
     comments: It is used for dynamic index, if it is be set, the value of this column will be used as the index. It and `index` can only set one
     required: false
   - name: routing_column
-    field_type: usize
+    field_type: String
     comments: It is used for dynamic route, if it is be set, the value of this column will be used as the route
     required: false
   - name: retry_on_conflict
