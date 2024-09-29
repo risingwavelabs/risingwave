@@ -961,7 +961,7 @@ impl KillOpts {
     /// Killing all kind of nodes.
     pub const ALL: Self = KillOpts {
         kill_rate: 1.0,
-        kill_meta: true,
+        kill_meta: false, // FIXME: make it true when multiple meta nodes are supported
         kill_frontend: true,
         kill_compute: true,
         kill_compactor: true,
@@ -969,7 +969,7 @@ impl KillOpts {
     };
     pub const ALL_FAST: Self = KillOpts {
         kill_rate: 1.0,
-        kill_meta: true,
+        kill_meta: false, // FIXME: make it true when multiple meta nodes are supported
         kill_frontend: true,
         kill_compute: true,
         kill_compactor: true,
