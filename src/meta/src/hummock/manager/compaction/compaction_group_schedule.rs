@@ -678,7 +678,7 @@ impl HummockManager {
                 target_compaction_group_id,
                 table_ids,
                 table_id_to_split,
-                VirtualNode::MAX,
+                VirtualNode::MAX_REPRESENTABLE,
                 partition_vnode_count,
             )
             .await?;

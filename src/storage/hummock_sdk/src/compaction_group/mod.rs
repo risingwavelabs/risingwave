@@ -76,7 +76,7 @@ pub mod group_split {
         mut table_id: StateTableId,
         mut vnode: VirtualNode,
     ) -> FullKey<Vec<u8>> {
-        if VirtualNode::MAX == vnode {
+        if VirtualNode::MAX_REPRESENTABLE == vnode {
             // Modify `table_id` to `next_table_id` to satisfy the `split_to_right`` rule, so that the `table_id`` originally passed in will be split to left.
             table_id = table_id.strict_add(1);
             vnode = VirtualNode::ZERO;
@@ -423,8 +423,7 @@ pub mod group_split {
                 return insert_table_infos;
             }
 
-            // let sst = &mut level.table_infos[pos];
-            let sst_split_type = need_to_split(&mut level.table_infos[pos], split_key.clone());
+            let sst_split_type = need_to_split(&level.table_infos[pos], split_key.clone());
             match sst_split_type {
                 SstSplitType::Left => {
                     insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
