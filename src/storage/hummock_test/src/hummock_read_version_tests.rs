@@ -335,8 +335,11 @@ async fn test_read_filter_basic() {
             assert_eq!(1, hummock_read_snapshot.0.len());
             assert_eq!(0, hummock_read_snapshot.1.len());
             assert_eq!(
-                read_version.read().committed().max_committed_epoch(),
-                hummock_read_snapshot.2.max_committed_epoch()
+                read_version
+                    .read()
+                    .committed()
+                    .max_committed_epoch_for_test(),
+                hummock_read_snapshot.2.max_committed_epoch_for_test()
             );
         }
     }

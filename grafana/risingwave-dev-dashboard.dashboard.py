@@ -2442,6 +2442,20 @@ def section_hummock_read(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Safe Version Fetch Count",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('state_store_safe_version_hit')}",
+                            "",
+                        ),
+                        panels.target(
+                            f"{metric('state_store_safe_version_miss')}",
+                            "",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
@@ -3207,6 +3221,10 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                             "referenced by current version",
                         ),
                         panels.target(
+                            f"{metric('storage_time_travel_object_count')}",
+                            "referenced by time travel",
+                        ),
+                        panels.target(
                             f"{metric('storage_total_object_count')}",
                             "all objects (including dangling ones)",
                         ),
@@ -3364,6 +3382,33 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                         ),
                     ],
                 ),
+                panels.timeseries_latency(
+                    "Time Travel Replay Latency",
+                    "The latency of replaying a hummock version for time travel",
+                    quantile(
+                        lambda quantile, legend: panels.target(
+                            f"histogram_quantile({quantile}, sum(rate({metric('storage_time_travel_version_replay_latency_bucket')}[$__rate_interval])) by (le))",
+                            f"time_travel_version_replay_latency_p{legend}",
+                        ),
+                        [50, 90, 99, "max"],
+                    )
+                    + [
+                        panels.target(
+                            f"rate({metric('storage_time_travel_version_replay_latency_sum')}[$__rate_interval]) / rate({metric('storage_time_travel_version_replay_latency_count')}[$__rate_interval]) > 0",
+                            "time_travel_version_replay_avg",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Time Travel Replay Ops",
+                    "The frequency of replaying a hummock version for time travel",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_time_travel_version_replay_latency_count')}[$__rate_interval]))",
+                            "time_travel_version_replay_ops",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
@@ -3497,11 +3542,6 @@ def section_grpc_meta_hummock_manager(outer_panels):
                     panels,
                     "UnpinVersionBefore",
                     "path='/meta.HummockManagerService/UnpinVersionBefore'",
-                ),
-                grpc_metrics_target(
-                    panels,
-                    "UnpinSnapshotBefore",
-                    "path='/meta.HummockManagerService/UnpinSnapshotBefore'",
                 ),
                 grpc_metrics_target(
                     panels,

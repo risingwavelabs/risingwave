@@ -216,12 +216,12 @@ impl HummockManager {
         }
 
         if is_visible_table_committed_epoch
-            && committed_epoch <= current_version.visible_table_committed_epoch()
+            && committed_epoch <= current_version.max_committed_epoch_for_meta()
         {
             return Err(anyhow::anyhow!(
                 "Epoch {} <= max_committed_epoch {}",
                 committed_epoch,
-                current_version.visible_table_committed_epoch()
+                current_version.max_committed_epoch_for_meta()
             )
             .into());
         }

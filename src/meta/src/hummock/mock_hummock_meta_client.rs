@@ -38,7 +38,7 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    compact_task, HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest,
+    compact_task, PbHummockVersion, SubscribeCompactionEventRequest,
     SubscribeCompactionEventResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -117,10 +117,6 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
         Ok(self.hummock_manager.get_current_version().await)
-    }
-
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        Ok(self.hummock_manager.latest_snapshot())
     }
 
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
@@ -246,6 +242,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         _filtered_object_ids: Vec<HummockSstableObjectId>,
         _total_object_count: u64,
         _total_object_size: u64,
+        _next_start_after: Option<String>,
     ) -> Result<()> {
         unimplemented!()
     }

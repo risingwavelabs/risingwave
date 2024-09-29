@@ -30,7 +30,8 @@ use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_tes
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreRead, WriteOptions,
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreRead,
+    TryWaitEpochOptions, WriteOptions,
 };
 use risingwave_storage::StateStore;
 
@@ -148,7 +149,10 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap();
     meta_client.commit_epoch(1, res, false).await.unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(1))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(1),
+            TryWaitEpochOptions::for_test(local.table_id()),
+        )
         .await
         .unwrap();
     // clear block cache
@@ -225,7 +229,10 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap();
     meta_client.commit_epoch(3, res, false).await.unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(3))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(3),
+            TryWaitEpochOptions::for_test(local.table_id()),
+        )
         .await
         .unwrap();
 

@@ -28,7 +28,6 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::compact_task::{self};
-use risingwave_pb::hummock::HummockSnapshot;
 use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
@@ -286,12 +285,6 @@ impl HummockManager {
                 version_stats,
                 compaction_group_manager_txn
             )?;
-        }
-
-        if is_visible_table_committed_epoch {
-            let snapshot = HummockSnapshot { committed_epoch };
-            let prev_snapshot = self.latest_snapshot.swap(snapshot.into());
-            assert!(prev_snapshot.committed_epoch < committed_epoch);
         }
 
         for compaction_group_id in &modified_compaction_groups {

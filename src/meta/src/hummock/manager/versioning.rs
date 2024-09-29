@@ -25,14 +25,11 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
-    HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
-use risingwave_pb::hummock::{
-    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
-};
+use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats, TableStats};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::check_cg_write_limit;
@@ -165,14 +162,12 @@ impl HummockManager {
         &self,
         start_id: HummockVersionId,
         num_limit: u32,
-        committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
         let versioning = self.versioning.read().await;
         let version_deltas = versioning
             .hummock_version_deltas
             .range(start_id..)
             .map(|(_id, delta)| delta)
-            .filter(|delta| delta.visible_table_committed_epoch() <= committed_epoch_limit)
             .take(num_limit as _)
             .cloned()
             .collect();
@@ -260,7 +255,7 @@ impl HummockManager {
                 self.env.notification_manager(),
                 &self.metrics,
             );
-            let mut new_version_delta = version.new_delta();
+            let mut new_version_delta = version.new_delta(None);
             new_version_delta.with_latest_version(|version, delta| {
                 version.may_fill_backward_compatible_state_table_info_delta(delta)
             });
@@ -268,11 +263,6 @@ impl HummockManager {
             commit_multi_var!(self.meta_store_ref(), version)?;
         }
         Ok(())
-    }
-
-    pub fn latest_snapshot(&self) -> HummockSnapshot {
-        let snapshot = self.latest_snapshot.load();
-        HummockSnapshot::clone(&snapshot)
     }
 
     pub async fn list_change_log_epochs(

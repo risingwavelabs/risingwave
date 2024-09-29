@@ -19,6 +19,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
@@ -33,6 +34,7 @@ use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceTablePlan, SnapshotBackfillInfo,
 };
+use crate::error::bail_invalid_parameter;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
@@ -682,13 +684,46 @@ impl GlobalStreamManager {
         let worker_nodes = self
             .metadata_manager
             .list_active_streaming_compute_nodes()
-            .await?;
+            .await?
+            .into_iter()
+            .filter(|w| w.is_streaming_schedulable())
+            .collect_vec();
 
         let worker_ids = worker_nodes
             .iter()
-            .filter(|w| w.property.as_ref().map_or(true, |p| !p.is_unschedulable))
             .map(|node| node.id)
             .collect::<BTreeSet<_>>();
+
+        // Check if the provided parallelism is valid.
+        let available_parallelism = worker_nodes
+            .iter()
+            .map(|w| w.parallelism as usize)
+            .sum::<usize>();
+        // TODO(var-vnode): get correct max parallelism from catalogs.
+        let max_parallelism = VirtualNode::COUNT_FOR_COMPAT;
+
+        match parallelism {
+            TableParallelism::Adaptive => {
+                if available_parallelism > max_parallelism {
+                    tracing::warn!(
+                        "too many parallelism available, use max parallelism {} will be limited",
+                        max_parallelism
+                    );
+                }
+            }
+            TableParallelism::Fixed(parallelism) => {
+                if parallelism > max_parallelism {
+                    bail_invalid_parameter!(
+                        "specified parallelism {} should not exceed max parallelism {}",
+                        parallelism,
+                        max_parallelism
+                    );
+                }
+            }
+            TableParallelism::Custom => {
+                bail_invalid_parameter!("should not alter parallelism to custom")
+            }
+        }
 
         let table_parallelism_assignment = HashMap::from([(TableId::new(table_id), parallelism)]);
 

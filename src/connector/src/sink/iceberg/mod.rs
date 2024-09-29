@@ -41,6 +41,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -55,7 +56,8 @@ use super::decouple_checkpoint_log_sink::{
     default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
 };
 use super::{
-    Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Sink, SinkError, SinkWriterMetrics, SinkWriterParam, GLOBAL_SINK_METRICS,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -367,6 +369,8 @@ impl Sink for IcebergSink {
         } else {
             IcebergWriter::new_append_only(table, &writer_param).await?
         };
+
+        let metrics = SinkWriterMetrics::new(&writer_param);
         let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -390,7 +394,7 @@ impl Sink for IcebergSink {
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
-            writer_param.sink_metrics,
+            metrics,
             commit_checkpoint_interval,
         ))
     }
@@ -411,6 +415,17 @@ impl Sink for IcebergSink {
 pub struct IcebergWriter {
     inner_writer: IcebergWriterEnum,
     schema: SchemaRef,
+    // See comments below
+    _metrics: IcebergWriterMetrics,
+}
+
+pub struct IcebergWriterMetrics {
+    // NOTE: These 2 metrics are not used directly by us, but only kept for lifecycle management.
+    // They are actually used in `PrometheusWriterBuilder`:
+    //     WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone())
+    // We keep them here to let the guard cleans the labels from metrics registry when dropped
+    _write_qps: LabelGuardedIntCounter<3>,
+    _write_latency: LabelGuardedHistogram<3>,
 }
 
 enum IcebergWriterEnum {
@@ -446,38 +461,56 @@ impl IcebergWriter {
 
     pub async fn new_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
         let builder_helper = table.builder_helper()?;
+        let SinkWriterParam {
+            extra_partition_col_idx,
+            actor_id,
+            sink_id,
+            sink_name,
+            ..
+        } = writer_param;
+        let metrics_labels = [
+            &actor_id.to_string(),
+            &sink_id.to_string(),
+            sink_name.as_str(),
+        ];
+
+        // Metrics
+        let write_qps = GLOBAL_SINK_METRICS
+            .iceberg_write_qps
+            .with_guarded_label_values(&metrics_labels);
+        let write_latency = GLOBAL_SINK_METRICS
+            .iceberg_write_latency
+            .with_guarded_label_values(&metrics_labels);
+        let rolling_unflushed_data_file = GLOBAL_SINK_METRICS
+            .iceberg_rolling_unflushed_data_file
+            .with_guarded_label_values(&metrics_labels);
 
         let data_file_builder = DataFileWriterBuilder::new(MonitoredBaseFileWriterBuilder::new(
             builder_helper
                 .rolling_writer_builder(builder_helper.parquet_writer_builder(0, None)?)?,
-            writer_param
-                .sink_metrics
-                .iceberg_rolling_unflushed_data_file
-                .clone(),
+            rolling_unflushed_data_file,
         ));
-        if let Some(extra_partition_col_idx) = writer_param.extra_partition_col_idx {
+
+        if let Some(extra_partition_col_idx) = extra_partition_col_idx {
             let partition_data_file_builder = builder_helper.precompute_partition_writer_builder(
                 data_file_builder.clone(),
-                extra_partition_col_idx,
+                *extra_partition_col_idx,
             )?;
             let dispatch_builder = builder_helper
                 .dispatcher_writer_builder(partition_data_file_builder, data_file_builder)?;
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
-                WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
-                ),
+                WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone()),
             );
-            let schema = Self::schema_with_extra_partition_col(&table, extra_partition_col_idx)?;
+            let schema = Self::schema_with_extra_partition_col(&table, *extra_partition_col_idx)?;
             let inner_writer = RecordBatchWriter::new(prometheus_builder.build(&schema).await?);
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
+                },
             })
         } else {
             let partition_data_file_builder =
@@ -487,20 +520,17 @@ impl IcebergWriter {
             // wrap a layer with collect write metrics
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
-                WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
-                ),
+                WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone()),
             );
             let schema = table.current_arrow_schema()?;
             let inner_writer = RecordBatchWriter::new(prometheus_builder.build(&schema).await?);
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
+                },
             })
         }
     }
@@ -511,20 +541,41 @@ impl IcebergWriter {
         writer_param: &SinkWriterParam,
     ) -> Result<Self> {
         let builder_helper = table.builder_helper()?;
+        let SinkWriterParam {
+            extra_partition_col_idx,
+            actor_id,
+            sink_id,
+            sink_name,
+            ..
+        } = writer_param;
+        let metrics_labels = [
+            &actor_id.to_string(),
+            &sink_id.to_string(),
+            sink_name.as_str(),
+        ];
+
+        // Metrics
+        let write_qps = GLOBAL_SINK_METRICS
+            .iceberg_write_qps
+            .with_guarded_label_values(&metrics_labels);
+        let write_latency = GLOBAL_SINK_METRICS
+            .iceberg_write_latency
+            .with_guarded_label_values(&metrics_labels);
+        let rolling_unflushed_data_file = GLOBAL_SINK_METRICS
+            .iceberg_rolling_unflushed_data_file
+            .with_guarded_label_values(&metrics_labels);
+        let position_delete_cache_num = GLOBAL_SINK_METRICS
+            .iceberg_position_delete_cache_num
+            .with_guarded_label_values(&metrics_labels);
+
         let data_file_builder = DataFileWriterBuilder::new(MonitoredBaseFileWriterBuilder::new(
             builder_helper
                 .rolling_writer_builder(builder_helper.parquet_writer_builder(0, None)?)?,
-            writer_param
-                .sink_metrics
-                .iceberg_rolling_unflushed_data_file
-                .clone(),
+            rolling_unflushed_data_file,
         ));
         let position_delete_builder = MonitoredPositionDeleteWriterBuilder::new(
             builder_helper.position_delete_writer_builder(0, 1024)?,
-            writer_param
-                .sink_metrics
-                .iceberg_position_delete_cache_num
-                .clone(),
+            position_delete_cache_num,
         );
         let equality_delete_builder =
             builder_helper.equality_delete_writer_builder(unique_column_ids.clone(), 0)?;
@@ -534,30 +585,27 @@ impl IcebergWriter {
             equality_delete_builder,
             unique_column_ids,
         );
-        if let Some(extra_partition_col_idx) = writer_param.extra_partition_col_idx {
+        if let Some(extra_partition_col_idx) = extra_partition_col_idx {
             let partition_delta_builder = builder_helper.precompute_partition_writer_builder(
                 delta_builder.clone(),
-                extra_partition_col_idx,
+                *extra_partition_col_idx,
             )?;
             let dispatch_builder =
                 builder_helper.dispatcher_writer_builder(partition_delta_builder, delta_builder)?;
             // wrap a layer with collect write metrics
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
-                WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
-                ),
+                WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone()),
             );
-            let schema = Self::schema_with_extra_partition_col(&table, extra_partition_col_idx)?;
+            let schema = Self::schema_with_extra_partition_col(&table, *extra_partition_col_idx)?;
             let inner_writer = DeltaWriter::new(prometheus_builder.build(&schema).await?);
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
+                },
             })
         } else {
             let partition_delta_builder =
@@ -567,20 +615,17 @@ impl IcebergWriter {
             // wrap a layer with collect write metrics
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
-                WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
-                ),
+                WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone()),
             );
             let schema = table.current_arrow_schema()?;
             let inner_writer = DeltaWriter::new(prometheus_builder.build(&schema).await?);
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
+                _metrics: IcebergWriterMetrics {
+                    _write_qps: write_qps,
+                    _write_latency: write_latency,
+                },
             })
         }
     }

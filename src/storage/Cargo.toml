@@ -33,7 +33,7 @@ futures-async-stream = { workspace = true }
 hex = "0.4"
 itertools = { workspace = true }
 libc = "0.2"
-lz4 = "1.25.0"
+lz4 = "1.28.0"
 memcomparable = "0.2"
 metrics-prometheus = "0.7"
 moka = { version = "0.12.0", features = ["future", "sync"] }

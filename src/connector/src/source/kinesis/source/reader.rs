@@ -74,14 +74,14 @@ impl SplitReader for KinesisSplitReader {
                     "earliest" => KinesisOffset::Earliest,
                     "latest" => KinesisOffset::Latest,
                     "timestamp" => {
-                        if let Some(ts) = &properties.timestamp_offset {
+                        if let Some(ts) = &properties.start_timestamp_millis {
                             KinesisOffset::Timestamp(*ts)
                         } else {
                             bail!("scan.startup.timestamp.millis is required");
                         }
                     }
                     _ => {
-                        bail!("invalid scan_startup_mode, accept earliest/latest/timestamp")
+                        bail!("invalid scan.startup.mode, accept earliest/latest/timestamp")
                     }
                 },
             },
@@ -89,7 +89,7 @@ impl SplitReader for KinesisSplitReader {
         };
 
         if !matches!(next_offset, KinesisOffset::Timestamp(_))
-            && properties.timestamp_offset.is_some()
+            && properties.start_timestamp_millis.is_some()
         {
             // cannot bail! here because all new split readers will fail to start if user set 'scan.startup.mode' to 'timestamp'
             tracing::warn!("scan.startup.mode needs to be set to 'timestamp' if you want to start with a specific timestamp, starting shard {} from the beginning",
@@ -356,7 +356,7 @@ mod tests {
             },
 
             scan_startup_mode: None,
-            timestamp_offset: None,
+            start_timestamp_millis: None,
 
             unknown_fields: Default::default(),
         };
