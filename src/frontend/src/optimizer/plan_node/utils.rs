@@ -138,6 +138,21 @@ impl TableCatalogBuilder {
             Some(w) => w,
             None => FixedBitSet::with_capacity(self.columns.len()),
         };
+
+        // If `dist_key_in_pk` is set, check if it matches with `distribution_key`.
+        // Note that we cannot derive in the opposite direction, because there can be a column
+        // appearing multiple times in the PK.
+        if let Some(dist_key_in_pk) = &self.dist_key_in_pk {
+            let derived_dist_key = dist_key_in_pk
+                .iter()
+                .map(|idx| self.pk[*idx].column_index)
+                .collect_vec();
+            assert_eq!(
+                derived_dist_key, distribution_key,
+                "dist_key mismatch with dist_key_in_pk"
+            );
+        }
+
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
