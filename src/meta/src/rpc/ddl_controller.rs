@@ -1612,7 +1612,7 @@ impl DdlController {
         let specified_parallelism = fragment_graph.specified_parallelism();
         let internal_tables = fragment_graph.internal_tables();
         let expr_context = stream_ctx.to_expr_context();
-        let max_parallelism = NonZeroUsize::new(fragment_graph.expected_vnode_count()).unwrap();
+        let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
@@ -1693,6 +1693,7 @@ impl DdlController {
             &building_locations.actor_locations,
             stream_ctx.clone(),
             table_parallelism,
+            max_parallelism.get(),
         );
 
         if let Some(mview_fragment) = table_fragments.mview_fragment() {
@@ -1727,6 +1728,7 @@ impl DdlController {
                                 &stream_ctx,
                                 table.get_version()?,
                                 &fragment_graph.specified_parallelism(),
+                                fragment_graph.max_parallelism(),
                             )
                             .await? as u32
                     }
@@ -2178,6 +2180,7 @@ impl DdlController {
             &building_locations.actor_locations,
             stream_ctx,
             old_table_fragments.assigned_parallelism,
+            old_table_fragments.max_parallelism,
         );
 
         // Note: no need to set `vnode_count` as it's already set by the frontend.

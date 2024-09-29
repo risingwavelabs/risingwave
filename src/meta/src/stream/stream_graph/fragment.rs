@@ -326,7 +326,8 @@ pub struct StreamFragmentGraph {
     /// variable. If not specified, all active worker slots will be used.
     specified_parallelism: Option<NonZeroUsize>,
 
-    /// Expected vnode count for the graph.
+    /// Specified max parallelism, i.e., expected vnode count for the graph.
+    ///
     /// The scheduler on the meta service will use this as a hint to decide the vnode count
     /// for each fragment.
     ///
@@ -334,7 +335,7 @@ pub struct StreamFragmentGraph {
     /// For example, a no-shuffle exchange between current fragment graph and an existing
     /// upstream fragment graph requires two fragments to be in the same distribution,
     /// thus the same vnode count.
-    expected_vnode_count: usize,
+    max_parallelism: usize,
 }
 
 impl StreamFragmentGraph {
@@ -410,7 +411,7 @@ impl StreamFragmentGraph {
             None
         };
 
-        let expected_vnode_count = proto.expected_vnode_count as usize;
+        let max_parallelism = proto.max_parallelism as usize;
 
         Ok(Self {
             fragments,
@@ -418,7 +419,7 @@ impl StreamFragmentGraph {
             upstreams,
             dependent_table_ids,
             specified_parallelism,
-            expected_vnode_count,
+            max_parallelism,
         })
     }
 
@@ -519,8 +520,8 @@ impl StreamFragmentGraph {
     }
 
     /// Get the expected vnode count of the graph. See documentation of the field for more details.
-    pub fn expected_vnode_count(&self) -> usize {
-        self.expected_vnode_count
+    pub fn max_parallelism(&self) -> usize {
+        self.max_parallelism
     }
 
     /// Get downstreams of a fragment.
@@ -1184,7 +1185,7 @@ impl CompleteStreamFragmentGraph {
     }
 
     /// Get the expected vnode count of the building graph. See documentation of the field for more details.
-    pub(super) fn expected_vnode_count(&self) -> usize {
-        self.building_graph.expected_vnode_count()
+    pub(super) fn max_parallelism(&self) -> usize {
+        self.building_graph.max_parallelism()
     }
 }

@@ -315,6 +315,7 @@ impl CatalogController {
             HashMap<ActorId, Vec<actor_dispatcher::Model>>,
         )>,
         parallelism: StreamingParallelism,
+        max_parallelism: usize,
     ) -> MetaResult<PbTableFragments> {
         let mut pb_fragments = HashMap::new();
         let mut pb_actor_splits = HashMap::new();
@@ -347,6 +348,7 @@ impl CatalogController {
             ),
             node_label: "".to_string(),
             backfill_done: true,
+            max_parallelism: Some(max_parallelism as _),
         };
 
         Ok(table_fragments)
@@ -669,6 +671,7 @@ impl CatalogController {
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
             fragment_info,
             job_info.parallelism.clone(),
+            job_info.max_parallelism as _,
         )
     }
 
@@ -687,6 +690,15 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
         Ok(job_states)
+    }
+
+    pub async fn get_max_parallelism_by_id(&self, job_id: ObjectId) -> MetaResult<usize> {
+        let inner = self.inner.read().await;
+        let job = StreamingJob::find_by_id(job_id)
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
+        Ok(job.max_parallelism as usize)
     }
 
     /// Get all actor ids in the target streaming jobs.
@@ -790,6 +802,7 @@ impl CatalogController {
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),
                     fragment_info,
                     job.parallelism.clone(),
+                    job.max_parallelism as _,
                 )?,
             );
         }

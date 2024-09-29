@@ -83,6 +83,7 @@ impl CatalogController {
         create_type: PbCreateType,
         ctx: &StreamContext,
         streaming_parallelism: StreamingParallelism,
+        max_parallelism: usize,
     ) -> MetaResult<ObjectId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job = streaming_job::ActiveModel {
@@ -91,6 +92,7 @@ impl CatalogController {
             create_type: Set(create_type.into()),
             timezone: Set(ctx.timezone.clone()),
             parallelism: Set(streaming_parallelism),
+            max_parallelism: Set(max_parallelism as _),
         };
         job.insert(txn).await?;
 
@@ -102,6 +104,7 @@ impl CatalogController {
         streaming_job: &mut StreamingJob,
         ctx: &StreamContext,
         parallelism: &Option<Parallelism>,
+        max_parallelism: usize,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -169,6 +172,7 @@ impl CatalogController {
                     create_type,
                     ctx,
                     streaming_parallelism,
+                    max_parallelism,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -204,6 +208,7 @@ impl CatalogController {
                     create_type,
                     ctx,
                     streaming_parallelism,
+                    max_parallelism,
                 )
                 .await?;
                 sink.id = job_id as _;
@@ -220,6 +225,7 @@ impl CatalogController {
                     create_type,
                     ctx,
                     streaming_parallelism,
+                    max_parallelism,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -255,6 +261,7 @@ impl CatalogController {
                     create_type,
                     ctx,
                     streaming_parallelism,
+                    max_parallelism,
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -285,6 +292,7 @@ impl CatalogController {
                     create_type,
                     ctx,
                     streaming_parallelism,
+                    max_parallelism,
                 )
                 .await?;
                 src.id = job_id as _;
@@ -631,6 +639,7 @@ impl CatalogController {
         ctx: &StreamContext,
         version: &PbTableVersion,
         specified_parallelism: &Option<NonZeroUsize>,
+        max_parallelism: usize,
     ) -> MetaResult<ObjectId> {
         let id = streaming_job.id();
         let inner = self.inner.write().await;
@@ -685,6 +694,7 @@ impl CatalogController {
             PbCreateType::Foreground,
             ctx,
             parallelism,
+            max_parallelism,
         )
         .await?;
 
