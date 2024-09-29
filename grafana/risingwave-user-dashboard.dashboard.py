@@ -822,38 +822,6 @@ def section_batch(outer_panels):
         )
     ]
 
-
-def section_connector_node(outer_panels):
-    panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed(
-            "Connector Node",
-            [
-                panels.timeseries_rowsps(
-                    "Connector Source Throughput(rows)",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('connector_source_rows_received')}[$__rate_interval])",
-                            "source={{source_type}} @ {{source_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Connector Sink Throughput(rows)",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('connector_sink_rows_received')}[$__rate_interval])",
-                            "sink={{connector_type}} @ {{sink_id}}",
-                        ),
-                    ],
-                ),
-            ],
-        )
-    ]
-
-
 templating_list = []
 if dynamic_source_enabled:
     templating_list.append(
@@ -990,6 +958,5 @@ dashboard = Dashboard(
         *section_storage(panels),
         *section_streaming(panels),
         *section_batch(panels),
-        *section_connector_node(panels),
     ],
 ).auto_panel_ids()

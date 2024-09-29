@@ -347,9 +347,10 @@ pub struct MonitoredLogWriter<W: LogWriter> {
 }
 
 pub struct LogWriterMetrics {
-    pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
-    pub log_store_write_rows: LabelGuardedIntCounter<4>,
+    // Labels: [actor_id, sink_id, sink_name]
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_write_rows: LabelGuardedIntCounter<3>,
 }
 
 impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
