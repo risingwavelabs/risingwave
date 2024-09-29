@@ -146,11 +146,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(
-                HummockVersionId::new(req.start_id),
-                req.num_limit,
-                req.committed_epoch_limit,
-            )
+            .list_version_deltas(HummockVersionId::new(req.start_id), req.num_limit)
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(PbHummockVersionDeltas {
@@ -246,17 +242,6 @@ impl HummockManagerService for HummockServiceImpl {
 
         Ok(Response::new(TriggerManualCompactionResponse {
             status: None,
-        }))
-    }
-
-    async fn get_epoch(
-        &self,
-        _request: Request<GetEpochRequest>,
-    ) -> Result<Response<GetEpochResponse>, Status> {
-        let hummock_snapshot = self.hummock_manager.latest_snapshot();
-        Ok(Response::new(GetEpochResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
         }))
     }
 

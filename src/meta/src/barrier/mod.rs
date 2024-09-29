@@ -712,16 +712,13 @@ impl GlobalBarrierManager {
         }
 
         {
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
-
             // Bootstrap recovery. Here we simply trigger a recovery process to achieve the
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
             self.context
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap));
-            let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+            let span = tracing::info_span!("bootstrap_recovery");
             crate::telemetry::report_event(
                 risingwave_pb::telemetry::TelemetryEventStage::Recovery,
                 "normal_recovery",
@@ -1102,12 +1099,9 @@ impl GlobalBarrierManager {
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
                     err.clone(),
                 )));
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
                 error = %err.as_report(),
-                prev_epoch = prev_epoch.value().0
             );
 
             crate::telemetry::report_event(
@@ -1134,12 +1128,9 @@ impl GlobalBarrierManager {
 
         self.context
             .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
-        let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-        let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
         let span = tracing::info_span!(
             "adhoc_recovery",
             error = %err.as_report(),
-            prev_epoch = prev_epoch.value().0
         );
 
         crate::telemetry::report_event(

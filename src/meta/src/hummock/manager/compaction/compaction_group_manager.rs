@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact_task::ReportTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_compaction_group_ids, TableGroupInfo,
@@ -220,10 +221,7 @@ impl HummockManager {
             self.env.notification_manager(),
             &self.metrics,
         );
-        let mut new_version_delta = version.new_delta();
-        let epoch = new_version_delta
-            .latest_version()
-            .visible_table_committed_epoch();
+        let mut new_version_delta = version.new_delta(None);
 
         for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;
@@ -267,7 +265,7 @@ impl HummockManager {
                 .insert(
                     TableId::new(*table_id),
                     PbStateTableInfoDelta {
-                        committed_epoch: epoch,
+                        committed_epoch: INVALID_EPOCH,
                         compaction_group_id: *raw_group_id,
                     }
                 )
@@ -295,7 +293,7 @@ impl HummockManager {
             self.env.notification_manager(),
             &self.metrics,
         );
-        let mut new_version_delta = version.new_delta();
+        let mut new_version_delta = version.new_delta(None);
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
             HashMap::new();
         // Remove member tables
@@ -483,7 +481,7 @@ impl HummockManager {
             self.env.notification_manager(),
             &self.metrics,
         );
-        let mut new_version_delta = version.new_delta();
+        let mut new_version_delta = version.new_delta(None);
 
         let new_sst_start_id = next_sstable_object_id(
             &self.env,

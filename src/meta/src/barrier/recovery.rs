@@ -326,7 +326,7 @@ impl GlobalBarrierManager {
                         .context
                         .hummock_manager
                         .on_current_version(|version| {
-                            let max_committed_epoch = version.visible_table_committed_epoch();
+                            let max_committed_epoch = version.max_committed_epoch_for_meta();
                             for (table_id, info) in version.state_table_info.info() {
                                 assert_eq!(
                                     info.committed_epoch, max_committed_epoch,
