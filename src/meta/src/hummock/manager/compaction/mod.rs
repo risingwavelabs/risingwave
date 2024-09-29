@@ -144,7 +144,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 
 impl<'a> HummockVersionTransaction<'a> {
     fn apply_compact_task(&mut self, compact_task: &CompactTask) {
-        let mut version_delta = self.new_delta();
+        let mut version_delta = self.new_delta(None);
         let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
         version_delta.trivial_move = trivial_move;
 
@@ -1334,9 +1334,8 @@ impl HummockManager {
     ) -> Result<()> {
         self.on_current_version(|old_version| {
             tracing::info!(
-                "Trigger compaction for version {}, epoch {}, groups {:?}",
+                "Trigger compaction for version {}, groups {:?}",
                 old_version.id,
-                old_version.visible_table_committed_epoch(),
                 compaction_groups
             );
         })

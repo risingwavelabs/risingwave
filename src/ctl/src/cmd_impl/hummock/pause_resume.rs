@@ -22,9 +22,8 @@ pub async fn disable_commit_epoch(context: &CtlContext) -> anyhow::Result<()> {
     let version = meta_client.disable_commit_epoch().await?;
     println!(
         "Disabled.\
-        Current version: id {}, max_committed_epoch {}",
+        Current version: id {}",
         version.id,
-        version.visible_table_committed_epoch()
     );
     Ok(())
 }

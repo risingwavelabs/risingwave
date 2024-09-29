@@ -45,7 +45,7 @@ fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
 fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
     metrics
         .max_committed_epoch
-        .set(current_version.visible_table_committed_epoch() as i64);
+        .set(current_version.max_committed_epoch_for_meta() as i64);
     metrics
         .version_size
         .set(current_version.estimated_encode_len() as i64);
@@ -97,8 +97,13 @@ impl<'a> HummockVersionTransaction<'a> {
         }
     }
 
-    pub(super) fn new_delta<'b>(&'b mut self) -> SingleDeltaTransaction<'a, 'b> {
-        let delta = self.latest_version().version_delta_after();
+    pub(super) fn new_delta<'b>(
+        &'b mut self,
+        max_committed_epoch: Option<u64>,
+    ) -> SingleDeltaTransaction<'a, 'b> {
+        let delta = self
+            .latest_version()
+            .version_delta_after(max_committed_epoch);
         SingleDeltaTransaction {
             version_txn: self,
             delta: Some(delta),
@@ -125,10 +130,12 @@ impl<'a> HummockVersionTransaction<'a> {
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
     ) -> HummockVersionDelta {
-        let mut new_version_delta = self.new_delta();
-        if is_visible_table_committed_epoch {
-            new_version_delta.set_max_committed_epoch(committed_epoch);
-        }
+        let new_max_committed_epoch = if is_visible_table_committed_epoch {
+            Some(committed_epoch)
+        } else {
+            None
+        };
+        let mut new_version_delta = self.new_delta(new_max_committed_epoch);
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
