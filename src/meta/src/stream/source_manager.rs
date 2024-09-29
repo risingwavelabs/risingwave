@@ -235,6 +235,12 @@ pub struct SourceManagerCore {
     actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
+pub struct SourceManagerRunningInfo {
+    pub source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+    pub backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+}
+
 impl SourceManagerCore {
     fn new(
         metadata_manager: MetadataManager,
@@ -1099,6 +1105,15 @@ impl SourceManager {
     pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
         let core = self.core.lock().await;
         core.actor_splits.clone()
+    }
+
+    pub async fn get_running_info(&self) -> SourceManagerRunningInfo {
+        let core = self.core.lock().await;
+        SourceManagerRunningInfo {
+            source_fragments: core.source_fragments.clone(),
+            backfill_fragments: core.backfill_fragments.clone(),
+            actor_splits: core.actor_splits.clone(),
+        }
     }
 
     /// Checks whether the external source metadata has changed, and sends a split assignment command

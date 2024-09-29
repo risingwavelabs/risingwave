@@ -553,6 +553,8 @@ message VacuumTask {
 message FullScanTask {
   uint64 sst_retention_time_sec = 1;
   optional string prefix = 2;
+  optional string start_after = 3;
+  optional uint64 limit = 4;
 }
 
 // Cancel compact task
@@ -588,6 +590,7 @@ message ReportFullScanTaskRequest {
   uint64 total_object_count = 2;
   // Total size of objects before filtered by conditions specified by FullScanTask.
   uint64 total_object_size = 3;
+  optional string next_start_after = 4;
 }
 
 message ReportFullScanTaskResponse {

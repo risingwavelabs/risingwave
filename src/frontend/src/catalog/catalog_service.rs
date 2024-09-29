@@ -24,10 +24,9 @@ use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
-use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, create_connection_request, PbReplaceTablePlan,
-    PbTableJobType, ReplaceTablePlan, TableJobType, WaitVersion,
+    alter_name_request, alter_owner_request, alter_set_schema_request, create_connection_request,
+    PbReplaceTablePlan, PbTableJobType, ReplaceTablePlan, TableJobType, WaitVersion,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -175,27 +174,13 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
 
-    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()>;
-
-    async fn alter_view_name(&self, view_id: u32, view_name: &str) -> Result<()>;
-
-    async fn alter_index_name(&self, index_id: u32, index_name: &str) -> Result<()>;
-
-    async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()>;
-
-    async fn alter_subscription_name(
+    async fn alter_name(
         &self,
-        subscription_id: u32,
-        subscription_name: &str,
+        object_id: alter_name_request::Object,
+        object_name: &str,
     ) -> Result<()>;
 
-    async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()>;
-
-    async fn alter_schema_name(&self, schema_id: u32, schema_name: &str) -> Result<()>;
-
-    async fn alter_database_name(&self, database_id: u32, database_name: &str) -> Result<()>;
-
-    async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()>;
+    async fn alter_owner(&self, object: alter_owner_request::Object, owner_id: u32) -> Result<()>;
 
     /// Replace the source in the catalog.
     async fn alter_source(&self, source: PbSource) -> Result<()>;
@@ -469,81 +454,16 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_name(alter_name_request::Object::TableId(table_id), table_name)
-            .await?;
-        self.wait_version(version).await
-    }
-
-    async fn alter_view_name(&self, view_id: u32, view_name: &str) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_name(alter_name_request::Object::ViewId(view_id), view_name)
-            .await?;
-        self.wait_version(version).await
-    }
-
-    async fn alter_index_name(&self, index_id: u32, index_name: &str) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_name(alter_name_request::Object::IndexId(index_id), index_name)
-            .await?;
-        self.wait_version(version).await
-    }
-
-    async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_name(alter_name_request::Object::SinkId(sink_id), sink_name)
-            .await?;
-        self.wait_version(version).await
-    }
-
-    async fn alter_subscription_name(
+    async fn alter_name(
         &self,
-        subscription_id: u32,
-        subscription_name: &str,
+        object_id: alter_name_request::Object,
+        object_name: &str,
     ) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_name(
-                alter_name_request::Object::SubscriptionId(subscription_id),
-                subscription_name,
-            )
-            .await?;
+        let version = self.meta_client.alter_name(object_id, object_name).await?;
         self.wait_version(version).await
     }
 
-    async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_name(alter_name_request::Object::SourceId(source_id), source_name)
-            .await?;
-        self.wait_version(version).await
-    }
-
-    async fn alter_schema_name(&self, schema_id: u32, schema_name: &str) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_name(alter_name_request::Object::SchemaId(schema_id), schema_name)
-            .await?;
-        self.wait_version(version).await
-    }
-
-    async fn alter_database_name(&self, database_id: u32, database_name: &str) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_name(
-                alter_name_request::Object::DatabaseId(database_id),
-                database_name,
-            )
-            .await?;
-        self.wait_version(version).await
-    }
-
-    async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
+    async fn alter_owner(&self, object: alter_owner_request::Object, owner_id: u32) -> Result<()> {
         let version = self.meta_client.alter_owner(object, owner_id).await?;
         self.wait_version(version).await
     }

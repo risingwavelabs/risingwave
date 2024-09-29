@@ -68,6 +68,7 @@ use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
+use crate::error::{bail_invalid_parameter, bail_unavailable};
 use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, DdlType, FragmentManagerRef, FunctionId,
     IdCategory, IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -1540,33 +1541,60 @@ impl DdlController {
         Ok(version)
     }
 
+    /// Resolve the parallelism of the stream job based on the given information.
+    ///
+    /// Returns error if user specifies a parallelism that cannot be satisfied.
     fn resolve_stream_parallelism(
         &self,
-        specified_parallelism: Option<NonZeroUsize>,
+        specified: Option<NonZeroUsize>,
+        max: NonZeroUsize,
         cluster_info: &StreamingClusterInfo,
     ) -> MetaResult<NonZeroUsize> {
-        let available_parallelism = cluster_info.parallelism();
-        if available_parallelism == 0 {
-            return Err(MetaError::unavailable("No available slots to schedule"));
+        let available = cluster_info.parallelism();
+        let Some(available) = NonZeroUsize::new(available) else {
+            bail_unavailable!("no available slots to schedule");
+        };
+
+        if let Some(specified) = specified {
+            if specified > max {
+                bail_invalid_parameter!(
+                    "specified parallelism {} should not exceed max parallelism {}",
+                    specified,
+                    max,
+                );
+            }
+            if specified > available {
+                bail_unavailable!(
+                    "not enough parallelism to schedule, required: {}, available: {}",
+                    specified,
+                    available,
+                );
+            }
+            Ok(specified)
+        } else {
+            // Use configured parallelism if no default parallelism is specified.
+            let default_parallelism = match self.env.opts.default_parallelism {
+                DefaultParallelism::Full => available,
+                DefaultParallelism::Default(num) => {
+                    if num > available {
+                        bail_unavailable!(
+                            "not enough parallelism to schedule, required: {}, available: {}",
+                            num,
+                            available,
+                        );
+                    }
+                    num
+                }
+            };
+
+            if default_parallelism > max {
+                tracing::warn!(
+                    "too many parallelism available, use max parallelism {} instead",
+                    max
+                );
+            }
+            Ok(default_parallelism.min(max))
         }
-
-        let available_parallelism = NonZeroUsize::new(available_parallelism).unwrap();
-
-        // Use configured parallelism if no default parallelism is specified.
-        let parallelism =
-            specified_parallelism.unwrap_or_else(|| match &self.env.opts.default_parallelism {
-                DefaultParallelism::Full => available_parallelism,
-                DefaultParallelism::Default(num) => *num,
-            });
-
-        if parallelism > available_parallelism {
-            return Err(MetaError::unavailable(format!(
-                "Not enough parallelism to schedule, required: {}, available: {}",
-                parallelism, available_parallelism
-            )));
-        }
-
-        Ok(parallelism)
     }
 
     /// Builds the actor graph:
@@ -1631,12 +1659,8 @@ impl DdlController {
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
-        let parallelism = self.resolve_stream_parallelism(specified_parallelism, &cluster_info)?;
-        let parallelism_limited = parallelism > max_parallelism;
-        if parallelism_limited {
-            tracing::warn!("Too many parallelism, use {} instead", max_parallelism);
-        }
-        let parallelism = parallelism.min(max_parallelism);
+        let parallelism =
+            self.resolve_stream_parallelism(specified_parallelism, max_parallelism, &cluster_info)?;
 
         let actor_graph_builder =
             ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
@@ -1659,10 +1683,6 @@ impl DdlController {
         // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
         // Otherwise, it defaults to FIXED based on deduction.
         let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
-            (None, DefaultParallelism::Full) if parallelism_limited => {
-                tracing::warn!("Parallelism limited to {max_parallelism} in ADAPTIVE mode");
-                TableParallelism::Adaptive
-            }
             (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
             _ => TableParallelism::Fixed(parallelism.get()),
         };

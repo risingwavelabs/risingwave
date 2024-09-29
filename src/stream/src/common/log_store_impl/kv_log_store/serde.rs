@@ -201,7 +201,7 @@ impl LogStoreRowSerde {
 
         let vnodes = match vnodes {
             Some(vnodes) => vnodes,
-            None => Bitmap::singleton().into(),
+            None => Bitmap::singleton_arc().clone(),
         };
 
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type

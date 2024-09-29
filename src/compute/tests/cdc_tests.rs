@@ -39,7 +39,7 @@ use risingwave_connector::source::cdc::external::{
 };
 use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;
-use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_stream::common::table::state_table::StateTable;
@@ -384,7 +384,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         table.clone(),
         vec![ScanRange::full()],
         true,
-        to_committed_batch_query_epoch(u64::MAX),
+        test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_string(),
         None,

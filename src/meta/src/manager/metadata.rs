@@ -31,6 +31,7 @@ use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
 use tracing::warn;
 
+use super::FragmentParallelismInfo;
 use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
@@ -436,15 +437,12 @@ impl MetadataManager {
     pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> MetaResult<HashMap<FragmentId, usize>> {
+    ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         match self {
             MetadataManager::V1(mgr) => Ok(mgr
                 .fragment_manager
                 .running_fragment_parallelisms(id_filter)
-                .await
-                .into_iter()
-                .map(|(k, v)| (k as FragmentId, v))
-                .collect()),
+                .await),
             MetadataManager::V2(mgr) => {
                 let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
                 Ok(mgr
