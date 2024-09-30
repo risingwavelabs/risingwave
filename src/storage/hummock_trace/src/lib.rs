@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(cursor_remaining)]
+// FIXME: open the assert when 1.8.2 is stable that can use #![feature(cursor_split)] instead of #![feature(cursor_remaining)]
+// see: https://github.com/rust-lang/rust/pull/109174 
+// #![feature(cursor_remaining)]
+
 #![feature(trait_alias)]
 #![feature(coroutines)]
 
