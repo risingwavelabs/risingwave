@@ -53,7 +53,9 @@ use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
-use risingwave_hummock_sdk::{compact_task_to_string, HummockCompactionTaskId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    compact_task_to_string, HummockCompactionTaskId, HummockSstableObjectId, LocalSstableInfo,
+};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     Event as RequestEvent, HeartBeat, PullTask, ReportTask,
@@ -423,6 +425,7 @@ pub fn start_compactor(
                 fn send_report_task_event(
                     compact_task: &CompactTask,
                     table_stats: TableStatsMap,
+                    object_timestamps: HashMap<HummockSstableObjectId, u64>,
                     request_sender: &mpsc::UnboundedSender<SubscribeCompactionEventRequest>,
                 ) {
                     if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
@@ -435,6 +438,7 @@ pub fn start_compactor(
                                 .map(|sst| sst.into())
                                 .collect(),
                             table_stats_change: to_prost_table_stats_map(table_stats),
+                            object_timestamps,
                         })),
                         create_at: SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -487,16 +491,18 @@ pub fn start_compactor(
                                         max_task_parallelism,
                                         running_task_parallelism.load(Ordering::Relaxed),
                                     );
-                                    let (compact_task, table_stats) = compact_done(
-                                        compact_task,
-                                        context.clone(),
-                                        vec![],
-                                        TaskStatus::NoAvailCpuResourceCanceled,
-                                    );
+                                    let (compact_task, table_stats, object_timestamps) =
+                                        compact_done(
+                                            compact_task,
+                                            context.clone(),
+                                            vec![],
+                                            TaskStatus::NoAvailCpuResourceCanceled,
+                                        );
 
                                     send_report_task_event(
                                         &compact_task,
                                         table_stats,
+                                        object_timestamps,
                                         &request_sender,
                                     );
 
@@ -509,7 +515,7 @@ pub fn start_compactor(
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
-                                    let ((compact_task, table_stats), _memory_tracker) =
+                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker) =
                                         match sstable_object_id_manager
                                             .add_watermark_object_id(None)
                                             .await
@@ -538,7 +544,7 @@ pub fn start_compactor(
                                                 tracing::warn!(error = %err.as_report(), "Failed to track pending SST object id");
                                                 let mut compact_task = compact_task;
                                                 compact_task.task_status = TaskStatus::TrackSstObjectIdFailed;
-                                                ((compact_task, HashMap::default()), None)
+                                                ((compact_task, HashMap::default(), HashMap::default()), None)
                                             }
                                         };
                                     shutdown.lock().unwrap().remove(&task_id);
@@ -547,6 +553,7 @@ pub fn start_compactor(
                                     send_report_task_event(
                                         &compact_task,
                                         table_stats,
+                                        object_timestamps,
                                         &request_sender,
                                     );
 
@@ -740,7 +747,7 @@ pub fn start_shared_compactor(
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
-                                    let ((compact_task, table_stats), _memory_tracker)= compactor_runner::compact(
+                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact(
                                         context.clone(),
                                         compact_task,
                                         rx,
@@ -753,6 +760,7 @@ pub fn start_shared_compactor(
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                                             compact_task: Some(PbCompactTask::from(&compact_task)),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
+                                            object_timestamps,
                                         })),
                                     };
 

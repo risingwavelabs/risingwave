@@ -210,7 +210,13 @@ async fn test_hummock_compaction_task() {
     // Finish the task and succeed.
 
     assert!(hummock_manager
-        .report_compact_task(compact_task.task_id, TaskStatus::Success, vec![], None)
+        .report_compact_task(
+            compact_task.task_id,
+            TaskStatus::Success,
+            vec![],
+            None,
+            HashMap::default()
+        )
         .await
         .unwrap());
 }
@@ -1383,6 +1389,7 @@ async fn test_version_stats() {
             TaskStatus::Success,
             vec![],
             Some(to_prost_table_stats_map(compact_table_stats_change)),
+            HashMap::default(),
         )
         .await
         .unwrap();
@@ -1770,12 +1777,19 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
                 ..Default::default()
             }],
             None,
+            HashMap::default(),
         )
         .await
         .unwrap();
     assert!(ret);
     let ret = hummock_manager
-        .report_compact_task(task.task_id, TaskStatus::Success, vec![], None)
+        .report_compact_task(
+            task.task_id,
+            TaskStatus::Success,
+            vec![],
+            None,
+            HashMap::default(),
+        )
         .await
         .unwrap();
     // the task has been canceled
@@ -1845,7 +1859,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
 
     let compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
-
     let manual_compcation_option = ManualCompactionOption {
         level: 0,
         ..Default::default()
@@ -1990,7 +2003,13 @@ async fn test_compaction_task_expiration_due_to_split_group() {
 
     let version_1 = hummock_manager.get_current_version().await;
     assert!(!hummock_manager
-        .report_compact_task(compaction_task.task_id, TaskStatus::Success, vec![], None)
+        .report_compact_task(
+            compaction_task.task_id,
+            TaskStatus::Success,
+            vec![],
+            None,
+            HashMap::default()
+        )
         .await
         .unwrap());
     let version_2 = hummock_manager.get_current_version().await;
@@ -2005,7 +2024,13 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         get_manual_compact_task(hummock_manager.clone(), compaction_group_id, 0).await;
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
     hummock_manager
-        .report_compact_task(compaction_task.task_id, TaskStatus::Success, vec![], None)
+        .report_compact_task(
+            compaction_task.task_id,
+            TaskStatus::Success,
+            vec![],
+            None,
+            HashMap::default(),
+        )
         .await
         .unwrap();
 
@@ -2254,7 +2279,13 @@ async fn test_partition_level() {
             sst.sst_size = sst.file_size;
             global_sst_id += 1;
             let ret = hummock_manager
-                .report_compact_task(task.task_id, TaskStatus::Success, vec![sst], None)
+                .report_compact_task(
+                    task.task_id,
+                    TaskStatus::Success,
+                    vec![sst],
+                    None,
+                    HashMap::default(),
+                )
                 .await
                 .unwrap();
             assert!(ret);

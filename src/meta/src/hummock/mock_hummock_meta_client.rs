@@ -346,6 +346,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                         task_status,
                         sorted_output_ssts,
                         table_stats_change,
+                        object_timestamps,
                     }) = item.event.unwrap()
                     {
                         if let Err(e) = hummock_manager_compact
@@ -357,6 +358,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                                     .map(SstableInfo::from)
                                     .collect_vec(),
                                 Some(table_stats_change),
+                                object_timestamps,
                             )
                             .await
                         {
