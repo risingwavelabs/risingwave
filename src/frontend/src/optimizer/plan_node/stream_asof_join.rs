@@ -15,7 +15,6 @@
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::bail;
 use risingwave_pb::expr::expr_node::PbType;
@@ -28,15 +27,16 @@ use super::stream::prelude::*;
 use super::utils::{
     childless_record, plan_node_name, watermark_pretty, Distill, TableCatalogBuilder,
 };
-use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
+use super::{
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamJoinCommon, StreamNode,
+};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ColIndexMappingRewriteExt;
 use crate::TableCatalog;
 
 /// [`StreamAsOfJoin`] implements [`super::LogicalJoin`] with hash tables.
@@ -63,13 +63,19 @@ impl StreamAsOfJoin {
         eq_join_predicate: EqJoinPredicate,
         inequality_desc: AsOfJoinDesc,
     ) -> Self {
+        assert!(core.join_type == JoinType::AsofInner || core.join_type == JoinType::AsofLeftOuter);
+
         // Inner join won't change the append-only behavior of the stream. The rest might.
         let append_only = match core.join_type {
             JoinType::Inner => core.left.append_only() && core.right.append_only(),
             _ => false,
         };
 
-        let dist = Self::derive_dist(core.left.distribution(), core.right.distribution(), &core);
+        let dist = StreamJoinCommon::derive_dist(
+            core.left.distribution(),
+            core.right.distribution(),
+            &core,
+        );
 
         // TODO: derive watermarks
         let watermark_columns = FixedBitSet::with_capacity(core.schema().len());
@@ -136,66 +142,23 @@ impl StreamAsOfJoin {
         self.core.join_type
     }
 
-    /// Get a reference to the batch hash join's eq join predicate.
+    /// Get a reference to the `AsOf` join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
-    }
-
-    pub(super) fn derive_dist(
-        left: &Distribution,
-        right: &Distribution,
-        logical: &generic::Join<PlanRef>,
-    ) -> Distribution {
-        match (left, right) {
-            (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (Distribution::HashShard(_), Distribution::HashShard(_)) => match logical.join_type {
-                JoinType::Unspecified
-                | JoinType::FullOuter
-                | JoinType::Inner
-                | JoinType::LeftOuter
-                | JoinType::LeftSemi
-                | JoinType::LeftAnti
-                | JoinType::RightSemi
-                | JoinType::RightAnti
-                | JoinType::RightOuter => unreachable!(),
-                JoinType::AsofInner | JoinType::AsofLeftOuter => {
-                    let l2o = logical
-                        .l2i_col_mapping()
-                        .composite(&logical.i2o_col_mapping());
-                    l2o.rewrite_provided_distribution(left)
-                }
-            },
-            (_, _) => unreachable!(
-                "suspicious distribution: left: {:?}, right: {:?}",
-                left, right
-            ),
-        }
     }
 
     pub fn derive_dist_key_in_join_key(&self) -> Vec<usize> {
         let left_dk_indices = self.left().distribution().dist_column_indices().to_vec();
         let right_dk_indices = self.right().distribution().dist_column_indices().to_vec();
-        let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
-        let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
 
-        assert_eq!(left_jk_indices.len(), right_jk_indices.len());
-
-        let mut dk_indices_in_jk = vec![];
-
-        for (l_dk_idx, r_dk_idx) in left_dk_indices.iter().zip_eq_fast(right_dk_indices.iter()) {
-            for dk_idx_in_jk in left_jk_indices.iter().positions(|idx| idx == l_dk_idx) {
-                if right_jk_indices[dk_idx_in_jk] == *r_dk_idx {
-                    dk_indices_in_jk.push(dk_idx_in_jk);
-                    break;
-                }
-            }
-        }
-
-        assert_eq!(dk_indices_in_jk.len(), left_dk_indices.len());
-        dk_indices_in_jk
+        StreamJoinCommon::get_dist_key_in_join_key(
+            &left_dk_indices,
+            &right_dk_indices,
+            self.eq_join_predicate(),
+        )
     }
 
-    /// Return stream hash join internal table catalog.
+    /// Return stream asof join internal table catalog.
     pub fn infer_internal_table_catalog<I: StreamPlanRef>(
         input: I,
         join_key_indices: Vec<usize>,
