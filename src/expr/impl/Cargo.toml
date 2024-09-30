@@ -43,7 +43,7 @@ futures-async-stream = { workspace = true }
 futures-util = "0.3"
 ginepro = "0.7" # TODO(http-bump): bump to 0.8 once arrow-udf switches to tonic 0.12
 hex = "0.4"
-icelake = { workspace = true }
+iceberg = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { version = "0.3", features = ["used_linker"] }

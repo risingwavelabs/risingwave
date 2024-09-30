@@ -17,7 +17,7 @@ use std::io::{Error, ErrorKind};
 
 use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
-use icelake::types::Transform;
+use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, CreateType, TableId};
@@ -605,13 +605,12 @@ impl ExprVisitable for StreamSink {}
 
 #[cfg(test)]
 mod test {
-    use icelake::types::Transform;
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, StructType};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_pb::expr::expr_node::Type;
 
-    use super::IcebergPartitionInfo;
+    use super::{IcebergPartitionInfo, *};
     use crate::expr::{Expr, ExprImpl};
 
     fn create_column_catalog() -> Vec<ColumnCatalog> {

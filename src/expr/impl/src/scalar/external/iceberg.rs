@@ -19,9 +19,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use icelake::types::{
-    create_transform_function, Any as IcelakeDataType, BoxedTransformFunction, Transform,
-};
+use iceberg::spec::Transform;
+use iceberg::transform::{create_transform_function, BoxedTransformFunction};
 use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
@@ -81,7 +80,7 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         let datum = children[0].eval_const()?.unwrap();
         let str = datum.as_utf8();
         Transform::from_str(str).map_err(|_| ExprError::InvalidParam {
-            name: "transform type in icberg_transform",
+            name: "transform type in iceberg_transform",
             reason: format!("Fail to parse {str} as iceberg transform type").into(),
         })?
     };
@@ -101,7 +100,7 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         .data_type()
         .clone();
     let output_arrow_field = IcebergArrowConvert.to_arrow_field("", &return_type)?;
-    let input_type = IcelakeDataType::try_from(input_arrow_type.clone()).map_err(|err| {
+    let input_type = iceberg::arrow::arrow_type_to_type(&input_arrow_type).map_err(|err| {
         ExprError::InvalidParam {
             name: "input type in iceberg_transform",
             reason: format!(
@@ -120,8 +119,8 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
             )
             .into()
         })?;
-    let actual_res_type = IcelakeDataType::try_from(
-        IcebergArrowConvert
+    let actual_res_type = iceberg::arrow::arrow_type_to_type(
+        &IcebergArrowConvert
             .to_arrow_field("", &return_type)?
             .data_type()
             .clone(),

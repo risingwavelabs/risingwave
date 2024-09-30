@@ -529,6 +529,7 @@ mod v2 {
                         java_catalog_props,
                     )
                 }
+                "mock" => Ok(Arc::new(mock_catalog::MockCatalog {})),
                 _ => {
                     bail!(
                     "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`",
