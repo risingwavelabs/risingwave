@@ -5545,9 +5545,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-auth"
-version = "0.16.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1112c453c2e155b3e683204ffff52bcc6d6495d04b68d9e90cd24161270c5058"
+checksum = "357160f51a60ec3e32169ad687f4abe0ee1e90c73b449aa5d11256c4f1cf2ff6"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -5567,9 +5567,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-bigquery"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "305cb7214d11b719e9f00f982c1ee1304c674f7a8dfc44a43b8bad3c909750c2"
+checksum = "876a94dbf94e306f43f9bb34e7dd65f92d10e846f42596ba594c18a0f3d440b1"
 dependencies = [
  "anyhow",
  "arrow 50.0.0",
@@ -5632,9 +5632,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-pubsub"
-version = "0.28.1"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55ef73601dcec5ea144e59969e921d35d66000211603fee8023b7947af09248f"
+checksum = "e3d2d4a82a8699b8ed9e5849410820d91ce51bcb6572386bbd3ac1336325e191"
 dependencies = [
  "async-channel 1.9.0",
  "async-stream",
