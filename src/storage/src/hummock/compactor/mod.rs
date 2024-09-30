@@ -516,37 +516,13 @@ pub fn start_compactor(
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
                                     let ((compact_task, table_stats, object_timestamps), _memory_tracker) =
-                                        match sstable_object_id_manager
-                                            .add_watermark_object_id(None)
-                                            .await
-                                        {
-                                            Ok(tracker_id) => {
-                                                let sstable_object_id_manager_clone =
-                                                    sstable_object_id_manager.clone();
-                                                let _guard = scopeguard::guard(
-                                                    (tracker_id, sstable_object_id_manager_clone),
-                                                    |(tracker_id, sstable_object_id_manager)| {
-                                                        sstable_object_id_manager
-                                                            .remove_watermark_object_id(tracker_id);
-                                                    },
-                                                );
-
-                                                compactor_runner::compact(
-                                                    context.clone(),
-                                                    compact_task,
-                                                    rx,
-                                                    Box::new(sstable_object_id_manager.clone()),
-                                                    filter_key_extractor_manager.clone(),
-                                                )
-                                                .await
-                                            }
-                                            Err(err) => {
-                                                tracing::warn!(error = %err.as_report(), "Failed to track pending SST object id");
-                                                let mut compact_task = compact_task;
-                                                compact_task.task_status = TaskStatus::TrackSstObjectIdFailed;
-                                                ((compact_task, HashMap::default(), HashMap::default()), None)
-                                            }
-                                        };
+                                        compactor_runner::compact(
+                                            context.clone(),
+                                            compact_task,
+                                            rx,
+                                            Box::new(sstable_object_id_manager.clone()),
+                                            filter_key_extractor_manager.clone(),
+                                        ).await;
                                     shutdown.lock().unwrap().remove(&task_id);
                                     running_task_parallelism.fetch_sub(parallelism as u32, Ordering::SeqCst);
 

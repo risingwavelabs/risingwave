@@ -18,16 +18,12 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::time::{Duration, SystemTime};
 
-use anyhow::Context;
-use futures::{stream, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_meta_model_migration::OnConflict;
 use risingwave_meta_model_v2::hummock_sequence;
 use risingwave_meta_model_v2::hummock_sequence::HUMMOCK_NOW;
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::FullScanTask;
 use sea_orm::{ActiveValue, EntityTrait};
@@ -35,7 +31,6 @@ use sea_orm::{ActiveValue, EntityTrait};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
-use crate::manager::MetadataManager;
 use crate::model::BTreeMapTransaction;
 
 #[derive(Default)]
@@ -237,11 +232,6 @@ impl HummockManager {
             return Ok(0);
         }
         let metrics = &self.metrics;
-        let spin_interval =
-            Duration::from_secs(self.env.opts.collect_gc_watermark_spin_interval_sec);
-        let watermark =
-            collect_global_gc_watermark(self.metadata_manager().clone(), spin_interval).await?;
-        metrics.full_gc_last_object_id_watermark.set(watermark as _);
         let candidate_object_number = object_ids.len();
         metrics
             .full_gc_candidate_object_count
@@ -253,24 +243,18 @@ impl HummockManager {
         self.metrics
             .time_travel_object_count
             .set(pinned_object_ids.len() as _);
-        // 1. filter by watermark
-        let object_ids = object_ids
-            .into_iter()
-            .filter(|s| *s < watermark)
-            .collect_vec();
-        let after_watermark = object_ids.len();
-        // 2. filter by time travel archive
+        // filter by time travel archive
         let object_ids = object_ids
             .into_iter()
             .filter(|s| !pinned_object_ids.contains(s))
             .collect_vec();
         let after_time_travel = object_ids.len();
-        // 3. filter by version
+        // filter by version
         let selected_object_number = self.extend_objects_to_delete_from_scan(&object_ids).await;
         metrics
             .full_gc_selected_object_count
             .observe(selected_object_number as _);
-        tracing::info!("GC watermark is {watermark}. Object full scan returns {candidate_object_number} objects. {after_watermark} remains after filtered by GC watermark. {after_time_travel} remains after filtered by time travel archives. {selected_object_number} remains after filtered by hummock version.");
+        tracing::info!("Object full scan returns {candidate_object_number} objects. {after_time_travel} remains after filtered by time travel archives. {selected_object_number} remains after filtered by hummock version.");
         Ok(selected_object_number)
     }
 
@@ -341,79 +325,6 @@ impl FullGcState {
     }
 }
 
-/// Collects SST GC watermark from related cluster nodes and calculates a global one.
-///
-/// It must wait enough heartbeats first. This precondition is checked at `spin_interval`.
-///
-/// Returns a global GC watermark. The watermark only guards SSTs created before this
-/// invocation.
-pub async fn collect_global_gc_watermark(
-    metadata_manager: MetadataManager,
-    spin_interval: Duration,
-) -> Result<HummockSstableObjectId> {
-    let mut global_watermark = HummockSstableObjectId::MAX;
-    let workers = [
-        metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await
-            .map_err(|err| Error::MetaStore(err.into()))?,
-        metadata_manager
-            .list_worker_node(Some(WorkerType::Compactor), Some(Running))
-            .await
-            .map_err(|err| Error::MetaStore(err.into()))?,
-    ]
-    .concat();
-
-    if workers.is_empty() {
-        return Ok(global_watermark);
-    }
-
-    let mut worker_futures = vec![];
-    for worker in &workers {
-        // For each cluster node, its watermark is collected after waiting for 2 heartbeats.
-        // The first heartbeat may carry watermark took before the start of this method,
-        // which doesn't correctly guard target SSTs.
-        // The second heartbeat guarantees its watermark is took after the start of this method.
-        let worker_id = worker.id;
-        let metadata_manager_clone = metadata_manager.clone();
-        worker_futures.push(tokio::spawn(async move {
-            let mut init_version_id: Option<u64> = None;
-            loop {
-                let worker_info = match metadata_manager_clone
-                    .get_worker_info_by_id(worker_id)
-                    .await
-                {
-                    None => {
-                        return None;
-                    }
-                    Some(worker_info) => worker_info,
-                };
-                match init_version_id.as_ref() {
-                    None => {
-                        init_version_id = Some(worker_info.info_version_id);
-                    }
-                    Some(init_version_id) => {
-                        if worker_info.info_version_id >= *init_version_id + 2 {
-                            return worker_info.hummock_gc_watermark;
-                        }
-                    }
-                }
-                tokio::time::sleep(spin_interval).await;
-            }
-        }));
-    }
-    let mut buffered = stream::iter(worker_futures).buffer_unordered(workers.len());
-    while let Some(worker_result) = buffered.next().await {
-        let worker_watermark = worker_result.context("Failed to collect GC watermark")?;
-        // None means either the worker has gone or the worker has not set a watermark.
-        global_watermark = cmp::min(
-            global_watermark,
-            worker_watermark.unwrap_or(HummockSstableObjectId::MAX),
-        );
-    }
-    Ok(global_watermark)
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -421,17 +332,15 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::HummockSstableObjectId;
     use risingwave_rpc_client::HummockMetaClient;
 
     use super::ResponseEvent;
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::hummock::MockHummockMetaClient;
-    use crate::MetaOpts;
 
     #[tokio::test]
     async fn test_full_gc() {
-        let (mut env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+        let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager.clone(),
@@ -439,12 +348,6 @@ mod tests {
         ));
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-        // Use smaller spin interval to accelerate test.
-        env.opts = Arc::new(MetaOpts {
-            collect_gc_watermark_spin_interval_sec: 1,
-            ..(*env.opts).clone()
-        });
-
         // No task scheduled because no available worker.
         assert!(!hummock_manager
             .start_full_gc(
@@ -489,25 +392,6 @@ mod tests {
             .complete_full_gc(vec![], None)
             .await
             .unwrap();
-
-        // mimic CN heartbeat
-        use risingwave_pb::meta::heartbeat_request::extra_info::Info;
-        let heartbeat_interval = hummock_manager
-            .env
-            .opts
-            .collect_gc_watermark_spin_interval_sec;
-        tokio::spawn(async move {
-            loop {
-                cluster_manager
-                    .heartbeat(
-                        context_id,
-                        vec![Info::HummockGcWatermark(HummockSstableObjectId::MAX)],
-                    )
-                    .await
-                    .unwrap();
-                tokio::time::sleep(Duration::from_secs(heartbeat_interval)).await;
-            }
-        });
 
         // LSMtree is empty. All input SST ids should be treated as garbage.
         assert_eq!(

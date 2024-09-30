@@ -16,10 +16,8 @@ use std::cmp;
 use std::ops::{Add, Deref};
 use std::time::{Duration, SystemTime};
 
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::worker_node::Resource;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use uuid::Uuid;
 
 use super::MetadataModelError;
@@ -42,11 +40,6 @@ pub struct Worker {
     pub started_at: Option<u64>,
 
     // Volatile values updated by worker as follows:
-    //
-    // Monotonic increasing id since meta node bootstrap.
-    pub info_version_id: u64,
-    // GC watermark.
-    pub hummock_gc_watermark: Option<HummockSstableObjectId>,
     pub resource: Option<Resource>,
 }
 
@@ -67,8 +60,6 @@ impl MetadataModel for Worker {
             worker_node: prost,
             expire_at: INVALID_EXPIRE_AT,
             started_at: None,
-            info_version_id: 0,
-            hummock_gc_watermark: None,
             resource: None,
         }
     }
@@ -105,17 +96,6 @@ impl Worker {
 
     pub fn update_started_at(&mut self, started_at: u64) {
         self.started_at = Some(started_at);
-    }
-
-    pub fn update_info(&mut self, info: Vec<Info>) {
-        self.info_version_id += 1;
-        for i in info {
-            match i {
-                Info::HummockGcWatermark(info) => {
-                    self.hummock_gc_watermark = Some(info);
-                }
-            }
-        }
     }
 
     pub fn update_resource(&mut self, resource: Option<Resource>) {

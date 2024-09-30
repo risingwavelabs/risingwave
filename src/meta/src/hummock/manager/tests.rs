@@ -1026,7 +1026,8 @@ async fn test_hummock_compaction_task_heartbeat() {
             compact_task.task_id,
             TaskStatus::ExecuteFailed,
             vec![],
-            None
+            None,
+            HashMap::default(),
         )
         .await
         .unwrap());
@@ -1054,7 +1055,8 @@ async fn test_hummock_compaction_task_heartbeat() {
             compact_task.task_id,
             TaskStatus::ExecuteFailed,
             vec![],
-            None
+            None,
+            HashMap::default(),
         )
         .await
         .unwrap());
@@ -1889,6 +1891,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
                 .flat_map(|level| level.table_infos.clone())
                 .collect(),
             None,
+            HashMap::default(),
         )
         .await
         .unwrap();

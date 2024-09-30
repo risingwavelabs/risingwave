@@ -27,9 +27,7 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH, MAX_EPOCH};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
-use risingwave_hummock_sdk::{
-    HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
-};
+use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo, SyncResult};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use risingwave_rpc_client::HummockMetaClient;
@@ -1288,16 +1286,8 @@ async fn test_multiple_epoch_sync_v2() {
 }
 
 #[tokio::test]
-async fn test_gc_watermark_and_clear_shared_buffer() {
+async fn test_clear_shared_buffer() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
-
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        HummockSstableObjectId::MAX
-    );
-
     let mut local_hummock_storage = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
@@ -1323,13 +1313,6 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .unwrap();
     local_hummock_storage.flush().await.unwrap();
 
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        HummockSstableObjectId::MAX
-    );
-
     let epoch2 = epoch1.next_epoch();
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
     local_hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
@@ -1341,12 +1324,6 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .unwrap();
     local_hummock_storage.flush().await.unwrap();
 
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        HummockSstableObjectId::MAX
-    );
     let _min_object_id = |sync_result: &SyncResult| {
         sync_result
             .uncommitted_ssts
