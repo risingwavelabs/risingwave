@@ -17,8 +17,6 @@
 mod util;
 
 use std::env;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::OnceLock;
 
 use prost::Message;
@@ -26,6 +24,7 @@ use risingwave_pb::telemetry::{
     EventMessage as PbEventMessage, PbTelemetryDatabaseObject,
     TelemetryEventStage as PbTelemetryEventStage,
 };
+use tokio::task::JoinHandle;
 pub use util::*;
 
 pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
@@ -34,9 +33,9 @@ pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
 pub type TelemetryError = String;
 
 pub static TELEMETRY_TRACKING_ID: OnceLock<String> = OnceLock::new();
-type BoxFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
-pub static TELEMETRY_REPORT_CHANNEL_TX: OnceLock<tokio::sync::mpsc::Sender<BoxFuture>> =
-    OnceLock::new();
+pub static TELEMETRY_REPORT_CHANNEL_TX: OnceLock<
+    tokio::sync::mpsc::UnboundedSender<JoinHandle<()>>,
+> = OnceLock::new();
 
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
 
@@ -102,13 +101,16 @@ pub fn request_to_telemetry_event(
     };
     let report_bytes = event.encode_to_vec();
 
-    tokio::spawn(async move {
+    let event_handle = tokio::spawn(async move {
         const TELEMETRY_EVENT_REPORT_TYPE: &str = "event";
         let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_EVENT_REPORT_TYPE).to_owned();
         post_telemetry_report_pb(&url, report_bytes)
             .await
             .unwrap_or_else(|e| tracing::info!("{}", e))
     });
+    if let Some(tx) = TELEMETRY_REPORT_CHANNEL_TX.get() {
+        tx.send(event_handle).unwrap();
+    }
 }
 
 #[cfg(test)]

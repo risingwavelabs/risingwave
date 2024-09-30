@@ -91,7 +91,7 @@ where
                     "Telemetry failed to set tracking_id, event reporting will be disabled"
                 )
             });
-        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         TELEMETRY_REPORT_CHANNEL_TX
             .set(tx)
             .unwrap_or_else(|_| tracing::warn!("Telemetry failed to set report channel"));
@@ -100,7 +100,7 @@ where
             tokio::select! {
                 event_future = rx.recv() => {
                     if let Some(event_future) = event_future {
-                        event_future.await;
+                        let _ = event_future.await;
                     }
                 }
                 _ = interval.tick() => {},
