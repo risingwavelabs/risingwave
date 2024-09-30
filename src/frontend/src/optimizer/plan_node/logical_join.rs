@@ -133,7 +133,7 @@ impl LogicalJoin {
             .collect_input_refs(self.core.left.schema().len() + self.core.right.schema().len());
         let index_group = input_refs
             .ones()
-            .group_by(|i| *i < self.core.left.schema().len());
+            .chunk_by(|i| *i < self.core.left.schema().len());
         let left_index = index_group
             .into_iter()
             .next()
