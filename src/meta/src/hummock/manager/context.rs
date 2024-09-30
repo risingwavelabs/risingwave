@@ -190,7 +190,6 @@ impl HummockManager {
         &self,
         committed_epoch: HummockEpoch,
         tables_to_commit: &HashSet<TableId>,
-        is_visible_table_committed_epoch: bool,
         sstables: &[LocalSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
@@ -213,17 +212,6 @@ impl HummockManager {
             {
                 return Err(Error::InvalidSst(*sst_id));
             }
-        }
-
-        if is_visible_table_committed_epoch
-            && committed_epoch <= current_version.max_committed_epoch_for_meta()
-        {
-            return Err(anyhow::anyhow!(
-                "Epoch {} <= max_committed_epoch {}",
-                committed_epoch,
-                current_version.max_committed_epoch_for_meta()
-            )
-            .into());
         }
 
         // sanity check on monotonically increasing table committed epoch

@@ -144,7 +144,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 
 impl<'a> HummockVersionTransaction<'a> {
     fn apply_compact_task(&mut self, compact_task: &CompactTask) {
-        let mut version_delta = self.new_delta(None);
+        let mut version_delta = self.new_delta();
         let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
         version_delta.trivial_move = trivial_move;
 

@@ -161,7 +161,7 @@ impl HummockManager {
             self.env.notification_manager(),
             &self.metrics,
         );
-        let mut new_version_delta = version.new_delta(None);
+        let mut new_version_delta = version.new_delta();
 
         let target_compaction_group_id = {
             // merge right_group_id to left_group_id and remove right_group_id
@@ -448,7 +448,7 @@ impl HummockManager {
             self.env.notification_manager(),
             &self.metrics,
         );
-        let mut new_version_delta = version.new_delta(None);
+        let mut new_version_delta = version.new_delta();
 
         let split_sst_count = new_version_delta
             .latest_version()
