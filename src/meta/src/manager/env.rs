@@ -33,7 +33,6 @@ use risingwave_rpc_client::{
 use sea_orm::EntityTrait;
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
 
 use super::{
     SessionParamsManager, SessionParamsManagerRef, SystemParamsManager, SystemParamsManagerRef,
@@ -537,8 +536,6 @@ impl MetaSrvEnv {
             }
         };
 
-        env.may_start_watch_license_key_file()?;
-
         Ok(env)
     }
 
@@ -643,7 +640,7 @@ impl MetaSrvEnv {
 impl MetaSrvEnv {
     /// Spawn background tasks to watch the license key file and update the system parameter,
     /// if configured.
-    pub fn may_start_watch_license_key_file(&self) -> MetaResult<JoinHandle<()>> {
+    pub fn may_start_watch_license_key_file(&self) -> MetaResult<()> {
         let Some(path) = self.opts.license_key_path.as_ref() else {
             return Ok(());
         };
@@ -708,7 +705,8 @@ impl MetaSrvEnv {
                 }
             }
         };
+        let _handle = tokio::spawn(updater);
 
-        Ok(tokio::spawn(updater))
+        Ok(())
     }
 }
