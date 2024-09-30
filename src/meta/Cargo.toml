@@ -103,7 +103,7 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 expect-test = "1.5"
 rand = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
 
 [features]

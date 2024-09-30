@@ -16,17 +16,21 @@ use std::cmp;
 use std::collections::HashSet;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_meta_model_migration::OnConflict;
+use risingwave_meta_model_v2::hummock_sequence;
+use risingwave_meta_model_v2::hummock_sequence::HUMMOCK_NOW;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::FullScanTask;
+use sea_orm::{ActiveValue, EntityTrait};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::commit_multi_var;
@@ -177,13 +181,13 @@ impl HummockManager {
     /// 3. Meta node decides which SSTs to delete. See `HummockManager::complete_full_gc`.
     ///
     /// Returns Ok(false) if there is no worker available.
-    pub fn start_full_gc(
+    pub async fn start_full_gc(
         &self,
         sst_retention_time: Duration,
         prefix: Option<String>,
     ) -> Result<bool> {
         self.metrics.full_gc_trigger_count.inc();
-        // Set a minimum sst_retention_time to avoid deleting SSTs of on-going write op.
+        // Set a minimum sst_retention_time.
         let sst_retention_time = cmp::max(
             sst_retention_time,
             Duration::from_secs(self.env.opts.min_sst_retention_time_sec),
@@ -205,9 +209,13 @@ impl HummockManager {
             }
             Some(compactor) => compactor,
         };
+        let sst_retention_watermark = self
+            .now()
+            .await?
+            .saturating_sub(sst_retention_time.as_secs());
         compactor
             .send_event(ResponseEvent::FullScanTask(FullScanTask {
-                sst_retention_time_sec: sst_retention_time.as_secs(),
+                sst_retention_watermark,
                 prefix,
                 start_after,
                 limit,
@@ -264,6 +272,50 @@ impl HummockManager {
             .observe(selected_object_number as _);
         tracing::info!("GC watermark is {watermark}. Object full scan returns {candidate_object_number} objects. {after_watermark} remains after filtered by GC watermark. {after_time_travel} remains after filtered by time travel archives. {selected_object_number} remains after filtered by hummock version.");
         Ok(selected_object_number)
+    }
+
+    pub async fn now(&self) -> Result<u64> {
+        let mut guard = self.now.lock().await;
+        let new_now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Clock may have gone backwards")
+            .as_secs();
+        if new_now < *guard {
+            return Err(anyhow::anyhow!(format!(
+                "unexpected decreasing now, old={}, new={}",
+                *guard, new_now
+            ))
+            .into());
+        }
+        *guard = new_now;
+        drop(guard);
+        // Persist now to maintain non-decreasing even after a meta node reboot.
+        if let Some(sql) = self.sql_store() {
+            let m = hummock_sequence::ActiveModel {
+                name: ActiveValue::Set(HUMMOCK_NOW.into()),
+                seq: ActiveValue::Set(new_now.try_into().unwrap()),
+            };
+            hummock_sequence::Entity::insert(m)
+                .on_conflict(
+                    OnConflict::column(hummock_sequence::Column::Name)
+                        .update_column(hummock_sequence::Column::Seq)
+                        .to_owned(),
+                )
+                .exec(&sql.conn)
+                .await?;
+        }
+        Ok(new_now)
+    }
+
+    pub(crate) async fn load_now(&self) -> Result<Option<u64>> {
+        let Some(sql) = self.sql_store() else {
+            return Ok(None);
+        };
+        let now = hummock_sequence::Entity::find_by_id(HUMMOCK_NOW.to_string())
+            .one(&sql.conn)
+            .await?
+            .map(|m| m.seq.try_into().unwrap());
+        Ok(now)
     }
 }
 
@@ -399,6 +451,7 @@ mod tests {
                 Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec - 1,),
                 None
             )
+            .await
             .unwrap());
 
         let mut receiver = compactor_manager.add_compactor(context_id);
@@ -408,36 +461,28 @@ mod tests {
                 Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec - 1),
                 None
             )
+            .await
             .unwrap());
-        let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
+        let _full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
             _ => {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec override user provided value.
-        assert_eq!(
-            hummock_manager.env.opts.min_sst_retention_time_sec,
-            full_scan_task.sst_retention_time_sec
-        );
 
         assert!(hummock_manager
             .start_full_gc(
                 Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec + 1),
                 None
             )
+            .await
             .unwrap());
-        let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
+        let _full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
             _ => {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec doesn't override user provided value.
-        assert_eq!(
-            hummock_manager.env.opts.min_sst_retention_time_sec + 1,
-            full_scan_task.sst_retention_time_sec
-        );
 
         // Empty input results immediate return, without waiting heartbeat.
         hummock_manager
