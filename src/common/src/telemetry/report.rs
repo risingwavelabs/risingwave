@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
 pub use risingwave_telemetry_event::{
-    current_timestamp, post_telemetry_report_pb, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
+    current_timestamp, post_telemetry_report_pb, TELEMETRY_REPORT_CHANNEL_TX, TELEMETRY_REPORT_URL,
+    TELEMETRY_TRACKING_ID,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -90,9 +91,18 @@ where
                     "Telemetry failed to set tracking_id, event reporting will be disabled"
                 )
             });
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        TELEMETRY_REPORT_CHANNEL_TX
+            .set(tx)
+            .unwrap_or_else(|_| tracing::warn!("Telemetry failed to set report channel"));
 
         loop {
             tokio::select! {
+                event_future = rx.recv() => {
+                    if let Some(event_future) = event_future {
+                        event_future.await;
+                    }
+                }
                 _ = interval.tick() => {},
                 _ = &mut shutdown_rx => {
                     tracing::info!("Telemetry exit");

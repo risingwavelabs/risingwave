@@ -17,6 +17,8 @@
 mod util;
 
 use std::env;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::OnceLock;
 
 use prost::Message;
@@ -32,6 +34,9 @@ pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
 pub type TelemetryError = String;
 
 pub static TELEMETRY_TRACKING_ID: OnceLock<String> = OnceLock::new();
+type BoxFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+pub static TELEMETRY_REPORT_CHANNEL_TX: OnceLock<tokio::sync::mpsc::Sender<BoxFuture>> =
+    OnceLock::new();
 
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
 
