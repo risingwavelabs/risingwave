@@ -98,7 +98,7 @@
               └─StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
 - name: bushy tree join ordering manually
   sql: |
-    set rw_enable_join_ordering = false;
+    set enable_join_ordering = false;
     create table t1 (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
     create table t3 (v5 int, v6 int);
@@ -146,7 +146,7 @@
               └─StreamTableScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) }
 - name: right deep tree join ordering manually
   sql: |
-    set rw_enable_join_ordering = false;
+    set enable_join_ordering = false;
     create table t1 (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
     create table t3 (v5 int, v6 int);

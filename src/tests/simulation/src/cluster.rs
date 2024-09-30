@@ -166,7 +166,7 @@ impl Configuration {
 
     pub fn for_scale_shared_source() -> Self {
         let mut conf = Self::for_scale();
-        conf.per_session_queries = vec!["SET RW_ENABLE_SHARED_SOURCE = true;".into()].into();
+        conf.per_session_queries = vec!["SET ENABLE_SHARED_SOURCE = true;".into()].into();
         conf
     }
 
