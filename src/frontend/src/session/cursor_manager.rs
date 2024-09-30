@@ -23,6 +23,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
 use futures::StreamExt;
+use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, Row};
@@ -30,6 +31,7 @@ use risingwave_common::catalog::Field;
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
@@ -42,8 +44,7 @@ use crate::handler::declare_cursor::{
 };
 use crate::handler::query::{gen_batch_plan_fragmenter, BatchQueryPlanResult};
 use crate::handler::util::{
-    convert_logstore_u64_to_unix_millis, gen_query_from_table_name, pg_value_format, to_pg_field,
-    DataChunkToRowSetAdapter, StaticSessionData,
+    convert_logstore_u64_to_unix_millis, gen_query_from_table_name_order_by, pg_value_format, to_pg_field, DataChunkToRowSetAdapter, StaticSessionData
 };
 use crate::handler::HandlerArgs;
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
@@ -522,6 +523,7 @@ impl SubscriptionCursor {
         let session = handle_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
         let init_query_timer = Instant::now();
+        let pks = table_catalog.pk();
         let (chunk_stream, fields) = if let Some(rw_timestamp) = rw_timestamp {
             let context = OptimizerContext::from_handler_args(handle_args);
             let version_id = {
@@ -545,14 +547,17 @@ impl SubscriptionCursor {
                     rw_timestamp,
                     rw_timestamp,
                     version_id,
+                    pks,
                 )?,
             )?;
             create_chunk_stream_for_cursor(session, plan_fragmenter_result).await?
         } else {
             let subscription_from_table_name =
                 ObjectName(vec![Ident::from(table_catalog.name.as_ref())]);
-            let query_stmt = Statement::Query(Box::new(gen_query_from_table_name(
+            let pk_indexes = pks.iter().map(|c| c.column_index).collect_vec();
+            let query_stmt = Statement::Query(Box::new(gen_query_from_table_name_order_by(
                 subscription_from_table_name,
+                pk_indexes,
             )));
             create_stream_for_cursor_stmt(handle_args, query_stmt).await?
         };
@@ -621,6 +626,7 @@ impl SubscriptionCursor {
         old_epoch: u64,
         new_epoch: u64,
         version_id: HummockVersionId,
+        pks: &[ColumnOrder],
     ) -> Result<BatchQueryPlanResult> {
         let out_col_idx = table_catalog
             .columns
@@ -645,11 +651,12 @@ impl SubscriptionCursor {
             .clone();
         let out_fields = FixedBitSet::from_iter(0..schema.len());
         let out_names = batch_log_seq_scan.core().column_names();
+        let order = Order::new(pks.to_vec());
         // Here we just need a plan_root to call the method, only out_fields and out_names will be used
         let plan_root = PlanRoot::new_with_batch_plan(
             PlanRef::from(batch_log_seq_scan.clone()),
             RequiredDist::single(),
-            Order::default(),
+            order,
             out_fields,
             out_names,
         );
