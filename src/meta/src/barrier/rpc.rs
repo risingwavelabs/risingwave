@@ -142,7 +142,7 @@ impl ControlStreamManager {
                 .await
             {
                 Ok((stream_node, response_stream)) => {
-                    let _ = self.nodes.insert(node_id, stream_node);
+                    assert!(self.nodes.insert(node_id, stream_node).is_none());
                     self.response_streams
                         .push(into_future(node_id, response_stream));
                     info!(?node_host, "add control stream worker");
@@ -181,7 +181,7 @@ impl ControlStreamManager {
         self.nodes.clear();
         self.response_streams.clear();
         for (worker_id, (node, response_stream)) in nodes {
-            self.nodes.insert(worker_id, node);
+            assert!(self.nodes.insert(worker_id, node).is_none());
             self.response_streams
                 .push(into_future(worker_id, response_stream));
         }
@@ -230,7 +230,7 @@ impl ControlStreamManager {
                     }
                     Response::Init(_) => {
                         // This arm should be unreachable.
-                        Err(anyhow!("get unexpected init response").into())
+                        unreachable!("get unexpected init response")
                     }
                 },
                 Err(err) => Err(err),
@@ -358,7 +358,7 @@ impl ControlStreamManager {
             .collect_vec();
 
         self.nodes
-            .iter_mut()
+            .iter()
             .try_for_each(|(node_id, node)| {
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
                     .actor_ids_to_collect(*node_id)
@@ -439,22 +439,18 @@ impl ControlStreamManager {
 
     pub(super) fn remove_partial_graph(&mut self, partial_graph_ids: Vec<u32>) {
         self.nodes.retain(|_, node| {
-            if node
-                .sender
+            node.sender
                 .send(StreamingControlStreamRequest {
                     request: Some(
                         streaming_control_stream_request::Request::RemovePartialGraph(
-                            RemovePartialGraphRequest { partial_graph_ids: partial_graph_ids.clone() },
+                            RemovePartialGraphRequest {
+                                partial_graph_ids: partial_graph_ids.clone(),
+                            },
                         ),
                     ),
                 })
-                .is_ok()
-            {
-                true
-            } else {
-                warn!(id = node.worker.id, host = ?node.worker.host, ?partial_graph_ids, "fail to remove_partial_graph request, node removed");
-                false
-            }
+                .unwrap();
+            true
         })
     }
 }
