@@ -81,19 +81,21 @@ where
         std::env::set_var("TOKIO_WORKER_THREADS", worker_threads);
     }
 
-    // Set the default number of worker threads to be at least `MIN_WORKER_THREADS`.
-    let worker_threads = match std::env::var("TOKIO_WORKER_THREADS") {
-        Ok(v) => v
-            .parse::<usize>()
-            .expect("Failed to parse TOKIO_WORKER_THREADS"),
-        Err(std::env::VarError::NotPresent) => std::thread::available_parallelism()
-            .expect("Failed to get available parallelism")
-            .get(),
-        Err(_) => panic!("Failed to parse TOKIO_WORKER_THREADS"),
-    };
-    if worker_threads < MIN_WORKER_THREADS {
-        tracing::warn!("the default number of worker threads ({worker_threads}) is too small, which may lead to issues, increasing to {MIN_WORKER_THREADS}");
-        std::env::set_var("TOKIO_WORKER_THREADS", MIN_WORKER_THREADS.to_string());
+    // Set the default number of worker threads to be at least `MIN_WORKER_THREADS`, in production.
+    if !cfg!(debug_assertions) {
+        let worker_threads = match std::env::var("TOKIO_WORKER_THREADS") {
+            Ok(v) => v
+                .parse::<usize>()
+                .expect("Failed to parse TOKIO_WORKER_THREADS"),
+            Err(std::env::VarError::NotPresent) => std::thread::available_parallelism()
+                .expect("Failed to get available parallelism")
+                .get(),
+            Err(_) => panic!("Failed to parse TOKIO_WORKER_THREADS"),
+        };
+        if worker_threads < MIN_WORKER_THREADS {
+            tracing::warn!("the default number of worker threads ({worker_threads}) is too small, which may lead to issues, increasing to {MIN_WORKER_THREADS}");
+            std::env::set_var("TOKIO_WORKER_THREADS", MIN_WORKER_THREADS.to_string());
+        }
     }
 
     if let Ok(enable_deadlock_detection) = std::env::var("RW_DEADLOCK_DETECTION") {
