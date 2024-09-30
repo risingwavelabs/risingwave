@@ -44,7 +44,8 @@ use crate::handler::declare_cursor::{
 };
 use crate::handler::query::{gen_batch_plan_fragmenter, BatchQueryPlanResult};
 use crate::handler::util::{
-    convert_logstore_u64_to_unix_millis, gen_query_from_table_name_order_by, pg_value_format, to_pg_field, DataChunkToRowSetAdapter, StaticSessionData
+    convert_logstore_u64_to_unix_millis, gen_query_from_table_name_order_by, pg_value_format,
+    to_pg_field, DataChunkToRowSetAdapter, StaticSessionData,
 };
 use crate::handler::HandlerArgs;
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};

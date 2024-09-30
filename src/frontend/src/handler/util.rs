@@ -32,7 +32,8 @@ use risingwave_common::types::{write_date_time_tz, DataType, ScalarRefImpl, Time
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    CompatibleSourceSchema, ConnectorSchema, Expr, ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr, TableFactor, TableWithJoins, Value
+    CompatibleSourceSchema, ConnectorSchema, Expr, ObjectName, OrderByExpr, Query, Select,
+    SelectItem, SetExpr, TableFactor, TableWithJoins, Value,
 };
 
 use crate::error::{ErrorCode, Result as RwResult};
@@ -229,16 +230,19 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
     }
 }
 
-pub fn gen_query_from_table_name_order_by(from_name: ObjectName,pks: Vec<usize>) -> Query{
+pub fn gen_query_from_table_name_order_by(from_name: ObjectName, pks: Vec<usize>) -> Query {
     let mut query = gen_query_from_table_name(from_name);
-    query.order_by = pks.into_iter().map(|pk| {
-        let expr = Expr::Value(Value::Number((pk + 1).to_string()));
-        OrderByExpr {
-            expr,
-            asc: None,
-            nulls_first: None,
-        }
-    }).collect();
+    query.order_by = pks
+        .into_iter()
+        .map(|pk| {
+            let expr = Expr::Value(Value::Number((pk + 1).to_string()));
+            OrderByExpr {
+                expr,
+                asc: None,
+                nulls_first: None,
+            }
+        })
+        .collect();
     query
 }
 

@@ -401,7 +401,6 @@ impl PlanRoot {
             vec![BatchPushLimitToScanRule::create()],
             ApplyOrder::BottomUp,
         ));
-        println!("plan: {:?}", plan);
 
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
