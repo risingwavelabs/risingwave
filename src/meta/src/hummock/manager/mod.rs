@@ -20,7 +20,6 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
-use parking_lot::Mutex;
 use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::INVALID_EPOCH;
@@ -39,6 +38,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::Mutex;
 use tonic::Streaming;
 
 use crate::hummock::compaction::CompactStatus;
@@ -307,6 +307,9 @@ impl HummockManager {
 
     /// Load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
+        let now = self.load_now().await?;
+        *self.now.lock().await = now.unwrap_or(0);
+
         let mut compaction_guard = self.compaction.write().await;
         let mut versioning_guard = self.versioning.write().await;
         let mut context_info_guard = self.context_info.write().await;

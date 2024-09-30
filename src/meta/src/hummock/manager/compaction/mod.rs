@@ -1129,6 +1129,7 @@ impl HummockManager {
     /// or the task is not owned by `context_id` when `context_id` is not None.
 
     pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
+        // TODO: add sanity check for serverless compaction
         let mut guard = self.compaction.write().await;
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction: &mut Compaction = &mut guard;

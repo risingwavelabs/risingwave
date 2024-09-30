@@ -241,14 +241,16 @@ impl HummockManager {
             }
         }
 
-        // TODO: add sanity check for serverless compaction
-
-        // sanity check to ensure SSTs to commit have not been full GCed yet.
-        let now = self.now();
-        let sst_retention_watermark = now.saturating_sub(self.env.opts.min_sst_retention_time_sec);
-        for sst in sstables {
-            if sst.created_at < sst_retention_watermark {
-                return Err(anyhow::anyhow!("SST {} is rejected from being committed since it's below watermark: SST timestamp {}, meta node timestamp {}, retention_sec {}, watermark {}", sst.sst_info.sst_id, sst.created_at, now, self.env.opts.min_sst_retention_time_sec, sst_retention_watermark).into());
+        // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
+        if !sstables.is_empty() {
+            // sanity check to ensure SSTs to commit have not been full GCed yet.
+            let now = self.now().await?;
+            let sst_retention_watermark =
+                now.saturating_sub(self.env.opts.min_sst_retention_time_sec);
+            for sst in sstables {
+                if sst.created_at < sst_retention_watermark {
+                    return Err(anyhow::anyhow!("SST {} is rejected from being committed since it's below watermark: SST timestamp {}, meta node timestamp {}, retention_sec {}, watermark {}", sst.sst_info.sst_id, sst.created_at, now, self.env.opts.min_sst_retention_time_sec, sst_retention_watermark).into());
+                }
             }
         }
 
