@@ -64,7 +64,7 @@ iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
 icelake = { workspace = true }
-indexmap = { version = "2.2.6", features = ["serde"] }
+indexmap = { version = "2.5.0", features = ["serde"] }
 itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = { workspace = true }
