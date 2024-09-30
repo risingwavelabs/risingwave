@@ -75,6 +75,7 @@ enum CompatibilityVersion {
   VERSION_UNSPECIFIED = 0;
   NO_TRIVIAL_SPLIT = 1;
   NO_MEMBER_TABLE_IDS = 2;
+  SPLIT_GROUP_BY_TABLE_ID = 3;
 }
 
 message GroupConstruct {
@@ -85,6 +86,13 @@ message GroupConstruct {
   uint64 group_id = 4;
   uint64 new_sst_start_id = 5;
   CompatibilityVersion version = 6;
+
+  // The split_key is the key that the group is split by.
+  // When GroupConstruct with commit_epoch, split_key will be empty
+  // When split_key is not None, GroupConstruct tells to use split_key to check each level and split the sstable_info in the level into two groups (bounded by split_key).
+  // For the left sstable_info, split_key (right_exclusive=true) will be used as key_range_right.
+  // In the current implementation split_key always contains a table_id, vnode = 0, epoch = MAX
+  optional bytes split_key = 7;
 }
 
 message GroupDestroy {}
@@ -665,6 +673,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       CompressionAlgorithm compression_algorithm = 17;
       uint32 max_l0_compact_level_count = 18;
       uint64 sst_allowed_trivial_move_min_size = 19;
+      uint32 split_weight_by_vnode = 20;
     }
   }
   repeated uint64 compaction_group_ids = 1;

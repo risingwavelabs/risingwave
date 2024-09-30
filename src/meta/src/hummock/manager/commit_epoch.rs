@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
+use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
@@ -68,7 +68,8 @@ pub struct CommitEpochInfo {
 }
 
 impl HummockManager {
-    /// Caller should ensure `epoch` > `max_committed_epoch`
+    /// Caller should ensure `epoch` > `committed_epoch` of `tables_to_commit`
+    /// if tables are not newly added via `new_table_fragment_info`
     pub async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> Result<()> {
         let CommitEpochInfo {
             mut sstables,
@@ -388,7 +389,8 @@ impl HummockManager {
                     })
                     .sum();
 
-                let branch_sst = split_sst(
+                // TODO(li0k): replace with `split_sst`
+                let branch_sst = split_sst_with_table_ids(
                     &mut sst.sst_info,
                     &mut new_sst_id,
                     origin_sst_size - new_sst_size,

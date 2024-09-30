@@ -14,6 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -29,6 +30,7 @@ struct RwFragment {
     upstream_fragment_ids: Vec<i32>,
     flags: Vec<String>,
     parallelism: i32,
+    max_parallelism: i32,
 }
 
 fn extract_fragment_type_flag(mask: u32) -> Vec<FragmentTypeFlag> {
@@ -51,26 +53,36 @@ async fn read_rw_fragment(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragmen
 
     Ok(distributions
         .into_iter()
-        .map(|distribution| RwFragment {
-            fragment_id: distribution.fragment_id as i32,
-            table_id: distribution.table_id as i32,
-            distribution_type: distribution.distribution_type().as_str_name().into(),
-            state_table_ids: distribution
-                .state_table_ids
-                .into_iter()
-                .map(|id| id as i32)
-                .collect(),
-            upstream_fragment_ids: distribution
-                .upstream_fragment_ids
-                .into_iter()
-                .map(|id| id as i32)
-                .collect(),
-            flags: extract_fragment_type_flag(distribution.fragment_type_mask)
-                .into_iter()
-                .flat_map(|t| t.as_str_name().strip_prefix("FRAGMENT_TYPE_FLAG_"))
-                .map(|s| s.into())
-                .collect(),
-            parallelism: distribution.parallelism as i32,
+        .map(|distribution| {
+            let distribution_type = distribution.distribution_type();
+            let max_parallelism = match distribution_type {
+                FragmentDistributionType::Single => 1,
+                FragmentDistributionType::Hash => distribution.vnode_count as i32,
+                FragmentDistributionType::Unspecified => unreachable!(),
+            };
+
+            RwFragment {
+                fragment_id: distribution.fragment_id as i32,
+                table_id: distribution.table_id as i32,
+                distribution_type: distribution.distribution_type().as_str_name().into(),
+                state_table_ids: distribution
+                    .state_table_ids
+                    .into_iter()
+                    .map(|id| id as i32)
+                    .collect(),
+                upstream_fragment_ids: distribution
+                    .upstream_fragment_ids
+                    .into_iter()
+                    .map(|id| id as i32)
+                    .collect(),
+                flags: extract_fragment_type_flag(distribution.fragment_type_mask)
+                    .into_iter()
+                    .flat_map(|t| t.as_str_name().strip_prefix("FRAGMENT_TYPE_FLAG_"))
+                    .map(|s| s.into())
+                    .collect(),
+                parallelism: distribution.parallelism as i32,
+                max_parallelism,
+            }
         })
         .collect())
 }

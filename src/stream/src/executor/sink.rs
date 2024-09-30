@@ -221,7 +221,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         } else {
             let labels = [
                 &actor_id.to_string(),
-                "NA", // TODO: remove the connector label for log writer metrics
                 &sink_id.to_string(),
                 self.sink_param.sink_name.as_str(),
             ];
