@@ -40,6 +40,7 @@ impl MetaSrvEnv {
                     );
                     return;
                 }
+                // We don't check the event type but always notify the updater for simplicity.
                 let _ = changed_tx.send(());
             })
             .context("failed to create license key file watcher")?;
@@ -57,6 +58,8 @@ impl MetaSrvEnv {
                 let _watcher = watcher;
 
                 while changed_rx.changed().await.is_ok() {
+                    tracing::info!(path = %path.display(), "license key file changed, reloading...");
+
                     let content = match tokio::fs::read_to_string(&path).await {
                         Ok(v) => v,
                         Err(e) => {
@@ -69,6 +72,9 @@ impl MetaSrvEnv {
                         }
                     };
                     let content = content.trim().to_owned();
+
+                    // An empty license key file is considered as setting it to the default value,
+                    // i.e., `None` when calling `set_param`.
                     let value = (!content.is_empty()).then_some(content);
 
                     let result = match &mgr {
