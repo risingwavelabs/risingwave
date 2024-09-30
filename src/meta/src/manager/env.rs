@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::ops::Deref;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -305,6 +305,8 @@ pub struct MetaOpts {
     // Cluster limits
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
     pub actor_cnt_per_worker_parallelism_soft_limit: usize,
+
+    pub license_key_path: Option<PathBuf>,
 }
 
 impl MetaOpts {
@@ -372,6 +374,7 @@ impl MetaOpts {
             table_info_statistic_history_times: 240,
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
+            license_key_path: None,
         }
     }
 }
@@ -533,6 +536,9 @@ impl MetaSrvEnv {
                 }
             }
         };
+
+        env.may_start_watch_license_key_file()?;
+
         Ok(env)
     }
 
@@ -635,11 +641,13 @@ impl MetaSrvEnv {
 }
 
 impl MetaSrvEnv {
-    pub fn start_watch_license_key_file(
-        &self,
-        path: impl AsRef<Path>,
-    ) -> MetaResult<JoinHandle<()>> {
-        let path = path.as_ref();
+    /// Spawn background tasks to watch the license key file and update the system parameter,
+    /// if configured.
+    pub fn may_start_watch_license_key_file(&self) -> MetaResult<JoinHandle<()>> {
+        let Some(path) = self.opts.license_key_path.as_ref() else {
+            return Ok(());
+        };
+
         let (changed_tx, mut changed_rx) = watch::channel(());
 
         let mut watcher =
