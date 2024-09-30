@@ -91,7 +91,7 @@ async fn test_full_scan() {
     let object_metadata_iter = Box::pin(stream::iter(object_store_list_result.into_iter().map(Ok)));
 
     let task = FullScanTask {
-        sst_retention_time_sec: 10000,
+        sst_retention_watermark: 0,
         prefix: None,
         start_after: None,
         limit: None,
@@ -102,7 +102,7 @@ async fn test_full_scan() {
     assert!(scan_result.is_empty());
 
     let task = FullScanTask {
-        sst_retention_time_sec: 6000,
+        sst_retention_watermark: now_ts.sub(Duration::from_secs(6000)).as_secs(),
         prefix: None,
         start_after: None,
         limit: None,
@@ -113,7 +113,7 @@ async fn test_full_scan() {
     assert_eq!(scan_result.into_iter().sorted().collect_vec(), vec![1]);
 
     let task = FullScanTask {
-        sst_retention_time_sec: 2000,
+        sst_retention_watermark: u64::MAX,
         prefix: None,
         start_after: None,
         limit: None,

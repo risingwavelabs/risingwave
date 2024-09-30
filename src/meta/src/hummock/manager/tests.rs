@@ -89,6 +89,7 @@ fn gen_local_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> Local
     LocalSstableInfo {
         sst_info: gen_sstable_info(sst_id, table_ids, epoch),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     }
 }
 fn get_compaction_group_object_ids(
@@ -795,6 +796,31 @@ async fn test_invalid_sst_id() {
         );
     }
 
+    // reject due to SST's timestamp is below watermark
+    let ssts_below_watermerk = ssts
+        .iter()
+        .map(|s| LocalSstableInfo {
+            sst_info: s.sst_info.clone(),
+            table_stats: s.table_stats.clone(),
+            created_at: 0,
+        })
+        .collect();
+    let error = hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: ssts_below_watermerk,
+                ..Default::default()
+            },
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(error
+        .as_report()
+        .to_string()
+        .contains("is rejected from being committed since it's below watermark"));
+
     hummock_meta_client
         .commit_epoch(
             epoch,
@@ -1276,6 +1302,7 @@ async fn test_version_stats() {
                 .iter()
                 .map(|table_id| (*table_id, table_stats_change.clone()))
                 .collect(),
+            created_at: u64::MAX,
         })
         .collect_vec();
     hummock_meta_client
@@ -1385,6 +1412,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
                 },
             ),
         ]),
+        created_at: u64::MAX,
     };
     hummock_meta_client
         .commit_epoch(
@@ -1466,10 +1494,12 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     hummock_meta_client
         .commit_epoch(
@@ -1550,6 +1580,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_triv
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     hummock_manager
         .register_table_ids_for_test(&[(100, 2), (101, 2)])
@@ -1631,11 +1662,13 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     let mut sst_3 = sst_2.clone();
     let mut sst_4 = sst_1.clone();
@@ -1767,16 +1800,19 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100], epoch),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![101, 102], epoch),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     let sst_3 = LocalSstableInfo {
         sst_info: gen_sstable_info(12, vec![103], epoch),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     hummock_meta_client
@@ -1907,10 +1943,12 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     hummock_meta_client
@@ -2245,10 +2283,12 @@ async fn test_unregister_moved_table() {
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     hummock_meta_client
