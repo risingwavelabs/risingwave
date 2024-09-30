@@ -72,6 +72,8 @@ impl Rule for JoinCommuteRule {
             | JoinType::LeftSemi
             | JoinType::LeftAnti
             | JoinType::FullOuter
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter
             | JoinType::Unspecified => None,
         }
     }
@@ -116,6 +118,7 @@ impl JoinCommuteRule {
             JoinType::LeftAnti => JoinType::RightAnti,
             JoinType::RightSemi => JoinType::LeftSemi,
             JoinType::RightAnti => JoinType::LeftAnti,
+            JoinType::AsofInner | JoinType::AsofLeftOuter => unreachable!(),
         }
     }
 }
