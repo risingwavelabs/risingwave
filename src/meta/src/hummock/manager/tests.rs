@@ -1806,11 +1806,13 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![101, 102], epoch),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     let sst_3 = LocalSstableInfo {
         sst_info: gen_sstable_info(12, vec![103], epoch),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     hummock_meta_client
