@@ -535,7 +535,7 @@ message VacuumTask {
 
 // Scan object store to get candidate orphan SSTs.
 message FullScanTask {
-  uint64 sst_retention_time_sec = 1;
+  uint64 sst_retention_watermark = 1;
   optional string prefix = 2;
   optional string start_after = 3;
   optional uint64 limit = 4;

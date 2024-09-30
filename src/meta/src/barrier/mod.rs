@@ -1674,6 +1674,7 @@ fn collect_resp_info(
             LocalSstableInfo::new(
                 sst_info.into(),
                 from_prost_table_stats_map(grouped.table_stats_map),
+                grouped.created_at,
             )
         });
         synced_ssts.extend(ssts_iter);
