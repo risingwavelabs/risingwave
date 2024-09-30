@@ -26,6 +26,7 @@ pub struct Model {
     pub create_type: CreateType,
     pub timezone: Option<String>,
     pub parallelism: StreamingParallelism,
+    pub max_parallelism: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

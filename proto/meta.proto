@@ -111,7 +111,22 @@ message TableFragments {
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
   stream_plan.StreamContext ctx = 6;
+
   TableParallelism parallelism = 7;
+  // The max parallelism specified when the streaming job was created, i.e., expected vnode count.
+  //
+  // The reason for persisting this value is mainly to check if a parallelism change (via `ALTER
+  // .. SET PARALLELISM`) is valid, so that the behavior can be consistent with the creation of
+  // the streaming job.
+  //
+  // Note that the actual vnode count, denoted by `vnode_count` in `fragments`, may be different
+  // from this value (see `StreamFragmentGraph.max_parallelism` for more details.). As a result,
+  // checking the parallelism change with this value can be inaccurate in some cases. However,
+  // when generating resizing plans, we still take the `vnode_count` of each fragment into account.
+  //
+  // Can be unset if the fragment is created in older versions where variable vnode count is not
+  // supported, in which case a default value of 256 should be used.
+  optional uint32 max_parallelism = 10;
 
   // Actors of a materialize view, sink, or table can only be scheduled on nodes with matching node_label.
   string node_label = 8;
@@ -228,6 +243,7 @@ message ListTableFragmentStatesResponse {
     uint32 table_id = 1;
     TableFragments.State state = 2;
     TableParallelism parallelism = 3;
+    uint32 max_parallelism = 4;
   }
   repeated TableFragmentState states = 1;
 }
@@ -243,6 +259,7 @@ message ListFragmentDistributionResponse {
     repeated uint32 upstream_fragment_ids = 5;
     uint32 fragment_type_mask = 6;
     uint32 parallelism = 7;
+    uint32 vnode_count = 8;
   }
   repeated FragmentDistribution distributions = 1;
 }

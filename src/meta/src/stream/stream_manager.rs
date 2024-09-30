@@ -19,7 +19,6 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
@@ -681,6 +680,8 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
+        let table_id = TableId::new(table_id);
+
         let worker_nodes = self
             .metadata_manager
             .list_active_streaming_compute_nodes()
@@ -699,8 +700,10 @@ impl GlobalStreamManager {
             .iter()
             .map(|w| w.parallelism as usize)
             .sum::<usize>();
-        // TODO(var-vnode): get correct max parallelism from catalogs.
-        let max_parallelism = VirtualNode::COUNT_FOR_COMPAT;
+        let max_parallelism = self
+            .metadata_manager
+            .get_job_max_parallelism(table_id)
+            .await?;
 
         match parallelism {
             TableParallelism::Adaptive => {
@@ -725,7 +728,7 @@ impl GlobalStreamManager {
             }
         }
 
-        let table_parallelism_assignment = HashMap::from([(TableId::new(table_id), parallelism)]);
+        let table_parallelism_assignment = HashMap::from([(table_id, parallelism)]);
 
         if deferred {
             tracing::debug!(
@@ -1114,6 +1117,7 @@ mod tests {
                 &locations.actor_locations,
                 Default::default(),
                 TableParallelism::Adaptive,
+                VirtualNode::COUNT_FOR_TEST,
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,

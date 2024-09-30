@@ -174,7 +174,7 @@ pub struct MetaMetrics {
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
     pub compact_task_batch_count: HistogramVec,
-    pub move_state_table_count: IntCounterVec,
+    pub split_compaction_group_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
 
@@ -703,9 +703,9 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let move_state_table_count = register_int_counter_vec_with_registry!(
-            "storage_move_state_table_count",
-            "Count of trigger move state table",
+        let split_compaction_group_count = register_int_counter_vec_with_registry!(
+            "storage_split_compaction_group_count",
+            "Count of trigger split compaction group",
             &["group"],
             registry
         )
@@ -825,7 +825,7 @@ impl MetaMetrics {
             compact_task_file_count,
             compact_task_batch_count,
             table_write_throughput,
-            move_state_table_count,
+            split_compaction_group_count,
             state_table_count,
             branched_sst_count,
             compaction_event_consumed_latency,

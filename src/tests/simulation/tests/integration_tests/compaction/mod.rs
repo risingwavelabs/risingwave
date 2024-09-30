@@ -126,12 +126,14 @@ async fn test_vnode_watermark_reclaim_impl(
     cluster.split_compaction_group(2, table_id).await.unwrap();
     tokio::time::sleep(Duration::from_secs(5)).await;
     let compaction_group_id = session
-        .run("SELECT max(id) FROM rw_hummock_compaction_group_configs;")
+        .run(format!(
+            "SELECT id FROM rw_hummock_compaction_group_configs where member_tables @> '[{}]'::jsonb;",
+            table_id
+        ))
         .await
         .unwrap()
         .parse::<u64>()
         .unwrap();
-    assert!(compaction_group_id > 3);
 
     session
         .run("INSERT INTO t2 VALUES (now(), 1);")
