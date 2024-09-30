@@ -16,7 +16,7 @@ use std::cmp;
 use std::collections::HashSet;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
 use futures::{stream, StreamExt};
@@ -267,7 +267,10 @@ impl HummockManager {
     pub fn now(&self) -> u64 {
         // TODO: persist now to maintain non-decreasing even after a meta node reboot.
         let mut guard = self.now.lock();
-        let new_now = chrono::Utc::now().timestamp().try_into().unwrap();
+        let new_now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Clock may have gone backwards")
+            .as_secs();
         if new_now < *guard {
             tracing::warn!(old = *guard, new = new_now, "unexpected decreasing now");
             return *guard;
