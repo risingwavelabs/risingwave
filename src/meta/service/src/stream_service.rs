@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
@@ -272,6 +273,7 @@ impl StreamManagerService for StreamServiceImpl {
                             table_id: tf.table_id().table_id,
                             state: tf.state() as i32,
                             parallelism: Some(tf.assigned_parallelism.into()),
+                            max_parallelism: tf.max_parallelism as _,
                         },
                     )
                     .collect_vec()
@@ -280,7 +282,7 @@ impl StreamManagerService for StreamServiceImpl {
                 let job_states = mgr.catalog_controller.list_streaming_job_states().await?;
                 job_states
                     .into_iter()
-                    .map(|(table_id, state, parallelism)| {
+                    .map(|(table_id, state, parallelism, max_parallelism)| {
                         let parallelism = match parallelism {
                             StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
                             StreamingParallelism::Custom => model::TableParallelism::Custom,
@@ -293,6 +295,7 @@ impl StreamManagerService for StreamServiceImpl {
                             table_id: table_id as _,
                             state: PbState::from(state) as _,
                             parallelism: Some(parallelism.into()),
+                            max_parallelism: max_parallelism as _,
                         }
                     })
                     .collect_vec()
@@ -323,6 +326,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 upstream_fragment_ids: fragment.upstream_fragment_ids.clone(),
                                 fragment_type_mask: fragment.fragment_type_mask,
                                 parallelism: fragment.actors.len() as _,
+                                vnode_count: fragment.vnode_count() as _,
                             }
                         })
                     })
@@ -345,6 +349,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 .into_u32_array(),
                             fragment_type_mask: fragment_desc.fragment_type_mask as _,
                             parallelism: fragment_desc.parallelism as _,
+                            vnode_count: fragment_desc.vnode_count as _,
                         }
                     })
                     .collect_vec()

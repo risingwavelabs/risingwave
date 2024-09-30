@@ -243,6 +243,7 @@ message ListTableFragmentStatesResponse {
     uint32 table_id = 1;
     TableFragments.State state = 2;
     TableParallelism parallelism = 3;
+    uint32 max_parallelism = 4;
   }
   repeated TableFragmentState states = 1;
 }
@@ -258,6 +259,7 @@ message ListFragmentDistributionResponse {
     repeated uint32 upstream_fragment_ids = 5;
     uint32 fragment_type_mask = 6;
     uint32 parallelism = 7;
+    uint32 vnode_count = 8;
   }
   repeated FragmentDistribution distributions = 1;
 }
