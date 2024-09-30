@@ -880,9 +880,11 @@ impl GlobalBarrierManager {
                                 assert_matches!(output.command_ctx.kind, BarrierKind::Barrier);
                                 self.scheduled_barriers.force_checkpoint_in_next_barrier();
                             }
-                            self.control_stream_manager.remove_partial_graph(
-                                output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
-                            );
+                            if !output.table_ids_to_finish.is_empty() {
+                                self.control_stream_manager.remove_partial_graph(
+                                    output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
+                                );
+                            }
                         }
                         Ok(None) => {}
                         Err(e) => {

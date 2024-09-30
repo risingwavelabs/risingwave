@@ -230,18 +230,16 @@ impl ControlStreamManager {
                     }
                     Response::Init(_) => {
                         // This arm should be unreachable.
-                        unreachable!("get unexpected init response")
+                        Err(anyhow!("get unexpected init response").into())
                     }
                 },
                 Err(err) => Err(err),
             };
             if let Err(err) = &result {
-                let node = self.nodes.remove(&worker_id).unwrap_or_else(|| {
-                    panic!(
-                        "should exist when get shutdown resp: {} {:?}",
-                        worker_id, err
-                    );
-                });
+                let node = self
+                    .nodes
+                    .remove(&worker_id)
+                    .expect("should exist when get shutdown resp");
                 warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
             }
             (worker_id, result)
@@ -438,8 +436,9 @@ impl ControlStreamManager {
     }
 
     pub(super) fn remove_partial_graph(&mut self, partial_graph_ids: Vec<u32>) {
-        self.nodes.retain(|_, node| {
-            node.sender
+        self.nodes.iter().for_each(|(_, node)| {
+            if node
+                .sender
                 .send(StreamingControlStreamRequest {
                     request: Some(
                         streaming_control_stream_request::Request::RemovePartialGraph(
@@ -449,8 +448,10 @@ impl ControlStreamManager {
                         ),
                     ),
                 })
-                .unwrap();
-            true
+                .is_err()
+            {
+                warn!(worker_id = node.worker.id,node = ?node.worker.host,"failed to send remove partial graph request");
+            }
         })
     }
 }
