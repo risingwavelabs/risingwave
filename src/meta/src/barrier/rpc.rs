@@ -236,10 +236,12 @@ impl ControlStreamManager {
                 Err(err) => Err(err),
             };
             if let Err(err) = &result {
-                let node = self
-                    .nodes
-                    .remove(&worker_id)
-                    .expect("should exist when get shutdown resp");
+                let node = self.nodes.remove(&worker_id).unwrap_or_else(|| {
+                    panic!(
+                        "should exist when get shutdown resp: {} {:?}",
+                        worker_id, err
+                    );
+                });
                 warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
             }
             (worker_id, result)
