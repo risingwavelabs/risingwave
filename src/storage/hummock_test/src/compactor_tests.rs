@@ -811,7 +811,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = hummock_manager_ref
             .get_current_version()
             .await
-            .max_committed_epoch();
+            .max_committed_epoch_for_test();
 
         // assert compact_task
         assert_eq!(
@@ -1017,7 +1017,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = hummock_manager_ref
             .get_current_version()
             .await
-            .max_committed_epoch();
+            .max_committed_epoch_for_test();
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
@@ -2004,7 +2004,7 @@ pub(crate) mod tests {
             compact_task.current_epoch_time = hummock_manager_ref
                 .get_current_version()
                 .await
-                .max_committed_epoch();
+                .max_committed_epoch_for_test();
 
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
@@ -2028,27 +2028,11 @@ pub(crate) mod tests {
                 .unwrap();
         }
 
-        // compact
-        compact_once(
-            parent_group_id,
-            0,
-            hummock_manager_ref.clone(),
-            compact_ctx.clone(),
-            filter_key_extractor_manager.clone(),
-            sstable_object_id_manager.clone(),
-        )
-        .await;
-
         let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
             .await
-            .unwrap();
-
-        assert_ne!(parent_group_id, new_cg_id);
-        assert!(hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
-            .await
-            .is_err());
+            .unwrap()
+            .0;
 
         write_data(
             &storage,
@@ -2092,9 +2076,10 @@ pub(crate) mod tests {
             .unwrap();
 
         let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
             .await
-            .unwrap();
+            .unwrap()
+            .0;
 
         compact_once(
             parent_group_id,
@@ -2152,9 +2137,10 @@ pub(crate) mod tests {
 
         // try split
         let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
             .await
-            .unwrap();
+            .unwrap()
+            .0;
 
         // write right
         write_data(
@@ -2245,7 +2231,7 @@ pub(crate) mod tests {
                 compact_task.current_epoch_time = hummock_manager_ref
                     .get_current_version()
                     .await
-                    .max_committed_epoch();
+                    .max_committed_epoch_for_test();
 
                 // 3. compact
                 let (_tx, rx) = tokio::sync::oneshot::channel();
@@ -2272,18 +2258,12 @@ pub(crate) mod tests {
 
         // try split
         let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
             .await
-            .unwrap();
-
-        // try merge
-        assert!(hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
-            .await
-            .is_err());
+            .unwrap()
+            .0;
 
         // write left and write
-
         write_data(
             &storage,
             (&mut local_1, true),

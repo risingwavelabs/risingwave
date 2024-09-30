@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::pin::pin;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::future::{select, Either};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_meta_model_v2::{ObjectId, SourceId};
@@ -888,6 +888,24 @@ impl MetadataManager {
             MetadataManager::V1(mgr) => mgr.catalog_manager.get_mv_depended_subscriptions().await,
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller.get_mv_depended_subscriptions().await
+            }
+        }
+    }
+
+    pub async fn get_job_max_parallelism(&self, table_id: TableId) -> MetaResult<usize> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                let fragments = mgr.fragment_manager.get_fragment_read_guard().await;
+                Ok(fragments
+                    .table_fragments()
+                    .get(&table_id)
+                    .map(|tf| tf.max_parallelism)
+                    .with_context(|| format!("job {table_id} not found"))?)
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_max_parallelism_by_id(table_id.table_id as _)
+                    .await
             }
         }
     }

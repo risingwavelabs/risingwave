@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
+use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
@@ -28,7 +28,6 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::compact_task::{self};
-use risingwave_pb::hummock::HummockSnapshot;
 use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
@@ -288,12 +287,6 @@ impl HummockManager {
             )?;
         }
 
-        if is_visible_table_committed_epoch {
-            let snapshot = HummockSnapshot { committed_epoch };
-            let prev_snapshot = self.latest_snapshot.swap(snapshot.into());
-            assert!(prev_snapshot.committed_epoch < committed_epoch);
-        }
-
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
                 &self.metrics,
@@ -397,7 +390,8 @@ impl HummockManager {
                     })
                     .sum();
 
-                let branch_sst = split_sst(
+                // TODO(li0k): replace with `split_sst`
+                let branch_sst = split_sst_with_table_ids(
                     &mut sst.sst_info,
                     &mut new_sst_id,
                     origin_sst_size - new_sst_size,

@@ -471,7 +471,10 @@ async fn test_state_store_sync() {
 
     let read_version = hummock_storage.read_version();
 
-    let base_epoch = read_version.read().committed().max_committed_epoch();
+    let base_epoch = read_version
+        .read()
+        .committed()
+        .max_committed_epoch_for_test();
     let epoch1 = test_epoch(base_epoch.next_epoch());
     test_env
         .storage
@@ -842,7 +845,7 @@ async fn test_delete_get() {
         .read_version()
         .read()
         .committed()
-        .max_committed_epoch();
+        .max_committed_epoch_for_test();
 
     let epoch1 = initial_epoch.next_epoch();
     test_env
@@ -944,7 +947,7 @@ async fn test_multiple_epoch_sync() {
         .read_version()
         .read()
         .committed()
-        .max_committed_epoch();
+        .max_committed_epoch_for_test();
 
     let epoch1 = initial_epoch.next_epoch();
     test_env
@@ -1655,8 +1658,8 @@ async fn test_hummock_version_reader() {
                         .read_version()
                         .read()
                         .committed()
-                        .max_committed_epoch(),
-                    read_snapshot.2.max_committed_epoch()
+                        .max_committed_epoch_for_test(),
+                    read_snapshot.2.max_committed_epoch_for_test()
                 );
 
                 let iter = hummock_version_reader
@@ -2406,7 +2409,6 @@ async fn test_table_watermark() {
 
     let check_version_table_watermark = |version: PinnedVersion| {
         let epoch = version
-            .version()
             .state_table_info
             .info()
             .get(&TEST_TABLE_ID)
@@ -2414,12 +2416,11 @@ async fn test_table_watermark() {
             .committed_epoch;
         let table_watermarks = TableWatermarksIndex::new_committed(
             version
-                .version()
                 .table_watermarks
                 .get(&TEST_TABLE_ID)
                 .unwrap()
                 .clone(),
-            version.max_committed_epoch(),
+            version.max_committed_epoch_for_test(),
         );
         assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction());
         assert_eq!(
@@ -2578,7 +2579,7 @@ async fn test_commit_multi_epoch() {
         .manager
         .get_current_version()
         .await
-        .max_committed_epoch();
+        .max_committed_epoch_for_test();
 
     let commit_epoch = |epoch,
                         sst: SstableInfo,
@@ -2655,7 +2656,7 @@ async fn test_commit_multi_epoch() {
         assert_eq!(sub_level.table_infos.len(), 1);
         assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch1.object_id);
 
-        assert_eq!(version.visible_table_committed_epoch(), epoch1);
+        assert_eq!(version.max_committed_epoch_for_test(), epoch1);
 
         let info = version
             .state_table_info
@@ -2708,7 +2709,7 @@ async fn test_commit_multi_epoch() {
         assert_eq!(sub_level.table_infos.len(), 1);
         assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch2.object_id);
 
-        assert_eq!(version.visible_table_committed_epoch(), epoch2);
+        assert_eq!(version.max_committed_epoch_for_test(), epoch2);
 
         let info = version
             .state_table_info
@@ -2759,7 +2760,7 @@ async fn test_commit_multi_epoch() {
         assert_eq!(sub_level1.table_infos.len(), 1);
         assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
 
-        assert_eq!(version.visible_table_committed_epoch(), epoch2);
+        assert_eq!(version.max_committed_epoch_for_test(), epoch2);
 
         let info = version.state_table_info.info().get(&new_table_id).unwrap();
         assert_eq!(info.committed_epoch, epoch1);
@@ -2801,7 +2802,7 @@ async fn test_commit_multi_epoch() {
         assert_eq!(sub_level2.table_infos.len(), 1);
         assert_eq!(sub_level2.table_infos[0].object_id, sst2_epoch2.object_id);
 
-        assert_eq!(version.visible_table_committed_epoch(), epoch2);
+        assert_eq!(version.max_committed_epoch_for_test(), epoch2);
 
         let info = version.state_table_info.info().get(&new_table_id).unwrap();
         assert_eq!(info.committed_epoch, epoch2);
@@ -2865,7 +2866,7 @@ async fn test_commit_multi_epoch() {
         assert_eq!(sub_level3.table_infos.len(), 1);
         assert_eq!(sub_level3.table_infos[0].object_id, sst2_epoch2.object_id);
 
-        assert_eq!(version.visible_table_committed_epoch(), epoch3);
+        assert_eq!(version.max_committed_epoch_for_test(), epoch3);
 
         let info = version.state_table_info.info().get(&new_table_id).unwrap();
         assert_eq!(info.committed_epoch, epoch3);

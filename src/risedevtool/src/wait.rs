@@ -100,7 +100,10 @@ pub fn wait_tcp_available(
 
         if let Some(ref timeout) = timeout {
             if std::time::Instant::now() - start_time >= *timeout {
-                return Err(anyhow!("failed to wait for closing"));
+                return Err(anyhow!(
+                    "Failed to wait for port closing on {}. The port may still be in use by another process or application. Please ensure the port is not being used elsewhere and try again.",
+                    server
+                ));
             }
         }
 

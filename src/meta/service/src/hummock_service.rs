@@ -146,11 +146,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(
-                HummockVersionId::new(req.start_id),
-                req.num_limit,
-                req.committed_epoch_limit,
-            )
+            .list_version_deltas(HummockVersionId::new(req.start_id), req.num_limit)
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(PbHummockVersionDeltas {
@@ -246,17 +242,6 @@ impl HummockManagerService for HummockServiceImpl {
 
         Ok(Response::new(TriggerManualCompactionResponse {
             status: None,
-        }))
-    }
-
-    async fn get_epoch(
-        &self,
-        _request: Request<GetEpochRequest>,
-    ) -> Result<Response<GetEpochResponse>, Status> {
-        let hummock_snapshot = self.hummock_manager.latest_snapshot();
-        Ok(Response::new(GetEpochResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
         }))
     }
 
@@ -397,8 +382,13 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let new_group_id = self
             .hummock_manager
-            .split_compaction_group(req.group_id, &req.table_ids, req.partition_vnode_count)
-            .await?;
+            .move_state_tables_to_dedicated_compaction_group(
+                req.group_id,
+                &req.table_ids,
+                req.partition_vnode_count,
+            )
+            .await?
+            .0;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
 

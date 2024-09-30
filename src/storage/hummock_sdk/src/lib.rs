@@ -21,6 +21,7 @@
 #![feature(is_sorted)]
 #![feature(let_chains)]
 #![feature(btree_cursors)]
+#![feature(strict_overflow_ops)]
 
 mod key_cmp;
 use std::cmp::Ordering;

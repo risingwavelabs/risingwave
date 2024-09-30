@@ -2442,6 +2442,20 @@ def section_hummock_read(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Safe Version Fetch Count",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('state_store_safe_version_hit')}",
+                            "",
+                        ),
+                        panels.target(
+                            f"{metric('state_store_safe_version_miss')}",
+                            "",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
@@ -3207,6 +3221,10 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                             "referenced by current version",
                         ),
                         panels.target(
+                            f"{metric('storage_time_travel_object_count')}",
+                            "referenced by time travel",
+                        ),
+                        panels.target(
                             f"{metric('storage_total_object_count')}",
                             "all objects (including dangling ones)",
                         ),
@@ -3334,13 +3352,13 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                     "The times of move_state_table occurs",
                     [
                         panels.target(
-                            f"sum({table_metric('storage_move_state_table_count')}) by (group)",
-                            "move table cg{{group}}",
+                            f"sum({table_metric('storage_split_compaction_group_count')}) by (group)",
+                            "split compaction group cg{{group}}",
                         ),
 
                         panels.target(
                             f"sum({table_metric('storage_merge_compaction_group_count')}) by (group)",
-                            "merge_compaction_group_count cg-{{group}}",
+                            "merge compaction group cg{{group}}",
                         ),
                     ],
                 ),
@@ -3361,6 +3379,33 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                         panels.target(
                             f"sum(irate({table_metric('storage_branched_sst_count')}[$__rate_interval])) by (group)",
                             "branched sst cg{{group}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Time Travel Replay Latency",
+                    "The latency of replaying a hummock version for time travel",
+                    quantile(
+                        lambda quantile, legend: panels.target(
+                            f"histogram_quantile({quantile}, sum(rate({metric('storage_time_travel_version_replay_latency_bucket')}[$__rate_interval])) by (le))",
+                            f"time_travel_version_replay_latency_p{legend}",
+                        ),
+                        [50, 90, 99, "max"],
+                    )
+                    + [
+                        panels.target(
+                            f"rate({metric('storage_time_travel_version_replay_latency_sum')}[$__rate_interval]) / rate({metric('storage_time_travel_version_replay_latency_count')}[$__rate_interval]) > 0",
+                            "time_travel_version_replay_avg",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Time Travel Replay Ops",
+                    "The frequency of replaying a hummock version for time travel",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_time_travel_version_replay_latency_count')}[$__rate_interval]))",
+                            "time_travel_version_replay_ops",
                         ),
                     ],
                 ),
@@ -3497,11 +3542,6 @@ def section_grpc_meta_hummock_manager(outer_panels):
                     panels,
                     "UnpinVersionBefore",
                     "path='/meta.HummockManagerService/UnpinVersionBefore'",
-                ),
-                grpc_metrics_target(
-                    panels,
-                    "UnpinSnapshotBefore",
-                    "path='/meta.HummockManagerService/UnpinSnapshotBefore'",
                 ),
                 grpc_metrics_target(
                     panels,
@@ -4134,44 +4174,22 @@ def section_memory_manager(outer_panels):
         ),
     ]
 
-
-def section_connector_node(outer_panels):
-    panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed(
-            "Connector Node",
-            [
-                panels.timeseries_rowsps(
-                    "Connector Source Throughput(rows)",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('source_rows_received')}[$__rate_interval])",
-                            "source={{source_type}} @ {{source_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Connector Sink Throughput(rows)",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('connector_sink_rows_received')}[$__rate_interval])",
-                            "sink={{connector_type}} @ {{sink_id}}",
-                        ),
-                    ],
-                ),
-            ],
-        )
-    ]
-
-
 def section_sink_metrics(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
             "Sink Metrics",
             [
+                panels.timeseries_rowsps(
+                    "Remote Sink (Java) Throughput",
+                    "The rows sent by remote sink to the Java connector process",
+                    [
+                        panels.target(
+                            f"rate({metric('connector_sink_rows_received')}[$__rate_interval])",
+                            "{{sink_id}} {{sink_name}} @ actor {{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_latency(
                     "Commit Duration",
                     "",
@@ -4195,7 +4213,7 @@ def section_sink_metrics(outer_panels):
                     [
                         panels.target(
                             f"{metric('log_store_latest_write_epoch')}",
-                            "latest write epoch @ {{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}}",
+                            "latest write epoch @ {{sink_id}} {{sink_name}} @ actor {{actor_id}}",
                         ),
                         panels.target(
                             f"{metric('log_store_latest_read_epoch')}",
@@ -4203,7 +4221,7 @@ def section_sink_metrics(outer_panels):
                         ),
                         panels.target(
                             f"{metric('kv_log_store_buffer_unconsumed_min_epoch')}",
-                            "Kv log store uncomsuned min epoch @ {{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}}",
+                            "Kv log store unconsumed min epoch @ {{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4212,9 +4230,9 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"(max({metric('log_store_latest_write_epoch')}) by (connector, sink_id, actor_id, sink_name)"
-                            + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, actor_id, sink_name)) / (2^16) / 1000",
-                            "Consume lag @ {{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}}",
+                            f"(max({metric('log_store_latest_write_epoch')}) by (sink_id, actor_id, sink_name)"
+                            + f"- max({metric('log_store_latest_read_epoch')}) by (sink_id, actor_id, sink_name)) / (2^16) / 1000",
+                            "{{sink_id}} {{sink_name}} @ actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4233,9 +4251,9 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"clamp_min((max({metric('log_store_first_write_epoch')}) by (connector, sink_id, actor_id, sink_name)"
-                            + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, actor_id, sink_name)) / (2^16) / 1000, 0)",
-                            "Consume persistent log lag @ {{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}}",
+                            f"clamp_min((max({metric('log_store_first_write_epoch')}) by (sink_id, actor_id, sink_name)"
+                            + f"- max({metric('log_store_latest_read_epoch')}) by (sink_id, actor_id, sink_name)) / (2^16) / 1000, 0)",
+                            "{{sink_id}} {{sink_name}} @ actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4265,19 +4283,12 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by (connector, sink_id, sink_name)",
-                            "sink={{sink_id}} {{sink_name}} ({{connector}})",
+                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by (sink_id, sink_name)",
+                            "{{sink_id}} {{sink_name}}",
                         ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Executor Log Store Write Throughput(rows)",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, actor_id, sink_name)",
-                            "{{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}} {{%s}}"
-                            % NODE_LABEL,
+                        panels.target_hidden(
+                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by ({NODE_LABEL}, sink_id, actor_id, sink_name)",
+                            "{{sink_id}} {{sink_name}} @ actor {{actor_id}} {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -4805,7 +4816,6 @@ dashboard = Dashboard(
         *section_grpc_hummock_meta_client(panels),
         *section_frontend(panels),
         *section_memory_manager(panels),
-        *section_connector_node(panels),
         *section_sink_metrics(panels),
         *section_kafka_metrics(panels),
         *section_network_connection(panels),

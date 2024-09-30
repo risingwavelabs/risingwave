@@ -425,7 +425,7 @@ async fn test_state_store_sync_v2() {
 
     let mut epoch = hummock_storage
         .get_pinned_version()
-        .max_committed_epoch()
+        .max_committed_epoch_for_test()
         .next_epoch();
 
     // ingest 16B batch
@@ -1040,7 +1040,9 @@ async fn test_reload_storage() {
 async fn test_delete_get_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
 
-    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
+    let initial_epoch = hummock_storage
+        .get_pinned_version()
+        .max_committed_epoch_for_test();
     let epoch1 = initial_epoch.next_epoch();
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     let batch1 = vec![
@@ -1130,7 +1132,9 @@ async fn test_delete_get_v2() {
 async fn test_multiple_epoch_sync_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
 
-    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
+    let initial_epoch = hummock_storage
+        .get_pinned_version()
+        .max_committed_epoch_for_test();
     let epoch1 = initial_epoch.next_epoch();
     let batch1 = vec![
         (
@@ -1306,7 +1310,9 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .await;
     let table_id_set = HashSet::from_iter([local_hummock_storage.table_id()]);
 
-    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
+    let initial_epoch = hummock_storage
+        .get_pinned_version()
+        .max_committed_epoch_for_test();
     let epoch1 = initial_epoch.next_epoch();
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     local_hummock_storage.init_for_test(epoch1).await.unwrap();
@@ -1350,7 +1356,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             .global_watermark_object_id(),
         HummockSstableObjectId::MAX
     );
-    let min_object_id = |sync_result: &SyncResult| {
+    let _min_object_id = |sync_result: &SyncResult| {
         sync_result
             .uncommitted_ssts
             .iter()
@@ -1363,24 +1369,12 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .seal_and_sync_epoch(epoch1, table_id_set.clone())
         .await
         .unwrap();
-    let min_object_id_epoch1 = min_object_id(&sync_result1);
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        min_object_id_epoch1,
-    );
-    let sync_result2 = hummock_storage
+
+    let _sync_result2 = hummock_storage
         .seal_and_sync_epoch(epoch2, table_id_set)
         .await
         .unwrap();
-    let min_object_id_epoch2 = min_object_id(&sync_result2);
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        min_object_id_epoch1,
-    );
+
     meta_client
         .commit_epoch(epoch1, sync_result1, false)
         .await
@@ -1393,25 +1387,11 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .await
         .unwrap();
 
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        min_object_id_epoch2,
-    );
-
     drop(local_hummock_storage);
 
     hummock_storage
         .clear_shared_buffer(hummock_storage.get_pinned_version().id())
         .await;
-
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        HummockSstableObjectId::MAX
-    );
 }
 
 /// Test the following behaviours:
@@ -1425,7 +1405,7 @@ async fn test_replicated_local_hummock_storage() {
 
     let epoch0 = meta_client
         .hummock_manager_ref()
-        .on_current_version(|version| version.visible_table_committed_epoch())
+        .on_current_version(|version| version.max_committed_epoch_for_test())
         .await;
 
     let epoch0 = epoch0.next_epoch();

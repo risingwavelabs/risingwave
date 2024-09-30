@@ -125,11 +125,10 @@ pub fn get_committed_read_version_tuple(
     mut key_range: TableKeyRange,
     epoch: HummockEpoch,
 ) -> (TableKeyRange, ReadVersionTuple) {
-    if let Some(table_watermarks) = version.version().table_watermarks.get(&table_id) {
+    if let Some(table_watermarks) = version.table_watermarks.get(&table_id) {
         TableWatermarksIndex::new_committed(
             table_watermarks.clone(),
             version
-                .version()
                 .state_table_info
                 .info()
                 .get(&table_id)
@@ -396,11 +395,7 @@ impl HummockStorage {
         key_range: TableKeyRange,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
         let pinned_version = self.recent_versions.load().latest_version().clone();
-        let info = pinned_version
-            .version()
-            .state_table_info
-            .info()
-            .get(&table_id);
+        let info = pinned_version.state_table_info.info().get(&table_id);
 
         // check epoch if lower mce
         let ret = if let Some(info) = info
@@ -648,7 +643,7 @@ impl StateStore for HummockStorage {
                 // fast path by checking recent_versions
                 {
                     let recent_versions = self.recent_versions.load();
-                    let latest_version = recent_versions.latest_version().version();
+                    let latest_version = recent_versions.latest_version();
                     if latest_version.id >= wait_version_id
                         && let Some(committed_epoch) =
                             latest_version.table_committed_epoch(options.table_id)
@@ -664,7 +659,6 @@ impl StateStore for HummockStorage {
                             return Ok(false);
                         }
                         let committed_epoch = version
-                            .version()
                             .table_committed_epoch(options.table_id)
                             .ok_or_else(|| {
                                 // In batch query, since we have ensured that the current version must be after the

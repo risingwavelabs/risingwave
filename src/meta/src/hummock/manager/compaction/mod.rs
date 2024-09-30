@@ -144,7 +144,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 
 impl<'a> HummockVersionTransaction<'a> {
     fn apply_compact_task(&mut self, compact_task: &CompactTask) {
-        let mut version_delta = self.new_delta();
+        let mut version_delta = self.new_delta(None);
         let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
         version_delta.trivial_move = trivial_move;
 
@@ -1335,9 +1335,8 @@ impl HummockManager {
     ) -> Result<()> {
         self.on_current_version(|old_version| {
             tracing::info!(
-                "Trigger compaction for version {}, epoch {}, groups {:?}",
+                "Trigger compaction for version {}, groups {:?}",
                 old_version.id,
-                old_version.visible_table_committed_epoch(),
                 compaction_groups
             );
         })
@@ -1662,5 +1661,28 @@ impl CompactionState {
         } else {
             None
         }
+    }
+}
+
+impl Compaction {
+    pub fn get_compact_task_assignments_by_group_id(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Vec<CompactTaskAssignment> {
+        self.compact_task_assignment
+            .iter()
+            .filter_map(|(_, assignment)| {
+                if assignment.compact_task.as_ref().map_or(false, |task| {
+                    task.compaction_group_id == compaction_group_id
+                }) {
+                    Some(CompactTaskAssignment {
+                        compact_task: assignment.compact_task.clone(),
+                        context_id: assignment.context_id,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }

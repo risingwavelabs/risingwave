@@ -27,7 +27,7 @@ use risingwave_pb::hummock::{
 };
 use tracing::warn;
 
-use super::group_split::get_sub_level_insert_hint;
+use super::group_split::split_sst_with_table_ids;
 use super::{group_split, StateTableId};
 use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
 use crate::compaction_group::StaticCompactionGroupId;
@@ -36,8 +36,8 @@ use crate::level::{Level, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
-    GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
-    IntraLevelDelta,
+    GroupDelta, GroupDeltas, HummockVersion, HummockVersionCommon, HummockVersionDelta,
+    HummockVersionStateTableInfo, IntraLevelDelta,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
@@ -327,27 +327,56 @@ impl HummockVersion {
     pub fn count_new_ssts_in_group_split(
         &self,
         parent_group_id: CompactionGroupId,
-        member_table_ids: HashSet<StateTableId>,
+        split_key: Bytes,
     ) -> u64 {
         self.levels
             .get(&parent_group_id)
             .map_or(0, |parent_levels| {
-                parent_levels
-                    .l0
-                    .sub_levels
-                    .iter()
-                    .chain(parent_levels.levels.iter())
-                    .flat_map(|level| &level.table_infos)
-                    .map(|sst_info| {
-                        // `sst_info.table_ids` will never be empty.
-                        for table_id in &sst_info.table_ids {
-                            if member_table_ids.contains(table_id) {
-                                return 2;
-                            }
-                        }
-                        0
-                    })
-                    .sum()
+                let l0 = &parent_levels.l0;
+                let mut split_count = 0;
+                for sub_level in &l0.sub_levels {
+                    if sub_level.level_type == PbLevelType::Overlapping {
+                        // TODO: use table_id / vnode / key_range filter
+                        split_count += sub_level
+                            .table_infos
+                            .iter()
+                            .map(|sst| {
+                                if let group_split::SstSplitType::Both =
+                                    group_split::need_to_split(sst, split_key.clone())
+                                {
+                                    2
+                                } else {
+                                    0
+                                }
+                            })
+                            .sum::<u64>();
+                        continue;
+                    }
+
+                    let pos = group_split::get_split_pos(&sub_level.table_infos, split_key.clone());
+                    let sst = sub_level.table_infos.get(pos).unwrap();
+
+                    if let group_split::SstSplitType::Both =
+                        group_split::need_to_split(sst, split_key.clone())
+                    {
+                        split_count += 2;
+                    }
+                }
+
+                for level in &parent_levels.levels {
+                    if level.table_infos.is_empty() {
+                        continue;
+                    }
+                    let pos = group_split::get_split_pos(&level.table_infos, split_key.clone());
+                    let sst = level.table_infos.get(pos).unwrap();
+                    if let group_split::SstSplitType::Both =
+                        group_split::need_to_split(sst, split_key.clone())
+                    {
+                        split_count += 2;
+                    }
+                }
+
+                split_count
             })
     }
 
@@ -375,8 +404,10 @@ impl HummockVersion {
             }
             return;
         } else if !self.levels.contains_key(&parent_group_id) {
-            warn!(parent_group_id, "non-existing parent group id to init from");
-            return;
+            unreachable!(
+                "non-existing parent group id {} to init from",
+                parent_group_id
+            );
         }
         let [parent_levels, cur_levels] = self
             .levels
@@ -402,7 +433,7 @@ impl HummockVersion {
                 if insert_table_infos.is_empty() {
                     continue;
                 }
-                match get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
+                match group_split::get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
                     Ok(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
                     }
@@ -544,9 +575,7 @@ impl HummockVersion {
             &version_delta.removed_table_ids,
         );
 
-        if !is_commit_epoch
-            && self.visible_table_committed_epoch() < version_delta.visible_table_committed_epoch()
-        {
+        if !is_commit_epoch && self.max_committed_epoch < version_delta.max_committed_epoch {
             is_commit_epoch = true;
             tracing::trace!("max committed epoch bumped but no table committed epoch is changed");
         }
@@ -580,12 +609,27 @@ impl HummockVersion {
                         BTreeSet::from_iter(group_construct.table_ids.clone())
                     };
 
-                self.init_with_parent_group(
-                    parent_group_id,
-                    *compaction_group_id,
-                    member_table_ids,
-                    group_construct.get_new_sst_start_id(),
-                );
+                if group_construct.version >= CompatibilityVersion::SplitGroupByTableId as _ {
+                    let split_key = if group_construct.split_key.is_some() {
+                        Some(Bytes::from(group_construct.split_key.clone().unwrap()))
+                    } else {
+                        None
+                    };
+                    self.init_with_parent_group_v2(
+                        parent_group_id,
+                        *compaction_group_id,
+                        group_construct.get_new_sst_start_id(),
+                        split_key.clone(),
+                    );
+                } else {
+                    // for backward-compatibility of previous hummock version delta
+                    self.init_with_parent_group(
+                        parent_group_id,
+                        *compaction_group_id,
+                        member_table_ids,
+                        group_construct.get_new_sst_start_id(),
+                    );
+                }
             } else if let Some(group_merge) = &summary.group_merge {
                 tracing::info!(
                     "group_merge left {:?} right {:?}",
@@ -594,17 +638,17 @@ impl HummockVersion {
                 );
                 self.merge_compaction_group(group_merge.left_group_id, group_merge.right_group_id)
             }
-            let visible_table_committed_epoch = self.visible_table_committed_epoch();
+            let max_committed_epoch = self.max_committed_epoch;
             let group_destroy = summary.group_destroy;
             let levels = self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
                 panic!("compaction group {} does not exist", compaction_group_id)
             });
 
             assert!(
-                visible_table_committed_epoch <= version_delta.visible_table_committed_epoch(),
+                max_committed_epoch <= version_delta.max_committed_epoch,
                 "new max commit epoch {} is older than the current max commit epoch {}",
-                version_delta.visible_table_committed_epoch(),
-                visible_table_committed_epoch
+                version_delta.max_committed_epoch,
+                max_committed_epoch
             );
             if is_commit_epoch {
                 // `max_committed_epoch` increases. It must be a `commit_epoch`
@@ -655,7 +699,7 @@ impl HummockVersion {
             }
         }
         self.id = version_delta.id;
-        self.set_max_committed_epoch(version_delta.visible_table_committed_epoch());
+        self.max_committed_epoch = version_delta.max_committed_epoch;
 
         // apply to table watermark
 
@@ -837,6 +881,124 @@ impl HummockVersion {
     }
 }
 
+impl HummockVersionCommon<SstableInfo> {
+    pub fn init_with_parent_group_v2(
+        &mut self,
+        parent_group_id: CompactionGroupId,
+        group_id: CompactionGroupId,
+        new_sst_start_id: u64,
+        split_key: Option<Bytes>,
+    ) {
+        let mut new_sst_id = new_sst_start_id;
+        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
+            if new_sst_start_id != 0 {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "non-zero sst start id {} for NewCompactionGroup",
+                        new_sst_start_id
+                    );
+                } else {
+                    warn!(
+                        new_sst_start_id,
+                        "non-zero sst start id for NewCompactionGroup"
+                    );
+                }
+            }
+            return;
+        } else if !self.levels.contains_key(&parent_group_id) {
+            unreachable!(
+                "non-existing parent group id {} to init from (V2)",
+                parent_group_id
+            );
+        }
+
+        let [parent_levels, cur_levels] = self
+            .levels
+            .get_many_mut([&parent_group_id, &group_id])
+            .unwrap();
+        let l0 = &mut parent_levels.l0;
+        {
+            for sub_level in &mut l0.sub_levels {
+                let target_l0 = &mut cur_levels.l0;
+                // Remove SST from sub level may result in empty sub level. It will be purged
+                // whenever another compaction task is finished.
+                let insert_table_infos = if let Some(split_key) = &split_key {
+                    group_split::split_sst_info_for_level_v2(
+                        sub_level,
+                        &mut new_sst_id,
+                        split_key.clone(),
+                    )
+                } else {
+                    vec![]
+                };
+
+                if insert_table_infos.is_empty() {
+                    continue;
+                }
+
+                sub_level
+                    .table_infos
+                    .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                    .for_each(|sst_info| {
+                        sub_level.total_file_size -= sst_info.sst_size;
+                        sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                        l0.total_file_size -= sst_info.sst_size;
+                        l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                    });
+                match group_split::get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
+                    Ok(idx) => {
+                        add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
+                    }
+                    Err(idx) => {
+                        insert_new_sub_level(
+                            target_l0,
+                            sub_level.sub_level_id,
+                            sub_level.level_type,
+                            insert_table_infos,
+                            Some(idx),
+                        );
+                    }
+                }
+            }
+        }
+
+        for (idx, level) in parent_levels.levels.iter_mut().enumerate() {
+            let insert_table_infos = if let Some(split_key) = &split_key {
+                group_split::split_sst_info_for_level_v2(level, &mut new_sst_id, split_key.clone())
+            } else {
+                vec![]
+            };
+
+            if insert_table_infos.is_empty() {
+                continue;
+            }
+
+            cur_levels.levels[idx].total_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.sst_size)
+                .sum::<u64>();
+            cur_levels.levels[idx].uncompressed_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.uncompressed_file_size)
+                .sum::<u64>();
+            cur_levels.levels[idx]
+                .table_infos
+                .extend(insert_table_infos);
+            cur_levels.levels[idx]
+                .table_infos
+                .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+            assert!(can_concat(&cur_levels.levels[idx].table_infos));
+            level
+                .table_infos
+                .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                .for_each(|sst_info| {
+                    level.total_file_size -= sst_info.sst_size;
+                    level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                });
+        }
+    }
+}
+
 #[easy_ext::ext(HummockLevelsExt)]
 impl Levels {
     pub fn apply_compact_ssts(
@@ -1013,7 +1175,7 @@ fn split_sst_info_for_level(
             .cloned()
             .collect_vec();
         if !removed_table_ids.is_empty() {
-            let branch_sst = split_sst(
+            let branch_sst = split_sst_with_table_ids(
                 sst_info,
                 new_sst_id,
                 sst_info.sst_size / 2,
@@ -1331,42 +1493,6 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     res
 }
 
-pub fn split_sst(
-    sst_info: &mut SstableInfo,
-    new_sst_id: &mut u64,
-    old_sst_size: u64,
-    new_sst_size: u64,
-    new_table_ids: Vec<u32>,
-) -> SstableInfo {
-    let mut branch_table_info = sst_info.clone();
-    branch_table_info.sst_id = *new_sst_id;
-    branch_table_info.sst_size = new_sst_size;
-    *new_sst_id += 1;
-
-    sst_info.sst_id = *new_sst_id;
-    sst_info.sst_size = old_sst_size;
-    *new_sst_id += 1;
-
-    {
-        // related github.com/risingwavelabs/risingwave/pull/17898/
-        // This is a temporary implementation that will update `table_ids`` based on the new split rule after PR 17898
-        // sst_info.table_ids = vec[1, 2, 3];
-        // new_table_ids = vec[2, 3, 4];
-        // branch_table_info.table_ids = vec[1, 2, 3] ∩ vec[2, 3, 4] = vec[2, 3]
-        let set1: BTreeSet<_> = sst_info.table_ids.iter().cloned().collect();
-        let set2: BTreeSet<_> = new_table_ids.into_iter().collect();
-        let intersection: Vec<_> = set1.intersection(&set2).cloned().collect();
-
-        // Update table_ids
-        branch_table_info.table_ids = intersection;
-        sst_info
-            .table_ids
-            .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
-    }
-
-    branch_table_info
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1374,9 +1500,11 @@ mod tests {
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::hummock::{CompactionConfig, GroupConstruct, GroupDestroy, LevelType};
 
-    use crate::compaction_group::group_split;
+    use super::group_split;
+    use crate::compaction_group::group_split::*;
     use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
     use crate::key::{gen_key_from_str, FullKey};
     use crate::key_range::KeyRange;
@@ -1386,6 +1514,36 @@ mod tests {
         GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta,
     };
     use crate::HummockVersionId;
+
+    fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
+        let table_key_l = gen_key_from_str(VirtualNode::ZERO, "1");
+        let table_key_r = gen_key_from_str(VirtualNode::MAX_FOR_TEST, "1");
+        let full_key_l = FullKey::for_test(
+            TableId::new(*table_ids.first().unwrap()),
+            table_key_l,
+            epoch,
+        )
+        .encode();
+        let full_key_r =
+            FullKey::for_test(TableId::new(*table_ids.last().unwrap()), table_key_r, epoch)
+                .encode();
+
+        SstableInfo {
+            sst_id,
+            key_range: KeyRange {
+                left: full_key_l.into(),
+                right: full_key_r.into(),
+                right_exclusive: false,
+            },
+            table_ids,
+            object_id: sst_id,
+            min_epoch: 20,
+            max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn test_get_sst_object_ids() {
@@ -1943,6 +2101,461 @@ mod tests {
 
             assert!(left_levels.levels[0].level_idx == 1);
             assert_eq!(600, left_levels.levels[0].total_file_size);
+        }
+    }
+
+    #[test]
+    fn test_get_split_pos() {
+        let epoch = test_epoch(1);
+        let s1 = gen_sstable_info(1, vec![1, 2], epoch);
+        let s2 = gen_sstable_info(2, vec![3, 4, 5], epoch);
+        let s3 = gen_sstable_info(3, vec![6, 7], epoch);
+
+        let ssts = vec![s1, s2, s3];
+        let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
+
+        let pos = group_split::get_split_pos(&ssts, split_key.clone());
+        assert_eq!(1, pos);
+
+        let pos = group_split::get_split_pos(&vec![], split_key);
+        assert_eq!(0, pos);
+    }
+
+    #[test]
+    fn test_split_sst() {
+        let epoch = test_epoch(1);
+        let sst = gen_sstable_info(1, vec![1, 2, 3, 5], epoch);
+
+        {
+            let split_key = group_split::build_split_key(3, VirtualNode::ZERO);
+            let origin_sst = sst.clone();
+            let sst_size = origin_sst.sst_size;
+            let split_type = group_split::need_to_split(&origin_sst, split_key.clone());
+            assert_eq!(SstSplitType::Both, split_type);
+
+            let mut new_sst_id = 10;
+            let (origin_sst, branched_sst) = group_split::split_sst(
+                origin_sst,
+                &mut new_sst_id,
+                split_key,
+                sst_size / 2,
+                sst_size / 2,
+            );
+
+            let origin_sst = origin_sst.unwrap();
+            let branched_sst = branched_sst.unwrap();
+
+            assert!(origin_sst.key_range.right_exclusive);
+            assert!(origin_sst
+                .key_range
+                .right
+                .cmp(&branched_sst.key_range.left)
+                .is_le());
+            assert!(origin_sst.table_ids.is_sorted());
+            assert!(branched_sst.table_ids.is_sorted());
+            assert!(origin_sst.table_ids.last().unwrap() < branched_sst.table_ids.first().unwrap());
+            assert!(branched_sst.sst_size < origin_sst.file_size);
+            assert_eq!(10, branched_sst.sst_id);
+            assert_eq!(11, origin_sst.sst_id);
+            assert_eq!(&3, branched_sst.table_ids.first().unwrap()); // split table_id to right
+        }
+
+        {
+            // test un-exist table_id
+            let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
+            let origin_sst = sst.clone();
+            let sst_size = origin_sst.sst_size;
+            let split_type = group_split::need_to_split(&origin_sst, split_key.clone());
+            assert_eq!(SstSplitType::Both, split_type);
+
+            let mut new_sst_id = 10;
+            let (origin_sst, branched_sst) = group_split::split_sst(
+                origin_sst,
+                &mut new_sst_id,
+                split_key,
+                sst_size / 2,
+                sst_size / 2,
+            );
+
+            let origin_sst = origin_sst.unwrap();
+            let branched_sst = branched_sst.unwrap();
+
+            assert!(origin_sst.key_range.right_exclusive);
+            assert!(origin_sst.key_range.right.le(&branched_sst.key_range.left));
+            assert!(origin_sst.table_ids.is_sorted());
+            assert!(branched_sst.table_ids.is_sorted());
+            assert!(origin_sst.table_ids.last().unwrap() < branched_sst.table_ids.first().unwrap());
+            assert!(branched_sst.sst_size < origin_sst.file_size);
+            assert_eq!(10, branched_sst.sst_id);
+            assert_eq!(11, origin_sst.sst_id);
+            assert_eq!(&5, branched_sst.table_ids.first().unwrap()); // split table_id to right
+        }
+
+        {
+            let split_key = group_split::build_split_key(6, VirtualNode::ZERO);
+            let origin_sst = sst.clone();
+            let split_type = group_split::need_to_split(&origin_sst, split_key);
+            assert_eq!(SstSplitType::Left, split_type);
+        }
+
+        {
+            let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
+            let origin_sst = sst.clone();
+            let split_type = group_split::need_to_split(&origin_sst, split_key);
+            assert_eq!(SstSplitType::Both, split_type);
+
+            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
+            let origin_sst = sst.clone();
+            let split_type = group_split::need_to_split(&origin_sst, split_key);
+            assert_eq!(SstSplitType::Right, split_type);
+        }
+
+        {
+            // test key_range left = right
+            let mut sst = gen_sstable_info(1, vec![1], epoch);
+            sst.key_range.right = sst.key_range.left.clone();
+            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
+            let origin_sst = sst.clone();
+            let sst_size = origin_sst.sst_size;
+
+            let mut new_sst_id = 10;
+            let (origin_sst, branched_sst) = group_split::split_sst(
+                origin_sst,
+                &mut new_sst_id,
+                split_key,
+                sst_size / 2,
+                sst_size / 2,
+            );
+
+            assert!(origin_sst.is_none());
+            assert!(branched_sst.is_some());
+        }
+    }
+
+    #[test]
+    fn test_split_sst_info_for_level() {
+        let mut version = HummockVersion {
+            id: HummockVersionId(0),
+            levels: HashMap::from_iter([(
+                1,
+                build_initial_compaction_group_levels(
+                    1,
+                    &CompactionConfig {
+                        max_level: 6,
+                        ..Default::default()
+                    },
+                ),
+            )]),
+            ..Default::default()
+        };
+
+        let cg1 = version.levels.get_mut(&1).unwrap();
+
+        cg1.levels[0] = Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping,
+            table_infos: vec![
+                gen_sst_info(
+                    1,
+                    vec![3],
+                    FullKey::for_test(
+                        TableId::new(3),
+                        gen_key_from_str(VirtualNode::from_index(1), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(3),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    10,
+                    vec![3, 4],
+                    FullKey::for_test(
+                        TableId::new(3),
+                        gen_key_from_str(VirtualNode::from_index(201), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(4),
+                        gen_key_from_str(VirtualNode::from_index(10), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    11,
+                    vec![4],
+                    FullKey::for_test(
+                        TableId::new(4),
+                        gen_key_from_str(VirtualNode::from_index(11), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(4),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+            ],
+            total_file_size: 300,
+            ..Default::default()
+        };
+
+        cg1.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![
+                gen_sst_info(
+                    2,
+                    vec![2],
+                    FullKey::for_test(
+                        TableId::new(0),
+                        gen_key_from_str(VirtualNode::from_index(1), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(2),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    22,
+                    vec![2],
+                    FullKey::for_test(
+                        TableId::new(0),
+                        gen_key_from_str(VirtualNode::from_index(1), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(2),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    23,
+                    vec![2],
+                    FullKey::for_test(
+                        TableId::new(0),
+                        gen_key_from_str(VirtualNode::from_index(1), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(2),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    24,
+                    vec![2],
+                    FullKey::for_test(
+                        TableId::new(2),
+                        gen_key_from_str(VirtualNode::from_index(1), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(2),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    25,
+                    vec![2],
+                    FullKey::for_test(
+                        TableId::new(0),
+                        gen_key_from_str(VirtualNode::from_index(1), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(0),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+            ],
+            sub_level_id: 101,
+            level_type: LevelType::Overlapping,
+            total_file_size: 300,
+            ..Default::default()
+        });
+
+        {
+            // split Overlapping level
+            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
+
+            let mut new_sst_id = 100;
+            let x = group_split::split_sst_info_for_level_v2(
+                &mut cg1.l0.sub_levels[0],
+                &mut new_sst_id,
+                split_key,
+            );
+            // assert_eq!(3, x.len());
+            // assert_eq!(100, x[0].sst_id);
+            // assert_eq!(100, x[0].sst_size);
+            // assert_eq!(101, x[1].sst_id);
+            // assert_eq!(100, x[1].sst_size);
+            // assert_eq!(102, x[2].sst_id);
+            // assert_eq!(100, x[2].sst_size);
+
+            let mut right_l0 = OverlappingLevel {
+                sub_levels: vec![],
+                total_file_size: 0,
+                uncompressed_file_size: 0,
+            };
+
+            right_l0.sub_levels.push(Level {
+                level_idx: 0,
+                table_infos: x,
+                sub_level_id: 101,
+                total_file_size: 100,
+                level_type: LevelType::Overlapping,
+                ..Default::default()
+            });
+
+            let right_levels = Levels {
+                levels: vec![],
+                l0: right_l0,
+                ..Default::default()
+            };
+
+            merge_levels(cg1, right_levels);
+        }
+
+        {
+            // test split empty level
+            let mut new_sst_id = 100;
+            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
+            let x = group_split::split_sst_info_for_level_v2(
+                &mut cg1.levels[2],
+                &mut new_sst_id,
+                split_key,
+            );
+
+            assert!(x.is_empty());
+        }
+
+        {
+            // test split to right Nonoverlapping level
+            let mut cg1 = cg1.clone();
+            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
+
+            let mut new_sst_id = 100;
+            let x = group_split::split_sst_info_for_level_v2(
+                &mut cg1.levels[0],
+                &mut new_sst_id,
+                split_key,
+            );
+
+            assert_eq!(3, x.len());
+            assert_eq!(1, x[0].sst_id);
+            assert_eq!(100, x[0].sst_size);
+            assert_eq!(10, x[1].sst_id);
+            assert_eq!(100, x[1].sst_size);
+            assert_eq!(11, x[2].sst_id);
+            assert_eq!(100, x[2].sst_size);
+
+            assert_eq!(0, cg1.levels[0].table_infos.len());
+        }
+
+        {
+            // test split to left Nonoverlapping level
+            let mut cg1 = cg1.clone();
+            let split_key = group_split::build_split_key(5, VirtualNode::ZERO);
+
+            let mut new_sst_id = 100;
+            let x = group_split::split_sst_info_for_level_v2(
+                &mut cg1.levels[0],
+                &mut new_sst_id,
+                split_key,
+            );
+
+            assert_eq!(0, x.len());
+            assert_eq!(3, cg1.levels[0].table_infos.len());
+        }
+
+        // {
+        //     // test split to both Nonoverlapping level
+        //     let mut cg1 = cg1.clone();
+        //     let split_key = build_split_key(3, VirtualNode::MAX);
+
+        //     let mut new_sst_id = 100;
+        //     let x = group_split::split_sst_info_for_level_v2(
+        //         &mut cg1.levels[0],
+        //         &mut new_sst_id,
+        //         split_key,
+        //     );
+
+        //     assert_eq!(2, x.len());
+        //     assert_eq!(100, x[0].sst_id);
+        //     assert_eq!(100 / 2, x[0].sst_size);
+        //     assert_eq!(11, x[1].sst_id);
+        //     assert_eq!(100, x[1].sst_size);
+        //     assert_eq!(vec![3, 4], x[0].table_ids);
+
+        //     assert_eq!(2, cg1.levels[0].table_infos.len());
+        //     assert_eq!(101, cg1.levels[0].table_infos[1].sst_id);
+        //     assert_eq!(100 / 2, cg1.levels[0].table_infos[1].sst_size);
+        //     assert_eq!(vec![3], cg1.levels[0].table_infos[1].table_ids);
+        // }
+
+        {
+            // test split to both Nonoverlapping level
+            let mut cg1 = cg1.clone();
+            let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
+
+            let mut new_sst_id = 100;
+            let x = group_split::split_sst_info_for_level_v2(
+                &mut cg1.levels[0],
+                &mut new_sst_id,
+                split_key,
+            );
+
+            assert_eq!(2, x.len());
+            assert_eq!(100, x[0].sst_id);
+            assert_eq!(100 / 2, x[0].sst_size);
+            assert_eq!(11, x[1].sst_id);
+            assert_eq!(100, x[1].sst_size);
+            assert_eq!(vec![4], x[1].table_ids);
+
+            assert_eq!(2, cg1.levels[0].table_infos.len());
+            assert_eq!(101, cg1.levels[0].table_infos[1].sst_id);
+            assert_eq!(100 / 2, cg1.levels[0].table_infos[1].sst_size);
+            assert_eq!(vec![3], cg1.levels[0].table_infos[1].table_ids);
         }
     }
 }

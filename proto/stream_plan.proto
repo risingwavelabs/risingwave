@@ -1041,7 +1041,8 @@ message StreamFragmentGraph {
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
 
-  // Expected vnode count for the graph.
+  // Specified max parallelism, i.e., expected vnode count for the graph.
+  //
   // The scheduler on the meta service will use this as a hint to decide the vnode count
   // for each fragment.
   //
@@ -1049,5 +1050,5 @@ message StreamFragmentGraph {
   // For example, a no-shuffle exchange between current fragment graph and an existing
   // upstream fragment graph requires two fragments to be in the same distribution,
   // thus the same vnode count.
-  uint32 expected_vnode_count = 7;
+  uint32 max_parallelism = 7;
 }

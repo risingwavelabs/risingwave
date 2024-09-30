@@ -250,6 +250,9 @@ impl HummockManager {
             .all_object_ids_in_time_travel()
             .await?
             .collect::<HashSet<_>>();
+        self.metrics
+            .time_travel_object_count
+            .set(pinned_object_ids.len() as _);
         // 1. filter by watermark
         let object_ids = object_ids
             .into_iter()
