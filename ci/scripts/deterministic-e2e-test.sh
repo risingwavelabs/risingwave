@@ -51,4 +51,4 @@ echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queri
 timeout 10m seq 64 | parallel RUST_MIN_STACK=4194304 './risingwave_simulation  --run-sqlsmith-queries ./src/tests/sqlsmith/tests/sqlsmith-query-snapshots/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, e2e extended mode test"
-seq "$TEST_NUM" | parallel './risingwave_simulation -e 2> $LOGDIR/extended-{}.log && rm $LOGDIR/extended-{}.log'
+seq "$TEST_NUM" | parallel 'RUST_LOG=info ./risingwave_simulation -e 2> $LOGDIR/extended-{}.log && rm $LOGDIR/extended-{}.log'
