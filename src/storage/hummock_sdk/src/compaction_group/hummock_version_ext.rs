@@ -575,9 +575,14 @@ impl HummockVersion {
             &version_delta.removed_table_ids,
         );
 
-        if !is_commit_epoch && self.max_committed_epoch < version_delta.max_committed_epoch {
-            is_commit_epoch = true;
-            tracing::trace!("max committed epoch bumped but no table committed epoch is changed");
+        #[expect(deprecated)]
+        {
+            if !is_commit_epoch && self.max_committed_epoch < version_delta.max_committed_epoch {
+                is_commit_epoch = true;
+                tracing::trace!(
+                    "max committed epoch bumped but no table committed epoch is changed"
+                );
+            }
         }
 
         // apply to `levels`, which is different compaction groups
@@ -638,20 +643,12 @@ impl HummockVersion {
                 );
                 self.merge_compaction_group(group_merge.left_group_id, group_merge.right_group_id)
             }
-            let max_committed_epoch = self.max_committed_epoch;
             let group_destroy = summary.group_destroy;
             let levels = self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
                 panic!("compaction group {} does not exist", compaction_group_id)
             });
 
-            assert!(
-                max_committed_epoch <= version_delta.max_committed_epoch,
-                "new max commit epoch {} is older than the current max commit epoch {}",
-                version_delta.max_committed_epoch,
-                max_committed_epoch
-            );
             if is_commit_epoch {
-                // `max_committed_epoch` increases. It must be a `commit_epoch`
                 let GroupDeltasSummary {
                     delete_sst_levels,
                     delete_sst_ids_set,
@@ -687,7 +684,7 @@ impl HummockVersion {
                     }
                 }
             } else {
-                // `max_committed_epoch` is not changed. The delta is caused by compaction.
+                // The delta is caused by compaction.
                 levels.apply_compact_ssts(
                     summary,
                     self.state_table_info
@@ -699,7 +696,10 @@ impl HummockVersion {
             }
         }
         self.id = version_delta.id;
-        self.max_committed_epoch = version_delta.max_committed_epoch;
+        #[expect(deprecated)]
+        {
+            self.max_committed_epoch = version_delta.max_committed_epoch;
+        }
 
         // apply to table watermark
 

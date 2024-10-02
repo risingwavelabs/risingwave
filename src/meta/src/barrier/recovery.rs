@@ -326,16 +326,33 @@ impl GlobalBarrierManager {
                         .context
                         .hummock_manager
                         .on_current_version(|version| {
-                            let max_committed_epoch = version.max_committed_epoch_for_meta();
-                            for (table_id, info) in version.state_table_info.info() {
-                                assert_eq!(
-                                    info.committed_epoch, max_committed_epoch,
-                                    "table {} with invisible epoch is not purged",
-                                    table_id
+                            let state_table_info = version.state_table_info.info();
+                            let committed_epoch = state_table_info
+                                .values()
+                                .map(|info| info.committed_epoch)
+                                .next();
+                            let existing_table_ids = info.existing_table_ids();
+                            for table_id in existing_table_ids {
+                                assert!(
+                                    state_table_info.contains_key(&table_id),
+                                    "table id {table_id} not registered to hummock but in recovered job {:?}. hummock table info{:?}",
+                                    info.existing_table_ids().collect_vec(),
+                                    state_table_info
                                 );
                             }
+                            if let Some(committed_epoch) = committed_epoch {
+                                for (table_id, info) in version.state_table_info.info() {
+                                    assert_eq!(
+                                        info.committed_epoch, committed_epoch,
+                                        "table {} with invisible epoch is not purged",
+                                        table_id
+                                    );
+                                }
+                            }
                             (
-                                TracedEpoch::new(Epoch::from(max_committed_epoch)),
+                                committed_epoch.map(|committed_epoch| {
+                                    TracedEpoch::new(Epoch::from(committed_epoch))
+                                }),
                                 version.id,
                             )
                         })
@@ -388,30 +405,36 @@ impl GlobalBarrierManager {
                         subscriptions_to_add: Default::default(),
                     });
 
-                    // Use a different `curr_epoch` for each recovery attempt.
-                    let new_epoch = prev_epoch.next();
+                    let new_epoch = if let Some(prev_epoch) = &prev_epoch {
+                        // Use a different `curr_epoch` for each recovery attempt.
+                        let new_epoch = prev_epoch.next();
 
-                    let mut node_to_collect = control_stream_manager.inject_barrier(
-                        None,
-                        Some(mutation),
-                        (&new_epoch, &prev_epoch),
-                        &BarrierKind::Initial,
-                        &info,
-                        Some(&info),
-                        Some(node_actors),
-                        vec![],
-                        vec![],
-                    )?;
-                    debug!(?node_to_collect, "inject initial barrier");
-                    while !node_to_collect.is_empty() {
-                        let (worker_id, result) = control_stream_manager
-                            .next_complete_barrier_response()
-                            .await;
-                        let resp = result?;
-                        assert_eq!(resp.epoch, prev_epoch.value().0);
-                        assert!(node_to_collect.remove(&worker_id));
-                    }
-                    debug!("collected initial barrier");
+                        let mut node_to_collect = control_stream_manager.inject_barrier(
+                            None,
+                            Some(mutation),
+                            (&new_epoch, prev_epoch),
+                            &BarrierKind::Initial,
+                            &info,
+                            Some(&info),
+                            Some(node_actors),
+                            vec![],
+                            vec![],
+                        )?;
+                        debug!(?node_to_collect, "inject initial barrier");
+                        while !node_to_collect.is_empty() {
+                            let (worker_id, result) = control_stream_manager
+                                .next_complete_barrier_response()
+                                .await;
+                            let resp = result?;
+                            assert_eq!(resp.epoch, prev_epoch.value().0);
+                            assert!(node_to_collect.remove(&worker_id));
+                        }
+                        debug!("collected initial barrier");
+                        Some(new_epoch)
+                    } else {
+                        assert!(info.is_empty());
+                        None
+                    };
 
                     (
                         BarrierManagerState::new(new_epoch, info, subscription_info, paused_reason),
@@ -446,7 +469,7 @@ impl GlobalBarrierManager {
             CheckpointControl::new(self.context.clone(), create_mview_tracker).await;
 
         tracing::info!(
-            epoch = self.state.in_flight_prev_epoch().value().0,
+            epoch = self.state.in_flight_prev_epoch().map(|epoch| epoch.value().0),
             paused = ?self.state.paused_reason(),
             "recovery success"
         );

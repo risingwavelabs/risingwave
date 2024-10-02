@@ -808,10 +808,7 @@ pub(crate) mod tests {
                 retention_seconds: Some(retention_seconds_expire_second),
             },
         )]);
-        compact_task.current_epoch_time = hummock_manager_ref
-            .get_current_version()
-            .await
-            .max_committed_epoch_for_test();
+        compact_task.current_epoch_time = Epoch::now().0;
 
         // assert compact_task
         assert_eq!(
@@ -1014,10 +1011,7 @@ pub(crate) mod tests {
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        compact_task.current_epoch_time = hummock_manager_ref
-            .get_current_version()
-            .await
-            .max_committed_epoch_for_test();
+        compact_task.current_epoch_time = Epoch::now().0;
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
@@ -2001,10 +1995,7 @@ pub(crate) mod tests {
             let compaction_filter_flag =
                 CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
             compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-            compact_task.current_epoch_time = hummock_manager_ref
-                .get_current_version()
-                .await
-                .max_committed_epoch_for_test();
+            compact_task.current_epoch_time = Epoch::now().0;
 
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
@@ -2228,10 +2219,7 @@ pub(crate) mod tests {
                 let compaction_filter_flag =
                     CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
                 compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-                compact_task.current_epoch_time = hummock_manager_ref
-                    .get_current_version()
-                    .await
-                    .max_committed_epoch_for_test();
+                compact_task.current_epoch_time = Epoch::now().0;
 
                 // 3. compact
                 let (_tx, rx) = tokio::sync::oneshot::channel();

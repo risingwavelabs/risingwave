@@ -86,7 +86,7 @@ impl StreamDeltaJoin {
         }
     }
 
-    /// Get a reference to the batch hash join's eq join predicate.
+    /// Get a reference to the delta hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
     }

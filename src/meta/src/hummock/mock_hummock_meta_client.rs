@@ -162,6 +162,13 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .iter()
                     .flat_map(|sstable| sstable.sst_info.table_ids.clone())
             })
+            .chain(
+                sync_result
+                    .table_watermarks
+                    .keys()
+                    .map(|table_id| table_id.table_id),
+            )
+            .chain(table_ids.iter().cloned())
             .collect::<BTreeSet<_>>();
 
         let new_table_fragment_info = if commit_table_ids
@@ -216,7 +223,6 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .cloned()
                     .map(TableId::from)
                     .collect(),
-                is_visible_table_committed_epoch: true,
             })
             .await
             .map_err(mock_err)?;

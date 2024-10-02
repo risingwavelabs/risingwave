@@ -1647,7 +1647,8 @@ pub(crate) mod tests {
             uploader
                 .context
                 .pinned_version
-                .max_committed_epoch_for_test()
+                .table_committed_epoch(TEST_TABLE_ID)
+                .unwrap()
         );
     }
 
@@ -1684,7 +1685,8 @@ pub(crate) mod tests {
             uploader
                 .context
                 .pinned_version
-                .max_committed_epoch_for_test()
+                .table_committed_epoch(TEST_TABLE_ID)
+                .unwrap()
         );
     }
 
@@ -1725,7 +1727,8 @@ pub(crate) mod tests {
             uploader
                 .context
                 .pinned_version
-                .max_committed_epoch_for_test()
+                .table_committed_epoch(TEST_TABLE_ID)
+                .unwrap()
         );
     }
 

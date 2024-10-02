@@ -584,6 +584,20 @@ impl fmt::Display for Join {
                 suffix(constraint)
             ),
             JoinOperator::CrossJoin => write!(f, " CROSS JOIN {}", self.relation),
+            JoinOperator::AsOfInner(constraint) => write!(
+                f,
+                " {}ASOF JOIN {}{}",
+                prefix(constraint),
+                self.relation,
+                suffix(constraint)
+            ),
+            JoinOperator::AsOfLeft(constraint) => write!(
+                f,
+                " {}ASOF LEFT JOIN {}{}",
+                prefix(constraint),
+                self.relation,
+                suffix(constraint)
+            ),
         }
     }
 }
@@ -596,6 +610,8 @@ pub enum JoinOperator {
     RightOuter(JoinConstraint),
     FullOuter(JoinConstraint),
     CrossJoin,
+    AsOfInner(JoinConstraint),
+    AsOfLeft(JoinConstraint),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
