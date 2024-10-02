@@ -11,7 +11,8 @@ statement ok
 create table t3 (v1 int primary key, v2 int);
 
 statement ok
-create materialized view mv1 as with sub as changelog from t1 select * from sub;
+# test public.t1 due to https://github.com/risingwavelabs/risingwave/issues/18747
+create materialized view mv1 as with sub as changelog from public.t1 select * from sub;
 
 statement ok
 create materialized view mv2 as with sub as changelog from t2 select * from sub;
