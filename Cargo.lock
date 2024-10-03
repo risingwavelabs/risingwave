@@ -10849,7 +10849,7 @@ dependencies = [
  "sqlx",
  "strum 0.26.3",
  "strum_macros 0.26.4",
- "syn 1.0.109",
+ "syn 2.0.66",
  "tempfile",
  "thiserror",
  "thiserror-ext",
