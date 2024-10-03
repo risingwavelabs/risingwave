@@ -176,7 +176,7 @@ parking_lot = { version = "0.12", features = [
     "arc_lock",
     "deadlock_detection",
 ] }
-sea-orm = { version = "0.12.14", features = [
+sea-orm = { version = "0.12.15", features = [
     "sqlx-mysql",
     "sqlx-postgres",
     "sqlx-sqlite",
