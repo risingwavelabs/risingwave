@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+use std::mem::take;
+
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 
@@ -25,6 +29,7 @@ pub struct BarrierManagerState {
     /// There's no need to persist this field. On recovery, we will restore this from the latest
     /// committed snapshot in `HummockManager`.
     in_flight_prev_epoch: Option<TracedEpoch>,
+    creating_jobs_to_wait: HashSet<TableId>,
 
     /// Inflight running actors info.
     pub(crate) inflight_graph_info: InflightGraphInfo,
@@ -44,6 +49,7 @@ impl BarrierManagerState {
     ) -> Self {
         Self {
             in_flight_prev_epoch,
+            creating_jobs_to_wait: Default::default(),
             inflight_graph_info,
             inflight_subscription_info,
             paused_reason,
@@ -66,7 +72,10 @@ impl BarrierManagerState {
     }
 
     /// Returns the epoch pair for the next barrier, and updates the state.
-    pub fn next_epoch_pair(&mut self, command: &Command) -> Option<(TracedEpoch, TracedEpoch)> {
+    pub fn next_epoch_pair(
+        &mut self,
+        command: &Command,
+    ) -> Option<(TracedEpoch, TracedEpoch, HashSet<TableId>)> {
         if self.inflight_graph_info.is_empty()
             && !matches!(&command, Command::CreateStreamingJob { .. })
         {
@@ -78,7 +87,11 @@ impl BarrierManagerState {
         let prev_epoch = in_flight_prev_epoch.clone();
         let next_epoch = prev_epoch.next();
         *in_flight_prev_epoch = next_epoch.clone();
-        Some((prev_epoch, next_epoch))
+        Some((
+            prev_epoch,
+            next_epoch,
+            take(&mut self.creating_jobs_to_wait),
+        ))
     }
 
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
@@ -108,6 +121,14 @@ impl BarrierManagerState {
         if let Some(fragment_changes) = fragment_changes {
             self.inflight_graph_info.post_apply(&fragment_changes);
         }
+        if let Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) = command {
+            for (_, graph_info) in jobs_to_merge.values() {
+                self.inflight_graph_info.extend(graph_info.clone());
+            }
+            self.creating_jobs_to_wait
+                .extend(jobs_to_merge.keys().cloned());
+        }
+
         self.inflight_subscription_info.post_apply(command);
 
         (info, subscription_info)

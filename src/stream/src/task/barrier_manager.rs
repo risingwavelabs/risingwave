@@ -24,7 +24,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::error::tonic::extra::Score;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCreateMviewProgress, PbLocalSstableInfo,
+    PbCreateMviewLogStoreProgress, PbCreateMviewProgress, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use thiserror_ext::AsReport;
@@ -78,6 +78,8 @@ pub struct BarrierCompleteResult {
 
     /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
+
+    pub create_mview_log_store_progress: Vec<PbCreateMviewLogStoreProgress>,
 }
 
 pub(super) struct ControlStreamHandle {
@@ -186,6 +188,12 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         actor: ActorId,
         state: BackfillState,
+    },
+    ReportCreateMviewLogStoreProgress {
+        epoch: EpochPair,
+        actor: ActorId,
+        /// `None` means it has finished processing log store
+        pending_barrier_num: Option<usize>,
     },
     RegisterBarrierSender {
         actor_id: ActorId,
@@ -407,6 +415,11 @@ impl LocalBarrierWorker {
             } => {
                 self.update_create_mview_progress(epoch, actor, state);
             }
+            LocalBarrierEvent::ReportCreateMviewLogStoreProgress {
+                epoch,
+                actor,
+                pending_barrier_num,
+            } => self.update_create_mview_log_store_progress(epoch, actor, pending_barrier_num),
             LocalBarrierEvent::RegisterBarrierSender {
                 actor_id,
                 barrier_sender,
@@ -467,6 +480,7 @@ impl LocalBarrierWorker {
         let BarrierCompleteResult {
             create_mview_progress,
             sync_result,
+            create_mview_log_store_progress,
         } = result;
 
         let (synced_sstables, table_watermarks, old_value_ssts) = sync_result
@@ -488,6 +502,7 @@ impl LocalBarrierWorker {
                         epoch,
                         status: None,
                         create_mview_progress,
+                        create_mview_log_store_progress,
                         synced_sstables: synced_sstables
                             .into_iter()
                             .map(

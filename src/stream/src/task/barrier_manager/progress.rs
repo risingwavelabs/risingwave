@@ -18,7 +18,9 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
 use super::LocalBarrierManager;
-use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
+use crate::task::barrier_manager::LocalBarrierEvent::{
+    ReportCreateMviewLogStoreProgress, ReportCreateProgress,
+};
 use crate::task::barrier_manager::LocalBarrierWorker;
 use crate::task::ActorId;
 
@@ -77,6 +79,31 @@ impl LocalBarrierWorker {
                 .insert(actor, state);
         } else {
             warn!(?epoch, actor, ?state, "ignore create mview progress");
+        }
+    }
+
+    pub(crate) fn update_create_mview_log_store_progress(
+        &mut self,
+        epoch: EpochPair,
+        actor: ActorId,
+        pending_barrier_num: Option<usize>,
+    ) {
+        if let Some(actor_state) = self.state.actor_states.get(&actor)
+            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
+            && let Some(graph_state) = self.state.graph_states.get_mut(partial_graph_id)
+        {
+            graph_state
+                .create_mview_log_store_progress
+                .entry(epoch.curr)
+                .or_default()
+                .insert(actor, pending_barrier_num);
+        } else {
+            warn!(
+                ?epoch,
+                actor,
+                ?pending_barrier_num,
+                "ignore create mview log store progress"
+            );
         }
     }
 }
@@ -191,6 +218,10 @@ impl CreateMviewProgressReporter {
         }
         self.update_inner(epoch, BackfillState::Done(current_consumed_rows));
     }
+
+    pub(crate) fn barrier_manager(&self) -> &LocalBarrierManager {
+        &self.barrier_manager
+    }
 }
 
 impl LocalBarrierManager {
@@ -201,11 +232,32 @@ impl LocalBarrierManager {
     ///
     /// When all backfill executors of the creating mview finish, the creation progress will be done at
     /// frontend and the mview will be exposed to the user.
-    pub fn register_create_mview_progress(
+    pub(crate) fn register_create_mview_progress(
         &self,
         backfill_actor_id: ActorId,
     ) -> CreateMviewProgressReporter {
         trace!("register create mview progress: {}", backfill_actor_id);
         CreateMviewProgressReporter::new(self.clone(), backfill_actor_id)
+    }
+
+    pub(crate) fn update_create_mview_log_store_progress(
+        &self,
+        epoch: EpochPair,
+        actor: ActorId,
+        pending_barrier_num: usize,
+    ) {
+        self.send_event(ReportCreateMviewLogStoreProgress {
+            epoch,
+            actor,
+            pending_barrier_num: Some(pending_barrier_num),
+        })
+    }
+
+    pub(crate) fn finish_consuming_log_store(&self, epoch: EpochPair, actor: ActorId) {
+        self.send_event(ReportCreateMviewLogStoreProgress {
+            epoch,
+            actor,
+            pending_barrier_num: None,
+        })
     }
 }

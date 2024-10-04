@@ -17,24 +17,19 @@ mod status;
 
 use std::cmp::max;
 use std::collections::HashMap;
-use std::mem::take;
 use std::sync::Arc;
-use std::time::Duration;
 
 use prometheus::HistogramTimer;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
-use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::barrier::command::CommandContext;
-use crate::barrier::creating_job::barrier_control::{
-    CreatingStreamingJobBarrierControl, CreatingStreamingJobBarrierType,
-};
+use crate::barrier::creating_job::barrier_control::CreatingStreamingJobBarrierControl;
 use crate::barrier::creating_job::status::{
     CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus,
 };
@@ -73,6 +68,7 @@ impl CreatingStreamingJobControl {
             definition = info.definition,
             "new creating job"
         );
+        let snapshot_backfill_actors = info.table_fragments.snapshot_backfill_actor_ids();
         let mut create_mview_tracker = CreateMviewProgressTracker::default();
         create_mview_tracker.update_tracking_jobs(Some((&info, None)), [], version_stat);
         let fragment_info: HashMap<_, _> = info.new_fragment_info().collect();
@@ -85,13 +81,18 @@ impl CreatingStreamingJobControl {
         Self {
             info,
             snapshot_backfill_info,
-            barrier_control: CreatingStreamingJobBarrierControl::new(table_id, metrics),
+            barrier_control: CreatingStreamingJobBarrierControl::new(
+                table_id,
+                backfill_epoch,
+                metrics,
+            ),
             backfill_epoch,
             status: CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time: 0,
                 pending_commands: vec![],
                 version_stats: version_stat.clone(),
                 create_mview_tracker,
+                snapshot_backfill_actors,
                 graph_info: InflightGraphInfo::new(fragment_info),
                 backfill_epoch,
                 pending_non_checkpoint_barriers: vec![],
@@ -103,6 +104,25 @@ impl CreatingStreamingJobControl {
             upstream_wait_progress_latency: metrics
                 .snapshot_backfill_upstream_wait_progress_latency
                 .with_guarded_label_values(&[&table_id_str]),
+        }
+    }
+
+    /// Return whether the job is finished or not
+    pub(super) fn attach_upstream_wait_finish_epoch(&mut self, upstream_epoch: u64) -> bool {
+        match &mut self.status {
+            CreatingStreamingJobStatus::Finishing(upstream_epoch_to_notify) => {
+                assert_eq!(*upstream_epoch_to_notify, None);
+                if self.barrier_control.is_empty() {
+                    true
+                } else {
+                    *upstream_epoch_to_notify = Some(upstream_epoch);
+                    false
+                }
+            }
+            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => {
+                unreachable!("should not attach upstream wait finish epoch at non-finishing status")
+            }
         }
     }
 
@@ -142,32 +162,15 @@ impl CreatingStreamingJobControl {
                 }
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
-                start_consume_log_store_epoch,
+                log_store_progress_tracker,
                 ..
             } => {
-                let max_collected_epoch = max(
-                    self.barrier_control.max_collected_epoch().unwrap_or(0),
-                    self.backfill_epoch,
-                );
-                let lag = Duration::from_millis(
-                    Epoch(*start_consume_log_store_epoch)
-                        .physical_time()
-                        .saturating_sub(Epoch(max_collected_epoch).physical_time()),
-                );
                 format!(
-                    "LogStore [remain lag: {:?}, epoch cnt: {}]",
-                    lag,
-                    self.barrier_control.inflight_barrier_count()
+                    "LogStore [{}]",
+                    log_store_progress_tracker.gen_ddl_progress()
                 )
             }
-            CreatingStreamingJobStatus::ConsumingUpstream { .. } => {
-                format!(
-                    "Upstream [unattached: {}, epoch cnt: {}]",
-                    self.barrier_control.unattached_epochs().count(),
-                    self.barrier_control.inflight_barrier_count(),
-                )
-            }
-            CreatingStreamingJobStatus::Finishing { .. } => {
+            CreatingStreamingJobStatus::Finishing(_) => {
                 format!(
                     "Finishing [epoch count: {}]",
                     self.barrier_control.inflight_barrier_count()
@@ -182,52 +185,22 @@ impl CreatingStreamingJobControl {
     }
 
     pub(super) fn pinned_upstream_log_epoch(&self) -> Option<u64> {
-        let stop_consume_log_store_epoch = match &self.status {
-            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => None,
-            CreatingStreamingJobStatus::ConsumingUpstream {
-                start_consume_upstream_epoch,
-                ..
-            }
-            | CreatingStreamingJobStatus::Finishing {
-                start_consume_upstream_epoch,
-                ..
-            } => Some(*start_consume_upstream_epoch),
-        };
-        if let Some(max_collected_epoch) = self.barrier_control.max_collected_epoch() {
-            if max_collected_epoch < self.backfill_epoch {
-                Some(self.backfill_epoch)
-            } else if let Some(stop_consume_log_store_epoch) = stop_consume_log_store_epoch
-                && max_collected_epoch >= stop_consume_log_store_epoch
-            {
-                None
-            } else {
-                Some(max_collected_epoch)
-            }
-        } else {
-            Some(self.backfill_epoch)
+        if matches!(&self.status, CreatingStreamingJobStatus::Finishing(_)) {
+            return None;
         }
+        // TODO: when supporting recoverable snapshot backfill, we should use the max epoch that has committed
+        Some(max(
+            self.barrier_control.max_collected_epoch().unwrap_or(0),
+            self.backfill_epoch,
+        ))
     }
 
     pub(super) fn may_inject_fake_barrier(
         &mut self,
         control_stream_manager: &mut ControlStreamManager,
-        upstream_prev_epoch: u64,
         is_checkpoint: bool,
     ) -> MetaResult<()> {
-        if let Some((barriers_to_inject, graph_info)) =
-            self.status.may_inject_fake_barrier(is_checkpoint)
-        {
-            if let Some(graph_info) = graph_info {
-                info!(
-                    table_id = self.info.table_fragments.table_id().table_id,
-                    upstream_prev_epoch, "start consuming log store"
-                );
-                self.status = CreatingStreamingJobStatus::ConsumingLogStore {
-                    graph_info,
-                    start_consume_log_store_epoch: upstream_prev_epoch,
-                };
-            }
+        if let Some(barriers_to_inject) = self.status.may_inject_fake_barrier(is_checkpoint) {
             let graph_info = self
                 .status
                 .active_graph_info()
@@ -256,7 +229,6 @@ impl CreatingStreamingJobControl {
                     prev_epoch.value().0,
                     node_to_collect,
                     kind.is_checkpoint(),
-                    CreatingStreamingJobBarrierType::Snapshot,
                 );
             }
         }
@@ -267,7 +239,7 @@ impl CreatingStreamingJobControl {
         &mut self,
         control_stream_manager: &mut ControlStreamManager,
         command_ctx: &Arc<CommandContext>,
-    ) -> MetaResult<Option<Option<InflightGraphInfo>>> {
+    ) -> MetaResult<()> {
         let table_id = self.info.table_fragments.table_id();
         let start_consume_upstream = if let Command::MergeSnapshotBackfillStreamingJobs(
             jobs_to_merge,
@@ -290,7 +262,7 @@ impl CreatingStreamingJobControl {
                 .0
                 .saturating_sub(progress_epoch) as _,
         );
-        let graph_to_finish = match &mut self.status {
+        match &mut self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot {
                 pending_commands, ..
             } => {
@@ -299,65 +271,15 @@ impl CreatingStreamingJobControl {
                     "should not start consuming upstream for a job that are consuming snapshot"
                 );
                 pending_commands.push(command_ctx.clone());
-                None
             }
             CreatingStreamingJobStatus::ConsumingLogStore { graph_info, .. } => {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
+                    None,
+                    (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
+                    &command_ctx.kind,
+                    graph_info,
                     if start_consume_upstream {
-                        // erase the mutation on upstream except the last command
-                        command_ctx.to_mutation()
-                    } else {
-                        None
-                    },
-                    (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
-                    &command_ctx.kind,
-                    graph_info,
-                    Some(graph_info),
-                    None,
-                    vec![],
-                    vec![],
-                )?;
-                self.barrier_control.enqueue_epoch(
-                    command_ctx.prev_epoch.value().0,
-                    node_to_collect,
-                    command_ctx.kind.is_checkpoint(),
-                    CreatingStreamingJobBarrierType::LogStore,
-                );
-                let prev_epoch = command_ctx.prev_epoch.value().0;
-                if start_consume_upstream {
-                    let graph_info = take(graph_info);
-                    info!(
-                        table_id = self.info.table_fragments.table_id().table_id,
-                        prev_epoch, "start consuming upstream"
-                    );
-                    self.status = CreatingStreamingJobStatus::ConsumingUpstream {
-                        start_consume_upstream_epoch: prev_epoch,
-                        graph_info,
-                    };
-                }
-                None
-            }
-            CreatingStreamingJobStatus::ConsumingUpstream {
-                start_consume_upstream_epoch,
-                graph_info,
-            } => {
-                assert!(
-                    !start_consume_upstream,
-                    "should not start consuming upstream for a job again"
-                );
-
-                let should_finish = command_ctx.kind.is_checkpoint()
-                    && self.barrier_control.unattached_epochs().next().is_none();
-                let node_to_collect = control_stream_manager.inject_barrier(
-                    Some(table_id),
-                    // do not send the upstream barrier mutation because in `ConsumingUpstream` stage,
-                    // barriers are still injected and collected independently on the creating jobs.
-                    None,
-                    (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
-                    &command_ctx.kind,
-                    graph_info,
-                    if should_finish {
                         None
                     } else {
                         Some(graph_info)
@@ -366,49 +288,28 @@ impl CreatingStreamingJobControl {
                     vec![],
                     vec![],
                 )?;
-                let prev_epoch = command_ctx.prev_epoch.value().0;
                 self.barrier_control.enqueue_epoch(
-                    prev_epoch,
+                    command_ctx.prev_epoch.value().0,
                     node_to_collect,
                     command_ctx.kind.is_checkpoint(),
-                    CreatingStreamingJobBarrierType::Upstream,
                 );
-                let graph_info = if should_finish {
-                    info!(prev_epoch, table_id = ?self.info.table_fragments.table_id(), "mark as finishing");
-                    self.barrier_control
-                        .attach_upstream_epoch(prev_epoch, prev_epoch);
-                    let graph_info = take(graph_info);
-                    self.status = CreatingStreamingJobStatus::Finishing {
-                        start_consume_upstream_epoch: *start_consume_upstream_epoch,
-                    };
-                    Some(Some(graph_info))
-                } else {
-                    let mut unattached_epochs_iter = self.barrier_control.unattached_epochs();
-                    let mut epoch_to_attach = unattached_epochs_iter.next().expect("non-empty").0;
-                    let mut remain_count = 5;
-                    while remain_count > 0
-                        && let Some((epoch, _)) = unattached_epochs_iter.next()
-                    {
-                        remain_count -= 1;
-                        epoch_to_attach = epoch;
-                    }
-                    drop(unattached_epochs_iter);
-                    self.barrier_control
-                        .attach_upstream_epoch(epoch_to_attach, prev_epoch);
-                    Some(None)
-                };
-
-                graph_info
+                let prev_epoch = command_ctx.prev_epoch.value().0;
+                if start_consume_upstream {
+                    info!(
+                        table_id = self.info.table_fragments.table_id().table_id,
+                        prev_epoch, "start consuming upstream"
+                    );
+                    self.status = CreatingStreamingJobStatus::Finishing(None);
+                }
             }
             CreatingStreamingJobStatus::Finishing { .. } => {
                 assert!(
                     !start_consume_upstream,
                     "should not start consuming upstream for a job again"
                 );
-                None
             }
         };
-        Ok(graph_to_finish)
+        Ok(())
     }
 
     pub(super) fn collect(
@@ -417,50 +318,39 @@ impl CreatingStreamingJobControl {
         worker_id: WorkerId,
         resp: BarrierCompleteResponse,
     ) {
-        self.status.update_progress(&resp.create_mview_progress);
+        self.status.update_progress(
+            &resp.create_mview_progress,
+            &resp.create_mview_log_store_progress,
+        );
         self.barrier_control.collect(epoch, worker_id, resp);
     }
 
     pub(super) fn should_merge_to_upstream(&self) -> Option<InflightGraphInfo> {
-        if let (
-            CreatingStreamingJobStatus::ConsumingLogStore {
-                graph_info,
-                start_consume_log_store_epoch,
-            },
-            Some(max_collected_epoch),
-        ) = (&self.status, self.barrier_control.max_collected_epoch())
+        if let CreatingStreamingJobStatus::ConsumingLogStore {
+            graph_info,
+            ref log_store_progress_tracker,
+        } = &self.status
+            && log_store_progress_tracker.is_finished()
         {
-            if max_collected_epoch >= *start_consume_log_store_epoch {
-                Some(graph_info.clone())
-            } else {
-                let lag = Duration::from_millis(
-                    Epoch(*start_consume_log_store_epoch).physical_time()
-                        - Epoch(max_collected_epoch).physical_time(),
-                );
-                debug!(
-                    ?lag,
-                    max_collected_epoch, start_consume_log_store_epoch, "wait consuming log store"
-                );
-                None
-            }
+            Some(graph_info.clone())
         } else {
             None
         }
     }
 
-    #[expect(clippy::type_complexity)]
-    pub(super) fn start_completing(
-        &mut self,
-    ) -> (Vec<u64>, Option<(u64, Vec<BarrierCompleteResponse>, bool)>) {
+    pub(super) fn start_completing(&mut self) -> Option<(u64, Vec<BarrierCompleteResponse>, bool)> {
         self.barrier_control.start_completing()
     }
 
-    pub(super) fn ack_completed(&mut self, completed_epoch: u64) -> Option<(u64, bool)> {
-        let upstream_epoch_to_notify = self.barrier_control.ack_completed(completed_epoch);
-        if let Some(upstream_epoch_to_notify) = upstream_epoch_to_notify {
-            Some((upstream_epoch_to_notify, self.is_finished()))
+    pub(super) fn ack_completed(&mut self, completed_epoch: u64) -> Option<u64> {
+        self.barrier_control.ack_completed(completed_epoch);
+        if let CreatingStreamingJobStatus::Finishing(upstream_epoch_to_notify) = &self.status {
+            if self.barrier_control.is_empty() {
+                *upstream_epoch_to_notify
+            } else {
+                None
+            }
         } else {
-            assert!(!self.is_finished());
             None
         }
     }

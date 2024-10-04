@@ -12,21 +12,91 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::mem::take;
 use std::sync::Arc;
 
+use itertools::Itertools;
+use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::StreamActor;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    CreateMviewProgress, PbCreateMviewLogStoreProgress,
+};
+use tracing::warn;
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{BarrierKind, TracedEpoch};
 use crate::manager::WorkerId;
+
+#[derive(Debug)]
+pub(super) struct CreateMviewLogStoreProgressTracker {
+    /// `actor_id` -> `pending_barrier_count`
+    ongoing_actors: HashMap<ActorId, usize>,
+    finished_actors: HashSet<ActorId>,
+}
+
+impl CreateMviewLogStoreProgressTracker {
+    fn new(actors: impl Iterator<Item = ActorId>, initial_pending_count: usize) -> Self {
+        Self {
+            ongoing_actors: HashMap::from_iter(actors.map(|actor| (actor, initial_pending_count))),
+            finished_actors: HashSet::new(),
+        }
+    }
+
+    pub(super) fn gen_ddl_progress(&self) -> String {
+        let sum = self.ongoing_actors.values().sum::<usize>() as f64;
+        let count = if self.ongoing_actors.is_empty() {
+            1
+        } else {
+            self.ongoing_actors.len()
+        } as f64;
+        let avg = sum / count;
+        format!(
+            "finished: {}/{}, avg epoch count {}",
+            self.finished_actors.len(),
+            self.ongoing_actors.len() + self.finished_actors.len(),
+            avg
+        )
+    }
+
+    fn update(&mut self, progress: impl IntoIterator<Item = &PbCreateMviewLogStoreProgress>) {
+        for progress in progress {
+            match self.ongoing_actors.entry(progress.backfill_actor_id) {
+                Entry::Occupied(mut entry) => {
+                    if progress.done {
+                        entry.remove_entry();
+                        assert!(
+                            self.finished_actors.insert(progress.backfill_actor_id),
+                            "non-duplicate"
+                        );
+                    } else {
+                        *entry.get_mut() = progress.pending_barrier_num as _;
+                    }
+                }
+                Entry::Vacant(_) => {
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "reporting progress on non-inflight actor: {:?} {:?}",
+                            progress, self
+                        );
+                    } else {
+                        warn!(?progress, progress_tracker = ?self, "reporting progress on non-inflight actor");
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn is_finished(&self) -> bool {
+        self.ongoing_actors.is_empty()
+    }
+}
 
 #[derive(Debug)]
 pub(super) enum CreatingStreamingJobStatus {
@@ -36,6 +106,7 @@ pub(super) enum CreatingStreamingJobStatus {
         version_stats: HummockVersionStats,
         create_mview_tracker: CreateMviewProgressTracker,
         graph_info: InflightGraphInfo,
+        snapshot_backfill_actors: HashSet<ActorId>,
         backfill_epoch: u64,
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
@@ -45,15 +116,9 @@ pub(super) enum CreatingStreamingJobStatus {
     },
     ConsumingLogStore {
         graph_info: InflightGraphInfo,
-        start_consume_log_store_epoch: u64,
+        log_store_progress_tracker: CreateMviewLogStoreProgressTracker,
     },
-    ConsumingUpstream {
-        start_consume_upstream_epoch: u64,
-        graph_info: InflightGraphInfo,
-    },
-    Finishing {
-        start_consume_upstream_epoch: u64,
-    },
+    Finishing(Option<u64>),
 }
 
 pub(super) struct CreatingJobInjectBarrierInfo {
@@ -68,9 +133,8 @@ impl CreatingStreamingJobStatus {
     pub(super) fn active_graph_info(&self) -> Option<&InflightGraphInfo> {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot { graph_info, .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { graph_info, .. }
-            | CreatingStreamingJobStatus::ConsumingUpstream { graph_info, .. } => Some(graph_info),
-            CreatingStreamingJobStatus::Finishing { .. } => {
+            | CreatingStreamingJobStatus::ConsumingLogStore { graph_info, .. } => Some(graph_info),
+            CreatingStreamingJobStatus::Finishing(_) => {
                 // when entering `Finishing`, the graph will have been added to the upstream graph,
                 // and therefore the separate graph info is inactive.
                 None
@@ -81,32 +145,53 @@ impl CreatingStreamingJobStatus {
     pub(super) fn update_progress(
         &mut self,
         create_mview_progress: impl IntoIterator<Item = &CreateMviewProgress>,
+        log_store_progress: impl IntoIterator<Item = &PbCreateMviewLogStoreProgress>,
     ) {
-        if let Self::ConsumingSnapshot {
-            create_mview_tracker,
-            ref version_stats,
-            ..
-        } = self
-        {
-            create_mview_tracker.update_tracking_jobs(None, create_mview_progress, version_stats);
+        match self {
+            Self::ConsumingSnapshot {
+                create_mview_tracker,
+                ref version_stats,
+                ..
+            } => {
+                create_mview_tracker.update_tracking_jobs(
+                    None,
+                    create_mview_progress,
+                    version_stats,
+                );
+                let mut log_store_progress = log_store_progress.into_iter().peekable();
+                if log_store_progress.peek().is_some() {
+                    warn!(log_store_progress = ?log_store_progress.collect_vec(), "ignore log store progress when consuming snapshot");
+                }
+            }
+            CreatingStreamingJobStatus::ConsumingLogStore {
+                log_store_progress_tracker,
+                ..
+            } => {
+                log_store_progress_tracker.update(log_store_progress);
+                let mut create_mview_progress = create_mview_progress.into_iter().peekable();
+                if create_mview_progress.peek().is_some() {
+                    warn!(create_mview_progress = ?create_mview_progress.collect_vec(), "ignore create_mview_progress when consuming log store");
+                }
+            }
+            CreatingStreamingJobStatus::Finishing(_) => {}
         }
     }
 
     /// return
     /// - Some(vec[(`curr_epoch`, `prev_epoch`, `barrier_kind`)]) of barriers to newly inject
-    /// - Some(`graph_info`) when the status should transit to `ConsumingLogStore`
     pub(super) fn may_inject_fake_barrier(
         &mut self,
         is_checkpoint: bool,
-    ) -> Option<(Vec<CreatingJobInjectBarrierInfo>, Option<InflightGraphInfo>)> {
+    ) -> Option<Vec<CreatingJobInjectBarrierInfo>> {
         if let CreatingStreamingJobStatus::ConsumingSnapshot {
             prev_epoch_fake_physical_time,
             pending_commands,
             create_mview_tracker,
-            graph_info,
+            ref graph_info,
             pending_non_checkpoint_barriers,
             ref backfill_epoch,
             initial_barrier_info,
+            ref snapshot_backfill_actors,
             ..
         } = self
         {
@@ -115,7 +200,7 @@ impl CreatingStreamingJobStatus {
                 pending_non_checkpoint_barriers.push(*backfill_epoch);
 
                 let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
-                let barriers_to_inject =
+                let barriers_to_inject: Vec<_> =
                     [CreatingJobInjectBarrierInfo {
                         curr_epoch: TracedEpoch::new(Epoch(*backfill_epoch)),
                         prev_epoch: TracedEpoch::new(prev_epoch),
@@ -135,8 +220,14 @@ impl CreatingStreamingJobStatus {
                     }))
                     .collect();
 
-                let graph_info = take(graph_info);
-                Some((barriers_to_inject, Some(graph_info)))
+                *self = CreatingStreamingJobStatus::ConsumingLogStore {
+                    graph_info: graph_info.clone(),
+                    log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
+                        snapshot_backfill_actors.iter().cloned(),
+                        barriers_to_inject.len(),
+                    ),
+                };
+                Some(barriers_to_inject)
             } else {
                 let prev_epoch =
                     TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
@@ -155,16 +246,13 @@ impl CreatingStreamingJobStatus {
                     } else {
                         Default::default()
                     };
-                Some((
-                    vec![CreatingJobInjectBarrierInfo {
-                        curr_epoch,
-                        prev_epoch,
-                        kind,
-                        new_actors,
-                        mutation,
-                    }],
-                    None,
-                ))
+                Some(vec![CreatingJobInjectBarrierInfo {
+                    curr_epoch,
+                    prev_epoch,
+                    kind,
+                    new_actors,
+                    mutation,
+                }])
             }
         } else {
             None

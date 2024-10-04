@@ -308,22 +308,29 @@ impl CheckpointControl {
             ?jobs_to_wait,
             "enqueue command"
         );
+        let mut finished_table_ids = HashMap::new();
         let creating_jobs_to_wait = jobs_to_wait
             .into_iter()
-            .map(|table_id| {
-                (
-                    table_id,
-                    if node_to_collect.is_empty() {
-                        Some(
-                            self.creating_streaming_job_controls
-                                .get(&table_id)
-                                .expect("should exist")
-                                .start_wait_progress_timer(),
-                        )
-                    } else {
-                        None
-                    },
-                )
+            .filter_map(|table_id| {
+                let Entry::Occupied(mut entry) =
+                    self.creating_streaming_job_controls.entry(table_id)
+                else {
+                    unreachable!("should exist")
+                };
+                if entry
+                    .get_mut()
+                    .attach_upstream_wait_finish_epoch(command_ctx.prev_epoch.value().0)
+                {
+                    let (table_id, creating_job) = entry.remove_entry();
+                    finished_table_ids
+                        .try_insert(table_id, creating_job.info)
+                        .unwrap();
+                    None
+                } else if node_to_collect.is_empty() {
+                    Some((table_id, Some(entry.get().start_wait_progress_timer())))
+                } else {
+                    Some((table_id, None))
+                }
             })
             .collect();
         self.command_ctx_queue.insert(
@@ -334,7 +341,7 @@ impl CheckpointControl {
                     node_to_collect,
                     resps: vec![],
                     creating_jobs_to_wait,
-                    finished_table_ids: HashMap::new(),
+                    finished_table_ids,
                     table_ids_to_commit,
                 },
                 command_ctx,
@@ -948,7 +955,8 @@ impl GlobalBarrierManager {
             }
         }
 
-        let Some((prev_epoch, curr_epoch)) = self.state.next_epoch_pair(&command) else {
+        let Some((prev_epoch, curr_epoch, jobs_to_wait)) = self.state.next_epoch_pair(&command)
+        else {
             // skip the command when there is nothing to do with the barrier
             for mut notifier in notifiers {
                 notifier.notify_started();
@@ -997,11 +1005,7 @@ impl GlobalBarrierManager {
             .creating_streaming_job_controls
             .values_mut()
         {
-            creating_job.may_inject_fake_barrier(
-                &mut self.control_stream_manager,
-                prev_epoch.value().0,
-                checkpoint,
-            )?
+            creating_job.may_inject_fake_barrier(&mut self.control_stream_manager, checkpoint)?
         }
 
         self.pending_non_checkpoint_barriers
@@ -1048,18 +1052,12 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let mut jobs_to_wait = HashSet::new();
-
-        for (table_id, creating_job) in &mut self.checkpoint_control.creating_streaming_job_controls
+        for creating_job in &mut self
+            .checkpoint_control
+            .creating_streaming_job_controls
+            .values_mut()
         {
-            if let Some(wait_job) =
-                creating_job.on_new_command(&mut self.control_stream_manager, &command_ctx)?
-            {
-                jobs_to_wait.insert(*table_id);
-                if let Some(graph_to_finish) = wait_job {
-                    self.state.inflight_graph_info.extend(graph_to_finish);
-                }
-            }
+            creating_job.on_new_command(&mut self.control_stream_manager, &command_ctx)?;
         }
 
         let node_to_collect = match self.control_stream_manager.inject_command_ctx_barrier(
@@ -1423,20 +1421,7 @@ impl CheckpointControl {
                 };
             } else {
                 for (table_id, job) in &mut self.creating_streaming_job_controls {
-                    let (upstream_epochs_to_notify, commit_info) = job.start_completing();
-                    for upstream_epoch in upstream_epochs_to_notify {
-                        let wait_progress_timer = self
-                            .command_ctx_queue
-                            .get_mut(&upstream_epoch)
-                            .expect("should exist")
-                            .state
-                            .creating_jobs_to_wait
-                            .remove(table_id)
-                            .expect("should exist");
-                        if let Some(timer) = wait_progress_timer {
-                            timer.observe_duration();
-                        }
-                    }
+                    let commit_info = job.start_completing();
                     if let Some((epoch, resps, is_first_time)) = commit_info {
                         let tables_to_commit = job
                             .info
@@ -1514,7 +1499,7 @@ impl CheckpointControl {
                     CompletingCommand::None
                 };
                 self.completing_command = next_completing_command_status;
-                if let Some((upstream_epoch, is_finished)) = self
+                if let Some(upstream_epoch) = self
                     .creating_streaming_job_controls
                     .get_mut(&table_id)
                     .expect("should exist")
@@ -1531,22 +1516,20 @@ impl CheckpointControl {
                     if let Some(timer) = wait_progress_timer {
                         timer.observe_duration();
                     }
-                    if is_finished {
-                        debug!(epoch, ?table_id, "finish creating job");
-                        let creating_streaming_job = self
-                            .creating_streaming_job_controls
-                            .remove(&table_id)
-                            .expect("should exist");
-                        assert!(creating_streaming_job.is_finished());
-                        assert!(self
-                            .command_ctx_queue
-                            .get_mut(&upstream_epoch)
-                            .expect("should exist")
-                            .state
-                            .finished_table_ids
-                            .insert(table_id, creating_streaming_job.info)
-                            .is_none());
-                    }
+                    debug!(epoch, ?table_id, "finish creating job");
+                    let creating_streaming_job = self
+                        .creating_streaming_job_controls
+                        .remove(&table_id)
+                        .expect("should exist");
+                    assert!(creating_streaming_job.is_finished());
+                    assert!(self
+                        .command_ctx_queue
+                        .get_mut(&upstream_epoch)
+                        .expect("should exist")
+                        .state
+                        .finished_table_ids
+                        .insert(table_id, creating_streaming_job.info)
+                        .is_none());
                 }
                 join_result.map(|_| None)
             }
