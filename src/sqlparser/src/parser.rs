@@ -2625,6 +2625,9 @@ impl Parser<'_> {
                 column_alias,
                 header_inner_expect_type,
             });
+
+            // accept an optional comma and ignore whether it actually exists
+            let _ = self.consume_token(&Token::Comma);
         }
         Ok(options)
     }

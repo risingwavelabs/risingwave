@@ -1842,7 +1842,7 @@ impl fmt::Display for Statement {
                     write!(f, " WITH VERSION COLUMN({})", version_column)?;
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
-                    write!(f, "{}", display_comma_separated(
+                    write!(f, "{}", display_separated(
                         include_column_options.iter().map(|option_item: &IncludeOptionItem| {
                             format!(" INCLUDE {}{}{}",
                                     option_item.column_type,
@@ -1857,7 +1857,8 @@ impl fmt::Display for Statement {
                                     "".into()
                                 }
                             )
-                        }).collect_vec().as_slice()
+                        }).collect_vec().as_slice(),
+                        " ",
                     ))?;
                 }
                 if !with_options.is_empty() {
