@@ -17,14 +17,13 @@ use std::collections::{HashMap, HashSet};
 use std::mem::take;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    CreateMviewProgress, PbCreateMviewLogStoreProgress,
+    CreateMviewProgress, PbCreateMviewProgress,
 };
 use tracing::warn;
 
@@ -65,7 +64,7 @@ impl CreateMviewLogStoreProgressTracker {
         )
     }
 
-    fn update(&mut self, progress: impl IntoIterator<Item = &PbCreateMviewLogStoreProgress>) {
+    fn update(&mut self, progress: impl IntoIterator<Item = &PbCreateMviewProgress>) {
         for progress in progress {
             match self.ongoing_actors.entry(progress.backfill_actor_id) {
                 Entry::Occupied(mut entry) => {
@@ -145,7 +144,6 @@ impl CreatingStreamingJobStatus {
     pub(super) fn update_progress(
         &mut self,
         create_mview_progress: impl IntoIterator<Item = &CreateMviewProgress>,
-        log_store_progress: impl IntoIterator<Item = &PbCreateMviewLogStoreProgress>,
     ) {
         match self {
             Self::ConsumingSnapshot {
@@ -158,20 +156,12 @@ impl CreatingStreamingJobStatus {
                     create_mview_progress,
                     version_stats,
                 );
-                let mut log_store_progress = log_store_progress.into_iter().peekable();
-                if log_store_progress.peek().is_some() {
-                    warn!(log_store_progress = ?log_store_progress.collect_vec(), "ignore log store progress when consuming snapshot");
-                }
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
                 log_store_progress_tracker,
                 ..
             } => {
-                log_store_progress_tracker.update(log_store_progress);
-                let mut create_mview_progress = create_mview_progress.into_iter().peekable();
-                if create_mview_progress.peek().is_some() {
-                    warn!(create_mview_progress = ?create_mview_progress.collect_vec(), "ignore create_mview_progress when consuming log store");
-                }
+                log_store_progress_tracker.update(create_mview_progress);
             }
             CreatingStreamingJobStatus::Finishing(_) => {}
         }

@@ -94,9 +94,7 @@ mod await_epoch_completed_future {
     use futures::future::BoxFuture;
     use futures::FutureExt;
     use risingwave_hummock_sdk::SyncResult;
-    use risingwave_pb::stream_service::barrier_complete_response::{
-        PbCreateMviewLogStoreProgress, PbCreateMviewProgress,
-    };
+    use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
@@ -110,7 +108,6 @@ mod await_epoch_completed_future {
         barrier: Barrier,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
         create_mview_progress: Vec<PbCreateMviewProgress>,
-        create_mview_log_store_progress: Vec<PbCreateMviewLogStoreProgress>,
     ) -> AwaitEpochCompletedFuture {
         let prev_epoch = barrier.epoch.prev;
         let future = async move {
@@ -127,7 +124,6 @@ mod await_epoch_completed_future {
                 result.map(|sync_result| BarrierCompleteResult {
                     sync_result,
                     create_mview_progress,
-                    create_mview_log_store_progress,
                 }),
             )
         });
@@ -146,7 +142,6 @@ mod await_epoch_completed_future {
 
 use await_epoch_completed_future::*;
 use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
-use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewLogStoreProgress;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
 fn sync_epoch<S: StateStore>(
@@ -383,8 +378,6 @@ pub(super) struct PartialGraphManagedBarrierState {
     /// in [`BarrierCompleteResult`].
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
-    pub(super) create_mview_log_store_progress: HashMap<u64, HashMap<ActorId, Option<usize>>>,
-
     pub(super) state_store: StateStoreImpl,
 
     pub(super) streaming_metrics: Arc<StreamingMetrics>,
@@ -406,7 +399,6 @@ impl PartialGraphManagedBarrierState {
             epoch_barrier_state_map: Default::default(),
             prev_barrier_table_ids: None,
             create_mview_progress: Default::default(),
-            create_mview_log_store_progress: Default::default(),
             await_epoch_completed_futures: Default::default(),
             state_store,
             streaming_metrics,
@@ -751,20 +743,6 @@ impl PartialGraphManagedBarrierState {
                 .map(|(actor, state)| state.to_pb(actor))
                 .collect();
 
-            let create_mview_log_store_progress = self
-                .create_mview_log_store_progress
-                .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default()
-                .into_iter()
-                .map(
-                    |(actor, pending_barrier_num)| PbCreateMviewLogStoreProgress {
-                        backfill_actor_id: actor,
-                        done: pending_barrier_num.is_none(),
-                        pending_barrier_num: pending_barrier_num.unwrap_or_default() as _,
-                    },
-                )
-                .collect();
-
             let complete_barrier_future = match kind {
                 BarrierKind::Unspecified => unreachable!(),
                 BarrierKind::Initial => {
@@ -796,7 +774,6 @@ impl PartialGraphManagedBarrierState {
                     barrier,
                     self.barrier_await_tree_reg.as_ref(),
                     create_mview_progress,
-                    create_mview_log_store_progress,
                 )
             });
         }

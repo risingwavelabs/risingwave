@@ -105,8 +105,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         debug!(epoch = ?first_recv_barrier.epoch, "get first inject barrier");
         let should_backfill = first_barrier.epoch != first_recv_barrier.epoch;
 
-        let barrier_manager = self.progress.barrier_manager().clone();
-
         let (mut barrier_epoch, mut need_report_finish) = {
             if should_backfill {
                 let table_id_str = format!("{}", self.upstream_table.table_id().table_id);
@@ -140,7 +138,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             self.rate_limit,
                             &mut self.barrier_rx,
                             &self.output_indices,
-                            self.progress,
+                            &mut self.progress,
                             first_recv_barrier,
                         );
 
@@ -217,9 +215,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
                     debug!(?barrier_epoch, "after consume change log");
 
-                    barrier_manager.update_create_mview_log_store_progress(
+                    self.progress.update_create_mview_log_store_progress(
                         barrier.epoch,
-                        self.actor_ctx.id,
                         upstream_buffer.state.barrier_count(),
                     );
 
@@ -251,7 +248,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 barrier_epoch = barrier.epoch;
                 if need_report_finish {
                     need_report_finish = false;
-                    barrier_manager.finish_consuming_log_store(barrier_epoch, self.actor_ctx.id);
+                    self.progress.finish_consuming_log_store(barrier_epoch);
                 }
             }
             yield msg;
@@ -547,7 +544,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     rate_limit: Option<usize>,
     barrier_rx: &'a mut UnboundedReceiver<Barrier>,
     output_indices: &'a [usize],
-    mut progress: CreateMviewProgressReporter,
+    progress: &'a mut CreateMviewProgressReporter,
     first_recv_barrier: Barrier,
 ) {
     let mut barrier_epoch = first_recv_barrier.epoch;

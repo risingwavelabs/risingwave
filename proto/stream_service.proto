@@ -28,11 +28,7 @@ message BarrierCompleteResponse {
     bool done = 2;
     uint64 consumed_epoch = 3;
     uint64 consumed_rows = 4;
-  }
-  message CreateMviewLogStoreProgress {
-    uint32 backfill_actor_id = 1;
-    bool done = 2;
-    uint32 pending_barrier_num = 3;
+    uint32 pending_barrier_num = 5;
   }
   string request_id = 1;
   common.Status status = 2;
@@ -51,7 +47,6 @@ message BarrierCompleteResponse {
   uint32 partial_graph_id = 8;
   // prev_epoch of barrier
   uint64 epoch = 9;
-  repeated CreateMviewLogStoreProgress create_mview_log_store_progress = 10;
 }
 
 message WaitEpochCommitRequest {

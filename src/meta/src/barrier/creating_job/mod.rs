@@ -107,11 +107,15 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    /// Return whether the job is finished or not
+    /// Attach an upstream epoch to be notified on the finish of the creating job.
+    /// Return whether the job is finished or not, and if finished, the upstream_epoch won't be attached.
     pub(super) fn attach_upstream_wait_finish_epoch(&mut self, upstream_epoch: u64) -> bool {
         match &mut self.status {
             CreatingStreamingJobStatus::Finishing(upstream_epoch_to_notify) => {
-                assert_eq!(*upstream_epoch_to_notify, None);
+                assert_eq!(
+                    *upstream_epoch_to_notify, None,
+                    "should not attach wait finish epoch for twice"
+                );
                 if self.barrier_control.is_empty() {
                     true
                 } else {
@@ -318,10 +322,7 @@ impl CreatingStreamingJobControl {
         worker_id: WorkerId,
         resp: BarrierCompleteResponse,
     ) {
-        self.status.update_progress(
-            &resp.create_mview_progress,
-            &resp.create_mview_log_store_progress,
-        );
+        self.status.update_progress(&resp.create_mview_progress);
         self.barrier_control.collect(epoch, worker_id, resp);
     }
 
