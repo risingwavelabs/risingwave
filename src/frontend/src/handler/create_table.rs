@@ -475,6 +475,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
+    secure_secret: Option<SecureSecret>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     if append_only
         && source_schema.format != Format::Plain
@@ -510,6 +511,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &mut col_id_gen,
         false,
         rate_limit,
+        secure_secret,
     )
     .await?;
 
@@ -947,7 +949,22 @@ pub(super) async fn handle_create_table_plan(
         &cdc_table_info,
     )?;
 
-    let ((plan, source, table), job_type) =
+    let ((plan, source, table), job_type) = if let Some(secure_secret) = secure_secret {
+        let context = OptimizerContext::new(handler_args, explain_options);
+        let (plan, table) = gen_create_table_plan(
+            context,
+            table_name.clone(),
+            column_defs,
+            constraints,
+            col_id_gen,
+            source_watermarks,
+            append_only,
+            on_conflict,
+            with_version_column,
+        )?;
+
+        ((plan, None, table), TableJobType::General)
+    } else {
         match (source_schema, cdc_table_info.as_ref()) {
             (Some(source_schema), None) => (
                 gen_create_table_plan_with_source(
@@ -964,6 +981,7 @@ pub(super) async fn handle_create_table_plan(
                     on_conflict,
                     with_version_column,
                     include_column_options,
+                    secure_secret,
                 )
                 .await?,
                 TableJobType::General,
@@ -1060,7 +1078,9 @@ pub(super) async fn handle_create_table_plan(
                 "Remove the FORMAT and ENCODE specification".into(),
             )
             .into()),
-        };
+        }
+    };
+
     Ok((plan, source, table, job_type))
 }
 
@@ -1286,6 +1306,7 @@ pub async fn handle_create_table(
         .create_table(source, table, graph, job_type)
         .await?;
 
+    println!("WKXLOG analyze handle_create_table done");
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
 
@@ -1350,6 +1371,7 @@ pub async fn generate_stream_graph_for_table(
                 on_conflict,
                 with_version_column,
                 vec![],
+                None,
             )
             .await?,
             TableJobType::General,

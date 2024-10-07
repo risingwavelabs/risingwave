@@ -368,6 +368,7 @@ derive_array_from_blob!(
     PbColumnCatalogArray
 );
 derive_from_blob!(StreamSourceInfo, risingwave_pb::catalog::PbStreamSourceInfo);
+derive_from_blob!(WebhookSourceInfo, risingwave_pb::catalog::PbWebhookSourceInfo);
 derive_from_blob!(WatermarkDesc, risingwave_pb::catalog::PbWatermarkDesc);
 derive_array_from_blob!(
     WatermarkDescArray,

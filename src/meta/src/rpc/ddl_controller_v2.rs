@@ -52,8 +52,11 @@ impl DdlController {
 
         match &mut streaming_job {
             StreamingJob::Table(src, table, job_type) => {
+                println!("WKXLOG create_streaming_job_v2 BEGIN");
+
                 // If we're creating a table with connector, we should additionally fill its ID first.
                 fill_table_stream_graph_info(src, table, *job_type, &mut fragment_graph);
+                println!("WKXLOG create_streaming_job_v2 DONE");
             }
             StreamingJob::Source(src) => {
                 // set the inner source id of source node.

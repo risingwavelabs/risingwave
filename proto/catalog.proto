@@ -94,6 +94,10 @@ message StreamSourceInfo {
   map<string, secret.SecretRef> format_encode_secret_refs = 16;
 }
 
+message WebhookSourceInfo {
+  string name = 1;
+}
+
 message Source {
   uint32 id = 1;
   uint32 schema_id = 2;
@@ -132,6 +136,7 @@ message Source {
   // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
   // Used for secret connect options.
   map<string, secret.SecretRef> secret_refs = 19;
+  optional WebhookSourceInfo webhook_info = 20;
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;

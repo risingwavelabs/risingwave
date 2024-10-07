@@ -2572,7 +2572,7 @@ impl Parser<'_> {
         let include_options = self.parse_include_options()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
-        let mut with_options = self.parse_with_properties()?;
+        let with_options = self.parse_with_properties()?;
 
         let option = with_options
             .iter()
@@ -2582,15 +2582,12 @@ impl Parser<'_> {
         let contain_webhook = if let Some(connector) = &connector
             && connector.contains("webhook")
         {
-            with_options.clear();
             true
         } else {
             false
         };
 
-        let source_schema = if let Some(connector) = &connector
-            && !contain_webhook
-        {
+        let source_schema = if let Some(connector) = &connector {
             Some(self.parse_source_schema_with_connector(connector, false)?)
         } else {
             None // Table is NOT created with an external connector.

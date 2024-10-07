@@ -297,6 +297,8 @@ impl Parser<'_> {
                 }
             }
             Ok(expected.into())
+        } else if connector.contains("webhook") {
+            Ok(ConnectorSchema::native().into())
         } else {
             Ok(parse_source_schema(self)?)
         }

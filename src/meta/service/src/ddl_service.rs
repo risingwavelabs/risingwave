@@ -535,6 +535,7 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<CreateTableRequest>,
     ) -> Result<Response<CreateTableResponse>, Status> {
+        println!("WKXLOG real create_table in meta server");
         let request = request.into_inner();
         let job_type = request.get_job_type().unwrap_or_default();
         let source = request.source;
@@ -551,6 +552,8 @@ impl DdlService for DdlServiceImpl {
                 None,
             ))
             .await?;
+
+        println!("WKXLOG real create_table in meta server done");
 
         Ok(Response::new(CreateTableResponse {
             status: None,

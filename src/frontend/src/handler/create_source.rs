@@ -55,15 +55,17 @@ pub use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::{
     ConnectorProperties, AZBLOB_CONNECTOR, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
-    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR, WEBHOOK_CONNECTOR,
 };
 use risingwave_connector::WithPropertiesExt;
-use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::{
+    PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc, WebhookSourceInfo,
+};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
-    ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
+    ObjectName, ProtobufSchema, SecureSecret, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
@@ -1140,6 +1142,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
                 ),
+                WEBHOOK_CONNECTOR => hashmap!(
+                    Format::Native => vec![Encode::Native],
+                ),
         ))
     });
 
@@ -1489,6 +1494,7 @@ pub async fn bind_create_source_or_table_with_connector(
     // `true` for "create source", `false` for "create table with connector"
     is_create_source: bool,
     source_rate_limit: Option<u32>,
+    secure_secret: Option<SecureSecret>,
 ) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
     let session = &handler_args.session;
     let db_name: &str = session.database();
@@ -1561,6 +1567,8 @@ pub async fn bind_create_source_or_table_with_connector(
     )
     .await?;
 
+    println!("WKXREAD analyze bind_source_pk \npk_names: {:?}", pk_names);
+
     if is_create_source && !pk_names.is_empty() {
         return Err(ErrorCode::InvalidInputSyntax(
             "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
@@ -1611,6 +1619,10 @@ pub async fn bind_create_source_or_table_with_connector(
     } else {
         Some(TableId::placeholder())
     };
+
+    let webhook_info = secure_secret.map(|s| WebhookSourceInfo {
+        name: s.name.to_string(),
+    });
     let source = SourceCatalog {
         id: TableId::placeholder().table_id,
         name: source_name,
@@ -1631,6 +1643,7 @@ pub async fn bind_create_source_or_table_with_connector(
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
+        webhook_info,
     };
     Ok((source, database_id, schema_id))
 }
@@ -1691,6 +1704,7 @@ pub async fn handle_create_source(
         &mut col_id_gen,
         true,
         overwrite_options.source_rate_limit,
+        None,
     )
     .await?;
 

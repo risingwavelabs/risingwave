@@ -832,6 +832,7 @@ impl DdlController {
         create_type: CreateType,
         affected_table_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
+        println!("WKXLOG create_streaming_job BEGIN");
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
             return self
                 .create_streaming_job_v2(stream_job, fragment_graph, affected_table_replace_info)
@@ -843,10 +844,12 @@ impl DdlController {
         match &mut stream_job {
             StreamingJob::Table(src, table, job_type) => {
                 // If we're creating a table with connector, we should additionally fill its ID first.
+                println!("WKXLOG create_streaming_job::Table START");
                 if let Some(src) = src {
                     src.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
                 }
                 fill_table_stream_graph_info(src, table, *job_type, &mut fragment_graph);
+                println!("WKXLOG create_streaming_job::Table DONE");
             }
             StreamingJob::Source(_) => {
                 // set the inner source id of source node.
