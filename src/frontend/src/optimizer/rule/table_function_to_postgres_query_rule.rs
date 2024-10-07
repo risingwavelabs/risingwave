@@ -43,7 +43,7 @@ impl Rule for TableFunctionToPostgresQueryRule {
 
             let schema = Schema::new(fields);
 
-            assert!(logical_table_function.table_function().args.len() >= 6);
+            assert_eq!(logical_table_function.table_function().args.len(), 6);
             let mut eval_args = vec![];
             for arg in &logical_table_function.table_function().args {
                 assert_eq!(arg.return_type(), DataType::Varchar);
@@ -57,23 +57,23 @@ impl Rule for TableFunctionToPostgresQueryRule {
                     }
                 }
             }
-            assert!("parquet".eq_ignore_ascii_case(&eval_args[0]));
-            assert!("s3".eq_ignore_ascii_case(&eval_args[1]));
-            let s3_region = eval_args[2].clone();
-            let s3_access_key = eval_args[3].clone();
-            let s3_secret_key = eval_args[4].clone();
-            // The rest of the arguments are file locations
-            let file_location = eval_args[5..].iter().cloned().collect_vec();
+            let hostname = eval_args[0].clone();
+            let port = eval_args[1].clone();
+            let username = eval_args[2].clone();
+            let password = eval_args[3].clone();
+            let database = eval_args[4].clone();
+            let query = eval_args[5].clone();
+
             Some(
                 LogicalPostgresQuery::new(
                     logical_table_function.ctx(),
                     schema,
-                    "parquet".to_string(),
-                    "s3".to_string(),
-                    s3_region,
-                    s3_access_key,
-                    s3_secret_key,
-                    file_location,
+                    hostname,
+                    port,
+                    username,
+                    password,
+                    database,
+                    query,
                 )
                 .into(),
             )

@@ -42,22 +42,21 @@ impl LogicalPostgresQuery {
     pub fn new(
         ctx: OptimizerContextRef,
         schema: Schema,
-        file_format: String,
-        storage_type: String,
-        s3_region: String,
-        s3_access_key: String,
-        s3_secret_key: String,
-        file_location: Vec<String>,
+        hostname: String,
+        port: String,
+        username: String,
+        password: String,
+        database: String,
+        query: String,
     ) -> Self {
-        assert!("parquet".eq_ignore_ascii_case(&file_format));
-        assert!("s3".eq_ignore_ascii_case(&storage_type));
-
         let core = generic::PostgresQuery {
             schema,
-            s3_region,
-            s3_access_key,
-            s3_secret_key,
-            file_location,
+            hostname,
+            port,
+            username,
+            password,
+            database,
+            query,
             ctx,
         };
 

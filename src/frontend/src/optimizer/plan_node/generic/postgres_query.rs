@@ -23,10 +23,12 @@ use crate::optimizer::property::FunctionalDependencySet;
 #[educe(PartialEq, Eq, Hash)]
 pub struct PostgresQuery {
     pub schema: Schema,
-    pub s3_region: String,
-    pub s3_access_key: String,
-    pub s3_secret_key: String,
-    pub file_location: Vec<String>,
+    pub hostname: String,
+    pub port: String,
+    pub username: String,
+    pub password: String,
+    pub database: String,
+    pub query: String,
 
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
