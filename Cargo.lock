@@ -11721,7 +11721,6 @@ dependencies = [
  "lru 0.7.6",
  "madsim",
  "madsim-aws-sdk-s3",
- "madsim-etcd-client",
  "madsim-rdkafka",
  "madsim-tokio",
  "maplit",
