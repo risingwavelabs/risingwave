@@ -175,7 +175,7 @@ async fn main() {
         ..Default::default()
     };
     let kill_opts = KillOpts {
-        kill_meta: false,
+        kill_meta: args.kill_meta || args.kill,
         kill_frontend: args.kill_frontend || args.kill,
         kill_compute: args.kill_compute || args.kill,
         kill_compactor: args.kill_compactor || args.kill,
