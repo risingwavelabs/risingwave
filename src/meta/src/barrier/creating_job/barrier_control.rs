@@ -14,6 +14,8 @@
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::mem::take;
+use std::ops::Bound::Unbounded;
+use std::ops::{Bound, RangeBounds};
 use std::time::Instant;
 
 use prometheus::HistogramTimer;
@@ -42,7 +44,7 @@ pub(super) struct CreatingStreamingJobBarrierControl {
     backfill_epoch: u64,
     initial_epoch: Option<u64>,
     max_collected_epoch: Option<u64>,
-    // newer epoch at the front. should all be checkpoint barrier
+    // newer epoch at the front.
     pending_barriers_to_complete: VecDeque<CreatingStreamingJobEpochState>,
     completing_barrier: Option<(CreatingStreamingJobEpochState, HistogramTimer)>,
 
@@ -174,11 +176,21 @@ impl CreatingStreamingJobBarrierControl {
     }
 
     /// Return Some((epoch, resps, `is_first_commit`))
-    pub(super) fn start_completing(&mut self) -> Option<(u64, Vec<BarrierCompleteResponse>, bool)> {
-        if self.completing_barrier.is_some() {
-            return None;
-        }
-        while let Some(mut epoch_state) = self.pending_barriers_to_complete.pop_back() {
+    ///
+    /// Only epoch within the `epoch_end_bound` can be started.
+    pub(super) fn start_completing(
+        &mut self,
+        epoch_end_bound: Bound<u64>,
+    ) -> Option<(u64, Vec<BarrierCompleteResponse>, bool)> {
+        assert!(self.completing_barrier.is_none());
+        let epoch_range: (Bound<u64>, Bound<u64>) = (Unbounded, epoch_end_bound);
+        while let Some(epoch_state) = self.pending_barriers_to_complete.back()
+            && epoch_range.contains(&epoch_state.epoch)
+        {
+            let mut epoch_state = self
+                .pending_barriers_to_complete
+                .pop_back()
+                .expect("non-empty");
             let epoch = epoch_state.epoch;
             let is_first = self.initial_epoch.expect("should have set") == epoch;
             if is_first {

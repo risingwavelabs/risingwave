@@ -117,7 +117,10 @@ pub(super) enum CreatingStreamingJobStatus {
         graph_info: InflightGraphInfo,
         log_store_progress_tracker: CreateMviewLogStoreProgressTracker,
     },
-    Finishing(Option<u64>),
+    /// All backfill actors have started consuming upstream, and the job
+    /// will be finished when all previously injected barriers have been collected
+    /// Store the `prev_epoch` that will finish at.
+    Finishing(u64),
 }
 
 pub(super) struct CreatingJobInjectBarrierInfo {

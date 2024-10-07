@@ -17,10 +17,10 @@ mod status;
 
 use std::cmp::max;
 use std::collections::HashMap;
+use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::Arc;
 
-use prometheus::HistogramTimer;
-use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -51,7 +51,6 @@ pub(super) struct CreatingStreamingJobControl {
     status: CreatingStreamingJobStatus,
 
     upstream_lag: LabelGuardedIntGauge<1>,
-    upstream_wait_progress_latency: LabelGuardedHistogram<1>,
 }
 
 impl CreatingStreamingJobControl {
@@ -101,37 +100,7 @@ impl CreatingStreamingJobControl {
             upstream_lag: metrics
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&table_id_str]),
-            upstream_wait_progress_latency: metrics
-                .snapshot_backfill_upstream_wait_progress_latency
-                .with_guarded_label_values(&[&table_id_str]),
         }
-    }
-
-    /// Attach an upstream epoch to be notified on the finish of the creating job.
-    /// Return whether the job is finished or not, and if finished, the upstream_epoch won't be attached.
-    pub(super) fn attach_upstream_wait_finish_epoch(&mut self, upstream_epoch: u64) -> bool {
-        match &mut self.status {
-            CreatingStreamingJobStatus::Finishing(upstream_epoch_to_notify) => {
-                assert_eq!(
-                    *upstream_epoch_to_notify, None,
-                    "should not attach wait finish epoch for twice"
-                );
-                if self.barrier_control.is_empty() {
-                    true
-                } else {
-                    *upstream_epoch_to_notify = Some(upstream_epoch);
-                    false
-                }
-            }
-            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => {
-                unreachable!("should not attach upstream wait finish epoch at non-finishing status")
-            }
-        }
-    }
-
-    pub(super) fn start_wait_progress_timer(&self) -> HistogramTimer {
-        self.upstream_wait_progress_latency.start_timer()
     }
 
     pub(super) fn is_wait_on_worker(&self, worker_id: WorkerId) -> bool {
@@ -303,7 +272,8 @@ impl CreatingStreamingJobControl {
                         table_id = self.info.table_fragments.table_id().table_id,
                         prev_epoch, "start consuming upstream"
                     );
-                    self.status = CreatingStreamingJobStatus::Finishing(None);
+                    assert!(command_ctx.kind.is_checkpoint());
+                    self.status = CreatingStreamingJobStatus::Finishing(prev_epoch);
                 }
             }
             CreatingStreamingJobStatus::Finishing { .. } => {
@@ -338,22 +308,65 @@ impl CreatingStreamingJobControl {
             None
         }
     }
+}
 
-    pub(super) fn start_completing(&mut self) -> Option<(u64, Vec<BarrierCompleteResponse>, bool)> {
-        self.barrier_control.start_completing()
+pub(super) enum CompleteJobType {
+    /// The first barrier
+    First,
+    Normal,
+    /// The last barrier to complete
+    Finished,
+}
+
+impl CreatingStreamingJobControl {
+    pub(super) fn start_completing(
+        &mut self,
+        min_upstream_inflight_epoch: Option<u64>,
+    ) -> Option<(u64, Vec<BarrierCompleteResponse>, CompleteJobType)> {
+        let (finished_at_epoch, epoch_end_bound) = match &self.status {
+            CreatingStreamingJobStatus::Finishing(finish_at_epoch) => {
+                let epoch_end_bound = min_upstream_inflight_epoch
+                    .map(|upstream_epoch| {
+                        if upstream_epoch < *finish_at_epoch {
+                            Excluded(upstream_epoch)
+                        } else {
+                            Unbounded
+                        }
+                    })
+                    .unwrap_or(Unbounded);
+                (Some(*finish_at_epoch), epoch_end_bound)
+            }
+            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => (
+                None,
+                min_upstream_inflight_epoch
+                    .map(Excluded)
+                    .unwrap_or(Unbounded),
+            ),
+        };
+        self.barrier_control.start_completing(epoch_end_bound).map(
+            |(epoch, resps, is_first_commit)| {
+                let status = if let Some(finish_at_epoch) = finished_at_epoch {
+                    assert!(!is_first_commit);
+                    if epoch == finish_at_epoch {
+                        self.barrier_control.ack_completed(epoch);
+                        assert!(self.barrier_control.is_empty());
+                        CompleteJobType::Finished
+                    } else {
+                        CompleteJobType::Normal
+                    }
+                } else if is_first_commit {
+                    CompleteJobType::First
+                } else {
+                    CompleteJobType::Normal
+                };
+                (epoch, resps, status)
+            },
+        )
     }
 
-    pub(super) fn ack_completed(&mut self, completed_epoch: u64) -> Option<u64> {
+    pub(super) fn ack_completed(&mut self, completed_epoch: u64) {
         self.barrier_control.ack_completed(completed_epoch);
-        if let CreatingStreamingJobStatus::Finishing(upstream_epoch_to_notify) = &self.status {
-            if self.barrier_control.is_empty() {
-                *upstream_epoch_to_notify
-            } else {
-                None
-            }
-        } else {
-            None
-        }
     }
 
     pub(super) fn is_finished(&self) -> bool {

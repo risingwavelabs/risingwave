@@ -84,9 +84,6 @@ pub struct MetaMetrics {
     pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec<2>, // (table_id, barrier_type)
     /// The latency of commit epoch of `table_id`
     pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec<1>, // (table_id, )
-    /// The latency that the upstream waits on the snapshot backfill progress after the upstream
-    /// has collected the barrier.
-    pub snapshot_backfill_upstream_wait_progress_latency: LabelGuardedHistogramVec<1>, /* (table_id, ) */
     /// The lags between the upstream epoch and the downstream epoch.
     pub snapshot_backfill_lag: LabelGuardedIntGaugeVec<1>, // (table_id, )
     /// The number of inflight barriers of `table_id`
@@ -285,13 +282,7 @@ impl MetaMetrics {
         );
         let snapshot_backfill_wait_commit_latency =
             register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let opts = histogram_opts!(
-            "meta_snapshot_backfill_upstream_wait_progress_latency",
-            "snapshot backfill upstream_wait_progress_latency",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
-        );
-        let snapshot_backfill_upstream_wait_progress_latency =
-            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+
         let snapshot_backfill_lag = register_guarded_int_gauge_vec_with_registry!(
             "meta_snapshot_backfill_upstream_lag",
             "snapshot backfill upstream_lag",
@@ -769,7 +760,6 @@ impl MetaMetrics {
             last_committed_barrier_time,
             snapshot_backfill_barrier_latency,
             snapshot_backfill_wait_commit_latency,
-            snapshot_backfill_upstream_wait_progress_latency,
             snapshot_backfill_lag,
             snapshot_backfill_inflight_barrier_num,
             recovery_failure_cnt,
