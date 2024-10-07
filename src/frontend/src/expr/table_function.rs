@@ -22,6 +22,7 @@ pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
 use tokio::runtime::Runtime;
 use tokio_postgres;
+use tokio_postgres::types::Type as TokioPgType;
 
 use super::{infer_type, Expr, ExprImpl, ExprRewriter, Literal, RwResult};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
@@ -235,49 +236,52 @@ impl TableFunction {
     // password = 'connector',
     // database.name = 'test',
     pub fn new_postgres_query(args: Vec<ExprImpl>) -> RwResult<Self> {
-        let mut evaled_args = Vec::with_capacity(6);
-        if args.len() != 6 {
-            return Err(BindError("table_scan function only accepts 6 arguments: postgres_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, postgres_query varchar)".to_string()).into());
-        }
-        let mut eval_args: Vec<String> = vec![];
-        for arg in &args {
-            if arg.return_type() != DataType::Varchar {
-                return Err(BindError(
-                    "table_scan function only accepts string arguments".to_string(),
-                )
-                .into());
+        let evaled_args = {
+            let mut evaled_args: Vec<String> = Vec::with_capacity(6);
+            if args.len() != 6 {
+                return Err(BindError("table_scan function only accepts 6 arguments: postgres_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, postgres_query varchar)".to_string()).into());
             }
-            match arg.try_fold_const() {
-                Some(Ok(value)) => {
-                    if value.is_none() {
-                        return Err(BindError(
-                            "table_scan function does not accept null arguments".to_string(),
-                        )
-                        .into());
-                    }
-                    match value {
-                        Some(ScalarImpl::Utf8(s)) => {
-                            eval_args.push(s.to_string());
-                        }
-                        _ => {
-                            return Err(BindError(
-                                "table_scan function only accepts string arguments".to_string(),
-                            )
-                            .into())
-                        }
-                    }
-                }
-                Some(Err(err)) => {
-                    return Err(err);
-                }
-                None => {
+            for arg in &args {
+                if arg.return_type() != DataType::Varchar {
                     return Err(BindError(
-                        "table_scan function only accepts constant arguments".to_string(),
+                        "table_scan function only accepts string arguments".to_string(),
                     )
                     .into());
                 }
+                match arg.try_fold_const() {
+                    Some(Ok(value)) => {
+                        if value.is_none() {
+                            return Err(BindError(
+                                "table_scan function does not accept null arguments".to_string(),
+                            )
+                            .into());
+                        }
+                        match value {
+                            Some(ScalarImpl::Utf8(s)) => {
+                                evaled_args.push(s.to_string());
+                            }
+                            _ => {
+                                return Err(BindError(
+                                    "table_scan function only accepts string arguments".to_string(),
+                                )
+                                .into())
+                            }
+                        }
+                    }
+                    Some(Err(err)) => {
+                        return Err(err);
+                    }
+                    None => {
+                        return Err(BindError(
+                            "table_scan function only accepts constant arguments".to_string(),
+                        )
+                        .into());
+                    }
+                }
             }
-        }
+            evaled_args
+        };
+
         #[cfg(madsim)]
         {
             return Err(crate::error::ErrorCode::BindError(
@@ -297,26 +301,49 @@ impl TableFunction {
 
             let schema = tokio::task::block_in_place(|| {
                 RUNTIME.block_on(async {
-                    let (client, conn) = tokio_postgres::connect(
+                    let (client, _conn) = tokio_postgres::connect(
                         format!(
                             "host={} port={} user={} password={} dbname={}",
-                            eval_args[0], eval_args[1], eval_args[2], eval_args[3], eval_args[4]
+                            evaled_args[0],
+                            evaled_args[1],
+                            evaled_args[2],
+                            evaled_args[3],
+                            evaled_args[4]
                         )
                         .as_str(),
                         tokio_postgres::NoTls,
                     )
                     .await?;
 
-                    let statement = client.prepare(eval_args[5].as_str()).await?;
+                    let statement = client.prepare(evaled_args[5].as_str()).await?;
 
                     let mut rw_types = vec![];
                     for column in statement.columns() {
-                        rw_types.push((
-                            column.name().to_string(),
-                            IcebergArrowConvert.type_from_field(&column).unwrap(),
-                        ));
+                        let name = column.name().to_string();
+                        let data_type = match *column.type_() {
+                            TokioPgType::BOOL => DataType::Boolean,
+                            TokioPgType::INT2 => DataType::Int16,
+                            TokioPgType::INT4 => DataType::Int32,
+                            TokioPgType::INT8 => DataType::Int64,
+                            TokioPgType::FLOAT4 => DataType::Float32,
+                            TokioPgType::FLOAT8 => DataType::Float64,
+                            TokioPgType::NUMERIC => DataType::Decimal,
+                            TokioPgType::DATE => DataType::Date,
+                            TokioPgType::TIME => DataType::Time,
+                            TokioPgType::TIMESTAMP => DataType::Timestamp,
+                            TokioPgType::TIMESTAMPTZ => DataType::Timestamptz,
+                            TokioPgType::TEXT => DataType::Varchar,
+                            TokioPgType::BYTEA => DataType::Bytea,
+                            _ => {
+                                return Err(crate::error::ErrorCode::BindError(
+                                    format!("unsupported column type: {}", column.type_())
+                                        .to_string(),
+                                )
+                                .into());
+                            }
+                        };
+                        rw_types.push((name, data_type));
                     }
-
                     Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
                         StructType::new(rw_types),
                     ))
