@@ -93,6 +93,11 @@ message FileScanNode {
   repeated string file_location = 7;
 }
 
+message PostgresQueryNode {
+  string query = 1;
+  repeated plan_common.ColumnCatalog columns = 2;
+}
+
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
 }

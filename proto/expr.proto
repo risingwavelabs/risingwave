@@ -363,7 +363,7 @@ message TableFunction {
     // file scan
     FILE_SCAN = 19;
     // postgres query
-    PG_QUERY = 20;
+    POSTGRES_QUERY = 20;
     // User defined table function
     USER_DEFINED = 100;
   }

@@ -132,6 +132,9 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
         vec![
             // Apply file scan rule first
             TableFunctionToFileScanRule::create(),
+            // Apply postgres query rule next
+            TableFunctionToPostgresQueryRule::create(),
+            // Apply project set rule last
             TableFunctionToProjectSetRule::create(),
         ],
         ApplyOrder::TopDown,
@@ -142,6 +145,14 @@ static TABLE_FUNCTION_TO_FILE_SCAN: LazyLock<OptimizationStage> = LazyLock::new(
     OptimizationStage::new(
         "Table Function To FileScan",
         vec![TableFunctionToFileScanRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
+static TABLE_FUNCTION_TO_POSTGRES_QUERY: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Table Function To PostgresQuery",
+        vec![TableFunctionToPostgresQueryRule::create()],
         ApplyOrder::TopDown,
     )
 });

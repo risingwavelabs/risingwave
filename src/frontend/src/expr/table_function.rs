@@ -353,7 +353,7 @@ impl TableFunction {
             Ok(TableFunction {
                 args,
                 return_type: schema,
-                function_type: TableFunctionType::FileScan,
+                function_type: TableFunctionType::PostgresQuery,
                 user_defined: None,
             })
         }
