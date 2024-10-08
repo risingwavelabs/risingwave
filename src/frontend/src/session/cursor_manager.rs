@@ -47,7 +47,6 @@ use crate::handler::util::{
 };
 use crate::handler::HandlerArgs;
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
@@ -352,6 +351,7 @@ impl SubscriptionCursor {
                                 expected_timestamp,
                                 init_query_timer,
                             };
+                            println!("fields: {:?},???,{:?}", fields, self.fields);
                             if self.fields.ne(&fields) {
                                 self.fields = fields;
                                 return Ok(None);
@@ -691,6 +691,7 @@ impl SubscriptionCursor {
             out_fields,
             out_names,
         );
+        let schema = plan_root.schema().clone();
         let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
             QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
             QueryMode::Local => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
@@ -699,7 +700,6 @@ impl SubscriptionCursor {
                 QueryMode::Distributed,
             ),
         };
-        let schema = batch_log_seq_scan.schema().clone();
         Ok(BatchQueryPlanResult {
             plan: batch_log_seq_scan,
             query_mode,

@@ -385,7 +385,7 @@ def test_order_table_with_pk():
     check_rows_data([17,17],row[4],"Insert")
     execute_insert("update t2 set v2 = 100 where v1 > 10",conn)
     execute_insert("flush",conn)
-    row = execute_query("fetch 5 from cur",conn)
+    row = execute_query("fetch 10 from cur",conn)
     assert len(row) == 10
     check_rows_data([13,13],row[0],"UpdateDelete")
     check_rows_data([13,100],row[1],"UpdateInsert")
@@ -397,6 +397,7 @@ def test_order_table_with_pk():
     check_rows_data([16,100],row[7],"UpdateInsert")
     check_rows_data([17,17],row[8],"UpdateDelete")
     check_rows_data([17,100],row[9],"UpdateInsert")
+    drop_table_subscription()
 
 def test_order_table_with_row_id():
     print(f"test_order_table_with_pk")
@@ -409,20 +410,20 @@ def test_order_table_with_row_id():
     )
     execute_insert("insert into t1 values(6,6),(3,3),(5,5),(4,4),(7,7)",conn)
     execute_insert("flush",conn)
-    execute_insert("declare cur subscription cursor for sub2 full",conn)
-    row = execute_query("fetch 5 from cur",conn)
+    execute_insert("declare cur subscription cursor for sub full",conn)
+    row = execute_query("fetch 10 from cur",conn)
     ex_row = execute_query("select v1, v2 from t1 order by _row_id",conn)
-    assert len(row) == 5
-    assert len(ex_row) == 5
+    assert len(row) == 6
+    assert len(ex_row) == 6
     check_rows_data(ex_row[0],row[0],"Insert")
     check_rows_data(ex_row[1],row[1],"Insert")
     check_rows_data(ex_row[2],row[2],"Insert")
     check_rows_data(ex_row[3],row[3],"Insert")
     check_rows_data(ex_row[4],row[4],"Insert")
-    execute_insert("insert into t2 values(16,16),(13,13),(15,15),(14,14),(17,17)",conn)
+    execute_insert("insert into t1 values(16,16),(13,13),(15,15),(14,14),(17,17)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch 5 from cur",conn)
-    ex_row = execute_query("select v1, v2 from t1 order by _row_id",conn)
+    ex_row = execute_query("select v1, v2 from t1 where v1 > 10 order by _row_id",conn)
     assert len(row) == 5
     assert len(ex_row) == 5
     check_rows_data(ex_row[0],row[0],"Insert")
@@ -430,6 +431,7 @@ def test_order_table_with_row_id():
     check_rows_data(ex_row[2],row[2],"Insert")
     check_rows_data(ex_row[3],row[3],"Insert")
     check_rows_data(ex_row[4],row[4],"Insert")
+    drop_table_subscription()
 
 def test_order_mv():
     print(f"test_order_mv")
@@ -452,10 +454,10 @@ def test_order_mv():
     check_rows_data(ex_row[2],row[2],"Insert")
     check_rows_data(ex_row[3],row[3],"Insert")
     check_rows_data(ex_row[4],row[4],"Insert")
-    execute_insert("insert into t2 values(16,16,16,16),(13,13,13,13),(15,15,15,15),(14,14,14,14),(17,17,17,17)",conn)
+    execute_insert("insert into t4 values(16,16,16,16),(13,13,13,13),(15,15,15,15),(14,14,14,14),(17,17,17,17)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch 5 from cur",conn)
-    ex_row = execute_query("select v1, v2 from t1 order by _row_id",conn)
+    ex_row = execute_query("select v4, v2 from t4 where v2 > 10 order by _row_id",conn)
     assert len(row) == 5
     assert len(ex_row) == 5
     check_rows_data(ex_row[0],row[0],"Insert")
@@ -463,8 +465,9 @@ def test_order_mv():
     check_rows_data(ex_row[2],row[2],"Insert")
     check_rows_data(ex_row[3],row[3],"Insert")
     check_rows_data(ex_row[4],row[4],"Insert")
+    drop_table_subscription()
 
-def test_order_mutil_pk():
+def test_order_multi_pk():
     print(f"test_order_mutil_pk")
     create_table_subscription()
     conn = psycopg2.connect(
@@ -473,27 +476,26 @@ def test_order_mutil_pk():
         user="root",
         database="dev"
     )
-    execute_insert("insert into t5 values(6,6,6,6),(3,3,3,3),(5,5,5,5),(4,4,4,4),(7,7,7,7)",conn)
+    execute_insert("insert into t5 values(6,6,6,6),(6,3,3,3),(5,5,5,5),(5,4,4,4),(7,7,7,7)",conn)
     execute_insert("flush",conn)
-    execute_insert("declare cur subscription cursor for sub4 full",conn)
+    execute_insert("declare cur subscription cursor for sub5 full",conn)
     row = execute_query("fetch 5 from cur",conn)
     assert len(row) == 5
-    check_rows_data([3,3,3,3],row[0],"Insert")
-    check_rows_data([4,4,4,4],row[1],"Insert")
-    check_rows_data([5,5,5,5],row[2],"Insert")
+    check_rows_data([5,4,4,4],row[0],"Insert")
+    check_rows_data([5,5,5,5],row[1],"Insert")
+    check_rows_data([6,3,3,3],row[2],"Insert")
     check_rows_data([6,6,6,6],row[3],"Insert")
     check_rows_data([7,7,7,7],row[4],"Insert")
-    execute_insert("insert into t2 values(16,16,16,16),(13,13,13,13),(15,15,15,15),(14,14,14,14),(17,17,17,17)",conn)
+    execute_insert("insert into t5 values(16,16,16,16),(16,13,13,13),(15,15,15,15),(15,14,14,14),(17,17,17,17)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch 5 from cur",conn)
-    ex_row = execute_query("select v1, v2 from t1 order by _row_id",conn)
     assert len(row) == 5
-    assert len(ex_row) == 5
-    check_rows_data([13,13,13,13],row[0],"Insert")
-    check_rows_data([14,14,14,14],row[1],"Insert")
-    check_rows_data([15,15,15,15],row[2],"Insert")
+    check_rows_data([15,14,14,14],row[0],"Insert")
+    check_rows_data([15,15,15,15],row[1],"Insert")
+    check_rows_data([16,13,13,13],row[2],"Insert")
     check_rows_data([16,16,16,16],row[3],"Insert")
     check_rows_data([17,17,17,17],row[4],"Insert")
+    drop_table_subscription()
 
 if __name__ == "__main__":
     test_cursor_snapshot()
@@ -509,4 +511,4 @@ if __name__ == "__main__":
     test_order_table_with_pk()
     test_order_table_with_row_id()
     test_order_mv()
-    test_order_mutil_pk()
+    test_order_multi_pk()
