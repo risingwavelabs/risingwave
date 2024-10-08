@@ -106,6 +106,8 @@ expect-test = "1.5"
 rand = { workspace = true }
 risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
+tempfile = "3"
+tracing-subscriber = "0.3"
 
 [features]
 test = []

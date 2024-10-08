@@ -398,7 +398,7 @@ pub async fn start_service_as_election_leader(
         meta_store_impl,
     )
     .await?;
-    env.may_start_watch_license_key_file()?;
+    let _ = env.may_start_watch_license_key_file()?;
     let system_params_reader = env.system_params_reader().await;
 
     let data_directory = system_params_reader.data_directory();
