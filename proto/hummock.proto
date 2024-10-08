@@ -525,7 +525,6 @@ message ReportCompactionTaskResponse {
 message ValidationTask {
   repeated SstableInfo sst_infos = 1;
   map<uint64, uint32> sst_id_to_worker_id = 2;
-  uint64 epoch = 3;
 }
 
 // Delete SSTs in object store

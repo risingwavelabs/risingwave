@@ -325,7 +325,6 @@ impl From<&CompactTask> for PbCompactTask {
 pub struct ValidationTask {
     pub sst_infos: Vec<SstableInfo>,
     pub sst_id_to_worker_id: HashMap<u64, u32>,
-    pub epoch: u64,
 }
 
 impl From<PbValidationTask> for ValidationTask {
@@ -337,7 +336,6 @@ impl From<PbValidationTask> for ValidationTask {
                 .map(SstableInfo::from)
                 .collect_vec(),
             sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.clone(),
-            epoch: pb_validation_task.epoch,
         }
     }
 }
@@ -351,7 +349,6 @@ impl From<ValidationTask> for PbValidationTask {
                 .map(|sst| sst.into())
                 .collect_vec(),
             sst_id_to_worker_id: validation_task.sst_id_to_worker_id.clone(),
-            epoch: validation_task.epoch,
         }
     }
 }

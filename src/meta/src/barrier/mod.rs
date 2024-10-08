@@ -1166,20 +1166,23 @@ impl GlobalBarrierManagerContext {
         let (sst_to_context, sstables, new_table_watermarks, old_value_sst) =
             collect_resp_info(resps);
         assert!(old_value_sst.is_empty());
-        let new_table_fragment_info = if is_first_time {
-            NewTableFragmentInfo::NewCompactionGroup {
+        let new_table_fragment_infos = if is_first_time {
+            vec![NewTableFragmentInfo::NewCompactionGroup {
                 table_ids: tables_to_commit.clone(),
-            }
+            }]
         } else {
-            NewTableFragmentInfo::None
+            vec![]
         };
+        let tables_to_commit = tables_to_commit
+            .into_iter()
+            .map(|table_id| (table_id, epoch))
+            .collect();
         let info = CommitEpochInfo {
             sstables,
             new_table_watermarks,
             sst_to_context,
-            new_table_fragment_info,
+            new_table_fragment_infos,
             change_log_delta: Default::default(),
-            committed_epoch: epoch,
             tables_to_commit,
         };
         self.hummock_manager.commit_epoch(info).await?;
@@ -1712,21 +1715,21 @@ fn collect_commit_epoch_info(
     let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
         collect_resp_info(resps);
 
-    let new_table_fragment_info = if let Command::CreateStreamingJob { info, job_type } =
+    let new_table_fragment_infos = if let Command::CreateStreamingJob { info, job_type } =
         &command_ctx.command
         && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
     {
         let table_fragments = &info.table_fragments;
-        NewTableFragmentInfo::Normal {
+        vec![NewTableFragmentInfo::Normal {
             mv_table_id: table_fragments.mv_table_id().map(TableId::new),
             internal_table_ids: table_fragments
                 .internal_table_ids()
                 .into_iter()
                 .map(TableId::new)
                 .collect(),
-        }
+        }]
     } else {
-        NewTableFragmentInfo::None
+        vec![]
     };
 
     let mut mv_log_store_truncate_epoch = HashMap::new();
@@ -1767,14 +1770,17 @@ fn collect_commit_epoch_info(
     );
 
     let epoch = command_ctx.prev_epoch.value().0;
+    let tables_to_commit = tables_to_commit
+        .into_iter()
+        .map(|table_id| (table_id, epoch))
+        .collect();
 
     CommitEpochInfo {
         sstables: synced_ssts,
         new_table_watermarks,
         sst_to_context,
-        new_table_fragment_info,
+        new_table_fragment_infos,
         change_log_delta: table_new_change_log,
-        committed_epoch: epoch,
         tables_to_commit,
     }
 }
