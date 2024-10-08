@@ -73,8 +73,9 @@ use crate::sink::{
 macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
-            { ElasticSearchJava, ElasticSearchJavaSink, "elasticsearch_v1" }
-            { OpensearchJava, OpenSearchJavaSink, "opensearch_v1"}
+            //todo!, delete java impl
+            // { ElasticSearchJava, ElasticSearchJavaSink, "elasticsearch_v1" }
+            // { OpensearchJava, OpenSearchJavaSink, "opensearch_v1"}
             { Cassandra, CassandraSink, "cassandra" }
             { Jdbc, JdbcSink, "jdbc" }
             { DeltaLake, DeltaLakeSink, "deltalake" }
