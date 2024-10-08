@@ -6301,7 +6301,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=67d434d9ab188770c1b598518d50745cd2a8a73b#67d434d9ab188770c1b598518d50745cd2a8a73b"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6346,7 +6346,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=67d434d9ab188770c1b598518d50745cd2a8a73b#67d434d9ab188770c1b598518d50745cd2a8a73b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6363,7 +6363,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=67d434d9ab188770c1b598518d50745cd2a8a73b#67d434d9ab188770c1b598518d50745cd2a8a73b"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6383,7 +6383,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-sql"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=67d434d9ab188770c1b598518d50745cd2a8a73b#67d434d9ab188770c1b598518d50745cd2a8a73b"
 dependencies = [
  "async-trait",
  "iceberg",
