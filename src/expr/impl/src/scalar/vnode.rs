@@ -25,6 +25,8 @@ use risingwave_expr::{build_function, expr_context, Result};
 
 #[derive(Debug)]
 struct VnodeExpression {
+    /// `Some` if it's from the first argument of user-facing function `VnodeUser` (`rw_vnode`),
+    /// `None` if it's from the internal function `Vnode`.
     vnode_count: Option<usize>,
 
     /// A list of expressions to get the distribution key columns. Typically `InputRef`.
@@ -55,8 +57,12 @@ fn build_user(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpres
         .eval_const() // required to be constant
         .ok()
         .flatten() // required to be non-null
-        .context("rw_vnode expects the first argument to be a non-null constant")?
+        .context("the first argument (vnode count) must be a non-null constant")?
         .into_int16() as usize;
+    if vnode_count == 0 {
+        return Err(anyhow::anyhow!("the first argument (vnode count) must not be zero").into());
+    }
+
     let children = children.collect_vec();
 
     Ok(Box::new(VnodeExpression {
