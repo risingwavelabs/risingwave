@@ -22,7 +22,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compact_task::ReportTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::TableGroupInfo;
-use risingwave_hummock_sdk::compaction_group::{group_split, StateTableId};
+use risingwave_hummock_sdk::compaction_group::{
+    group_split, StateTableId, StaticCompactionGroupId,
+};
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
 use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -630,13 +632,13 @@ impl HummockManager {
 
         let window_size =
             self.env.opts.split_group_statistic_window_times / (checkpoint_secs as usize);
-        if !table_write_throughput.get(table_id).unwrap().len() < window_size {
+        let table_throughput = table_write_throughput.get(table_id).unwrap();
+        if table_throughput.len() < window_size {
             return;
         }
 
         let is_high_write_throughput = is_table_high_write_throughput(
-            table_write_throughput,
-            *table_id,
+            table_throughput,
             checkpoint_secs,
             window_size,
             self.env.opts.table_write_throughput_threshold,
@@ -740,6 +742,13 @@ impl HummockManager {
         checkpoint_secs: u64,
         created_tables: &HashSet<u32>,
     ) -> Result<()> {
+        // TODO: remove this check after refactor group id
+        if group.group_id == StaticCompactionGroupId::StateDefault as u64
+            && next_group.group_id == StaticCompactionGroupId::MaterializedView as u64
+        {
+            return Ok(());
+        }
+
         if group.table_statistic.is_empty() || next_group.table_statistic.is_empty() {
             return Err(Error::CompactionGroup(format!(
                 "group-{} or group-{} is empty",
@@ -840,20 +849,17 @@ impl HummockManager {
 }
 
 pub fn is_table_high_write_throughput(
-    table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-    table_id: StateTableId,
+    table_throughput: &VecDeque<u64>,
     checkpoint_secs: u64,
     window_size: usize,
     threshold: u64,
     high_write_throughput_ratio: f64,
 ) -> bool {
-    let history = table_write_throughput.get(&table_id).unwrap();
-    assert!(history.len() >= window_size);
-
+    assert!(table_throughput.len() >= window_size);
     let mut high_write_throughput_count = 0;
-    for throughput in history
+    for throughput in table_throughput
         .iter()
-        .skip(history.len().saturating_sub(window_size))
+        .skip(table_throughput.len().saturating_sub(window_size))
     {
         // only check the latest window_size
         if *throughput / checkpoint_secs > threshold {
@@ -865,20 +871,18 @@ pub fn is_table_high_write_throughput(
 }
 
 pub fn is_table_low_write_throughput(
-    table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-    table_id: StateTableId,
+    table_throughput: &VecDeque<u64>,
     checkpoint_secs: u64,
     window_size: usize,
     threshold: u64,
     low_write_throughput_ratio: f64,
 ) -> bool {
-    let history = table_write_throughput.get(&table_id).unwrap();
-    assert!(history.len() >= window_size);
+    assert!(table_throughput.len() >= window_size);
 
     let mut low_write_throughput_count = 0;
-    for throughput in history
+    for throughput in table_throughput
         .iter()
-        .skip(history.len().saturating_sub(window_size))
+        .skip(table_throughput.len().saturating_sub(window_size))
     {
         if *throughput / checkpoint_secs <= threshold {
             low_write_throughput_count += 1;
@@ -910,9 +914,9 @@ fn check_is_low_write_throughput_compaction_group(
     }
 
     live_table.into_iter().all(|table_id| {
+        let table_write_throughput = table_write_throughput.get(&table_id).unwrap();
         is_table_low_write_throughput(
             table_write_throughput,
-            table_id,
             checkpoint_secs,
             window_size,
             threshold,
