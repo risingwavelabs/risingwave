@@ -10816,6 +10816,7 @@ dependencies = [
  "pg_bigdecimal",
  "postgres-openssl",
  "pretty_assertions",
+ "proc-macro2",
  "prometheus",
  "prost 0.13.1",
  "prost-reflect",
