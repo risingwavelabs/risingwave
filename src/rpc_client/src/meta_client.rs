@@ -698,21 +698,6 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn list_change_log_epochs(
-        &self,
-        table_id: u32,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Result<Vec<u64>> {
-        let request = ListChangeLogEpochsRequest {
-            table_id,
-            min_epoch,
-            max_count,
-        };
-        let resp = self.inner.list_change_log_epochs(request).await?;
-        Ok(resp.epochs)
-    }
-
     pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<WaitVersion> {
         let request = DropIndexRequest {
             index_id: index_id.index_id,
@@ -2119,7 +2104,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
-            ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
             ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
             ,{ hummock_client, merge_compaction_group, MergeCompactionGroupRequest, MergeCompactionGroupResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
