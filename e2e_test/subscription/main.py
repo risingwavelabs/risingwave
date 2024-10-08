@@ -355,6 +355,146 @@ def test_rebuild_table():
     check_rows_data([1,100],row[2],"UpdateInsert")
     drop_table_subscription()
 
+def test_order_table_with_pk():
+    print(f"test_order_table_with_pk")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t2 values(6,6),(3,3),(5,5),(4,4),(7,7)",conn)
+    execute_insert("flush",conn)
+    execute_insert("declare cur subscription cursor for sub2 full",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    assert len(row) == 5
+    check_rows_data([3,3],row[0],"Insert")
+    check_rows_data([4,4],row[1],"Insert")
+    check_rows_data([5,5],row[2],"Insert")
+    check_rows_data([6,6],row[3],"Insert")
+    check_rows_data([7,7],row[4],"Insert")
+    execute_insert("insert into t2 values(16,16),(13,13),(15,15),(14,14),(17,17)",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    assert len(row) == 5
+    check_rows_data([13,13],row[0],"Insert")
+    check_rows_data([14,14],row[1],"Insert")
+    check_rows_data([15,15],row[2],"Insert")
+    check_rows_data([16,16],row[3],"Insert")
+    check_rows_data([17,17],row[4],"Insert")
+    execute_insert("update t2 set v2 = 100 where v1 > 10",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    assert len(row) == 10
+    check_rows_data([13,13],row[0],"UpdateDelete")
+    check_rows_data([13,100],row[1],"UpdateInsert")
+    check_rows_data([14,14],row[2],"UpdateDelete")
+    check_rows_data([14,100],row[3],"UpdateInsert")
+    check_rows_data([15,15],row[4],"UpdateDelete")
+    check_rows_data([15,100],row[5],"UpdateInsert")
+    check_rows_data([16,16],row[6],"UpdateDelete")
+    check_rows_data([16,100],row[7],"UpdateInsert")
+    check_rows_data([17,17],row[8],"UpdateDelete")
+    check_rows_data([17,100],row[9],"UpdateInsert")
+
+def test_order_table_with_row_id():
+    print(f"test_order_table_with_pk")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t1 values(6,6),(3,3),(5,5),(4,4),(7,7)",conn)
+    execute_insert("flush",conn)
+    execute_insert("declare cur subscription cursor for sub2 full",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    ex_row = execute_query("select v1, v2 from t1 order by _row_id",conn)
+    assert len(row) == 5
+    assert len(ex_row) == 5
+    check_rows_data(ex_row[0],row[0],"Insert")
+    check_rows_data(ex_row[1],row[1],"Insert")
+    check_rows_data(ex_row[2],row[2],"Insert")
+    check_rows_data(ex_row[3],row[3],"Insert")
+    check_rows_data(ex_row[4],row[4],"Insert")
+    execute_insert("insert into t2 values(16,16),(13,13),(15,15),(14,14),(17,17)",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    ex_row = execute_query("select v1, v2 from t1 order by _row_id",conn)
+    assert len(row) == 5
+    assert len(ex_row) == 5
+    check_rows_data(ex_row[0],row[0],"Insert")
+    check_rows_data(ex_row[1],row[1],"Insert")
+    check_rows_data(ex_row[2],row[2],"Insert")
+    check_rows_data(ex_row[3],row[3],"Insert")
+    check_rows_data(ex_row[4],row[4],"Insert")
+
+def test_order_mv():
+    print(f"test_order_mv")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t4 values(6,6,6,6),(3,3,3,3),(5,5,5,5),(4,4,4,4),(7,7,7,7)",conn)
+    execute_insert("flush",conn)
+    execute_insert("declare cur subscription cursor for sub4 full",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    ex_row = execute_query("select v4, v2 from t4 order by _row_id",conn)
+    assert len(row) == 5
+    assert len(ex_row) == 5
+    check_rows_data(ex_row[0],row[0],"Insert")
+    check_rows_data(ex_row[1],row[1],"Insert")
+    check_rows_data(ex_row[2],row[2],"Insert")
+    check_rows_data(ex_row[3],row[3],"Insert")
+    check_rows_data(ex_row[4],row[4],"Insert")
+    execute_insert("insert into t2 values(16,16,16,16),(13,13,13,13),(15,15,15,15),(14,14,14,14),(17,17,17,17)",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    ex_row = execute_query("select v1, v2 from t1 order by _row_id",conn)
+    assert len(row) == 5
+    assert len(ex_row) == 5
+    check_rows_data(ex_row[0],row[0],"Insert")
+    check_rows_data(ex_row[1],row[1],"Insert")
+    check_rows_data(ex_row[2],row[2],"Insert")
+    check_rows_data(ex_row[3],row[3],"Insert")
+    check_rows_data(ex_row[4],row[4],"Insert")
+
+def test_order_mutil_pk():
+    print(f"test_order_mutil_pk")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t5 values(6,6,6,6),(3,3,3,3),(5,5,5,5),(4,4,4,4),(7,7,7,7)",conn)
+    execute_insert("flush",conn)
+    execute_insert("declare cur subscription cursor for sub4 full",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    assert len(row) == 5
+    check_rows_data([3,3,3,3],row[0],"Insert")
+    check_rows_data([4,4,4,4],row[1],"Insert")
+    check_rows_data([5,5,5,5],row[2],"Insert")
+    check_rows_data([6,6,6,6],row[3],"Insert")
+    check_rows_data([7,7,7,7],row[4],"Insert")
+    execute_insert("insert into t2 values(16,16,16,16),(13,13,13,13),(15,15,15,15),(14,14,14,14),(17,17,17,17)",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    ex_row = execute_query("select v1, v2 from t1 order by _row_id",conn)
+    assert len(row) == 5
+    assert len(ex_row) == 5
+    check_rows_data([13,13,13,13],row[0],"Insert")
+    check_rows_data([14,14,14,14],row[1],"Insert")
+    check_rows_data([15,15,15,15],row[2],"Insert")
+    check_rows_data([16,16,16,16],row[3],"Insert")
+    check_rows_data([17,17,17,17],row[4],"Insert")
+
 if __name__ == "__main__":
     test_cursor_snapshot()
     test_cursor_op()
@@ -366,3 +506,7 @@ if __name__ == "__main__":
     test_cursor_with_table_alter()
     test_cursor_fetch_n()
     test_rebuild_table()
+    test_order_table_with_pk()
+    test_order_table_with_row_id()
+    test_order_mv()
+    test_order_mutil_pk()

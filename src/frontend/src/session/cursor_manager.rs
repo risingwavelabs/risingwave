@@ -21,9 +21,7 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use fixedbitset::FixedBitSet;
 use futures::StreamExt;
-use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, Row};
@@ -38,7 +36,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::TableId;
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::declare_cursor::{
     create_chunk_stream_for_cursor, create_stream_for_cursor_stmt,
 };
@@ -49,6 +47,7 @@ use crate::handler::util::{
 };
 use crate::handler::HandlerArgs;
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
@@ -555,10 +554,27 @@ impl SubscriptionCursor {
         } else {
             let subscription_from_table_name =
                 ObjectName(vec![Ident::from(table_catalog.name.as_ref())]);
-            let pk_indexes = pks.iter().map(|c| c.column_index).collect_vec();
+            let pk_names = pks
+                .iter()
+                .map(|f| {
+                    Ok::<String, RwError>(
+                        table_catalog
+                            .columns
+                            .get(f.column_index)
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "columns not find in table schema, index is {:?}",
+                                    f.column_index
+                                )
+                            })?
+                            .name()
+                            .to_string(),
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
             let query_stmt = Statement::Query(Box::new(gen_query_from_table_name_order_by(
                 subscription_from_table_name,
-                pk_indexes,
+                pk_names,
             )));
             create_stream_for_cursor_stmt(handle_args, query_stmt).await?
         };
@@ -629,30 +645,44 @@ impl SubscriptionCursor {
         version_id: HummockVersionId,
         pks: &[ColumnOrder],
     ) -> Result<BatchQueryPlanResult> {
+        // pk + all column without hidden
         let out_col_idx = table_catalog
             .columns
             .iter()
             .enumerate()
-            .filter(|(_, v)| !v.is_hidden)
-            .map(|(i, _)| i)
+            .filter_map(|(index, v)| {
+                if !v.is_hidden || table_catalog.pk.iter().any(|pk| pk.column_index == index) {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let hidden_col_idx = table_catalog
+            .columns
+            .iter()
+            .enumerate()
+            .filter_map(|(index, v)| if v.is_hidden { Some(index) } else { None })
             .collect::<Vec<_>>();
         let core = generic::LogScan::new(
             table_catalog.name.clone(),
             out_col_idx,
+            hidden_col_idx,
             Rc::new(table_catalog.table_desc()),
             context,
             old_epoch,
             new_epoch,
             version_id,
         );
+
         let batch_log_seq_scan = BatchLogSeqScan::new(core);
-        let schema = batch_log_seq_scan
-            .core()
-            .schema_without_table_name()
-            .clone();
-        let out_fields = FixedBitSet::from_iter(0..schema.len());
-        let out_names = batch_log_seq_scan.core().column_names();
+
+        let out_fields = batch_log_seq_scan.core().out_fields();
+        let out_names = batch_log_seq_scan.core().column_names_without_hidden();
+
+        // order by pk, so don't need to sort
         let order = Order::new(pks.to_vec());
+
         // Here we just need a plan_root to call the method, only out_fields and out_names will be used
         let plan_root = PlanRoot::new_with_batch_plan(
             PlanRef::from(batch_log_seq_scan.clone()),
@@ -669,6 +699,7 @@ impl SubscriptionCursor {
                 QueryMode::Distributed,
             ),
         };
+        let schema = batch_log_seq_scan.schema().clone();
         Ok(BatchQueryPlanResult {
             plan: batch_log_seq_scan,
             query_mode,
