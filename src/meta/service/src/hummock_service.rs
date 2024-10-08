@@ -533,7 +533,6 @@ impl HummockManagerService for HummockServiceImpl {
             min_delta_log_num_for_hummock_version_checkpoint,
             min_sst_retention_time_sec,
             full_gc_interval_sec,
-            collect_gc_watermark_spin_interval_sec,
             periodic_compaction_interval_sec,
             periodic_space_reclaim_compaction_interval_sec,
             periodic_ttl_reclaim_compaction_interval_sec,

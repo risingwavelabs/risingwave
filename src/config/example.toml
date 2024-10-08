@@ -17,7 +17,6 @@ dir = "./"
 min_sst_retention_time_sec = 86400
 full_gc_interval_sec = 86400
 full_gc_object_limit = 100000
-collect_gc_watermark_spin_interval_sec = 5
 periodic_compaction_interval_sec = 60
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 200
