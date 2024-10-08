@@ -1329,16 +1329,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1181e1e0d1fce796a03db1ae795d67167da795f9cf4a39c37589e85ef57f26d3"
 
 [[package]]
-name = "atomic-write-file"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbf54d4588732bdfc5ebc3eb9f74f20e027112fc31de412fc7ff0cd1c6896dae"
-dependencies = [
- "nix 0.28.0",
- "rand",
-]
-
-[[package]]
 name = "auto_enums"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2354,7 +2344,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6362ed55def622cddc70a4746a68554d7b687713770de539e59a739b249f8ed"
 dependencies = [
  "borsh-derive",
- "cfg_aliases 0.2.1",
+ "cfg_aliases",
 ]
 
 [[package]]
@@ -2705,12 +2695,6 @@ dependencies = [
  "quote",
  "syn 2.0.66",
 ]
-
-[[package]]
-name = "cfg_aliases"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
 name = "cfg_aliases"
@@ -7158,9 +7142,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.29"
+version = "0.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53a36782df7996da4863e04526454fbd43067fac1a4dcb8fc663acd538cbf6af"
+checksum = "7d3eb2acc57c82d21d699119b859e2df70a91dbdb84734885a1e72be83bdecb5"
 dependencies = [
  "madsim",
  "spin 0.9.8",
@@ -7700,25 +7684,13 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
-dependencies = [
- "bitflags 2.6.0",
- "cfg-if",
- "cfg_aliases 0.1.1",
- "libc",
-]
-
-[[package]]
-name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
- "cfg_aliases 0.2.1",
+ "cfg_aliases",
  "libc",
 ]
 
@@ -13551,8 +13523,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=15ee4ba0eedc269540e42c6b4437c10de7325ed7#15ee4ba0eedc269540e42c6b4437c10de7325ed7"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -13563,8 +13535,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-core"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=15ee4ba0eedc269540e42c6b4437c10de7325ed7#15ee4ba0eedc269540e42c6b4437c10de7325ed7"
 dependencies = [
  "ahash 0.8.11",
  "atoi",
@@ -13607,8 +13579,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=15ee4ba0eedc269540e42c6b4437c10de7325ed7#15ee4ba0eedc269540e42c6b4437c10de7325ed7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -13619,10 +13591,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros-core"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=15ee4ba0eedc269540e42c6b4437c10de7325ed7#15ee4ba0eedc269540e42c6b4437c10de7325ed7"
 dependencies = [
- "atomic-write-file",
  "dotenvy",
  "either",
  "heck 0.4.1",
@@ -13645,8 +13616,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-mysql"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=15ee4ba0eedc269540e42c6b4437c10de7325ed7#15ee4ba0eedc269540e42c6b4437c10de7325ed7"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -13691,8 +13662,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-postgres"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=15ee4ba0eedc269540e42c6b4437c10de7325ed7#15ee4ba0eedc269540e42c6b4437c10de7325ed7"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -13721,7 +13692,6 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
- "sha1",
  "sha2",
  "smallvec",
  "sqlx-core",
@@ -13735,8 +13705,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-sqlite"
-version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=5a32ad8ce842176c202df30910e1416655eda071#5a32ad8ce842176c202df30910e1416655eda071"
+version = "0.7.4"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=15ee4ba0eedc269540e42c6b4437c10de7325ed7#15ee4ba0eedc269540e42c6b4437c10de7325ed7"
 dependencies = [
  "async-channel 2.2.1",
  "atoi",
