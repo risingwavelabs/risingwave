@@ -24,11 +24,12 @@ use risingwave_expr::{build_function, Result};
 
 #[derive(Debug)]
 struct VnodeExpression {
+    /// A list of expressions to get the distribution key columns. Typically `InputRef`.
     children: Vec<BoxedExpression>,
 
     /// Normally, we pass the distribution key indices to `VirtualNode::compute_xx` functions.
     /// But in this case, all children columns are used to compute vnode. So we cache a vector of
-    /// all indices here and pass it later.
+    /// all indices here and pass it later to reduce allocation.
     all_indices: Vec<usize>,
 }
 
