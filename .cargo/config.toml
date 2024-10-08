@@ -20,11 +20,13 @@ rustflags = [
 [target.x86_64-apple-darwin]
 rustflags = [
     "-Ctarget-feature=+sse4.2",                             # use a generally available feature, since it's not for production
+    "-Clink-arg=-fuse-ld=lld",
 ]
 
 [target.aarch64-apple-darwin]
 rustflags = [
     # neon is enabled by default
+    "-Clink-arg=-fuse-ld=lld",
 ]
 
 # Flags for all targets.
