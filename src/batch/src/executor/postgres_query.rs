@@ -145,6 +145,10 @@ impl PostgresQueryExecutor {
                 yield chunk;
             }
         }
+        if let Some(chunk) = builder.consume_all() {
+            yield chunk;
+        }
+        return Ok(());
     }
 }
 
