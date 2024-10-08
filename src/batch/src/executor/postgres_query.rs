@@ -130,6 +130,7 @@ impl PostgresQueryExecutor {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        tracing::debug!("postgres_query_executor: started");
         let conn_str = format!(
             "host={} port={} user={} password={} dbname={}",
             self.host, self.port, self.username, self.password, self.database
@@ -138,6 +139,7 @@ impl PostgresQueryExecutor {
         // TODO(kwannoel): Use pagination using CURSOR.
         let rows = client.query(&self.query, &[]).await?;
         let mut builder = DataChunkBuilder::new(self.schema.data_types(), 1024);
+        tracing::debug!("postgres_query_executor: query executed, start deserializing rows");
         // deserialize the rows
         for row in rows {
             let owned_row = postgres_row_to_owned_row(row, &self.schema)?;
