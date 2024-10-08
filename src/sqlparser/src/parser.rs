@@ -2793,9 +2793,11 @@ impl Parser<'_> {
 
     pub fn parse_handle_conflict_behavior(&mut self) -> PResult<Option<OnConflict>> {
         if self.parse_keyword(Keyword::OVERWRITE) {
-            Ok(Some(OnConflict::OverWrite))
+            // compatible with v1.9 - v2.0
+            Ok(Some(OnConflict::UpdateFull))
         } else if self.parse_keyword(Keyword::IGNORE) {
-            Ok(Some(OnConflict::Ignore))
+            // compatible with v1.9 - v2.0
+            Ok(Some(OnConflict::Nothing))
         } else if self.parse_keywords(&[
             Keyword::DO,
             Keyword::UPDATE,
@@ -2803,7 +2805,11 @@ impl Parser<'_> {
             Keyword::NOT,
             Keyword::NULL,
         ]) {
-            Ok(Some(OnConflict::DoUpdateIfNotNull))
+            Ok(Some(OnConflict::UpdateIfNotNull))
+        } else if self.parse_keywords(&[Keyword::DO, Keyword::UPDATE, Keyword::FULL]) {
+            Ok(Some(OnConflict::UpdateFull))
+        } else if self.parse_keywords(&[Keyword::DO, Keyword::NOTHING]) {
+            Ok(Some(OnConflict::Nothing))
         } else {
             Ok(None)
         }
@@ -4289,6 +4295,26 @@ impl Parser<'_> {
             let value = alt((
                 Keyword::DEFAULT.value(SetTimeZoneValue::Default),
                 Keyword::LOCAL.value(SetTimeZoneValue::Local),
+                preceded(
+                    Keyword::INTERVAL,
+                    cut_err(Self::parse_literal_interval.try_map(|e| match e {
+                        // support a special case for clients which would send when initializing the connection
+                        // like: SET TIME ZONE INTERVAL '+00:00' HOUR TO MINUTE;
+                        Expr::Value(v) => match v {
+                            Value::Interval { value, .. } => {
+                                if value != "+00:00" {
+                                    return Err(StrError("only support \"+00:00\" ".into()));
+                                }
+                                Ok(SetTimeZoneValue::Ident(Ident::with_quote_unchecked(
+                                    '\'',
+                                    "UTC".to_string(),
+                                )))
+                            }
+                            _ => Err(StrError("expect Value::Interval".into())),
+                        },
+                        _ => Err(StrError("expect Expr::Value".into())),
+                    })),
+                ),
                 Self::parse_identifier.map(SetTimeZoneValue::Ident),
                 Self::parse_value.map(SetTimeZoneValue::Literal),
             ))
@@ -4610,7 +4636,13 @@ impl Parser<'_> {
                     join_operator,
                 }
             } else {
-                let natural = self.parse_keyword(Keyword::NATURAL);
+                let (natural, asof) =
+                    match self.parse_one_of_keywords(&[Keyword::NATURAL, Keyword::ASOF]) {
+                        Some(Keyword::NATURAL) => (true, false),
+                        Some(Keyword::ASOF) => (false, true),
+                        Some(_) => unreachable!(),
+                        None => (false, false),
+                    };
                 let peek_keyword = if let Token::Word(w) = self.peek_token().token {
                     w.keyword
                 } else {
@@ -4621,17 +4653,33 @@ impl Parser<'_> {
                     Keyword::INNER | Keyword::JOIN => {
                         let _ = self.parse_keyword(Keyword::INNER);
                         self.expect_keyword(Keyword::JOIN)?;
-                        JoinOperator::Inner
+                        if asof {
+                            JoinOperator::AsOfInner
+                        } else {
+                            JoinOperator::Inner
+                        }
                     }
                     kw @ Keyword::LEFT | kw @ Keyword::RIGHT | kw @ Keyword::FULL => {
+                        let checkpoint = *self;
                         let _ = self.next_token();
                         let _ = self.parse_keyword(Keyword::OUTER);
                         self.expect_keyword(Keyword::JOIN)?;
-                        match kw {
-                            Keyword::LEFT => JoinOperator::LeftOuter,
-                            Keyword::RIGHT => JoinOperator::RightOuter,
-                            Keyword::FULL => JoinOperator::FullOuter,
-                            _ => unreachable!(),
+                        if asof {
+                            if Keyword::LEFT == kw {
+                                JoinOperator::AsOfLeft
+                            } else {
+                                return self.expected_at(
+                                    checkpoint,
+                                    "LEFT after ASOF. RIGHT or FULL are not supported",
+                                );
+                            }
+                        } else {
+                            match kw {
+                                Keyword::LEFT => JoinOperator::LeftOuter,
+                                Keyword::RIGHT => JoinOperator::RightOuter,
+                                Keyword::FULL => JoinOperator::FullOuter,
+                                _ => unreachable!(),
+                            }
                         }
                     }
                     Keyword::OUTER => {
@@ -4640,14 +4688,24 @@ impl Parser<'_> {
                     _ if natural => {
                         return self.expected("a join type after NATURAL");
                     }
+                    _ if asof => {
+                        return self.expected("a join type after ASOF");
+                    }
                     _ => break,
                 };
                 let relation = self.parse_table_factor()?;
                 let join_constraint = self.parse_join_constraint(natural)?;
                 let join_operator = join_operator_type(join_constraint);
-                if let JoinOperator::Inner(JoinConstraint::None) = join_operator {
-                    return self.expected("join constraint after INNER JOIN");
+                let need_constraint = match join_operator {
+                    JoinOperator::Inner(JoinConstraint::None) => Some("INNER JOIN"),
+                    JoinOperator::AsOfInner(JoinConstraint::None) => Some("ASOF INNER JOIN"),
+                    JoinOperator::AsOfLeft(JoinConstraint::None) => Some("ASOF LEFT JOIN"),
+                    _ => None,
+                };
+                if let Some(join_type) = need_constraint {
+                    return self.expected(&format!("join constraint after {join_type}"));
                 }
+
                 Join {
                     relation,
                     join_operator,

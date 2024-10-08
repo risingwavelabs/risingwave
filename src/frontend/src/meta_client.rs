@@ -27,9 +27,9 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
+use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
@@ -47,7 +47,6 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
     async fn try_unregister(&self);
-    async fn get_snapshot(&self) -> Result<HummockSnapshot>;
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId>;
 
@@ -67,6 +66,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
+
+    async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
 
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
@@ -132,10 +133,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.try_unregister().await;
     }
 
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        self.0.get_snapshot().await
-    }
-
     async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId> {
         self.0.flush(checkpoint).await
     }
@@ -169,6 +166,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
         self.0.list_actor_states().await
+    }
+
+    async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
+        self.0.list_actor_splits().await
     }
 
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {

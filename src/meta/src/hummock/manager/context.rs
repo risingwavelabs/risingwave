@@ -190,7 +190,6 @@ impl HummockManager {
         &self,
         committed_epoch: HummockEpoch,
         tables_to_commit: &HashSet<TableId>,
-        is_visible_table_committed_epoch: bool,
         sstables: &[LocalSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
@@ -215,17 +214,6 @@ impl HummockManager {
             }
         }
 
-        if is_visible_table_committed_epoch
-            && committed_epoch <= current_version.visible_table_committed_epoch()
-        {
-            return Err(anyhow::anyhow!(
-                "Epoch {} <= max_committed_epoch {}",
-                committed_epoch,
-                current_version.visible_table_committed_epoch()
-            )
-            .into());
-        }
-
         // sanity check on monotonically increasing table committed epoch
         for table_id in tables_to_commit {
             if let Some(info) = current_version.state_table_info.info().get(table_id) {
@@ -239,6 +227,19 @@ impl HummockManager {
                     .into());
                 }
             }
+        }
+
+        // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
+        if !sstables.is_empty() {
+            // sanity check to ensure SSTs to commit have not been full GCed yet.
+            let now = self.now().await?;
+            check_sst_retention(
+                now,
+                self.env.opts.min_sst_retention_time_sec,
+                sstables
+                    .iter()
+                    .map(|s| (s.sst_info.object_id, s.created_at)),
+            )?;
         }
 
         async {
@@ -277,6 +278,36 @@ impl HummockManager {
     pub async fn release_meta_context(&self) -> Result<()> {
         self.release_contexts([META_NODE_ID]).await
     }
+
+    pub(crate) async fn report_compaction_sanity_check(
+        &self,
+        object_timestamps: &HashMap<HummockSstableObjectId, u64>,
+    ) -> Result<()> {
+        // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
+        if object_timestamps.is_empty() {
+            return Ok(());
+        }
+        let now = self.now().await?;
+        check_sst_retention(
+            now,
+            self.env.opts.min_sst_retention_time_sec,
+            object_timestamps.iter().map(|(k, v)| (*k, *v)),
+        )
+    }
+}
+
+fn check_sst_retention(
+    now: u64,
+    retention_sec: u64,
+    sst_infos: impl Iterator<Item = (HummockSstableObjectId, u64)>,
+) -> Result<()> {
+    let sst_retention_watermark = now.saturating_sub(retention_sec);
+    for (object_id, created_at) in sst_infos {
+        if created_at < sst_retention_watermark {
+            return Err(anyhow::anyhow!("object {object_id} is rejected from being committed since it's below watermark: object timestamp {created_at}, meta node timestamp {now}, retention_sec {retention_sec}, watermark {sst_retention_watermark}").into());
+        }
+    }
+    Ok(())
 }
 
 // pin and unpin method

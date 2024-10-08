@@ -277,15 +277,19 @@ pub async fn gen_sink_plan(
             }
         }
 
-        let user_defined_primary_key_table =
-            !(table_catalog.append_only || table_catalog.row_id_index.is_some());
+        let user_defined_primary_key_table = table_catalog.row_id_index.is_none();
+        let sink_is_append_only = sink_catalog.sink_type == SinkType::AppendOnly
+            || sink_catalog.sink_type == SinkType::ForceAppendOnly;
 
-        if !(user_defined_primary_key_table
-            || sink_catalog.sink_type == SinkType::AppendOnly
-            || sink_catalog.sink_type == SinkType::ForceAppendOnly)
-        {
+        if !user_defined_primary_key_table && !sink_is_append_only {
             return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a table without primary keys.".to_string(),
+                "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
+            )));
+        }
+
+        if table_catalog.append_only && !sink_is_append_only {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
             )));
         }
 
@@ -891,19 +895,19 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 FileSink::<S3Sink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<GcsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<AzblobSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<WebhdfsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<FsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],

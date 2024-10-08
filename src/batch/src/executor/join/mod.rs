@@ -62,7 +62,9 @@ impl JoinType {
             PbJoinType::RightSemi => JoinType::RightSemi,
             PbJoinType::RightAnti => JoinType::RightAnti,
             PbJoinType::FullOuter => JoinType::FullOuter,
-            PbJoinType::Unspecified => unreachable!(),
+            PbJoinType::AsofInner | PbJoinType::AsofLeftOuter | PbJoinType::Unspecified => {
+                unreachable!()
+            }
         }
     }
 }

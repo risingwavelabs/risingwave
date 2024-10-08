@@ -176,6 +176,7 @@ pub struct MetaOpts {
     pub hummock_version_checkpoint_interval_sec: u64,
     pub enable_hummock_data_archive: bool,
     pub hummock_time_travel_snapshot_interval: u64,
+    pub hummock_time_travel_sst_info_fetch_batch_size: usize,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -186,8 +187,8 @@ pub struct MetaOpts {
     pub min_sst_retention_time_sec: u64,
     /// Interval of automatic hummock full GC.
     pub full_gc_interval_sec: u64,
-    /// The spin interval when collecting global GC watermark in hummock
-    pub collect_gc_watermark_spin_interval_sec: u64,
+    /// Max number of object per full GC job can fetch.
+    pub full_gc_object_limit: u64,
     /// Enable sanity check when SSTs are committed
     pub enable_committed_sst_sanity_check: bool,
     /// Schedule compaction for all compaction groups with this interval.
@@ -315,10 +316,11 @@ impl MetaOpts {
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             hummock_time_travel_snapshot_interval: 0,
+            hummock_time_travel_sst_info_fetch_batch_size: 10_000,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
-            collect_gc_watermark_spin_interval_sec: 5,
+            full_gc_object_limit: 100_000,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,

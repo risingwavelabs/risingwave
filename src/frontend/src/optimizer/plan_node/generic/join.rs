@@ -277,7 +277,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                 .rewrite_functional_dependency_set(right_fd_set)
         };
         let fd_set: FunctionalDependencySet = match self.join_type {
-            JoinType::Inner => {
+            JoinType::Inner | JoinType::AsofInner => {
                 let mut fd_set = FunctionalDependencySet::new(full_out_col_num);
                 for i in &self.on.conjunctions {
                     if let Some((col, _)) = i.as_eq_const() {
@@ -300,7 +300,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                     .for_each(|fd| fd_set.add_functional_dependency(fd));
                 fd_set
             }
-            JoinType::LeftOuter => get_new_left_fd_set(left_fd_set),
+            JoinType::LeftOuter | JoinType::AsofLeftOuter => get_new_left_fd_set(left_fd_set),
             JoinType::RightOuter => get_new_right_fd_set(right_fd_set),
             JoinType::FullOuter => FunctionalDependencySet::new(full_out_col_num),
             JoinType::LeftSemi | JoinType::LeftAnti => left_fd_set,
@@ -325,9 +325,12 @@ impl<PlanRef> Join<PlanRef> {
 
     pub fn full_out_col_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                left_len + right_len
-            }
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::FullOuter
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter => left_len + right_len,
             JoinType::LeftSemi | JoinType::LeftAnti => left_len,
             JoinType::RightSemi | JoinType::RightAnti => right_len,
             JoinType::Unspecified => unreachable!(),
@@ -371,7 +374,12 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
         let right_len = self.right.schema().len();
 
         match self.join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::FullOuter
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter => {
                 ColIndexMapping::identity_or_none(left_len + right_len, left_len)
             }
 
@@ -389,7 +397,12 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
         let right_len = self.right.schema().len();
 
         match self.join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::FullOuter
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter => {
                 ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
             }
             JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len, right_len),
@@ -445,13 +458,16 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
 
     pub fn add_which_join_key_to_pk(&self) -> EitherOrBoth<(), ()> {
         match self.join_type {
-            JoinType::Inner => {
+            JoinType::Inner | JoinType::AsofInner => {
                 // Theoretically adding either side is ok, but the distribution key of the inner
                 // join derived based on the left side by default, so we choose the left side here
                 // to ensure the pk comprises the distribution key.
                 EitherOrBoth::Left(())
             }
-            JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => EitherOrBoth::Left(()),
+            JoinType::LeftOuter
+            | JoinType::LeftSemi
+            | JoinType::LeftAnti
+            | JoinType::AsofLeftOuter => EitherOrBoth::Left(()),
             JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => {
                 EitherOrBoth::Right(())
             }

@@ -340,8 +340,11 @@ impl HummockManager {
                                 }
 
                                 HummockTimerEvent::FullGc => {
+                                    let retention_sec =
+                                        hummock_manager.env.opts.min_sst_retention_time_sec;
                                     if hummock_manager
-                                        .start_full_gc(Duration::from_secs(3600), None)
+                                        .start_full_gc(Duration::from_secs(retention_sec), None)
+                                        .await
                                         .is_ok()
                                     {
                                         tracing::info!("Start full GC from meta node.");

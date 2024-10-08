@@ -16,7 +16,7 @@ use super::vnode::VirtualNode;
 
 /// A trait for accessing the vnode count field with backward compatibility.
 pub trait VnodeCountCompat {
-    /// Returns the vnode count, or [`VirtualNode::COUNT`] if the vnode count is not set,
+    /// Returns the vnode count, or [`VirtualNode::COUNT_FOR_COMPAT`] if the vnode count is not set,
     /// typically for backward compatibility.
     ///
     /// See the documentation on the field of the implementing type for more details.
@@ -38,7 +38,7 @@ macro_rules! impl_maybe_vnode_count_compat {
             impl VnodeCountCompat for $ty {
                 fn vnode_count(&self) -> usize {
                     self.maybe_vnode_count
-                        .map_or(VirtualNode::COUNT, |v| v as _)
+                        .map_or(VirtualNode::COUNT_FOR_COMPAT, |v| v as _)
                 }
             }
         )*

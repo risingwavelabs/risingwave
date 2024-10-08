@@ -83,6 +83,7 @@ impl CatalogController {
         create_type: PbCreateType,
         ctx: &StreamContext,
         streaming_parallelism: StreamingParallelism,
+        max_parallelism: usize,
     ) -> MetaResult<ObjectId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job = streaming_job::ActiveModel {
@@ -91,6 +92,7 @@ impl CatalogController {
             create_type: Set(create_type.into()),
             timezone: Set(ctx.timezone.clone()),
             parallelism: Set(streaming_parallelism),
+            max_parallelism: Set(max_parallelism as _),
         };
         job.insert(txn).await?;
 
@@ -102,6 +104,7 @@ impl CatalogController {
         streaming_job: &mut StreamingJob,
         ctx: &StreamContext,
         parallelism: &Option<Parallelism>,
+        max_parallelism: usize,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -169,6 +172,7 @@ impl CatalogController {
                     create_type,
                     ctx,
                     streaming_parallelism,
+                    max_parallelism,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -204,6 +208,7 @@ impl CatalogController {
                     create_type,
                     ctx,
                     streaming_parallelism,
+                    max_parallelism,
                 )
                 .await?;
                 sink.id = job_id as _;
@@ -220,6 +225,7 @@ impl CatalogController {
                     create_type,
                     ctx,
                     streaming_parallelism,
+                    max_parallelism,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -255,6 +261,7 @@ impl CatalogController {
                     create_type,
                     ctx,
                     streaming_parallelism,
+                    max_parallelism,
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -285,6 +292,7 @@ impl CatalogController {
                     create_type,
                     ctx,
                     streaming_parallelism,
+                    max_parallelism,
                 )
                 .await?;
                 src.id = job_id as _;
@@ -391,15 +399,19 @@ impl CatalogController {
         for fragment in fragments {
             let fragment_id = fragment.fragment_id;
             let state_table_ids = fragment.state_table_ids.inner_ref().clone();
+            let vnode_count = fragment.vnode_count;
+
             let fragment = fragment.into_active_model();
             Fragment::insert(fragment).exec(&txn).await?;
 
-            // Update fragment id for all state tables.
+            // Fields including `fragment_id` and `vnode_count` were placeholder values before.
+            // After table fragments are created, update them for all internal tables.
             if !for_replace {
                 for state_table_id in state_table_ids {
                     table::ActiveModel {
                         table_id: Set(state_table_id as _),
                         fragment_id: Set(Some(fragment_id)),
+                        vnode_count: Set(vnode_count),
                         ..Default::default()
                     }
                     .update(&txn)
@@ -631,6 +643,7 @@ impl CatalogController {
         ctx: &StreamContext,
         version: &PbTableVersion,
         specified_parallelism: &Option<NonZeroUsize>,
+        max_parallelism: usize,
     ) -> MetaResult<ObjectId> {
         let id = streaming_job.id();
         let inner = self.inner.write().await;
@@ -685,6 +698,7 @@ impl CatalogController {
             PbCreateType::Foreground,
             ctx,
             parallelism,
+            max_parallelism,
         )
         .await?;
 
@@ -995,22 +1009,25 @@ impl CatalogController {
         table.incoming_sinks = Set(incoming_sinks.into());
         let table = table.update(txn).await?;
 
-        // Update state table fragment id.
-        let fragment_table_ids: Vec<(FragmentId, I32Array)> = Fragment::find()
+        // Fields including `fragment_id` and `vnode_count` were placeholder values before.
+        // After table fragments are created, update them for all internal tables.
+        let fragment_info: Vec<(FragmentId, I32Array, i32)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
                 fragment::Column::StateTableIds,
+                fragment::Column::VnodeCount,
             ])
             .filter(fragment::Column::JobId.eq(dummy_id))
             .into_tuple()
             .all(txn)
             .await?;
-        for (fragment_id, state_table_ids) in fragment_table_ids {
+        for (fragment_id, state_table_ids, vnode_count) in fragment_info {
             for state_table_id in state_table_ids.into_inner() {
                 table::ActiveModel {
                     table_id: Set(state_table_id as _),
                     fragment_id: Set(Some(fragment_id)),
+                    vnode_count: Set(vnode_count),
                     ..Default::default()
                 }
                 .update(txn)
@@ -1631,13 +1648,12 @@ impl CatalogController {
 
                     let mut dispatcher = dispatcher.into_active_model();
 
+                    // Only hash dispatcher needs mapping
                     if dispatcher.dispatcher_type.as_ref() == &DispatcherType::Hash {
                         dispatcher.hash_mapping =
                             Set(upstream_dispatcher_mapping.as_ref().map(|m| {
                                 risingwave_meta_model_v2::ActorMapping::from(&m.to_protobuf())
                             }));
-                    } else {
-                        debug_assert!(upstream_dispatcher_mapping.is_none());
                     }
 
                     let mut new_downstream_actor_ids =

@@ -62,6 +62,7 @@ impl FrontendHummockVersion {
     }
 
     pub fn to_protobuf(&self) -> PbHummockVersion {
+        #[expect(deprecated)]
         PbHummockVersion {
             id: self.id.0,
             levels: Default::default(),
@@ -175,6 +176,7 @@ impl FrontendHummockVersionDelta {
     }
 
     pub fn to_protobuf(&self) -> PbHummockVersionDelta {
+        #[expect(deprecated)]
         PbHummockVersionDelta {
             id: self.id.to_u64(),
             prev_id: self.prev_id.to_u64(),

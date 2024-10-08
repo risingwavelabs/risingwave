@@ -381,14 +381,16 @@ pub fn start(
                 hummock_time_travel_snapshot_interval: config
                     .meta
                     .hummock_time_travel_snapshot_interval,
+                hummock_time_travel_sst_info_fetch_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_sst_info_fetch_batch_size,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
                 full_gc_interval_sec: config.meta.full_gc_interval_sec,
-                collect_gc_watermark_spin_interval_sec: config
-                    .meta
-                    .collect_gc_watermark_spin_interval_sec,
+                full_gc_object_limit: config.meta.full_gc_object_limit,
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,

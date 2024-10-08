@@ -16,6 +16,7 @@ export GCLOUD_DOWNLOAD_TGZ=https://rw-ci-deps-dist.s3.amazonaws.com/google-cloud
 export NEXTEST_HIDE_PROGRESS_BAR=true
 export RW_TELEMETRY_TYPE=test
 export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef"
+export RUST_MIN_STACK=4194304
 
 unset LANG
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
@@ -139,10 +140,11 @@ configure_static_openssl() {
 }
 
 check_link_info() {
-  ldd_output=$(ldd target/"$1"/risingwave)
+  profile=$1
+  ldd_output=$(ldd target/"$profile"/risingwave)
   echo "$ldd_output"
   # enforce that libssl is not present if we are building with static openssl
-  if [[ "$profile" == "ci-release" ]] && [[ "$ldd_output" == *"libssl"* ]]; then
+  if [[ "$profile" == "ci-release" || "$profile" == "production" ]] && [[ "$ldd_output" == *"libssl"* ]]; then
       echo "libssl should not be dynamically linked"
       exit 1
   fi

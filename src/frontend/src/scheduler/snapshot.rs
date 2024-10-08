@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
     FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
 };
-use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
+use risingwave_pb::common::{batch_query_epoch, BatchQueryCommittedEpoch, BatchQueryEpoch};
 use risingwave_pb::hummock::{HummockVersionDeltas, StateTableInfoDelta};
 use tokio::sync::watch;
 
@@ -56,7 +56,10 @@ impl ReadSnapshot {
         Ok(match self {
             ReadSnapshot::FrontendPinned { snapshot } => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Committed(
-                    snapshot.batch_query_epoch(read_storage_tables)?.0,
+                    BatchQueryCommittedEpoch {
+                        epoch: snapshot.batch_query_epoch(read_storage_tables)?.0,
+                        hummock_version_id: snapshot.value.id.to_u64(),
+                    },
                 )),
             },
             ReadSnapshot::ReadUncommitted => BatchQueryEpoch {

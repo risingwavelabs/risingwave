@@ -221,7 +221,18 @@ impl ObjectStore for SimObjectStore {
         }
     }
 
-    async fn list(&self, path: &str) -> ObjectResult<ObjectMetadataIter> {
+    async fn list(
+        &self,
+        path: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter> {
+        if let Some(start_after) = start_after {
+            tracing::warn!(start_after, "start_after is ignored by SimObjectStore");
+        }
+        if let Some(limit) = limit {
+            tracing::warn!(limit, "limit is ignored by SimObjectStore");
+        }
         let path = path.to_string();
         let resp = self
             .client

@@ -38,7 +38,7 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    compact_task, HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest,
+    compact_task, PbHummockVersion, SubscribeCompactionEventRequest,
     SubscribeCompactionEventResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -119,10 +119,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(self.hummock_manager.get_current_version().await)
     }
 
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        Ok(self.hummock_manager.latest_snapshot())
-    }
-
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         fail_point!("get_new_sst_ids_err", |_| Err(anyhow!(
             "failpoint get_new_sst_ids_err"
@@ -166,6 +162,13 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .iter()
                     .flat_map(|sstable| sstable.sst_info.table_ids.clone())
             })
+            .chain(
+                sync_result
+                    .table_watermarks
+                    .keys()
+                    .map(|table_id| table_id.table_id),
+            )
+            .chain(table_ids.iter().cloned())
             .collect::<BTreeSet<_>>();
 
         let new_table_fragment_info = if commit_table_ids
@@ -220,7 +223,6 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .cloned()
                     .map(TableId::from)
                     .collect(),
-                is_visible_table_committed_epoch: true,
             })
             .await
             .map_err(mock_err)?;
@@ -246,6 +248,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         _filtered_object_ids: Vec<HummockSstableObjectId>,
         _total_object_count: u64,
         _total_object_size: u64,
+        _next_start_after: Option<String>,
     ) -> Result<()> {
         unimplemented!()
     }
@@ -343,6 +346,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                         task_status,
                         sorted_output_ssts,
                         table_stats_change,
+                        object_timestamps,
                     }) = item.event.unwrap()
                     {
                         if let Err(e) = hummock_manager_compact
@@ -354,6 +358,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                                     .map(SstableInfo::from)
                                     .collect_vec(),
                                 Some(table_stats_change),
+                                object_timestamps,
                             )
                             .await
                         {
