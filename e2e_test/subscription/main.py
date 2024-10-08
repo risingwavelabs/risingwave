@@ -57,7 +57,7 @@ def test_cursor_snapshot():
     execute_insert("declare cur subscription cursor for sub full",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([1,2],row[0],"Insert")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
     drop_table_subscription()
@@ -76,7 +76,7 @@ def test_cursor_snapshot_log_store():
     execute_insert("declare cur subscription cursor for sub full",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([1,2],row[0],"Insert")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("insert into t1 values(4,4)",conn)
     execute_insert("flush",conn)
@@ -86,7 +86,7 @@ def test_cursor_snapshot_log_store():
     check_rows_data([4,4],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     check_rows_data([5,5],row[0],"Insert")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
     drop_table_subscription()
@@ -114,7 +114,7 @@ def test_cursor_since_begin():
     check_rows_data([5,5],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
     drop_table_subscription()
@@ -139,7 +139,7 @@ def test_cursor_since_now():
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
     drop_table_subscription()
@@ -164,7 +164,7 @@ def test_cursor_without_since():
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
     drop_table_subscription()
@@ -198,7 +198,7 @@ def test_cursor_since_rw_timestamp():
     valuelen = len(row[0])
     rw_timestamp_3 = row[0][valuelen - 1] + 1
     check_rows_data([6,6],row[0],"Insert")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
 
@@ -213,7 +213,7 @@ def test_cursor_since_rw_timestamp():
     execute_insert("close cur",conn)
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_3}",conn)
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
 
@@ -232,7 +232,7 @@ def test_cursor_op():
     execute_insert("declare cur subscription cursor for sub full",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([1,2],row[0],"Insert")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
 
     execute_insert("insert into t1 values(4,4)",conn)
@@ -245,14 +245,14 @@ def test_cursor_op():
     check_rows_data([4,4],row[0],"UpdateDelete")
     row = execute_query("fetch next from cur",conn)
     check_rows_data([4,10],row[0],"UpdateInsert")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
 
     execute_insert("delete from t1 where v1 = 4",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([4,10],row[0],"Delete")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
 
     execute_insert("close cur",conn)
@@ -274,7 +274,7 @@ def test_cursor_with_table_alter():
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
     check_rows_data([1,2],row[0],"Insert")
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
     row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4,4],row[0],"Insert")
@@ -285,7 +285,7 @@ def test_cursor_with_table_alter():
     execute_insert("alter table t1 drop column v2",conn)
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
-    row = execute_query("fetch next from cur with (timeout = '2s')",conn)
+    row = execute_query("fetch next from cur",conn)
     assert row == []
     row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
@@ -356,8 +356,8 @@ def test_rebuild_table():
     check_rows_data([1,100],row[2],"UpdateInsert")
     drop_table_subscription()
 
-def test_blcok_cursor():
-    print(f"test_blcok_cursor")
+def test_block_cursor():
+    print(f"test_block_cursor")
     create_table_subscription()
     conn = psycopg2.connect(
         host="localhost",
@@ -371,7 +371,9 @@ def test_blcok_cursor():
     execute_insert("flush",conn)
     execute_insert("update t2 set v2 = 100 where v1 = 1",conn)
     execute_insert("flush",conn)
-    row = execute_query("fetch 100 from cur",conn)
+    start_time = time.time()
+    row = execute_query("fetch 100 from cur with (timeout = '30s')",conn)
+    assert (time.time() - start_time) < 3
     assert len(row) == 3
     check_rows_data([1,1],row[0],"Insert")
     check_rows_data([1,1],row[1],"UpdateDelete")
@@ -380,7 +382,7 @@ def test_blcok_cursor():
     # Test block cursor fetches data successfully
     thread = threading.Thread(target=insert_into_table)
     thread.start()
-    row = execute_query("fetch 100 from cur",conn)
+    row = execute_query("fetch 100 from cur with (timeout = '5s')",conn)
     check_rows_data([10,10],row[0],"Insert")
     thread.join()
 
@@ -411,4 +413,4 @@ if __name__ == "__main__":
     test_cursor_with_table_alter()
     test_cursor_fetch_n()
     test_rebuild_table()
-    test_blcok_cursor()
+    test_block_cursor()

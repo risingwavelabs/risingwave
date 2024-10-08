@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::time::Duration;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -324,34 +323,28 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn wait_table_change_log_notification(
-        &self,
-        table_id: u32,
-        timeout_seconds: Option<u64>,
-    ) -> Result<(), RwError> {
+    pub async fn wait_table_change_log_notification(&self, table_id: u32) -> Result<(), RwError> {
         let mut rx = self.table_change_log_notification_sender.subscribe();
-        let mut timeout_interval =
-            tokio::time::interval(Duration::from_secs(timeout_seconds.unwrap_or(u64::MAX)));
-        timeout_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        timeout_interval.tick().await;
         loop {
-            tokio::select! {
-                result = rx.changed() => {
-                    result.map_err(|_| {
-                        ErrorCode::InternalError("cursor notify channel is closed.".into())
-                    })?;
-                    let table_change_log_notification_msg = rx.borrow_and_update();
-                    if table_change_log_notification_msg.deleted_table_ids.contains(&table_id) {
-                        return Err(ErrorCode::InternalError(format!("Cursor dependent table deleted: table_id is {:?}", table_id)).into());
-                    }
-                    if table_change_log_notification_msg.updated_change_log_table_ids.contains(&table_id) {
-                        break;
-                    }
-                }
-                _ = timeout_interval.tick() => {
-                    tracing::debug!("Cursor wait next epoch timeout");
-                    break;
-                }
+            rx.changed()
+                .await
+                .map_err(|_| ErrorCode::InternalError("cursor notify channel is closed.".into()))?;
+            let table_change_log_notification_msg = rx.borrow_and_update();
+            if table_change_log_notification_msg
+                .deleted_table_ids
+                .contains(&table_id)
+            {
+                return Err(ErrorCode::InternalError(format!(
+                    "Cursor dependent table deleted: table_id is {:?}",
+                    table_id
+                ))
+                .into());
+            }
+            if table_change_log_notification_msg
+                .updated_change_log_table_ids
+                .contains(&table_id)
+            {
+                break;
             }
         }
         Ok(())

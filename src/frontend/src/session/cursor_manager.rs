@@ -483,19 +483,26 @@ impl SubscriptionCursor {
                     ans.push(row);
                 }
                 None => {
-                    if cur == 0 {
-                        // It's only blocked when there's no data
-                        // This method will only be called once, either to trigger a timeout or to get the return value in the next loop via `next_row`.
+                    let timeout_seconds = timeout_seconds.unwrap_or(0);
+                    if cur > 0 || timeout_seconds == 0 {
+                        break;
+                    }
+                    // It's only blocked when there's no data
+                    // This method will only be called once, either to trigger a timeout or to get the return value in the next loop via `next_row`.
+                    match tokio::time::timeout(
+                        Duration::from_secs(timeout_seconds),
                         session
                             .env
                             .hummock_snapshot_manager()
-                            .wait_table_change_log_notification(
-                                self.dependent_table_id.table_id(),
-                                timeout_seconds,
-                            )
-                            .await?;
-                    } else {
-                        break;
+                            .wait_table_change_log_notification(self.dependent_table_id.table_id()),
+                    )
+                    .await
+                    {
+                        Ok(result) => result?,
+                        Err(_) => {
+                            tracing::debug!("Cursor wait next epoch timeout");
+                            break;
+                        }
                     }
                 }
             }
