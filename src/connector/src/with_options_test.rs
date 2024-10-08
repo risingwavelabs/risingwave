@@ -21,6 +21,7 @@ use proc_macro2::TokenTree;
 use quote::ToTokens;
 use serde::Serialize;
 use syn::{parse_file, Attribute, Field, Item, ItemFn, Lit, LitStr, Meta, Type};
+use thiserror_ext::AsReport;
 use walkdir::{DirEntry, WalkDir};
 
 fn connector_crate_path() -> PathBuf {
@@ -285,10 +286,11 @@ fn extract_serde_properties(field: &Field) -> SerdeProperties {
                         _ = meta.input.parse::<LitStr>();
                         Ok(())
                     })
-                    .unwrap_or_else(|| {
+                    .unwrap_or_else(|err| {
                         panic!(
-                            "Failed to parse serde properties for field: {:?}",
+                            "Failed to parse serde properties for field: {:?}, err: {}",
                             field.ident,
+                            err.to_report_string(),
                         )
                     });
 
