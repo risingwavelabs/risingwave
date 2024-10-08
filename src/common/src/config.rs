@@ -196,10 +196,6 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_object_limit")]
     pub full_gc_object_limit: u64,
 
-    /// The spin interval when collecting global GC watermark in hummock.
-    #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
-    pub collect_gc_watermark_spin_interval_sec: u64,
-
     /// Schedule compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
     pub periodic_compaction_interval_sec: u64,
@@ -1356,10 +1352,6 @@ pub mod default {
 
         pub fn full_gc_object_limit() -> u64 {
             100_000
-        }
-
-        pub fn collect_gc_watermark_spin_interval_sec() -> u64 {
-            5
         }
 
         pub fn periodic_compaction_interval_sec() -> u64 {

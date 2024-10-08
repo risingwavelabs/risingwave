@@ -51,7 +51,7 @@ use risingwave_hummock_sdk::table_stats::{
 use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
-    HummockVersionId,
+    HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
@@ -144,7 +144,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 
 impl<'a> HummockVersionTransaction<'a> {
     fn apply_compact_task(&mut self, compact_task: &CompactTask) {
-        let mut version_delta = self.new_delta(None);
+        let mut version_delta = self.new_delta();
         let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
         version_delta.trivial_move = trivial_move;
 
@@ -994,6 +994,7 @@ impl HummockManager {
                 task_status,
                 sorted_output_ssts: vec![],
                 table_stats_change: HashMap::default(),
+                object_timestamps: HashMap::default(),
             })
             .collect_vec();
         let rets = self.report_compact_tasks(tasks).await?;
@@ -1108,6 +1109,7 @@ impl HummockManager {
         task_status: TaskStatus,
         sorted_output_ssts: Vec<SstableInfo>,
         table_stats_change: Option<PbTableStatsMap>,
+        object_timestamps: HashMap<HummockSstableObjectId, u64>,
     ) -> Result<bool> {
         let rets = self
             .report_compact_tasks(vec![ReportTask {
@@ -1115,6 +1117,7 @@ impl HummockManager {
                 task_status,
                 sorted_output_ssts,
                 table_stats_change: table_stats_change.unwrap_or_default(),
+                object_timestamps,
             }])
             .await?;
         Ok(rets[0])
@@ -1204,10 +1207,19 @@ impl HummockManager {
                 .map(|level| level.level_idx)
                 .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status {
-                // if member_table_ids changes, the data of sstable may stale.
-                let is_expired =
-                    Self::is_compact_task_expired(&compact_task, version.latest_version());
-                if is_expired {
+                if let Err(e) = self
+                    .report_compaction_sanity_check(&task.object_timestamps)
+                    .await
+                {
+                    warn!(
+                        "failed to commit compaction task {} {}",
+                        compact_task.task_id,
+                        e.as_report()
+                    );
+                    compact_task.task_status = TaskStatus::RetentionTimeRejected;
+                    false
+                } else if Self::is_compact_task_expired(&compact_task, version.latest_version()) {
+                    // if member_table_ids changes, the data of sstable may stale.
                     compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                     false
                 } else {
@@ -1566,6 +1578,7 @@ impl HummockManager {
             task_status,
             sorted_output_ssts,
             table_stats_change: table_stats_change.unwrap_or_default(),
+            object_timestamps: HashMap::default(),
         }])
         .await?;
         Ok(())

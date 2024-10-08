@@ -18,6 +18,8 @@ pub const COMPACTION_TASK_ID: &str = "compaction_task";
 pub const COMPACTION_GROUP_ID: &str = "compaction_group";
 pub const SSTABLE_OBJECT_ID: &str = "sstable_object";
 pub const META_BACKUP_ID: &str = "meta_backup";
+/// The read & write of now is different from other sequences. It merely reuses the hummock_sequence table.
+pub const HUMMOCK_NOW: &str = "now";
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default, Serialize, Deserialize)]
 #[sea_orm(table_name = "hummock_sequence")]

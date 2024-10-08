@@ -183,7 +183,7 @@ message HummockVersion {
   uint64 id = 1;
   // Levels of each compaction group
   map<uint64, Levels> levels = 2;
-  uint64 max_committed_epoch = 3;
+  uint64 max_committed_epoch = 3 [deprecated = true];
   reserved 4;
   reserved 'safe_epoch';
   map<uint32, TableWatermarks> table_watermarks = 5;
@@ -199,7 +199,7 @@ message HummockVersionDelta {
   uint64 prev_id = 2;
   // Levels of each compaction group
   map<uint64, GroupDeltas> group_deltas = 3;
-  uint64 max_committed_epoch = 4;
+  uint64 max_committed_epoch = 4 [deprecated = true];
   reserved 5;
   reserved 'safe_epoch';
   bool trivial_move = 6;
@@ -306,6 +306,7 @@ message CompactTask {
     TRACK_SST_OBJECT_ID_FAILED = 12;
     NO_AVAIL_CPU_RESOURCE_CANCELED = 13;
     HEARTBEAT_PROGRESS_CANCELED = 14;
+    RETENTION_TIME_REJECTED = 17;
 
     // for serverless compaction
     SERVERLESS_SEND_FAIL_CANCELED = 15;
@@ -460,6 +461,7 @@ message SubscribeCompactionEventRequest {
     uint64 task_id = 4;
     CompactTask.TaskStatus task_status = 5;
     repeated SstableInfo sorted_output_ssts = 6;
+    map<uint64, uint64> object_timestamps = 7;
   }
 
   // HeartBeat provides the progress status of all tasks on the Compactor.
@@ -507,6 +509,7 @@ message ReportCompactionTaskRequest {
   message ReportTask {
     CompactTask compact_task = 2;
     map<uint32, TableStats> table_stats_change = 3;
+    map<uint64, uint64> object_timestamps = 4;
   }
   // HeartBeat provides the progress status of all tasks on the Compactor.
   message HeartBeat {
@@ -535,7 +538,7 @@ message VacuumTask {
 
 // Scan object store to get candidate orphan SSTs.
 message FullScanTask {
-  uint64 sst_retention_time_sec = 1;
+  uint64 sst_retention_watermark = 1;
   optional string prefix = 2;
   optional string start_after = 3;
   optional uint64 limit = 4;

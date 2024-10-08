@@ -92,6 +92,8 @@ impl Binder {
                 JoinOperator::FullOuter(constraint) => (constraint, JoinType::FullOuter),
                 // Cross join equals to inner join with with no constraint.
                 JoinOperator::CrossJoin => (JoinConstraint::None, JoinType::Inner),
+                JoinOperator::AsOfInner(constraint) => (constraint, JoinType::AsofInner),
+                JoinOperator::AsOfLeft(constraint) => (constraint, JoinType::AsofLeftOuter),
             };
             let right: Relation;
             let cond: ExprImpl;

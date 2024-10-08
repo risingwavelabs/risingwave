@@ -282,7 +282,7 @@ pub(crate) mod tests {
         {
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats), _) = compact(
+            let ((result_task, task_stats, object_timestamps), _) = compact(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
@@ -297,6 +297,7 @@ pub(crate) mod tests {
                     result_task.task_status,
                     result_task.sorted_output_ssts,
                     Some(to_prost_table_stats_map(task_stats)),
+                    object_timestamps,
                 )
                 .await
                 .unwrap();
@@ -623,7 +624,7 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -637,6 +638,7 @@ pub(crate) mod tests {
                 result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                object_timestamps,
             )
             .await
             .unwrap();
@@ -808,10 +810,7 @@ pub(crate) mod tests {
                 retention_seconds: Some(retention_seconds_expire_second),
             },
         )]);
-        compact_task.current_epoch_time = hummock_manager_ref
-            .get_current_version()
-            .await
-            .max_committed_epoch_for_test();
+        compact_task.current_epoch_time = Epoch::now().0;
 
         // assert compact_task
         assert_eq!(
@@ -825,7 +824,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -840,6 +839,7 @@ pub(crate) mod tests {
                 result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                object_timestamps,
             )
             .await
             .unwrap();
@@ -1014,14 +1014,11 @@ pub(crate) mod tests {
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        compact_task.current_epoch_time = hummock_manager_ref
-            .get_current_version()
-            .await
-            .max_committed_epoch_for_test();
+        compact_task.current_epoch_time = Epoch::now().0;
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1036,6 +1033,7 @@ pub(crate) mod tests {
                 result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                object_timestamps,
             )
             .await
             .unwrap();
@@ -1195,7 +1193,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1210,6 +1208,7 @@ pub(crate) mod tests {
                 result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                object_timestamps,
             )
             .await
             .unwrap();
@@ -2001,14 +2000,11 @@ pub(crate) mod tests {
             let compaction_filter_flag =
                 CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
             compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-            compact_task.current_epoch_time = hummock_manager_ref
-                .get_current_version()
-                .await
-                .max_committed_epoch_for_test();
+            compact_task.current_epoch_time = Epoch::now().0;
 
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats), _) = compact(
+            let ((result_task, task_stats, object_timestamps), _) = compact(
                 compact_ctx,
                 compact_task.clone(),
                 rx,
@@ -2023,6 +2019,7 @@ pub(crate) mod tests {
                     result_task.task_status,
                     result_task.sorted_output_ssts,
                     Some(to_prost_table_stats_map(task_stats)),
+                    object_timestamps,
                 )
                 .await
                 .unwrap();
@@ -2228,14 +2225,11 @@ pub(crate) mod tests {
                 let compaction_filter_flag =
                     CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
                 compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-                compact_task.current_epoch_time = hummock_manager_ref
-                    .get_current_version()
-                    .await
-                    .max_committed_epoch_for_test();
+                compact_task.current_epoch_time = Epoch::now().0;
 
                 // 3. compact
                 let (_tx, rx) = tokio::sync::oneshot::channel();
-                let ((result_task, task_stats), _) = compact(
+                let ((result_task, task_stats, object_timestamps), _) = compact(
                     compact_ctx.clone(),
                     compact_task.clone(),
                     rx,
@@ -2250,6 +2244,7 @@ pub(crate) mod tests {
                         result_task.task_status,
                         result_task.sorted_output_ssts,
                         Some(to_prost_table_stats_map(task_stats)),
+                        object_timestamps,
                     )
                     .await
                     .unwrap();

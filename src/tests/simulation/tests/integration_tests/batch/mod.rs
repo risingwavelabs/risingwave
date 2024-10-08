@@ -78,7 +78,7 @@ mask_worker_temporary_secs = 30
         config_path: ConfigPath::Temp(config_path.into()),
         frontend_nodes: 2,
         compute_nodes: 0,
-        meta_nodes: 3,
+        meta_nodes: 1,
         compactor_nodes: 2,
         compute_node_cores: 2,
         ..Default::default()
