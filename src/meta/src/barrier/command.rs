@@ -41,7 +41,7 @@ use thiserror_ext::AsReport;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightGraphInfo};
-use super::trace::TracedEpoch;
+use crate::barrier::state::BarrierInfo;
 use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
 use crate::manager::{DdlType, InflightFragmentInfo, MetadataManager, StreamingJob, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
@@ -438,16 +438,11 @@ pub struct CommandContext {
     pub node_map: HashMap<WorkerId, PbWorkerNode>,
     pub subscription_info: InflightSubscriptionInfo,
 
-    pub prev_epoch: TracedEpoch,
-    pub curr_epoch: TracedEpoch,
+    pub barrier_info: BarrierInfo,
 
     pub table_ids_to_commit: HashSet<TableId>,
 
-    pub current_paused_reason: Option<PausedReason>,
-
     pub command: Command,
-
-    pub kind: BarrierKind,
 
     barrier_manager_context: GlobalBarrierManagerContext,
 
@@ -462,9 +457,7 @@ pub struct CommandContext {
 impl std::fmt::Debug for CommandContext {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CommandContext")
-            .field("prev_epoch", &self.prev_epoch.value().0)
-            .field("curr_epoch", &self.curr_epoch.value().0)
-            .field("kind", &self.kind)
+            .field("barrier_info", &self.barrier_info)
             .field("command", &self.command)
             .finish()
     }
@@ -473,25 +466,19 @@ impl std::fmt::Debug for CommandContext {
 impl CommandContext {
     pub(super) fn new(
         node_map: HashMap<WorkerId, PbWorkerNode>,
+        barrier_info: BarrierInfo,
         subscription_info: InflightSubscriptionInfo,
-        prev_epoch: TracedEpoch,
-        curr_epoch: TracedEpoch,
         table_ids_to_commit: HashSet<TableId>,
-        current_paused_reason: Option<PausedReason>,
         command: Command,
-        kind: BarrierKind,
         barrier_manager_context: GlobalBarrierManagerContext,
         span: tracing::Span,
     ) -> Self {
         Self {
             node_map,
             subscription_info,
-            prev_epoch,
-            curr_epoch,
+            barrier_info,
             table_ids_to_commit,
-            current_paused_reason,
             command,
-            kind,
             barrier_manager_context,
             _span: span,
         }
@@ -500,7 +487,7 @@ impl CommandContext {
 
 impl Command {
     /// Generate a mutation for the given command.
-    pub fn to_mutation(&self, current_paused_reason: Option<&PausedReason>) -> Option<Mutation> {
+    pub fn to_mutation(&self, current_paused_reason: Option<PausedReason>) -> Option<Mutation> {
         let mutation =
             match self {
                 Command::Plain(mutation) => mutation.clone(),
@@ -516,7 +503,7 @@ impl Command {
 
                 Command::Resume(reason) => {
                     // Only resume when the cluster is paused with the same reason.
-                    if current_paused_reason == Some(reason) {
+                    if current_paused_reason == Some(*reason) {
                         Some(Mutation::Resume(ResumeMutation {}))
                     } else {
                         None
@@ -902,41 +889,35 @@ impl Command {
             ..Default::default()
         }))
     }
-}
-
-impl CommandContext {
-    pub fn to_mutation(&self) -> Option<Mutation> {
-        self.command
-            .to_mutation(self.current_paused_reason.as_ref())
-    }
 
     /// Returns the paused reason after executing the current command.
-    pub fn next_paused_reason(&self) -> Option<PausedReason> {
-        match &self.command {
+    pub fn next_paused_reason(
+        &self,
+        current_paused_reason: Option<PausedReason>,
+    ) -> Option<PausedReason> {
+        match self {
             Command::Pause(reason) => {
                 // Only pause when the cluster is not already paused.
-                if self.current_paused_reason.is_none() {
+                if current_paused_reason.is_none() {
                     Some(*reason)
                 } else {
-                    self.current_paused_reason
+                    current_paused_reason
                 }
             }
 
             Command::Resume(reason) => {
                 // Only resume when the cluster is paused with the same reason.
-                if self.current_paused_reason == Some(*reason) {
+                if current_paused_reason == Some(*reason) {
                     None
                 } else {
-                    self.current_paused_reason
+                    current_paused_reason
                 }
             }
 
-            _ => self.current_paused_reason,
+            _ => current_paused_reason,
         }
     }
-}
 
-impl Command {
     /// For `CancelStreamingJob`, returns the table id of the target table.
     pub fn table_to_cancel(&self) -> Option<TableId> {
         match self {
@@ -962,7 +943,7 @@ impl CommandContext {
                 .get(worker_node)
                 .await?;
             let request = WaitEpochCommitRequest {
-                epoch: self.prev_epoch.value().0,
+                epoch: self.barrier_info.prev_epoch.value().0,
                 table_id: table_id.table_id,
             };
             client.wait_epoch_commit(request).await
@@ -1256,10 +1237,15 @@ impl CommandContext {
 
     pub fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
         let Some(truncate_timestamptz) = Timestamptz::from_secs(
-            self.prev_epoch.value().as_timestamptz().timestamp() - retention_second as i64,
+            self.barrier_info
+                .prev_epoch
+                .value()
+                .as_timestamptz()
+                .timestamp()
+                - retention_second as i64,
         ) else {
-            warn!(retention_second, prev_epoch = ?self.prev_epoch.value(), "invalid retention second value");
-            return self.prev_epoch.value();
+            warn!(retention_second, prev_epoch = ?self.barrier_info.prev_epoch.value(), "invalid retention second value");
+            return self.barrier_info.prev_epoch.value();
         };
         Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64)
     }

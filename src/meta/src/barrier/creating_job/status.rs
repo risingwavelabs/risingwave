@@ -15,7 +15,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
-use std::sync::Arc;
 
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
@@ -27,9 +26,9 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 };
 use tracing::warn;
 
-use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
+use crate::barrier::state::BarrierInfo;
 use crate::barrier::{BarrierKind, TracedEpoch};
 use crate::manager::WorkerId;
 
@@ -101,7 +100,7 @@ impl CreateMviewLogStoreProgressTracker {
 pub(super) enum CreatingStreamingJobStatus {
     ConsumingSnapshot {
         prev_epoch_fake_physical_time: u64,
-        pending_commands: Vec<Arc<CommandContext>>,
+        pending_barriers: Vec<BarrierInfo>,
         version_stats: HummockVersionStats,
         create_mview_tracker: CreateMviewProgressTracker,
         graph_info: InflightGraphInfo,
@@ -124,9 +123,7 @@ pub(super) enum CreatingStreamingJobStatus {
 }
 
 pub(super) struct CreatingJobInjectBarrierInfo {
-    pub curr_epoch: TracedEpoch,
-    pub prev_epoch: TracedEpoch,
-    pub kind: BarrierKind,
+    pub barrier_info: BarrierInfo,
     pub new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
     pub mutation: Option<Mutation>,
 }
@@ -178,7 +175,7 @@ impl CreatingStreamingJobStatus {
     ) -> Option<Vec<CreatingJobInjectBarrierInfo>> {
         if let CreatingStreamingJobStatus::ConsumingSnapshot {
             prev_epoch_fake_physical_time,
-            pending_commands,
+            pending_barriers,
             create_mview_tracker,
             ref graph_info,
             pending_non_checkpoint_barriers,
@@ -193,25 +190,24 @@ impl CreatingStreamingJobStatus {
                 pending_non_checkpoint_barriers.push(*backfill_epoch);
 
                 let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
-                let barriers_to_inject: Vec<_> =
-                    [CreatingJobInjectBarrierInfo {
+                let barriers_to_inject: Vec<_> = [CreatingJobInjectBarrierInfo {
+                    barrier_info: BarrierInfo {
                         curr_epoch: TracedEpoch::new(Epoch(*backfill_epoch)),
                         prev_epoch: TracedEpoch::new(prev_epoch),
                         kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
+                    },
+                    new_actors: None,
+                    mutation: None,
+                }]
+                .into_iter()
+                .chain(pending_barriers.drain(..).map(|barrier_info| {
+                    CreatingJobInjectBarrierInfo {
+                        barrier_info,
                         new_actors: None,
                         mutation: None,
-                    }]
-                    .into_iter()
-                    .chain(pending_commands.drain(..).map(|command_ctx| {
-                        CreatingJobInjectBarrierInfo {
-                            curr_epoch: command_ctx.curr_epoch.clone(),
-                            prev_epoch: command_ctx.prev_epoch.clone(),
-                            kind: command_ctx.kind.clone(),
-                            new_actors: None,
-                            mutation: None,
-                        }
-                    }))
-                    .collect();
+                    }
+                }))
+                .collect();
 
                 *self = CreatingStreamingJobStatus::ConsumingLogStore {
                     graph_info: graph_info.clone(),
@@ -240,9 +236,11 @@ impl CreatingStreamingJobStatus {
                         Default::default()
                     };
                 Some(vec![CreatingJobInjectBarrierInfo {
-                    curr_epoch,
-                    prev_epoch,
-                    kind,
+                    barrier_info: BarrierInfo {
+                        prev_epoch,
+                        curr_epoch,
+                        kind,
+                    },
                     new_actors,
                     mutation,
                 }])
