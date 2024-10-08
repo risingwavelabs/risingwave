@@ -62,7 +62,7 @@
       kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
       topic = 'dummy')
     FORMAT plain ENCODE bytes;
-  formatted_sql: CREATE SOURCE s (raw BYTEA) INCLUDE header AS all_headers INCLUDE header 'foo' AS foo_bytea INCLUDE header 'foo' AS foo_str WITH (connector = 'kafka', kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', topic = 'dummy') FORMAT PLAIN ENCODE BYTES
+  formatted_sql: CREATE SOURCE s (raw BYTEA) INCLUDE header AS all_headers INCLUDE header 'foo' bytea AS foo_bytea INCLUDE header 'foo' varchar AS foo_str WITH (connector = 'kafka', kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', topic = 'dummy') FORMAT PLAIN ENCODE BYTES
 - input: |-
     CREATE TABLE t
       (raw BYTEA)
@@ -74,7 +74,7 @@
       kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
       topic = 'dummy')
     FORMAT plain ENCODE bytes;
-  formatted_sql: CREATE TABLE t (raw BYTEA) INCLUDE header AS all_headers INCLUDE header 'foo' AS foo_bytea INCLUDE header 'foo' AS foo_str WITH (connector = 'kafka', kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', topic = 'dummy') FORMAT PLAIN ENCODE BYTES
+  formatted_sql: CREATE TABLE t (raw BYTEA) INCLUDE header AS all_headers INCLUDE header 'foo' bytea AS foo_bytea INCLUDE header 'foo' varchar AS foo_str WITH (connector = 'kafka', kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', topic = 'dummy') FORMAT PLAIN ENCODE BYTES
 - input: CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT>)
   formatted_sql: CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT>)
 - input: CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT, v3 STRUCT<v1 INT, v2 INT>>)
