@@ -4636,12 +4636,12 @@ def section_nimtable_metrics(outer_panels):
             "Nimtable Metrics",
             [
                 panels.timeseries_bytes(
-                    "Write Qps Of Iceberg Writer",
-                    "iceberg write qps",
+                    "Iceberg Table Storage Size",
+                    "iceberg table storage size group by database, schema, source",
                     [
                         panels.target(
-                            f"{metric('iceberg_write_qps')}",
-                            "{{sink_id}} {{sink_name}} actor {{actor_id}}",
+                            f"sum({metric('nimtable_storage_data_file_size')}) by (database, schema, source)",
+                            "storage size {{database}} {{schema}} {{source}}",
                         ),
                     ],
                 ),
