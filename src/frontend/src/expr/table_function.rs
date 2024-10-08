@@ -286,7 +286,8 @@ impl TableFunction {
         {
             return Err(crate::error::ErrorCode::BindError(
                 "table_scan can't be used in the madsim mode".to_string(),
-            ));
+            )
+            .into());
         }
 
         #[cfg(not(madsim))]
