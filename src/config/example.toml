@@ -40,7 +40,7 @@ periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
 periodic_tombstone_reclaim_compaction_interval_sec = 600
 periodic_scheduling_compaction_group_interval_sec = 10
-move_table_size_limit = 10737418240
+move_table_size_limit = 4294967296
 split_group_size_limit = 68719476736
 cut_table_size_limit = 1073741824
 do_not_config_object_storage_lifecycle = false
@@ -55,6 +55,11 @@ compact_task_table_size_partition_threshold_high = 536870912
 event_log_enabled = true
 event_log_channel_max_size = 10
 enable_dropped_column_reclaim = false
+compaction_group_size_threshold = 0.9
+table_statistic_high_write_throughput_ratio = 0.5
+table_statistic_low_write_throughput_ratio = 0.7
+split_group_statistic_window_times = 60
+merge_group_statistic_window_times = 240
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
