@@ -182,7 +182,7 @@ sea-orm = { version = "0.12.15", features = [
     "sqlx-sqlite",
     "runtime-tokio-native-tls",
 ] }
-sqlx = { version = "0.7.3", default-features = false, features = [
+sqlx = { version = "0.7.4", default-features = false, features = [
     "bigdecimal",
     "chrono",
     "json",
