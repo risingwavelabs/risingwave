@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
+use risingwave_common::catalog::Schema;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::PostgresQueryNode;
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, column_names_pretty, Distill};
@@ -23,6 +25,7 @@ use super::{
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
+use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchPostgresQuery {
@@ -75,23 +78,20 @@ impl ToDistributedBatch for BatchPostgresQuery {
 
 impl ToBatchPb for BatchPostgresQuery {
     fn to_batch_prost_body(&self) -> NodeBody {
-        todo!()
-        // NodeBody::PostgresQuery(PostgresQueryNode {
-        //     columns: self
-        //         .core
-        //         .columns()
-        //         .into_iter()
-        //         .map(|col| col.to_protobuf())
-        //         .collect(),
-        //     file_format: match self.core.file_format {
-        //         generic::FileFormat::Parquet => FileFormat::Parquet as i32,
-        //     },
-        //
-        //     s3_region: self.core.s3_region.clone(),
-        //     s3_access_key: self.core.s3_access_key.clone(),
-        //     s3_secret_key: self.core.s3_secret_key.clone(),
-        //     file_location: self.core.file_location.clone(),
-        // })
+        NodeBody::PostgresQuery(PostgresQueryNode {
+            columns: self
+                .core
+                .columns()
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect(),
+            hostname: self.core.hostname.clone(),
+            port: self.core.port.clone(),
+            username: self.core.username.clone(),
+            password: self.core.password.clone(),
+            database: self.core.database.clone(),
+            query: self.core.query.clone(),
+        })
     }
 }
 
