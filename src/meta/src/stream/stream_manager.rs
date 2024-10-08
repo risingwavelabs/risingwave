@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::join_all;
@@ -33,6 +33,7 @@ use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceTablePlan, SnapshotBackfillInfo,
 };
+use crate::error::bail_invalid_parameter;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
@@ -58,7 +59,7 @@ pub struct CreateStreamingJobContext {
     pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
 
     /// Internal tables in the streaming job.
-    pub internal_tables: HashMap<u32, Table>,
+    pub internal_tables: BTreeMap<u32, Table>,
 
     /// The locations of the actors to build in the streaming job.
     pub building_locations: Locations,
@@ -299,6 +300,12 @@ impl GlobalStreamManager {
                             tracing::debug!(
                                 "cancelling streaming job {table_id} by issue cancel command."
                             );
+
+                            if let MetadataManager::V2(mgr) = &self.metadata_manager {
+                                mgr.catalog_controller
+                                    .try_abort_creating_streaming_job(table_id.table_id as _, true)
+                                    .await?;
+                            }
 
                             self.barrier_scheduler
                                 .run_command(Command::CancelStreamingJob(table_fragments))
@@ -630,8 +637,18 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
-                if let MetadataManager::V1(mgr) = &self.metadata_manager {
-                    mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
+                match &self.metadata_manager {
+                    MetadataManager::V1(mgr) => {
+                        mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
+                    }
+                    MetadataManager::V2(mgr) => {
+                        mgr.catalog_controller
+                            .try_abort_creating_streaming_job(
+                                id.table_id as _,
+                                true,
+                            )
+                            .await?;
+                    }
                 }
 
                 self.barrier_scheduler
@@ -663,18 +680,55 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
+        let table_id = TableId::new(table_id);
+
         let worker_nodes = self
             .metadata_manager
             .list_active_streaming_compute_nodes()
-            .await?;
+            .await?
+            .into_iter()
+            .filter(|w| w.is_streaming_schedulable())
+            .collect_vec();
 
         let worker_ids = worker_nodes
             .iter()
-            .filter(|w| w.property.as_ref().map_or(true, |p| !p.is_unschedulable))
             .map(|node| node.id)
             .collect::<BTreeSet<_>>();
 
-        let table_parallelism_assignment = HashMap::from([(TableId::new(table_id), parallelism)]);
+        // Check if the provided parallelism is valid.
+        let available_parallelism = worker_nodes
+            .iter()
+            .map(|w| w.parallelism as usize)
+            .sum::<usize>();
+        let max_parallelism = self
+            .metadata_manager
+            .get_job_max_parallelism(table_id)
+            .await?;
+
+        match parallelism {
+            TableParallelism::Adaptive => {
+                if available_parallelism > max_parallelism {
+                    tracing::warn!(
+                        "too many parallelism available, use max parallelism {} will be limited",
+                        max_parallelism
+                    );
+                }
+            }
+            TableParallelism::Fixed(parallelism) => {
+                if parallelism > max_parallelism {
+                    bail_invalid_parameter!(
+                        "specified parallelism {} should not exceed max parallelism {}",
+                        parallelism,
+                        max_parallelism
+                    );
+                }
+            }
+            TableParallelism::Custom => {
+                bail_invalid_parameter!("should not alter parallelism to custom")
+            }
+        }
+
+        let table_parallelism_assignment = HashMap::from([(table_id, parallelism)]);
 
         if deferred {
             tracing::debug!(
@@ -1063,6 +1117,7 @@ mod tests {
                 &locations.actor_locations,
                 Default::default(),
                 TableParallelism::Adaptive,
+                VirtualNode::COUNT_FOR_TEST,
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,

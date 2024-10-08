@@ -146,11 +146,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(
-                HummockVersionId::new(req.start_id),
-                req.num_limit,
-                req.committed_epoch_limit,
-            )
+            .list_version_deltas(HummockVersionId::new(req.start_id), req.num_limit)
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(PbHummockVersionDeltas {
@@ -249,17 +245,6 @@ impl HummockManagerService for HummockServiceImpl {
         }))
     }
 
-    async fn get_epoch(
-        &self,
-        _request: Request<GetEpochRequest>,
-    ) -> Result<Response<GetEpochResponse>, Status> {
-        let hummock_snapshot = self.hummock_manager.latest_snapshot();
-        Ok(Response::new(GetEpochResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
-        }))
-    }
-
     async fn report_full_scan_task(
         &self,
         request: Request<ReportFullScanTaskRequest>,
@@ -277,7 +262,10 @@ impl HummockManagerService for HummockServiceImpl {
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {
-            match hummock_manager.complete_full_gc(req.object_ids).await {
+            match hummock_manager
+                .complete_full_gc(req.object_ids, req.next_start_after)
+                .await
+            {
                 Ok(number) => {
                     tracing::info!("Full GC results {} SSTs to delete", number);
                 }
@@ -295,7 +283,8 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .start_full_gc(Duration::from_secs(req.sst_retention_time_sec), req.prefix)?;
+            .start_full_gc(Duration::from_secs(req.sst_retention_time_sec), req.prefix)
+            .await?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
@@ -393,8 +382,13 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let new_group_id = self
             .hummock_manager
-            .split_compaction_group(req.group_id, &req.table_ids, req.partition_vnode_count)
-            .await?;
+            .move_state_tables_to_dedicated_compaction_group(
+                req.group_id,
+                &req.table_ids,
+                req.partition_vnode_count,
+            )
+            .await?
+            .0;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
 

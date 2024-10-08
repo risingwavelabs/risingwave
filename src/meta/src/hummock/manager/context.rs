@@ -190,7 +190,6 @@ impl HummockManager {
         &self,
         committed_epoch: HummockEpoch,
         tables_to_commit: &HashSet<TableId>,
-        is_visible_table_committed_epoch: bool,
         sstables: &[LocalSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
@@ -215,17 +214,6 @@ impl HummockManager {
             }
         }
 
-        if is_visible_table_committed_epoch
-            && committed_epoch <= current_version.visible_table_committed_epoch()
-        {
-            return Err(anyhow::anyhow!(
-                "Epoch {} <= max_committed_epoch {}",
-                committed_epoch,
-                current_version.visible_table_committed_epoch()
-            )
-            .into());
-        }
-
         // sanity check on monotonically increasing table committed epoch
         for table_id in tables_to_commit {
             if let Some(info) = current_version.state_table_info.info().get(table_id) {
@@ -237,6 +225,19 @@ impl HummockManager {
                         info.committed_epoch,
                     )
                     .into());
+                }
+            }
+        }
+
+        // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
+        if !sstables.is_empty() {
+            // sanity check to ensure SSTs to commit have not been full GCed yet.
+            let now = self.now().await?;
+            let sst_retention_watermark =
+                now.saturating_sub(self.env.opts.min_sst_retention_time_sec);
+            for sst in sstables {
+                if sst.created_at < sst_retention_watermark {
+                    return Err(anyhow::anyhow!("SST {} is rejected from being committed since it's below watermark: SST timestamp {}, meta node timestamp {}, retention_sec {}, watermark {}", sst.sst_info.sst_id, sst.created_at, now, self.env.opts.min_sst_retention_time_sec, sst_retention_watermark).into());
                 }
             }
         }

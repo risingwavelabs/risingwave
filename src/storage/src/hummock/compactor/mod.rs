@@ -594,11 +594,12 @@ pub fn start_compactor(
                                     )
                                     .await
                                     {
-                                        Ok((object_ids, total_object_count, total_object_size)) => {
+                                        Ok((object_ids, total_object_count, total_object_size, next_start_after)) => {
                                             Vacuum::report_full_scan_task(
                                                 object_ids,
                                                 total_object_count,
                                                 total_object_size,
+                                                next_start_after,
                                                 meta_client,
                                             )
                                             .await;
@@ -804,11 +805,12 @@ pub fn start_shared_compactor(
                                     match Vacuum::handle_full_scan_task(full_scan_task, context.sstable_store.clone())
                                         .await
                                     {
-                                        Ok((object_ids, total_object_count, total_object_size)) => {
+                                        Ok((object_ids, total_object_count, total_object_size, next_start_after)) => {
                                             let report_full_scan_task_request = ReportFullScanTaskRequest {
                                                 object_ids,
                                                 total_object_count,
                                                 total_object_size,
+                                                next_start_after,
                                             };
                                             match cloned_grpc_proxy_client
                                                 .report_full_scan_task(report_full_scan_task_request)

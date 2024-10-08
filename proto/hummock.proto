@@ -75,6 +75,7 @@ enum CompatibilityVersion {
   VERSION_UNSPECIFIED = 0;
   NO_TRIVIAL_SPLIT = 1;
   NO_MEMBER_TABLE_IDS = 2;
+  SPLIT_GROUP_BY_TABLE_ID = 3;
 }
 
 message GroupConstruct {
@@ -85,6 +86,13 @@ message GroupConstruct {
   uint64 group_id = 4;
   uint64 new_sst_start_id = 5;
   CompatibilityVersion version = 6;
+
+  // The split_key is the key that the group is split by.
+  // When GroupConstruct with commit_epoch, split_key will be empty
+  // When split_key is not None, GroupConstruct tells to use split_key to check each level and split the sstable_info in the level into two groups (bounded by split_key).
+  // For the left sstable_info, split_key (right_exclusive=true) will be used as key_range_right.
+  // In the current implementation split_key always contains a table_id, vnode = 0, epoch = MAX
+  optional bytes split_key = 7;
 }
 
 message GroupDestroy {}
@@ -175,7 +183,7 @@ message HummockVersion {
   uint64 id = 1;
   // Levels of each compaction group
   map<uint64, Levels> levels = 2;
-  uint64 max_committed_epoch = 3;
+  uint64 max_committed_epoch = 3 [deprecated = true];
   reserved 4;
   reserved 'safe_epoch';
   map<uint32, TableWatermarks> table_watermarks = 5;
@@ -191,7 +199,7 @@ message HummockVersionDelta {
   uint64 prev_id = 2;
   // Levels of each compaction group
   map<uint64, GroupDeltas> group_deltas = 3;
-  uint64 max_committed_epoch = 4;
+  uint64 max_committed_epoch = 4 [deprecated = true];
   reserved 5;
   reserved 'safe_epoch';
   bool trivial_move = 6;
@@ -225,15 +233,6 @@ message HummockVersionArchive {
   HummockVersion version = 1;
   // some version_deltas since version
   repeated HummockVersionDelta version_deltas = 2;
-}
-
-// We will have two epoch after decouple
-message HummockSnapshot {
-  // Epoch with checkpoint, we will read durable data with it.
-  uint64 committed_epoch = 1;
-  // Epoch without checkpoint, we will read real-time data with it. But it may be rolled back.
-  reserved 2;
-  reserved "current_epoch";
 }
 
 message VersionUpdatePayload {
@@ -271,13 +270,6 @@ message GetAssignedCompactTaskNumRequest {}
 
 message GetAssignedCompactTaskNumResponse {
   uint32 num_tasks = 1;
-}
-
-message GetEpochRequest {}
-
-message GetEpochResponse {
-  common.Status status = 1;
-  HummockSnapshot snapshot = 2;
 }
 
 // When right_exclusive=false, it represents [left, right], of which both boundary are open. When right_exclusive=true,
@@ -543,8 +535,10 @@ message VacuumTask {
 
 // Scan object store to get candidate orphan SSTs.
 message FullScanTask {
-  uint64 sst_retention_time_sec = 1;
+  uint64 sst_retention_watermark = 1;
   optional string prefix = 2;
+  optional string start_after = 3;
+  optional uint64 limit = 4;
 }
 
 // Cancel compact task
@@ -580,6 +574,7 @@ message ReportFullScanTaskRequest {
   uint64 total_object_count = 2;
   // Total size of objects before filtered by conditions specified by FullScanTask.
   uint64 total_object_size = 3;
+  optional string next_start_after = 4;
 }
 
 message ReportFullScanTaskResponse {
@@ -678,6 +673,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       CompressionAlgorithm compression_algorithm = 17;
       uint32 max_l0_compact_level_count = 18;
       uint64 sst_allowed_trivial_move_min_size = 19;
+      uint32 split_weight_by_vnode = 20;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -811,7 +807,6 @@ service HummockManagerService {
   rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
-  rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
   rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);

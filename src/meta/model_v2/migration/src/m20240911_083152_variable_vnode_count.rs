@@ -1,6 +1,10 @@
 use sea_orm_migration::prelude::{Table as MigrationTable, *};
 
-const VNODE_COUNT: i32 = 256;
+macro_rules! col {
+    ($name:expr) => {
+        ColumnDef::new($name).integer().not_null().default(256) // compat vnode count
+    };
+}
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -12,11 +16,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Table::Table)
-                    .add_column(
-                        ColumnDef::new(Table::VnodeCount)
-                            .integer()
-                            .default(VNODE_COUNT),
-                    )
+                    .add_column(col!(Table::VnodeCount))
                     .to_owned(),
             )
             .await?;
@@ -25,11 +25,16 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Fragment::Table)
-                    .add_column(
-                        ColumnDef::new(Fragment::VnodeCount)
-                            .integer()
-                            .default(VNODE_COUNT),
-                    )
+                    .add_column(col!(Fragment::VnodeCount))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(StreamingJob::Table)
+                    .add_column(col!(StreamingJob::MaxParallelism))
                     .to_owned(),
             )
             .await
@@ -52,6 +57,15 @@ impl MigrationTrait for Migration {
                     .drop_column(Fragment::VnodeCount)
                     .to_owned(),
             )
+            .await?;
+
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(StreamingJob::Table)
+                    .drop_column(StreamingJob::MaxParallelism)
+                    .to_owned(),
+            )
             .await
     }
 }
@@ -66,4 +80,10 @@ enum Fragment {
 enum Table {
     Table,
     VnodeCount,
+}
+
+#[derive(DeriveIden)]
+enum StreamingJob {
+    Table,
+    MaxParallelism,
 }

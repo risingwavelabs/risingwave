@@ -28,7 +28,6 @@ use crate::error::Result;
 struct RwHummockVersion {
     #[primary_key]
     version_id: i64,
-    max_committed_epoch: i64,
     compaction_group: JsonbVal,
 }
 
@@ -101,7 +100,6 @@ fn version_to_compaction_group_rows(version: &HummockVersion) -> Vec<RwHummockVe
         .values()
         .map(|cg| RwHummockVersion {
             version_id: version.id.to_u64() as _,
-            max_committed_epoch: version.visible_table_committed_epoch() as _,
             compaction_group: json!(cg.to_protobuf()).into(),
         })
         .collect()

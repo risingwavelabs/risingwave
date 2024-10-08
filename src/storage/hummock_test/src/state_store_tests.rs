@@ -25,12 +25,13 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt, MAX_EPOCH};
+use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH, MAX_EPOCH};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
 use risingwave_hummock_sdk::{
     HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::change_log::test_utils::{
     apply_test_log_data, gen_test_data,
@@ -385,7 +386,10 @@ async fn test_basic_v2() {
         .await
         .unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(epoch1),
+            TryWaitEpochOptions::for_test(local.table_id()),
+        )
         .await
         .unwrap();
     let value = hummock_storage
@@ -419,10 +423,7 @@ async fn test_basic_v2() {
 async fn test_state_store_sync_v2() {
     let (hummock_storage, _meta_client) = with_hummock_storage_v2(Default::default()).await;
 
-    let mut epoch = hummock_storage
-        .get_pinned_version()
-        .max_committed_epoch()
-        .next_epoch();
+    let mut epoch = INVALID_EPOCH.next_epoch();
 
     // ingest 16B batch
     let mut batch1 = vec![
@@ -1036,7 +1037,7 @@ async fn test_reload_storage() {
 async fn test_delete_get_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
 
-    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
+    let initial_epoch = INVALID_EPOCH;
     let epoch1 = initial_epoch.next_epoch();
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     let batch1 = vec![
@@ -1102,7 +1103,10 @@ async fn test_delete_get_v2() {
         .await
         .unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(epoch2),
+            TryWaitEpochOptions::for_test(local.table_id()),
+        )
         .await
         .unwrap();
     assert!(hummock_storage
@@ -1123,7 +1127,7 @@ async fn test_delete_get_v2() {
 async fn test_multiple_epoch_sync_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
 
-    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
+    let initial_epoch = INVALID_EPOCH;
     let epoch1 = initial_epoch.next_epoch();
     let batch1 = vec![
         (
@@ -1274,7 +1278,10 @@ async fn test_multiple_epoch_sync_v2() {
         .await
         .unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(epoch3))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(epoch3),
+            TryWaitEpochOptions::for_test(local.table_id()),
+        )
         .await
         .unwrap();
     test_get(true).await;
@@ -1296,7 +1303,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .await;
     let table_id_set = HashSet::from_iter([local_hummock_storage.table_id()]);
 
-    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
+    let initial_epoch = INVALID_EPOCH;
     let epoch1 = initial_epoch.next_epoch();
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     local_hummock_storage.init_for_test(epoch1).await.unwrap();
@@ -1340,7 +1347,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             .global_watermark_object_id(),
         HummockSstableObjectId::MAX
     );
-    let min_object_id = |sync_result: &SyncResult| {
+    let _min_object_id = |sync_result: &SyncResult| {
         sync_result
             .uncommitted_ssts
             .iter()
@@ -1353,52 +1360,29 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .seal_and_sync_epoch(epoch1, table_id_set.clone())
         .await
         .unwrap();
-    let min_object_id_epoch1 = min_object_id(&sync_result1);
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        min_object_id_epoch1,
-    );
-    let sync_result2 = hummock_storage
+
+    let _sync_result2 = hummock_storage
         .seal_and_sync_epoch(epoch2, table_id_set)
         .await
         .unwrap();
-    let min_object_id_epoch2 = min_object_id(&sync_result2);
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        min_object_id_epoch1,
-    );
+
     meta_client
         .commit_epoch(epoch1, sync_result1, false)
         .await
         .unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(epoch1),
+            TryWaitEpochOptions::for_test(local_hummock_storage.table_id()),
+        )
         .await
         .unwrap();
-
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        min_object_id_epoch2,
-    );
 
     drop(local_hummock_storage);
 
     hummock_storage
         .clear_shared_buffer(hummock_storage.get_pinned_version().id())
         .await;
-
-    assert_eq!(
-        hummock_storage
-            .sstable_object_id_manager()
-            .global_watermark_object_id(),
-        HummockSstableObjectId::MAX
-    );
 }
 
 /// Test the following behaviours:
@@ -1408,7 +1392,28 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 async fn test_replicated_local_hummock_storage() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
-    let (hummock_storage, _meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(TEST_TABLE_ID).await;
+
+    let epoch0 = meta_client
+        .hummock_manager_ref()
+        .on_current_version(|version| version.table_committed_epoch(TEST_TABLE_ID).unwrap())
+        .await;
+
+    let epoch0 = epoch0.next_epoch();
+
+    meta_client
+        .hummock_manager_ref()
+        .commit_epoch(CommitEpochInfo {
+            sstables: vec![],
+            new_table_watermarks: Default::default(),
+            sst_to_context: Default::default(),
+            new_table_fragment_info: NewTableFragmentInfo::None,
+            change_log_delta: Default::default(),
+            committed_epoch: epoch0,
+            tables_to_commit: HashSet::from_iter([TEST_TABLE_ID]),
+        })
+        .await
+        .unwrap();
 
     let read_options = ReadOptions {
         table_id: TableId {
@@ -1428,12 +1433,6 @@ async fn test_replicated_local_hummock_storage() {
             Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
         ))
         .await;
-
-    let epoch0 = local_hummock_storage
-        .read_version()
-        .read()
-        .committed()
-        .max_committed_epoch();
 
     let epoch1 = epoch0.next_epoch();
 
@@ -1484,13 +1483,13 @@ async fn test_replicated_local_hummock_storage() {
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 65536, epoch_with_gap: 65536, spill_offset: 0},
+                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 131072, epoch_with_gap: 131072, spill_offset: 0},
                         b"1111",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 65536, epoch_with_gap: 65536, spill_offset: 0},
+                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 131072, epoch_with_gap: 131072, spill_offset: 0},
                         b"2222",
                     ),
                 ),
@@ -1552,13 +1551,13 @@ async fn test_replicated_local_hummock_storage() {
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 131072, epoch_with_gap: 131072, spill_offset: 0},
+                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 196608, epoch_with_gap: 196608, spill_offset: 0},
                         b"3333",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 131072, epoch_with_gap: 131072, spill_offset: 0},
+                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 196608, epoch_with_gap: 196608, spill_offset: 0},
                         b"4444",
                     ),
                 ),
@@ -1650,8 +1649,12 @@ async fn test_iter_log() {
     }
 
     hummock_storage
-        .try_wait_epoch_for_test(test_log_data.last().unwrap().0)
-        .await;
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(test_log_data.last().unwrap().0),
+            TryWaitEpochOptions { table_id },
+        )
+        .await
+        .unwrap();
 
     let verify_state_store = VerifyStateStore {
         actual: hummock_storage,

@@ -249,22 +249,19 @@ impl HummockReadVersion {
         Self {
             table_id,
             instance_id,
-            table_watermarks: committed_version
-                .version()
-                .table_watermarks
-                .get(&table_id)
-                .map(|table_watermarks| {
+            table_watermarks: committed_version.table_watermarks.get(&table_id).map(
+                |table_watermarks| {
                     TableWatermarksIndex::new_committed(
                         table_watermarks.clone(),
                         committed_version
-                            .version()
                             .state_table_info
                             .info()
                             .get(&table_id)
                             .expect("should exist")
                             .committed_epoch,
                     )
-                }),
+                },
+            ),
             staging: StagingVersion {
                 imm: VecDeque::default(),
                 sst: VecDeque::default(),
@@ -364,7 +361,6 @@ impl HummockReadVersion {
 
             VersionUpdate::CommittedSnapshot(committed_version) => {
                 if let Some(info) = committed_version
-                    .version()
                     .state_table_info
                     .info()
                     .get(&self.table_id)
@@ -388,11 +384,8 @@ impl HummockReadVersion {
                         sst.epochs.last().expect("epochs not empty") > &committed_epoch
                     }));
 
-                    if let Some(committed_watermarks) = self
-                        .committed
-                        .version()
-                        .table_watermarks
-                        .get(&self.table_id)
+                    if let Some(committed_watermarks) =
+                        self.committed.table_watermarks.get(&self.table_id)
                     {
                         if let Some(watermark_index) = &mut self.table_watermarks {
                             watermark_index.apply_committed_watermarks(
@@ -426,12 +419,7 @@ impl HummockReadVersion {
                         direction,
                         epoch,
                         vnode_watermarks,
-                        self.committed
-                            .version()
-                            .state_table_info
-                            .info()
-                            .get(&self.table_id)
-                            .map(|info| info.committed_epoch),
+                        self.committed.table_committed_epoch(self.table_id),
                     ));
                 }
             }
@@ -969,13 +957,12 @@ impl HummockVersionReader {
         key_range: TableKeyRange,
         options: ReadLogOptions,
     ) -> HummockResult<ChangeLogIterator> {
-        let change_log =
-            if let Some(change_log) = version.version().table_change_log.get(&options.table_id) {
-                change_log.filter_epoch(epoch_range)
-            } else {
-                static EMPTY_VEC: Vec<EpochNewChangeLog> = Vec::new();
-                &EMPTY_VEC[..]
-            };
+        let change_log = if let Some(change_log) = version.table_change_log.get(&options.table_id) {
+            change_log.filter_epoch(epoch_range)
+        } else {
+            static EMPTY_VEC: Vec<EpochNewChangeLog> = Vec::new();
+            &EMPTY_VEC[..]
+        };
         if let Some(max_epoch_change_log) = change_log.last() {
             let (_, max_epoch) = epoch_range;
             if !max_epoch_change_log.epochs.contains(&max_epoch) {

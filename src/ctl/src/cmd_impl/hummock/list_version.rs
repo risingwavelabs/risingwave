@@ -49,11 +49,7 @@ pub async fn list_version(
 
         println!("{:#?}", version);
     } else {
-        println!(
-            "Version {} max_committed_epoch {}",
-            version.id,
-            version.visible_table_committed_epoch()
-        );
+        println!("Version {}", version.id);
 
         for (cg, levels) in &version.levels {
             println!("CompactionGroup {}", cg);

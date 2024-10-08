@@ -19,7 +19,8 @@ use async_trait::async_trait;
 
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::SinkWriter;
-use crate::sink::{LogSinker, Result, SinkLogReader, SinkMetrics};
+use crate::sink::{LogSinker, Result, SinkLogReader, SinkWriterMetrics};
+
 pub const DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE: u64 = 10;
 pub const DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE: u64 = 1;
 pub const COMMIT_CHECKPOINT_INTERVAL: &str = "commit_checkpoint_interval";
@@ -33,7 +34,7 @@ pub fn default_commit_checkpoint_interval() -> u64 {
 /// we delay the checkpoint barrier to make commits less frequent.
 pub struct DecoupleCheckpointLogSinkerOf<W> {
     writer: W,
-    sink_metrics: SinkMetrics,
+    sink_writer_metrics: SinkWriterMetrics,
     commit_checkpoint_interval: NonZeroU64,
 }
 
@@ -42,12 +43,12 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
     /// decouple log reader `KvLogStoreReader`.
     pub fn new(
         writer: W,
-        sink_metrics: SinkMetrics,
+        sink_writer_metrics: SinkWriterMetrics,
         commit_checkpoint_interval: NonZeroU64,
     ) -> Self {
         DecoupleCheckpointLogSinkerOf {
             writer,
-            sink_metrics,
+            sink_writer_metrics,
             commit_checkpoint_interval,
         }
     }
@@ -57,7 +58,6 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSinkerOf<W> {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         let mut sink_writer = self.writer;
-        let sink_metrics = self.sink_metrics;
         #[derive(Debug)]
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
@@ -74,6 +74,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
 
         let mut current_checkpoint: u64 = 0;
         let commit_checkpoint_interval = self.commit_checkpoint_interval;
+        let sink_writer_metrics = self.sink_writer_metrics;
 
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
@@ -87,8 +88,8 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                             // force commit on update vnode bitmap
                             let start_time = Instant::now();
                             sink_writer.barrier(true).await?;
-                            sink_metrics
-                                .sink_commit_duration_metrics
+                            sink_writer_metrics
+                                .sink_commit_duration
                                 .observe(start_time.elapsed().as_millis() as f64);
                             log_reader.truncate(TruncateOffset::Barrier { epoch: *prev_epoch })?;
                             current_checkpoint = 0;
@@ -149,8 +150,8 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                         if current_checkpoint >= commit_checkpoint_interval.get() {
                             let start_time = Instant::now();
                             sink_writer.barrier(true).await?;
-                            sink_metrics
-                                .sink_commit_duration_metrics
+                            sink_writer_metrics
+                                .sink_commit_duration
                                 .observe(start_time.elapsed().as_millis() as f64);
                             log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                             current_checkpoint = 0;

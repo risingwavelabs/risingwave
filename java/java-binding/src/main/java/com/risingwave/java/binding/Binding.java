@@ -33,7 +33,11 @@ public class Binding {
 
     public static native boolean tracingSlf4jEventEnabled(int level);
 
-    public static native int vnodeCount();
+    /**
+     * Used to get the default number of vnodes for a table, if its `maybeVnodeCount` field is not
+     * set.
+     */
+    public static native int defaultVnodeCount();
 
     static native long iteratorNewStreamChunk(long pointer);
 

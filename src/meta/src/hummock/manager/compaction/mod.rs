@@ -1132,6 +1132,7 @@ impl HummockManager {
     /// or the task is not owned by `context_id` when `context_id` is not None.
 
     pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
+        // TODO: add sanity check for serverless compaction
         let mut guard = self.compaction.write().await;
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction: &mut Compaction = &mut guard;
@@ -1337,9 +1338,8 @@ impl HummockManager {
     ) -> Result<()> {
         self.on_current_version(|old_version| {
             tracing::info!(
-                "Trigger compaction for version {}, epoch {}, groups {:?}",
+                "Trigger compaction for version {}, groups {:?}",
                 old_version.id,
-                old_version.visible_table_committed_epoch(),
                 compaction_groups
             );
         })
@@ -1664,5 +1664,28 @@ impl CompactionState {
         } else {
             None
         }
+    }
+}
+
+impl Compaction {
+    pub fn get_compact_task_assignments_by_group_id(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Vec<CompactTaskAssignment> {
+        self.compact_task_assignment
+            .iter()
+            .filter_map(|(_, assignment)| {
+                if assignment.compact_task.as_ref().map_or(false, |task| {
+                    task.compaction_group_id == compaction_group_id
+                }) {
+                    Some(CompactTaskAssignment {
+                        compact_task: assignment.compact_task.clone(),
+                        context_id: assignment.context_id,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }

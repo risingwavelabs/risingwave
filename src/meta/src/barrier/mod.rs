@@ -29,7 +29,6 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::{bail, must_match};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -597,7 +596,7 @@ impl GlobalBarrierManager {
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
         let initial_invalid_state = BarrierManagerState::new(
-            TracedEpoch::new(Epoch(INVALID_EPOCH)),
+            None,
             InflightGraphInfo::default(),
             InflightSubscriptionInfo::default(),
             None,
@@ -712,16 +711,13 @@ impl GlobalBarrierManager {
         }
 
         {
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
-
             // Bootstrap recovery. Here we simply trigger a recovery process to achieve the
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
             self.context
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap));
-            let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+            let span = tracing::info_span!("bootstrap_recovery");
             crate::telemetry::report_event(
                 risingwave_pb::telemetry::TelemetryEventStage::Recovery,
                 "normal_recovery",
@@ -952,7 +948,14 @@ impl GlobalBarrierManager {
             }
         }
 
-        let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
+        let Some((prev_epoch, curr_epoch)) = self.state.next_epoch_pair(&command) else {
+            // skip the command when there is nothing to do with the barrier
+            for mut notifier in notifiers {
+                notifier.notify_started();
+                notifier.notify_collected();
+            }
+            return Ok(());
+        };
 
         // Insert newly added creating job
         if let Command::CreateStreamingJob {
@@ -1028,11 +1031,14 @@ impl GlobalBarrierManager {
         });
         span.record("epoch", curr_epoch.value().0);
 
+        let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
+
         let command_ctx = Arc::new(CommandContext::new(
             self.active_streaming_nodes.current().clone(),
             pre_applied_subscription_info,
             prev_epoch.clone(),
             curr_epoch.clone(),
+            table_ids_to_commit.clone(),
             self.state.paused_reason(),
             command,
             kind,
@@ -1041,8 +1047,6 @@ impl GlobalBarrierManager {
         ));
 
         send_latency_timer.observe_duration();
-
-        let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
 
         let mut jobs_to_wait = HashSet::new();
 
@@ -1101,12 +1105,9 @@ impl GlobalBarrierManager {
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
                     err.clone(),
                 )));
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
                 error = %err.as_report(),
-                prev_epoch = prev_epoch.value().0
             );
 
             crate::telemetry::report_event(
@@ -1133,12 +1134,9 @@ impl GlobalBarrierManager {
 
         self.context
             .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
-        let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-        let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
         let span = tracing::info_span!(
             "adhoc_recovery",
             error = %err.as_report(),
-            prev_epoch = prev_epoch.value().0
         );
 
         crate::telemetry::report_event(
@@ -1183,7 +1181,6 @@ impl GlobalBarrierManagerContext {
             change_log_delta: Default::default(),
             committed_epoch: epoch,
             tables_to_commit,
-            is_visible_table_committed_epoch: false,
         };
         self.hummock_manager.commit_epoch(info).await?;
         Ok(())
@@ -1677,6 +1674,7 @@ fn collect_resp_info(
             LocalSstableInfo::new(
                 sst_info.into(),
                 from_prost_table_stats_map(grouped.table_stats_map),
+                grouped.created_at,
             )
         });
         synced_ssts.extend(ssts_iter);
@@ -1778,6 +1776,5 @@ fn collect_commit_epoch_info(
         change_log_delta: table_new_change_log,
         committed_epoch: epoch,
         tables_to_commit,
-        is_visible_table_committed_epoch: true,
     }
 }
