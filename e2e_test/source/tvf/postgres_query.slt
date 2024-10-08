@@ -1,0 +1,8 @@
+system ok
+PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=postgres_query psql -c "CREATE TABLE test (id bigint primary key, x int);"
+
+system ok
+PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=postgres_query psql -c "INSERT INTO test select id, id::int from generate_series(1, 100) as t(id);"
+
+query II
+select * from postgres_scan('db', '5432', 'postgres', 'postgres', 'postgres_query', 'select * from test where id > 90;');
