@@ -243,6 +243,7 @@ impl HummockManager {
                         task_status: TaskStatus::ManualCanceled,
                         table_stats_change: HashMap::default(),
                         sorted_output_ssts: vec![],
+                        object_timestamps: HashMap::default(),
                     });
                 }
             });
@@ -452,6 +453,7 @@ impl HummockManager {
                             task_status: TaskStatus::ManualCanceled,
                             table_stats_change: HashMap::default(),
                             sorted_output_ssts: vec![],
+                            object_timestamps: HashMap::default(),
                         });
                     }
                 }

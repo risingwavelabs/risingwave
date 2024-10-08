@@ -391,9 +391,6 @@ pub fn start(
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
                 full_gc_interval_sec: config.meta.full_gc_interval_sec,
                 full_gc_object_limit: config.meta.full_gc_object_limit,
-                collect_gc_watermark_spin_interval_sec: config
-                    .meta
-                    .collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
