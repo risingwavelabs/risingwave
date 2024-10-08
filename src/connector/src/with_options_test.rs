@@ -20,7 +20,7 @@ use itertools::Itertools;
 use proc_macro2::TokenTree;
 use quote::ToTokens;
 use serde::Serialize;
-use syn::{parenthesized, parse_file, Attribute, Field, Item, ItemFn, Lit, LitStr, Meta, Type};
+use syn::{parse_file, Attribute, Field, Item, ItemFn, Lit, LitStr, Meta, Type};
 use walkdir::{DirEntry, WalkDir};
 
 fn connector_crate_path() -> PathBuf {
@@ -285,10 +285,12 @@ fn extract_serde_properties(field: &Field) -> SerdeProperties {
                         _ = meta.input.parse::<LitStr>();
                         Ok(())
                     })
-                    .expect(&format!(
-                        "Failed to parse serde properties for field: {:?}",
-                        field.ident,
-                    ));
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Failed to parse serde properties for field: {:?}",
+                            field.ident,
+                        )
+                    });
 
                 // Return the extracted values
                 return serde_props;
