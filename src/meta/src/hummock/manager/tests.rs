@@ -1872,7 +1872,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
             compact_task
                 .input_ssts
                 .iter()
-                .flat_map(|level| level.table_infos.clone())
+                .flat_map(|level| level.sstable_infos.clone())
                 .collect(),
             None,
         )
@@ -1912,7 +1912,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
         current_version
             .get_compaction_group_levels(left_compaction_group_id)
             .levels[base_level - 1]
-            .table_infos
+            .sstable_infos
             .len(),
         1
     );
