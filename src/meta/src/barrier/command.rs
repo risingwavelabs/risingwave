@@ -1031,50 +1031,40 @@ impl CommandContext {
                     .unregister_table_ids(table_fragments.all_table_ids().map(TableId::new))
                     .await?;
 
-                match &self.barrier_manager_context.metadata_manager {
-                    MetadataManager::V1(mgr) => {
-                        // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
-                        // We need to cleanup the table state. So we can do it here.
-                        // The logic is the same as above, for hummock_manager.unregister_table_ids.
-                        if let Err(e) = mgr
-                            .catalog_manager
-                            .cancel_create_materialized_view_procedure(
-                                table_fragments.table_id().table_id,
-                                table_fragments.internal_table_ids(),
-                            )
-                            .await
-                        {
-                            let table_id = table_fragments.table_id().table_id;
-                            tracing::warn!(
-                                table_id,
-                                error = %e.as_report(),
-                                "cancel_create_table_procedure failed for CancelStreamingJob",
-                            );
-                            // If failed, check that table is not in meta store.
-                            // If any table is, just panic, let meta do bootstrap recovery.
-                            // Otherwise our persisted state is dirty.
-                            let mut table_ids = table_fragments.internal_table_ids();
-                            table_ids.push(table_id);
-                            mgr.catalog_manager.assert_tables_deleted(table_ids).await;
-                        }
+                if let MetadataManager::V1(mgr) = &self.barrier_manager_context.metadata_manager {
+                    // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
+                    // We need to cleanup the table state. So we can do it here.
+                    // The logic is the same as above, for hummock_manager.unregister_table_ids.
+                    if let Err(e) = mgr
+                        .catalog_manager
+                        .cancel_create_materialized_view_procedure(
+                            table_fragments.table_id().table_id,
+                            table_fragments.internal_table_ids(),
+                        )
+                        .await
+                    {
+                        let table_id = table_fragments.table_id().table_id;
+                        tracing::warn!(
+                            table_id,
+                            error = %e.as_report(),
+                            "cancel_create_table_procedure failed for CancelStreamingJob",
+                        );
+                        // If failed, check that table is not in meta store.
+                        // If any table is, just panic, let meta do bootstrap recovery.
+                        // Otherwise our persisted state is dirty.
+                        let mut table_ids = table_fragments.internal_table_ids();
+                        table_ids.push(table_id);
+                        mgr.catalog_manager.assert_tables_deleted(table_ids).await;
+                    }
 
-                        // We need to drop table fragments here,
-                        // since this is not done in stream manager (foreground ddl)
-                        // OR barrier manager (background ddl)
-                        mgr.fragment_manager
-                            .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
-                                table_fragments.table_id(),
-                            )))
-                            .await?;
-                    }
-                    MetadataManager::V2(mgr) => {
-                        mgr.catalog_controller
-                            .try_abort_creating_streaming_job(
-                                table_fragments.table_id().table_id as _,
-                                true,
-                            )
-                            .await?;
-                    }
+                    // We need to drop table fragments here,
+                    // since this is not done in stream manager (foreground ddl)
+                    // OR barrier manager (background ddl)
+                    mgr.fragment_manager
+                        .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
+                            table_fragments.table_id(),
+                        )))
+                        .await?;
                 }
             }
 

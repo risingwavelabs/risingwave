@@ -233,8 +233,9 @@ impl TranslateApplyRule {
                     | JoinType::RightSemi
                     | JoinType::LeftAnti
                     | JoinType::RightAnti
-                    | JoinType::RightOuter => rewrite(join.right(), right_idxs, true),
-                    JoinType::LeftOuter | JoinType::FullOuter => None,
+                    | JoinType::RightOuter
+                    | JoinType::AsofInner => rewrite(join.right(), right_idxs, true),
+                    JoinType::LeftOuter | JoinType::FullOuter | JoinType::AsofLeftOuter => None,
                     JoinType::Unspecified => unreachable!(),
                 }
             }
@@ -246,7 +247,9 @@ impl TranslateApplyRule {
                     | JoinType::RightSemi
                     | JoinType::LeftAnti
                     | JoinType::RightAnti
-                    | JoinType::LeftOuter => rewrite(join.left(), left_idxs, false),
+                    | JoinType::LeftOuter
+                    | JoinType::AsofInner
+                    | JoinType::AsofLeftOuter => rewrite(join.left(), left_idxs, false),
                     JoinType::RightOuter | JoinType::FullOuter => None,
                     JoinType::Unspecified => unreachable!(),
                 }
@@ -258,14 +261,18 @@ impl TranslateApplyRule {
                     | JoinType::LeftSemi
                     | JoinType::RightSemi
                     | JoinType::LeftAnti
-                    | JoinType::RightAnti => {
+                    | JoinType::RightAnti
+                    | JoinType::AsofInner => {
                         let left = rewrite(join.left(), left_idxs, false)?;
                         let right = rewrite(join.right(), right_idxs, true)?;
                         let new_join =
                             LogicalJoin::new(left, right, join.join_type(), Condition::true_cond());
                         Some(new_join.into())
                     }
-                    JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => None,
+                    JoinType::LeftOuter
+                    | JoinType::RightOuter
+                    | JoinType::FullOuter
+                    | JoinType::AsofLeftOuter => None,
                     JoinType::Unspecified => unreachable!(),
                 }
             }
@@ -300,7 +307,12 @@ impl TranslateApplyRule {
         if !left_idxs.is_empty() && right_idxs.is_empty() {
             // Deal with multi scalar subqueries
             match apply.join_type() {
-                JoinType::Inner | JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftOuter => {
+                JoinType::Inner
+                | JoinType::LeftSemi
+                | JoinType::LeftAnti
+                | JoinType::LeftOuter
+                | JoinType::AsofInner
+                | JoinType::AsofLeftOuter => {
                     let plan = apply.left();
                     Self::rewrite(&plan, left_idxs, offset, index_mapping, data_types, index)
                 }

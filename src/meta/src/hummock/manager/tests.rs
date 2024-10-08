@@ -22,7 +22,7 @@ use itertools::Itertools;
 use prometheus::Registry;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
@@ -51,6 +51,26 @@ use crate::hummock::{HummockManagerRef, MockHummockMetaClient};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl};
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
+
+pub fn version_max_committed_epoch(version: &HummockVersion) -> u64 {
+    let committed_epoch = version
+        .state_table_info
+        .info()
+        .values()
+        .next()
+        .unwrap()
+        .committed_epoch;
+    assert!(
+        version
+            .state_table_info
+            .info()
+            .values()
+            .all(|info| info.committed_epoch == committed_epoch),
+        "info: {:?}",
+        version.state_table_info.info()
+    );
+    committed_epoch
+}
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
@@ -89,6 +109,7 @@ fn gen_local_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> Local
     LocalSstableInfo {
         sst_info: gen_sstable_info(sst_id, table_ids, epoch),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     }
 }
 fn get_compaction_group_object_ids(
@@ -269,10 +290,6 @@ async fn test_hummock_transaction() {
         .await;
         // Get tables before committing epoch1. No tables should be returned.
         let current_version = hummock_manager.get_current_version().await;
-        assert_eq!(
-            current_version.max_committed_epoch_for_test(),
-            INVALID_EPOCH
-        );
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
         assert!(get_sorted_committed_object_ids(&current_version, compaction_group_id).is_empty());
 
@@ -293,7 +310,7 @@ async fn test_hummock_transaction() {
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
         let current_version = hummock_manager.get_current_version().await;
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
-        assert_eq!(current_version.max_committed_epoch_for_test(), epoch1);
+        assert_eq!(version_max_committed_epoch(&current_version), epoch1);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),
             get_sorted_committed_object_ids(&current_version, compaction_group_id)
@@ -317,7 +334,7 @@ async fn test_hummock_transaction() {
         // tables_in_epoch2 should be invisible.
         let current_version = hummock_manager.get_current_version().await;
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
-        assert_eq!(current_version.max_committed_epoch_for_test(), epoch1);
+        assert_eq!(version_max_committed_epoch(&current_version), epoch1);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),
             get_sorted_committed_object_ids(&current_version, compaction_group_id)
@@ -341,7 +358,7 @@ async fn test_hummock_transaction() {
         // returned
         let current_version = hummock_manager.get_current_version().await;
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
-        assert_eq!(current_version.max_committed_epoch_for_test(), epoch2);
+        assert_eq!(version_max_committed_epoch(&current_version), epoch2);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),
             get_sorted_committed_object_ids(&current_version, compaction_group_id)
@@ -622,7 +639,7 @@ async fn test_pin_snapshot_response_lost() {
     // Pin a snapshot with smallest last_pin
     // [ e0 ] -> [ e0:pinned ]
     let mut epoch_recorded_in_frontend = hummock_manager
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(version_max_committed_epoch)
         .await;
     let prev_epoch = epoch.prev_epoch();
     assert_eq!(epoch_recorded_in_frontend, prev_epoch);
@@ -651,7 +668,7 @@ async fn test_pin_snapshot_response_lost() {
     // Assume the response of the previous rpc is lost.
     // [ e0:pinned, e1 ] -> [ e0, e1:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(version_max_committed_epoch)
         .await;
     let prev_epoch = epoch.prev_epoch();
     assert_eq!(epoch_recorded_in_frontend, prev_epoch);
@@ -659,7 +676,7 @@ async fn test_pin_snapshot_response_lost() {
     // Assume the response of the previous rpc is lost.
     // [ e0, e1:pinned ] -> [ e0, e1:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(version_max_committed_epoch)
         .await;
     assert_eq!(epoch_recorded_in_frontend, epoch.prev_epoch());
 
@@ -687,7 +704,7 @@ async fn test_pin_snapshot_response_lost() {
     // Use correct snapshot id.
     // [ e0, e1:pinned, e2 ] -> [ e0, e1:pinned, e2:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(version_max_committed_epoch)
         .await;
     assert_eq!(epoch_recorded_in_frontend, epoch.prev_epoch());
 
@@ -715,7 +732,7 @@ async fn test_pin_snapshot_response_lost() {
     // Use u64::MAX as epoch to pin greatest snapshot
     // [ e0, e1:pinned, e2:pinned, e3 ] -> [ e0, e1:pinned, e2:pinned, e3::pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .on_current_version(|version| version.max_committed_epoch_for_test())
+        .on_current_version(version_max_committed_epoch)
         .await;
     assert_eq!(epoch_recorded_in_frontend, epoch.prev_epoch());
 }
@@ -794,6 +811,31 @@ async fn test_invalid_sst_id() {
             "mock error: SST 1 is invalid"
         );
     }
+
+    // reject due to SST's timestamp is below watermark
+    let ssts_below_watermerk = ssts
+        .iter()
+        .map(|s| LocalSstableInfo {
+            sst_info: s.sst_info.clone(),
+            table_stats: s.table_stats.clone(),
+            created_at: 0,
+        })
+        .collect();
+    let error = hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: ssts_below_watermerk,
+                ..Default::default()
+            },
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(error
+        .as_report()
+        .to_string()
+        .contains("is rejected from being committed since it's below watermark"));
 
     hummock_meta_client
         .commit_epoch(
@@ -1197,7 +1239,7 @@ async fn test_extend_objects_to_delete() {
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
-    let new_epoch = pinned_version2.max_committed_epoch_for_test().next_epoch();
+    let new_epoch = version_max_committed_epoch(&pinned_version2).next_epoch();
     hummock_meta_client
         .commit_epoch(
             new_epoch,
@@ -1210,7 +1252,7 @@ async fn test_extend_objects_to_delete() {
         .await
         .unwrap();
     let pinned_version3: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
-    assert_eq!(new_epoch, pinned_version3.max_committed_epoch_for_test());
+    assert_eq!(new_epoch, version_max_committed_epoch(&pinned_version3));
     hummock_manager
         .unpin_version_before(context_id, pinned_version3.id)
         .await
@@ -1276,6 +1318,7 @@ async fn test_version_stats() {
                 .iter()
                 .map(|table_id| (*table_id, table_stats_change.clone()))
                 .collect(),
+            created_at: u64::MAX,
         })
         .collect_vec();
     hummock_meta_client
@@ -1385,6 +1428,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
                 },
             ),
         ]),
+        created_at: u64::MAX,
     };
     hummock_meta_client
         .commit_epoch(
@@ -1466,10 +1510,12 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     hummock_meta_client
         .commit_epoch(
@@ -1550,6 +1596,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_triv
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     hummock_manager
         .register_table_ids_for_test(&[(100, 2), (101, 2)])
@@ -1631,11 +1678,13 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     let mut sst_3 = sst_2.clone();
     let mut sst_4 = sst_1.clone();
@@ -1767,16 +1816,19 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100], epoch),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![101, 102], epoch),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     let sst_3 = LocalSstableInfo {
         sst_info: gen_sstable_info(12, vec![103], epoch),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     hummock_meta_client
@@ -1907,10 +1959,12 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     hummock_meta_client
@@ -2245,10 +2299,12 @@ async fn test_unregister_moved_table() {
     let sst_1 = LocalSstableInfo {
         sst_info: gen_sstable_info(10, vec![100], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
     let sst_2 = LocalSstableInfo {
         sst_info: gen_sstable_info(11, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
+        created_at: u64::MAX,
     };
 
     hummock_meta_client

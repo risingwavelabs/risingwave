@@ -36,6 +36,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::Mutex;
 use tonic::Streaming;
 
 use crate::hummock::compaction::CompactStatus;
@@ -109,6 +110,7 @@ pub struct HummockManager {
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
     full_gc_state: FullGcState,
+    now: Mutex<u64>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -279,6 +281,7 @@ impl HummockManager {
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
             full_gc_state: FullGcState::new(Some(full_gc_object_limit)),
+            now: Mutex::new(0),
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
@@ -296,6 +299,9 @@ impl HummockManager {
 
     /// Load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
+        let now = self.load_now().await?;
+        *self.now.lock().await = now.unwrap_or(0);
+
         let mut compaction_guard = self.compaction.write().await;
         let mut versioning_guard = self.versioning.write().await;
         let mut context_info_guard = self.context_info.write().await;
