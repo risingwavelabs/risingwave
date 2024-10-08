@@ -14,16 +14,19 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
+use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::{BoxedExpression, Expression};
-use risingwave_expr::expr_context::vnode_count;
-use risingwave_expr::{build_function, Result};
+use risingwave_expr::{build_function, expr_context, Result};
 
 #[derive(Debug)]
 struct VnodeExpression {
+    vnode_count: Option<usize>,
+
     /// A list of expressions to get the distribution key columns. Typically `InputRef`.
     children: Vec<BoxedExpression>,
 
@@ -36,6 +39,28 @@ struct VnodeExpression {
 #[build_function("vnode(...) -> int2")]
 fn build(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     Ok(Box::new(VnodeExpression {
+        vnode_count: None,
+        all_indices: (0..children.len()).collect(),
+        children,
+    }))
+}
+
+#[build_function("vnode_user(...) -> int2")]
+fn build_user(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    let mut children = children.into_iter();
+
+    let vnode_count = children
+        .next()
+        .unwrap() // always exist, enforced in binder
+        .eval_const() // required to be constant
+        .ok()
+        .flatten() // required to be non-null
+        .context("rw_vnode expects the first argument to be a non-null constant")?
+        .into_int16() as usize;
+    let children = children.collect_vec();
+
+    Ok(Box::new(VnodeExpression {
+        vnode_count: Some(vnode_count),
         all_indices: (0..children.len()).collect(),
         children,
     }))
@@ -54,7 +79,7 @@ impl Expression for VnodeExpression {
         }
         let input = DataChunk::new(arrays, input.visibility().clone());
 
-        let vnodes = VirtualNode::compute_chunk(&input, &self.all_indices, vnode_count());
+        let vnodes = VirtualNode::compute_chunk(&input, &self.all_indices, self.vnode_count()?);
         let mut builder = I16ArrayBuilder::new(input.capacity());
         vnodes
             .into_iter()
@@ -70,10 +95,20 @@ impl Expression for VnodeExpression {
         let input = OwnedRow::new(datums);
 
         Ok(Some(
-            VirtualNode::compute_row(input, &self.all_indices, vnode_count())
+            VirtualNode::compute_row(input, &self.all_indices, self.vnode_count()?)
                 .to_scalar()
                 .into(),
         ))
+    }
+}
+
+impl VnodeExpression {
+    fn vnode_count(&self) -> Result<usize> {
+        if let Some(vnode_count) = self.vnode_count {
+            Ok(vnode_count)
+        } else {
+            expr_context::vnode_count()
+        }
     }
 }
 

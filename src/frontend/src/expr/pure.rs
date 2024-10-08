@@ -271,6 +271,7 @@ impl ExprVisitor for ImpureAnalyzer {
             }
             // expression output is not deterministic
             Type::Vnode
+            | Type::VnodeUser
             | Type::TestPaidTier
             | Type::Proctime
             | Type::PgSleep
