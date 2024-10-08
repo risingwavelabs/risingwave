@@ -15,6 +15,9 @@
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use tokio_postgres;
 
@@ -46,6 +49,60 @@ impl Executor for PostgresQueryExecutor {
     fn execute(self: Box<Self>) -> super::BoxedDataChunkStream {
         self.do_execute().boxed()
     }
+}
+
+pub fn postgres_row_to_owned_row(
+    row: tokio_postgres::Row,
+    schema: &Schema,
+) -> Result<OwnedRow, BatchError> {
+    let mut datums = vec![];
+    for i in 0..schema.fields.len() {
+        let rw_field = &schema.fields[i];
+        let name = rw_field.name.as_str();
+        let datum = postgres_cell_to_scalar_impl(&row, &rw_field.data_type, i, name)?;
+        datums.push(datum);
+    }
+    Ok(OwnedRow::new(datums))
+}
+
+// TODO(kwannoel): Support more types, see postgres connector's ScalarAdapter.
+fn postgres_cell_to_scalar_impl(
+    row: &tokio_postgres::Row,
+    data_type: &DataType,
+    i: usize,
+    name: &str,
+) -> Result<Datum, BatchError> {
+    // We observe several incompatibility issue in Debezium's Postgres connector. We summarize them here:
+    // Issue #1. The null of enum list is not supported in Debezium. An enum list contains `NULL` will fallback to `NULL`.
+    // Issue #2. In our parser, when there's inf, -inf, nan or invalid item in a list, the whole list will fallback null.
+    let datum = match data_type {
+        DataType::Boolean
+        | DataType::Int16
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::Float32
+        | DataType::Float64
+        | DataType::Date
+        | DataType::Time
+        | DataType::Timestamp
+        | DataType::Timestamptz
+        | DataType::Jsonb
+        | DataType::Interval
+        | DataType::Bytea => {
+            // ScalarAdapter is also fine. But ScalarImpl is more efficient
+            row.try_get::<_, Option<ScalarImpl>>(i)?
+        }
+        DataType::Decimal => {
+            // Decimal is more efficient than PgNumeric in ScalarAdapter
+            let val = row.try_get::<_, Option<Decimal>>(i)?;
+            val.map(ScalarImpl::from)
+        }
+        _ => {
+            tracing::warn!(name, ?data_type, "unsupported data type, set to null");
+            None
+        }
+    };
+    Ok(datum)
 }
 
 impl PostgresQueryExecutor {
@@ -80,6 +137,14 @@ impl PostgresQueryExecutor {
         let (client, _conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await?;
         // TODO(kwannoel): Use pagination using CURSOR.
         let rows = client.query(&self.query, &[]).await?;
+        let mut builder = DataChunkBuilder::new(self.schema.data_types(), 1024);
+        // deserialize the rows
+        for row in rows {
+            let owned_row = postgres_row_to_owned_row(row, &self.schema)?;
+            if let Some(chunk) = builder.append_one_row(owned_row) {
+                yield chunk;
+            }
+        }
     }
 }
 
