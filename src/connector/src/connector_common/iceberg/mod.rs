@@ -20,7 +20,9 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::ValueEnum;
-use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
+use iceberg::io::{
+    S3_ACCESS_KEY_ID, S3_DISABLE_CONFIG_LOAD, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
+};
 use icelake::catalog::{
     load_iceberg_base_catalog_config, BaseCatalogConfig, CATALOG_NAME, CATALOG_TYPE,
 };
@@ -550,10 +552,12 @@ mod v1 {
 
 /// iceberg-rust
 mod v2 {
+    use iceberg::io::FileIO;
     use iceberg::spec::TableMetadata;
     use iceberg::table::Table as TableV2;
     use iceberg::{Catalog as CatalogV2, TableIdent};
     use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
+    use iceberg_catalog_sql::{SqlBindStyle, SqlCatalog, SqlCatalogConfig};
 
     use super::*;
 
@@ -653,20 +657,22 @@ mod v2 {
                     let catalog = iceberg_catalog_glue::GlueCatalog::new(config).await?;
                     Ok(Arc::new(catalog))
                 }
-                catalog_type if catalog_type == "hive" || catalog_type == "jdbc" => {
+
+                "jdbc" => {
+                    // rewrite to sql catalog
+                    let sql_catalog_config = self.build_sql_catalog_config(java_catalog_props)?;
+                    let catalog = SqlCatalog::new(sql_catalog_config).await?;
+                    Ok(Arc::new(catalog))
+                }
+
+                "hive" => {
                     // Create java catalog
                     let (base_catalog_config, java_catalog_props) =
                         self.build_jni_catalog_configs(java_catalog_props)?;
-                    let catalog_impl = match catalog_type {
-                        "hive" => "org.apache.iceberg.hive.HiveCatalog",
-                        "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
-                        _ => unreachable!(),
-                    };
-
                     jni_catalog::JniCatalog::build_catalog_v2(
                         base_catalog_config,
                         self.catalog_name(),
-                        catalog_impl,
+                        "org.apache.iceberg.hive.HiveCatalog",
                         java_catalog_props,
                     )
                 }
@@ -726,6 +732,141 @@ mod v2 {
                 }
                 _ => self.load_table_v2(java_catalog_props).await,
             }
+        }
+
+        fn build_sql_catalog_config(
+            &self,
+            java_catalog_props: &HashMap<String, String>,
+        ) -> ConnectorResult<SqlCatalogConfig> {
+            // rewrite to sql catalog
+            let Ok(meta_store_backend) = std::env::var("RW_BACKEND") else {
+                bail!("To create an iceberg engine table, RW_BACKEND needed to be set");
+            };
+
+            let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
+                bail!("failed to parse meta backend: {}", meta_store_backend);
+            };
+
+            let Ok(meta_store_endpoint) = std::env::var("RW_SQL_ENDPOINT") else {
+                bail!("To create an iceberg engine table, RW_SQL_ENDPOINT needed to be set");
+            };
+
+            let Ok(meta_store_database) = std::env::var("RW_SQL_DATABASE") else {
+                bail!("To create an iceberg engine table, RW_SQL_DATABASE needed to be set");
+            };
+
+            let (meta_store_user, meta_store_password) = {
+                if let Some(enable_config_load) = self.enable_config_load
+                    && enable_config_load
+                {
+                    let Ok(meta_store_user) = std::env::var("RW_SQL_USERNAME") else {
+                        bail!(
+                            "To create an iceberg engine table, RW_SQL_USERNAME needed to be set"
+                        );
+                    };
+
+                    let Ok(meta_store_password) = std::env::var("RW_SQL_PASSWORD") else {
+                        bail!(
+                            "To create an iceberg engine table, RW_SQL_PASSWORD needed to be set"
+                        );
+                    };
+
+                    (meta_store_user, meta_store_password)
+                } else {
+                    (
+                        java_catalog_props.get("jdbc.user").unwrap().clone(),
+                        java_catalog_props.get("jdbc.password").unwrap().clone(),
+                    )
+                }
+            };
+
+            let (uri, bind_style) = match meta_backend {
+                MetaBackend::Postgres => (
+                    format!(
+                        "postgres://{}:{}@{}/{}",
+                        meta_store_user,
+                        meta_store_password,
+                        meta_store_endpoint.clone(),
+                        meta_store_database.clone(),
+                    ),
+                    SqlBindStyle::DollarNumeric,
+                ),
+                MetaBackend::Mysql => (
+                    format!(
+                        "mysql://{}:{}@{}/{}",
+                        meta_store_user,
+                        meta_store_password,
+                        meta_store_endpoint.clone(),
+                        meta_store_database.clone()
+                    ),
+                    SqlBindStyle::QMark,
+                ),
+
+                MetaBackend::Sqlite => (
+                    format!("sqlite://{}?mode=rwc", meta_store_database.clone()),
+                    SqlBindStyle::QMark,
+                ),
+                MetaBackend::Etcd | MetaBackend::Sql | MetaBackend::Mem => {
+                    bail!(
+                        "Unsupported meta backend for iceberg engine table: {}",
+                        meta_store_backend
+                    );
+                }
+            };
+
+            let (file_io_props, warehouse_path) = {
+                let mut file_io_props = HashMap::new();
+                let mut warehouse_path = self.warehouse_path.clone();
+                if let Some(enable_config_load) = self.enable_config_load
+                    && enable_config_load
+                {
+                    let Ok(s3_region) = std::env::var("AWS_REGION") else {
+                        bail!("To create an iceberg engine table, AWS_REGION needed to be set");
+                    };
+                    file_io_props.insert(S3_REGION.to_string(), s3_region);
+
+                    let Ok(s3_bucket) = std::env::var("AWS_S3_BUCKET") else {
+                        bail!("To create an iceberg engine table, AWS_S3_BUCKET needed to be set");
+                    };
+
+                    let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
+                        bail!(
+                            "To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set"
+                        );
+                    };
+
+                    warehouse_path = format!("s3://{}/{}/nimtable", s3_bucket, data_directory);
+                } else {
+                    if let Some(region) = &self.region {
+                        file_io_props.insert(S3_REGION.to_string(), region.clone().to_string());
+                    }
+                    if let Some(endpoint) = &self.endpoint {
+                        file_io_props.insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
+                    }
+
+                    file_io_props.insert(
+                        S3_ACCESS_KEY_ID.to_string(),
+                        self.access_key.clone().to_string(),
+                    );
+                    file_io_props.insert(
+                        S3_SECRET_ACCESS_KEY.to_string(),
+                        self.secret_key.clone().to_string(),
+                    );
+                    file_io_props.insert(S3_DISABLE_CONFIG_LOAD.to_string(), "true".to_string());
+                }
+
+                (file_io_props, warehouse_path)
+            };
+
+            let file_io_builder = FileIO::from_path(&warehouse_path)?;
+            let file_io = file_io_builder.with_props(file_io_props).build().unwrap();
+            Ok(SqlCatalogConfig::builder()
+                .uri(uri)
+                .name(self.catalog_name())
+                .warehouse_location(warehouse_path)
+                .file_io(file_io)
+                .sql_bind_style(bind_style)
+                .build())
         }
     }
 }
