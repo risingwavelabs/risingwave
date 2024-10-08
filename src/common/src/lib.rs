@@ -35,7 +35,6 @@
 #![feature(iter_order_by)]
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(map_entry_replace)]
 #![feature(negative_impls)]
 #![feature(register_tool)]
 #![feature(btree_cursors)]
