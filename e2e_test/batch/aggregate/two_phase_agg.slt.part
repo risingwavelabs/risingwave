@@ -2,14 +2,14 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-SET RW_ENABLE_TWO_PHASE_AGG=false;
+SET ENABLE_TWO_PHASE_AGG=false;
 
-# This should override `RW_ENABLE_TWO_PHASE_AGG`, enabling it.
+# This should override `ENABLE_TWO_PHASE_AGG`, enabling it.
 statement ok
 SET RW_FORCE_TWO_PHASE_AGG=true;
 
 query T
-SHOW RW_ENABLE_TWO_PHASE_AGG;
+SHOW ENABLE_TWO_PHASE_AGG;
 ----
 true
 

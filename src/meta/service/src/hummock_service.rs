@@ -619,22 +619,6 @@ impl HummockManagerService for HummockServiceImpl {
         return Ok(response);
     }
 
-    async fn list_change_log_epochs(
-        &self,
-        request: Request<ListChangeLogEpochsRequest>,
-    ) -> Result<Response<ListChangeLogEpochsResponse>, Status> {
-        let ListChangeLogEpochsRequest {
-            table_id,
-            min_epoch,
-            max_count,
-        } = request.into_inner();
-        let epochs = self
-            .hummock_manager
-            .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await;
-        Ok(Response::new(ListChangeLogEpochsResponse { epochs }))
-    }
-
     async fn get_version_by_epoch(
         &self,
         request: Request<GetVersionByEpochRequest>,
