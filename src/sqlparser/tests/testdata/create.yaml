@@ -62,7 +62,7 @@
       kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
       topic = 'dummy')
     FORMAT plain ENCODE bytes;
-  formatted_sql: CREATE SOURCE s (raw BYTEA) WITH (connector = 'kafka', kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', topic = 'dummy') FORMAT PLAIN ENCODE BYTES
+  formatted_sql: CREATE SOURCE s (raw BYTEA) INCLUDE header AS all_headers INCLUDE header 'foo' AS foo_bytea INCLUDE header 'foo' AS foo_str WITH (connector = 'kafka', kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', topic = 'dummy') FORMAT PLAIN ENCODE BYTES
 - input: |-
     CREATE TABLE t
       (raw BYTEA)

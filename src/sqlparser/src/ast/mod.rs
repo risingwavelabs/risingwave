@@ -1841,25 +1841,8 @@ impl fmt::Display for Statement {
                 if let Some(version_column) = with_version_column {
                     write!(f, " WITH VERSION COLUMN({})", version_column)?;
                 }
-                if !include_column_options.is_empty() { // (Ident, Option<Ident>)
-                    write!(f, " {}", display_separated(
-                        include_column_options.iter().map(|option_item: &IncludeOptionItem| {
-                            format!("INCLUDE {}{}{}",
-                                    option_item.column_type,
-                                    if let Some(inner_field) = &option_item.inner_field {
-                                        format!(" '{}'", value::escape_single_quote_string(inner_field))
-                                    } else {
-                                        "".into()
-                                    },
-                                    if let Some(alias) = &option_item.column_alias {
-                                        format!(" AS {}", alias)
-                                    } else {
-                                        "".into()
-                                    }
-                            )
-                        }).collect_vec().as_slice(),
-                        " ",
-                    ))?;
+                if !include_column_options.is_empty() {
+                    write!(f, " {}", display_separated(include_column_options, " "))?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
@@ -2185,6 +2168,25 @@ impl fmt::Display for Statement {
                 Ok(())
             }
         }
+    }
+}
+
+impl Display for IncludeOptionItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            column_type,
+            inner_field,
+            header_inner_expect_type,
+            column_alias,
+        } = self;
+        write!(f, "INCLUDE {}", column_type)?;
+        if let Some(inner_field) = inner_field {
+            write!(f, " '{}'", value::escape_single_quote_string(inner_field))?;
+        }
+        if let Some(alias) = column_alias {
+            write!(f, " AS {}", alias)?;
+        }
+        Ok(())
     }
 }
 

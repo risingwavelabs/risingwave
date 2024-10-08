@@ -463,6 +463,9 @@ impl fmt::Display for CreateSourceStatement {
             v.push(items);
         }
 
+        for item in &self.include_column_options {
+            v.push(format!("{}", item));
+        }
         impl_fmt_display!(with_properties, v, self);
         impl_fmt_display!(source_schema, v, self);
         v.iter().join(" ").fmt(f)
