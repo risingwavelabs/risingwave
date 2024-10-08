@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_pb::batch_plan::file_scan_node::{FileFormat, StorageType};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::PostgresQueryNode;
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, column_names_pretty, Distill};
