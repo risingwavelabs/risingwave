@@ -458,6 +458,7 @@ impl TableCatalog {
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.map(|v| v as _),
+            backfill_mode: 0,
         }
     }
 

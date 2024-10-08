@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_meta_model_v2::table::BackfillMode;
 use risingwave_meta_model_v2::{
     connection, database, function, index, object, schema, secret, sink, source, subscription,
     table, view,
@@ -23,7 +24,7 @@ use risingwave_meta_model_v2::{
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
-use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
+use risingwave_pb::catalog::table::{PbBackfillMode, PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
@@ -166,7 +167,10 @@ impl From<ObjectModel<table::Model>> for PbTable {
 
             maybe_vnode_count: Some(value.0.vnode_count as _),
 
-            backfill_mode: value.0.backfill_mode.map(|x| x.into()),
+            backfill_mode: PbBackfillMode::from(
+                value.0.backfill_mode.unwrap_or(BackfillMode::Regular),
+            )
+            .into(),
         }
     }
 }

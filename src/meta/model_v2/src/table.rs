@@ -83,6 +83,15 @@ impl From<PbBackfillMode> for BackfillMode {
     }
 }
 
+impl From<BackfillMode> for PbBackfillMode {
+    fn from(value: BackfillMode) -> Self {
+        match value {
+            BackfillMode::Regular => PbBackfillMode::BackfillRegular,
+            BackfillMode::ServerLess => PbBackfillMode::BackfillServerless,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum HandleConflictBehavior {
