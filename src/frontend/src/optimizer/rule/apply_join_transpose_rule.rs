@@ -482,7 +482,7 @@ impl ApplyJoinTransposeRule {
                 d_t2_bit_set.set_range(0..apply_left_len, true);
                 d_t2_bit_set.set_range(apply_left_len + join_left_len..apply_len, true);
 
-                for (key, group) in &apply_on.into_iter().group_by(|expr| {
+                for (key, group) in &apply_on.into_iter().chunk_by(|expr| {
                     let collect_bit_set = expr.collect_input_refs(apply_len);
                     if collect_bit_set.is_subset(&d_t1_bit_set) {
                         0

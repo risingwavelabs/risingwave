@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::fmt::{self, Debug, Display};
+use std::fmt::{self, Debug};
 use std::ops::Bound;
 use std::rc::Rc;
 use std::sync::LazyLock;
@@ -504,7 +504,7 @@ impl Condition {
         });
 
         let mut groups = vec![vec![]; pk_cols_num + 1];
-        for (key, group) in &conjunctions.into_iter().group_by(|expr| {
+        for (key, group) in &conjunctions.into_iter().chunk_by(|expr| {
             let input_bits = expr.collect_input_refs(cols_num);
             if input_bits.count_ones(..) == 1 {
                 let col_idx = input_bits.ones().next().unwrap();
@@ -802,7 +802,7 @@ impl Condition {
     {
         const EMPTY: Vec<ExprImpl> = vec![];
         let mut groups = [EMPTY; N];
-        for (key, group) in &self.conjunctions.into_iter().group_by(|expr| {
+        for (key, group) in &self.conjunctions.into_iter().chunk_by(|expr| {
             // i-th group
             let i = f(expr);
             assert!(i < N);
@@ -904,16 +904,19 @@ impl ConditionDisplay<'_> {
         if self.condition.always_true() {
             write!(f, "true")
         } else {
-            self.condition
-                .conjunctions
-                .iter()
-                .format_with(" AND ", |expr, f| {
-                    f(&ExprDisplay {
-                        expr,
-                        input_schema: self.input_schema,
+            write!(
+                f,
+                "{}",
+                self.condition
+                    .conjunctions
+                    .iter()
+                    .format_with(" AND ", |expr, f| {
+                        f(&ExprDisplay {
+                            expr,
+                            input_schema: self.input_schema,
+                        })
                     })
-                })
-                .fmt(f)
+            )
         }
     }
 }
