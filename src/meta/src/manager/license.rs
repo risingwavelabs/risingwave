@@ -132,6 +132,7 @@ mod tests {
          ALC3Kc9LI6u0S-jeMB1YTxg1k8Azxwvc750ihuSZgjA_e1OJC9moxMvpLrHdLZDzCXHjBYi0XJ_1lowmuO_0iPEuPqN5AFpDV1ywmzJvGmMCMtw3A2wuN7hhem9OsWbwe6lzdwrefZLipyo4GZtIkg5ZdwGuHzm33zsM-X5gl_Ns4P6axHKiorNSR6nTAyA6B32YVET_FAM2YJQrXqpwA61wn1XLfarZqpdIQyJ5cgyiC33BFBlUL3lcRXLMLeYe6TjYGeV4K63qARCjM9yeOlsRbbW5ViWeGtR2Yf18pN8ysPXdbaXm_P_IVhl3jCTDJt9ctPh6pUCbkt36FZqO9A";
 
     #[tokio::test]
+    #[cfg_attr(not(debug_assertions), ignore)] // skip in release build
     async fn test_watch_license_key_file() {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::INFO)
@@ -150,6 +151,7 @@ mod tests {
         // Since we've filled the key file with the initial key, the license should be loaded.
         tokio::time::sleep(Duration::from_secs(1)).await;
         let license = LicenseManager::get().license().unwrap();
+        assert_eq!(license.sub, "rw-test");
         assert_eq!(license.tier, Tier::Free);
 
         // Update the key file with an empty content, which should reset the license to the default.
