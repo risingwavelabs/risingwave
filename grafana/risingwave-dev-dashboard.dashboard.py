@@ -4629,6 +4629,26 @@ def section_udf(outer_panels):
         )
     ]
 
+def section_nimtable_metrics(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Nimtable Metrics",
+            [
+                panels.timeseries_bytes(
+                    "Write Qps Of Iceberg Writer",
+                    "iceberg write qps",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_write_qps')}",
+                            "{{sink_id}} {{sink_name}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+            ],
+        )
+    ]
+
 
 templating_list = []
 if dynamic_source_enabled:
