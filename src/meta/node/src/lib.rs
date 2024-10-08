@@ -449,6 +449,15 @@ pub fn start(
                     .developer
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
+                compaction_group_size_threshold: config.meta.compaction_group_size_threshold,
+                table_statistic_high_write_throughput_ratio: config
+                    .meta
+                    .table_statistic_high_write_throughput_ratio,
+                table_statistic_low_write_throughput_ratio: config
+                    .meta
+                    .table_statistic_low_write_throughput_ratio,
+                split_group_statistic_window_times: config.meta.split_group_statistic_window_times,
+                merge_group_statistic_window_times: config.meta.merge_group_statistic_window_times,
                 object_store_config: config.storage.object_store,
                 max_trivial_move_task_count_per_loop: config
                     .meta
