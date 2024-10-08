@@ -16,6 +16,7 @@ use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use tokio_postgres;
 
 use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
@@ -24,6 +25,12 @@ use crate::task::BatchTaskContext;
 /// S3 file scan executor. Currently only support parquet file format.
 pub struct PostgresQueryExecutor {
     schema: Schema,
+    host: String,
+    port: String,
+    username: String,
+    password: String,
+    database: String,
+    query: String,
     identity: String,
 }
 
@@ -42,12 +49,38 @@ impl Executor for PostgresQueryExecutor {
 }
 
 impl PostgresQueryExecutor {
-    pub fn new(schema: Schema, identity: String) -> Self {
-        Self { schema, identity }
+    pub fn new(
+        schema: Schema,
+        host: String,
+        port: String,
+        username: String,
+        password: String,
+        database: String,
+        query: String,
+        identity: String,
+    ) -> Self {
+        Self {
+            schema,
+            host,
+            port,
+            username,
+            password,
+            database,
+            query,
+            identity,
+        }
     }
 
     #[try_stream(ok = DataChunk, error = BatchError)]
-    async fn do_execute(self: Box<Self>) {}
+    async fn do_execute(self: Box<Self>) {
+        let conn_str = format!(
+            "host={} port={} user={} password={} dbname={}",
+            self.host, self.port, self.username, self.password, self.database
+        );
+        let (client, _conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await?;
+        // TODO(kwannoel): Use pagination using CURSOR.
+        let rows = client.query(&self.query, &[]).await?;
+    }
 }
 
 pub struct PostgresQueryExecutorBuilder {}
@@ -58,13 +91,19 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
         source: &ExecutorBuilder<'_, C>,
         _inputs: Vec<BoxedExecutor>,
     ) -> crate::error::Result<BoxedExecutor> {
-        let file_scan_node = try_match_expand!(
+        let postgres_query_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::PostgresQuery
         )?;
 
         Ok(Box::new(PostgresQueryExecutor::new(
-            Schema::from_iter(file_scan_node.columns.iter().map(Field::from)),
+            Schema::from_iter(postgres_query_node.columns.iter().map(Field::from)),
+            postgres_query_node.hostname.clone(),
+            postgres_query_node.port.clone(),
+            postgres_query_node.username.clone(),
+            postgres_query_node.password.clone(),
+            postgres_query_node.database.clone(),
+            postgres_query_node.query.clone(),
             source.plan_node().get_identity().clone(),
         )))
     }
