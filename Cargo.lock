@@ -6316,7 +6316,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f8b7bff7bd7853be7733fc1db1203862878f92c1#f8b7bff7bd7853be7733fc1db1203862878f92c1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6361,7 +6361,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f8b7bff7bd7853be7733fc1db1203862878f92c1#f8b7bff7bd7853be7733fc1db1203862878f92c1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6378,7 +6378,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f8b7bff7bd7853be7733fc1db1203862878f92c1#f8b7bff7bd7853be7733fc1db1203862878f92c1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6391,6 +6391,19 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tokio",
+ "typed-builder 0.20.0",
+ "uuid",
+]
+
+[[package]]
+name = "iceberg-catalog-sql"
+version = "0.3.0"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e1ef3385bea9e157390de1b352b98a9fa25abfff#e1ef3385bea9e157390de1b352b98a9fa25abfff"
+dependencies = [
+ "async-trait",
+ "iceberg",
+ "serde_json",
+ "sqlx",
  "typed-builder 0.20.0",
  "uuid",
 ]
@@ -11000,6 +11013,7 @@ dependencies = [
  "iceberg",
  "iceberg-catalog-glue",
  "iceberg-catalog-rest",
+ "iceberg-catalog-sql",
  "icelake",
  "indexmap 2.6.0",
  "itertools 0.13.0",

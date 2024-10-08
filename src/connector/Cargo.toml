@@ -66,6 +66,7 @@ http = "0.2"
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
+iceberg-catalog-sql = { workspace = true }
 icelake = { workspace = true }
 indexmap = { version = "2.6.0", features = ["serde"] }
 itertools = { workspace = true }
