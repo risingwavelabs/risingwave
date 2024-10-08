@@ -1842,22 +1842,23 @@ impl fmt::Display for Statement {
                     write!(f, " WITH VERSION COLUMN({})", version_column)?;
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
-                    write!(f, "{}", display_comma_separated(
+                    write!(f, " {}", display_separated(
                         include_column_options.iter().map(|option_item: &IncludeOptionItem| {
-                            format!(" INCLUDE {}{}{}",
+                            format!("INCLUDE {}{}{}",
                                     option_item.column_type,
                                     if let Some(inner_field) = &option_item.inner_field {
-                                        format!(" {}", inner_field)
+                                        format!(" '{}'", value::escape_single_quote_string(inner_field))
+                                    } else {
+                                        "".into()
+                                    },
+                                    if let Some(alias) = &option_item.column_alias {
+                                        format!(" AS {}", alias)
                                     } else {
                                         "".into()
                                     }
-                                    , if let Some(alias) = &option_item.column_alias {
-                                    format!(" AS {}", alias)
-                                } else {
-                                    "".into()
-                                }
                             )
-                        }).collect_vec().as_slice()
+                        }).collect_vec().as_slice(),
+                        " ",
                     ))?;
                 }
                 if !with_options.is_empty() {
