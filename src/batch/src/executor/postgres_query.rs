@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
-use parquet::arrow::ProjectionMask;
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_connector::source::iceberg::parquet_file_reader::create_parquet_stream_builder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
