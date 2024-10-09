@@ -17,12 +17,10 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, HummockCompactionTaskId,
@@ -33,18 +31,19 @@ use risingwave_meta_model_v2::{
     hummock_version_stats,
 };
 use risingwave_pb::hummock::{
-    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, PbCompactTaskAssignment,
-    PbCompactionGroupInfo, SubscribeCompactionEventRequest,
+    HummockPinnedVersion, HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
+    SubscribeCompactionEventRequest,
 };
 use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::Mutex;
 use tonic::Streaming;
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::DeleteObjectTracker;
+use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager};
 use crate::model::{ClusterId, MetadataModel, MetadataModelError};
@@ -71,8 +70,6 @@ use compaction::*;
 pub use compaction::{check_cg_write_limit, WriteLimitType};
 pub(crate) use utils::*;
 
-type Snapshot = ArcSwap<HummockSnapshot>;
-
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
@@ -90,7 +87,6 @@ pub struct HummockManager {
     /// `CompactionGroupManager` manages compaction configs for compaction groups.
     compaction_group_manager: MonitoredRwLock<CompactionGroupManager>,
     context_info: MonitoredRwLock<ContextInfo>,
-    latest_snapshot: Snapshot,
 
     pub metrics: Arc<MetaMetrics>,
 
@@ -113,6 +109,8 @@ pub struct HummockManager {
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
+    full_gc_state: FullGcState,
+    now: Mutex<u64>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -246,7 +244,7 @@ impl HummockManager {
         let version_checkpoint_path = version_checkpoint_path(state_store_dir);
         let version_archive_dir = version_archive_dir(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
+        let full_gc_object_limit = env.opts.full_gc_object_limit;
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -273,9 +271,6 @@ impl HummockManager {
             metadata_manager,
             // compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
-            latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
-                committed_epoch: INVALID_EPOCH,
-            }),
             event_sender: tx,
             delete_object_tracker: Default::default(),
             object_store,
@@ -285,6 +280,8 @@ impl HummockManager {
             history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
+            full_gc_state: FullGcState::new(Some(full_gc_object_limit)),
+            now: Mutex::new(0),
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
@@ -302,6 +299,9 @@ impl HummockManager {
 
     /// Load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
+        let now = self.load_now().await?;
+        *self.now.lock().await = now.unwrap_or(0);
+
         let mut compaction_guard = self.compaction.write().await;
         let mut versioning_guard = self.versioning.write().await;
         let mut context_info_guard = self.context_info.write().await;
@@ -427,12 +427,6 @@ impl HummockManager {
             ..Default::default()
         });
 
-        self.latest_snapshot.store(
-            HummockSnapshot {
-                committed_epoch: redo_state.visible_table_committed_epoch(),
-            }
-            .into(),
-        );
         versioning_guard.current_version = redo_state;
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 

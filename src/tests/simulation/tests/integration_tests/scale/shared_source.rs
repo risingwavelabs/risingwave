@@ -112,13 +112,13 @@ async fn test_shared_source() -> Result<()> {
         .collect_vec();
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
-        1 1 HASH {2} {} {SOURCE} 6
-        2 3 HASH {4,3} {3} {MVIEW} 6
-        3 3 HASH {5} {1} {SOURCE_SCAN} 6"#]]
+        1 6 HASH {7} {} {SOURCE} 6 256
+        2 8 HASH {9,8} {3} {MVIEW} 6 256
+        3 8 HASH {10} {1} {SOURCE_SCAN} 6 256"#]]
     .assert_eq(&cluster.run("select * from rw_fragments;").await?);
     expect_test::expect![[r#"
-        1 CREATED ADAPTIVE
-        3 CREATED ADAPTIVE"#]]
+        6 CREATED ADAPTIVE 256
+        8 CREATED ADAPTIVE 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
     // SourceBackfill cannot be scaled because of NoShuffle.
@@ -137,9 +137,9 @@ async fn test_shared_source() -> Result<()> {
         .await
         .unwrap();
     expect_test::expect![[r#"
-        1 1 HASH {2} {} {SOURCE} 6
-        2 3 HASH {4,3} {3} {MVIEW} 5
-        3 3 HASH {5} {1} {SOURCE_SCAN} 6"#]]
+        1 6 HASH {7} {} {SOURCE} 6 256
+        2 8 HASH {9,8} {3} {MVIEW} 5 256
+        3 8 HASH {10} {1} {SOURCE_SCAN} 6 256"#]]
     .assert_eq(&cluster.run("select * from rw_fragments;").await?);
 
     // source is the NoShuffle upstream. It can be scaled, and the downstream SourceBackfill will be scaled together.
@@ -156,13 +156,13 @@ async fn test_shared_source() -> Result<()> {
         .unwrap();
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
-        1 1 HASH {2} {} {SOURCE} 3
-        2 3 HASH {4,3} {3} {MVIEW} 5
-        3 3 HASH {5} {1} {SOURCE_SCAN} 3"#]]
+        1 6 HASH {7} {} {SOURCE} 3 256
+        2 8 HASH {9,8} {3} {MVIEW} 5 256
+        3 8 HASH {10} {1} {SOURCE_SCAN} 3 256"#]]
     .assert_eq(&cluster.run("select * from rw_fragments;").await?);
     expect_test::expect![[r#"
-        1 CREATED CUSTOM
-        3 CREATED CUSTOM"#]]
+        6 CREATED CUSTOM 256
+        8 CREATED CUSTOM 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
     // resolve_no_shuffle for backfill fragment is OK, which will scale the upstream together.
@@ -180,13 +180,13 @@ async fn test_shared_source() -> Result<()> {
         .unwrap();
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
-        1 1 HASH {2} {} {SOURCE} 7
-        2 3 HASH {4,3} {3} {MVIEW} 5
-        3 3 HASH {5} {1} {SOURCE_SCAN} 7"#]]
+        1 6 HASH {7} {} {SOURCE} 7 256
+        2 8 HASH {9,8} {3} {MVIEW} 5 256
+        3 8 HASH {10} {1} {SOURCE_SCAN} 7 256"#]]
     .assert_eq(&cluster.run("select * from rw_fragments;").await?);
     expect_test::expect![[r#"
-1 CREATED CUSTOM
-3 CREATED CUSTOM"#]]
+        6 CREATED CUSTOM 256
+        8 CREATED CUSTOM 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
     Ok(())
 }

@@ -14,4 +14,7 @@ statement ok
 select rw_vnode(_row_id) as vnode, _row_id from t;
 
 statement ok
+select rw_vnode(v2 + 114), rw_vnode(514) from t;
+
+statement ok
 drop table t

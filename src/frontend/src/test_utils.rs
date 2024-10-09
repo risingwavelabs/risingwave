@@ -43,15 +43,15 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
-    ReplaceTablePlan, TableJobType,
+    alter_name_request, alter_set_schema_request, create_connection_request, DdlProgress,
+    PbTableJobType, ReplaceTablePlan, TableJobType,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
+use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
@@ -563,11 +563,22 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
-        self.catalog
-            .write()
-            .alter_table_name_by_id(&table_id.into(), table_name);
-        Ok(())
+    async fn alter_name(
+        &self,
+        object_id: alter_name_request::Object,
+        object_name: &str,
+    ) -> Result<()> {
+        match object_id {
+            alter_name_request::Object::TableId(table_id) => {
+                self.catalog
+                    .write()
+                    .alter_table_name_by_id(&table_id.into(), object_name);
+                Ok(())
+            }
+            _ => {
+                unimplemented!()
+            }
+        }
     }
 
     async fn alter_source(&self, source: PbSource) -> Result<()> {
@@ -619,38 +630,6 @@ impl CatalogWriter for MockCatalogWriter {
             }
             _ => unreachable!(),
         }
-    }
-
-    async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_index_name(&self, _index_id: u32, _index_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_sink_name(&self, _sink_id: u32, _sink_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_subscription_name(
-        &self,
-        _subscription_id: u32,
-        _subscription_name: &str,
-    ) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_source_name(&self, _source_id: u32, _source_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_schema_name(&self, _schema_id: u32, _schema_name: &str) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn alter_database_name(&self, _database_id: u32, _database_name: &str) -> Result<()> {
-        unreachable!()
     }
 
     async fn alter_parallelism(
@@ -938,10 +917,6 @@ pub struct MockFrontendMetaClient {}
 impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
 
-    async fn get_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot { committed_epoch: 0 })
-    }
-
     async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockVersionId> {
         Ok(INVALID_VERSION_ID)
     }
@@ -970,6 +945,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_actor_states(&self) -> RpcResult<Vec<ActorState>> {
+        Ok(vec![])
+    }
+
+    async fn list_actor_splits(&self) -> RpcResult<Vec<ActorSplit>> {
         Ok(vec![])
     }
 
@@ -1072,15 +1051,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn get_cluster_recovery_status(&self) -> RpcResult<RecoveryStatus> {
         Ok(RecoveryStatus::StatusRunning)
-    }
-
-    async fn list_change_log_epochs(
-        &self,
-        _table_id: u32,
-        _min_epoch: u64,
-        _max_count: u32,
-    ) -> RpcResult<Vec<u64>> {
-        unimplemented!()
     }
 
     async fn get_cluster_limits(&self) -> RpcResult<Vec<ClusterLimit>> {

@@ -22,10 +22,11 @@ use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
     FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
 };
-use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
+use risingwave_pb::common::{batch_query_epoch, BatchQueryCommittedEpoch, BatchQueryEpoch};
 use risingwave_pb::hummock::{HummockVersionDeltas, StateTableInfoDelta};
 use tokio::sync::watch;
 
+use crate::error::{ErrorCode, RwError};
 use crate::expr::InlineNowProcTime;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::SchedulerError;
@@ -55,7 +56,10 @@ impl ReadSnapshot {
         Ok(match self {
             ReadSnapshot::FrontendPinned { snapshot } => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Committed(
-                    snapshot.batch_query_epoch(read_storage_tables)?.0,
+                    BatchQueryCommittedEpoch {
+                        epoch: snapshot.batch_query_epoch(read_storage_tables)?.0,
+                        hummock_version_id: snapshot.value.id.to_u64(),
+                    },
                 )),
             },
             ReadSnapshot::ReadUncommitted => BatchQueryEpoch {
@@ -136,6 +140,20 @@ impl PinnedSnapshot {
     pub fn version(&self) -> &FrontendHummockVersion {
         &self.value
     }
+
+    pub fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Vec<u64> {
+        if let Some(table_change_log) = self.value.table_change_log.get(&TableId::new(table_id)) {
+            let table_change_log = table_change_log.clone();
+            table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
+        } else {
+            vec![]
+        }
+    }
 }
 
 /// Returns an invalid snapshot, used for initial values.
@@ -159,6 +177,14 @@ pub struct HummockSnapshotManager {
     /// `current_epoch` is always in the shared buffer, so it will never be gc before the data
     /// of `committed_epoch`.
     latest_snapshot: watch::Sender<PinnedSnapshotRef>,
+
+    table_change_log_notification_sender: watch::Sender<TableChangeLogNotificationMsg>,
+}
+
+#[derive(Default)]
+struct TableChangeLogNotificationMsg {
+    updated_change_log_table_ids: HashSet<u32>,
+    deleted_table_ids: HashSet<u32>,
 }
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
@@ -171,7 +197,13 @@ impl HummockSnapshotManager {
 
         let (latest_snapshot, _) = watch::channel(latest_snapshot);
 
-        Self { latest_snapshot }
+        let (table_change_log_notification_sender, _) =
+            watch::channel(TableChangeLogNotificationMsg::default());
+
+        Self {
+            latest_snapshot,
+            table_change_log_notification_sender,
+        }
     }
 
     /// Acquire the latest snapshot by increasing its reference count.
@@ -180,6 +212,24 @@ impl HummockSnapshotManager {
     }
 
     pub fn init(&self, version: FrontendHummockVersion) {
+        let updated_change_log_table_ids: HashSet<_> = version
+            .table_change_log
+            .iter()
+            .filter_map(|(table_id, change_log)| {
+                if change_log.get_non_empty_epochs(0, usize::MAX).is_empty() {
+                    None
+                } else {
+                    Some(table_id.table_id())
+                }
+            })
+            .collect();
+        self.table_change_log_notification_sender
+            .send(TableChangeLogNotificationMsg {
+                updated_change_log_table_ids,
+                deleted_table_ids: Default::default(),
+            })
+            .ok();
+
         self.update_inner(|_| Some(version));
     }
 
@@ -187,6 +237,35 @@ impl HummockSnapshotManager {
     ///
     /// Should only be called by the observer manager.
     pub fn update(&self, deltas: HummockVersionDeltas) {
+        let updated_change_log_table_ids: HashSet<_> = deltas
+            .version_deltas
+            .iter()
+            .flat_map(|version_deltas| &version_deltas.change_log_delta)
+            .filter_map(|(table_id, change_log)| match change_log.new_log.as_ref() {
+                Some(new_log) => {
+                    let new_value_empty = new_log.new_value.is_empty();
+                    let old_value_empty = new_log.old_value.is_empty();
+                    if !new_value_empty || !old_value_empty {
+                        Some(*table_id)
+                    } else {
+                        None
+                    }
+                }
+                None => None,
+            })
+            .collect();
+        let deleted_table_ids: HashSet<_> = deltas
+            .version_deltas
+            .iter()
+            .flat_map(|version_deltas| version_deltas.removed_table_ids.clone())
+            .collect();
+        self.table_change_log_notification_sender
+            .send(TableChangeLogNotificationMsg {
+                updated_change_log_table_ids,
+                deleted_table_ids,
+            })
+            .ok();
+
         self.update_inner(|old_snapshot| {
             if deltas.version_deltas.is_empty() {
                 return None;
@@ -245,5 +324,32 @@ impl HummockSnapshotManager {
         while rx.borrow_and_update().value.id < version_id {
             rx.changed().await.unwrap();
         }
+    }
+
+    pub async fn wait_table_change_log_notification(&self, table_id: u32) -> Result<(), RwError> {
+        let mut rx = self.table_change_log_notification_sender.subscribe();
+        loop {
+            rx.changed()
+                .await
+                .map_err(|_| ErrorCode::InternalError("cursor notify channel is closed.".into()))?;
+            let table_change_log_notification_msg = rx.borrow_and_update();
+            if table_change_log_notification_msg
+                .deleted_table_ids
+                .contains(&table_id)
+            {
+                return Err(ErrorCode::InternalError(format!(
+                    "Cursor dependent table deleted: table_id is {:?}",
+                    table_id
+                ))
+                .into());
+            }
+            if table_change_log_notification_msg
+                .updated_change_log_table_ids
+                .contains(&table_id)
+            {
+                break;
+            }
+        }
+        Ok(())
     }
 }

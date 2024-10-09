@@ -219,6 +219,7 @@ impl HummockVersionStateTableInfo {
 pub struct HummockVersionCommon<T> {
     pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, LevelsCommon<T>>,
+    #[deprecated]
     pub(crate) max_committed_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<T>>,
@@ -277,6 +278,7 @@ where
     T: for<'a> From<&'a PbSstableInfo>,
 {
     fn from(pb_version: &PbHummockVersion) -> Self {
+        #[expect(deprecated)]
         Self {
             id: HummockVersionId(pb_version.id),
             levels: pb_version
@@ -319,6 +321,7 @@ where
     PbSstableInfo: for<'a> From<&'a T>,
 {
     fn from(version: &HummockVersionCommon<T>) -> Self {
+        #[expect(deprecated)]
         Self {
             id: version.id.0,
             levels: version
@@ -348,6 +351,7 @@ where
     PbSstableInfo: for<'a> From<&'a T>,
 {
     fn from(version: HummockVersionCommon<T>) -> Self {
+        #[expect(deprecated)]
         Self {
             id: version.id.0,
             levels: version
@@ -413,20 +417,15 @@ impl HummockVersion {
         }
     }
 
-    pub(crate) fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
-        self.max_committed_epoch = max_committed_epoch;
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn max_committed_epoch(&self) -> u64 {
-        self.max_committed_epoch
-    }
-
-    pub fn visible_table_committed_epoch(&self) -> u64 {
-        self.max_committed_epoch
+    pub fn table_committed_epoch(&self, table_id: TableId) -> Option<u64> {
+        self.state_table_info
+            .info()
+            .get(&table_id)
+            .map(|info| info.committed_epoch)
     }
 
     pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
+        #[expect(deprecated)]
         let mut init_version = HummockVersion {
             id: FIRST_VERSION_ID,
             levels: Default::default(),
@@ -448,6 +447,7 @@ impl HummockVersion {
     }
 
     pub fn version_delta_after(&self) -> HummockVersionDelta {
+        #[expect(deprecated)]
         HummockVersionDelta {
             id: self.next_version_id(),
             prev_id: self.id,
@@ -467,6 +467,7 @@ pub struct HummockVersionDeltaCommon<T> {
     pub id: HummockVersionId,
     pub prev_id: HummockVersionId,
     pub group_deltas: HashMap<CompactionGroupId, GroupDeltasCommon<T>>,
+    #[deprecated]
     pub(crate) max_committed_epoch: u64,
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -590,12 +591,9 @@ impl HummockVersionDelta {
             }))
     }
 
-    pub fn visible_table_committed_epoch(&self) -> u64 {
+    #[expect(deprecated)]
+    pub fn max_committed_epoch_for_migration(&self) -> HummockEpoch {
         self.max_committed_epoch
-    }
-
-    pub fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
-        self.max_committed_epoch = max_committed_epoch;
     }
 }
 
@@ -604,6 +602,7 @@ where
     T: for<'a> From<&'a PbSstableInfo>,
 {
     fn from(pb_version_delta: &PbHummockVersionDelta) -> Self {
+        #[expect(deprecated)]
         Self {
             id: HummockVersionId(pb_version_delta.id),
             prev_id: HummockVersionId(pb_version_delta.prev_id),
@@ -659,6 +658,7 @@ where
     PbSstableInfo: for<'a> From<&'a T>,
 {
     fn from(version_delta: &HummockVersionDeltaCommon<T>) -> Self {
+        #[expect(deprecated)]
         Self {
             id: version_delta.id.0,
             prev_id: version_delta.prev_id.0,
@@ -698,6 +698,7 @@ where
     PbSstableInfo: From<T>,
 {
     fn from(version_delta: HummockVersionDeltaCommon<T>) -> Self {
+        #[expect(deprecated)]
         Self {
             id: version_delta.id.0,
             prev_id: version_delta.prev_id.0,
@@ -737,6 +738,7 @@ where
     T: From<PbSstableInfo>,
 {
     fn from(pb_version_delta: PbHummockVersionDelta) -> Self {
+        #[expect(deprecated)]
         Self {
             id: HummockVersionId(pb_version_delta.id),
             prev_id: HummockVersionId(pb_version_delta.prev_id),

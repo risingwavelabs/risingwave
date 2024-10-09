@@ -704,9 +704,17 @@ fn infer_type_for_special_table_function(
 ) -> Result<Option<DataType>> {
     match func_type {
         PbTableFuncType::GenerateSeries => {
-            if inputs.len() < 3 {
+            if inputs.len() < 3 || !inputs[1].is_now() {
                 // let signature map handle this
                 return Ok(None);
+            }
+            // Now we are inferring type for `generate_series(start, now(), step)`, which will
+            // be further handled by `GenerateSeriesWithNowRule`.
+            if inputs[0].is_untyped() {
+                inputs[0].cast_implicit_mut(DataType::Timestamptz)?;
+            }
+            if inputs[2].is_untyped() {
+                inputs[2].cast_implicit_mut(DataType::Interval)?;
             }
             match (
                 inputs[0].return_type(),

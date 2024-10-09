@@ -23,7 +23,7 @@ pub enum NatsOffset {
     Earliest,
     Latest,
     SequenceNumber(String),
-    Timestamp(i128),
+    Timestamp(i64),
     None,
 }
 

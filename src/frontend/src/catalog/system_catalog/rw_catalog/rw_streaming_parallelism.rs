@@ -31,7 +31,8 @@ use risingwave_frontend_macro::system_catalog;
         job.id,
         job.name,
         job.relation_type,
-        tf.parallelism
+        tf.parallelism,
+        tf.max_parallelism
     FROM all_streaming_jobs job
     INNER JOIN rw_table_fragments tf ON job.id = tf.table_id
     ORDER BY job.id"
@@ -42,4 +43,5 @@ struct RwStreamingParallelism {
     name: String,
     relation_type: String,
     parallelism: String,
+    max_parallelism: i32,
 }

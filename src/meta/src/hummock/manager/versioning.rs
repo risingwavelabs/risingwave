@@ -16,7 +16,6 @@ use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_compaction_group_ids, get_table_compaction_group_id_mapping, BranchedSstInfo,
 };
@@ -25,14 +24,11 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
-    HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
-use risingwave_pb::hummock::{
-    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
-};
+use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats, TableStats};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::check_cg_write_limit;
@@ -165,14 +161,12 @@ impl HummockManager {
         &self,
         start_id: HummockVersionId,
         num_limit: u32,
-        committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
         let versioning = self.versioning.read().await;
         let version_deltas = versioning
             .hummock_version_deltas
             .range(start_id..)
             .map(|(_id, delta)| delta)
-            .filter(|delta| delta.visible_table_committed_epoch() <= committed_epoch_limit)
             .take(num_limit as _)
             .cloned()
             .collect();
@@ -268,30 +262,6 @@ impl HummockManager {
             commit_multi_var!(self.meta_store_ref(), version)?;
         }
         Ok(())
-    }
-
-    pub fn latest_snapshot(&self) -> HummockSnapshot {
-        let snapshot = self.latest_snapshot.load();
-        HummockSnapshot::clone(&snapshot)
-    }
-
-    pub async fn list_change_log_epochs(
-        &self,
-        table_id: u32,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Vec<u64> {
-        let versioning = self.versioning.read().await;
-        if let Some(table_change_log) = versioning
-            .current_version
-            .table_change_log
-            .get(&TableId::new(table_id))
-        {
-            let table_change_log = table_change_log.clone();
-            table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
-        } else {
-            vec![]
-        }
     }
 }
 

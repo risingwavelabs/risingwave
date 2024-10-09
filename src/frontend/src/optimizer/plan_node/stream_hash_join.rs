@@ -15,13 +15,13 @@
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
 use super::generic::Join;
 use super::stream::prelude::*;
+use super::stream_join_common::StreamJoinCommon;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
@@ -30,7 +30,7 @@ use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprVisitor, InequalityInputP
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -72,7 +72,11 @@ impl StreamHashJoin {
             _ => false,
         };
 
-        let dist = Self::derive_dist(core.left.distribution(), core.right.distribution(), &core);
+        let dist = StreamJoinCommon::derive_dist(
+            core.left.distribution(),
+            core.right.distribution(),
+            &core,
+        );
 
         let mut inequality_pairs = vec![];
         let mut clean_left_state_conjunction_idx = None;
@@ -215,46 +219,9 @@ impl StreamHashJoin {
         self.core.join_type
     }
 
-    /// Get a reference to the batch hash join's eq join predicate.
+    /// Get a reference to the hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
-    }
-
-    pub(super) fn derive_dist(
-        left: &Distribution,
-        right: &Distribution,
-        logical: &generic::Join<PlanRef>,
-    ) -> Distribution {
-        match (left, right) {
-            (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                // we can not derive the hash distribution from the side where outer join can
-                // generate a NULL row
-                match logical.join_type {
-                    JoinType::Unspecified => unreachable!(),
-                    JoinType::FullOuter => Distribution::SomeShard,
-                    JoinType::Inner
-                    | JoinType::LeftOuter
-                    | JoinType::LeftSemi
-                    | JoinType::LeftAnti => {
-                        let l2o = logical
-                            .l2i_col_mapping()
-                            .composite(&logical.i2o_col_mapping());
-                        l2o.rewrite_provided_distribution(left)
-                    }
-                    JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => {
-                        let r2o = logical
-                            .r2i_col_mapping()
-                            .composite(&logical.i2o_col_mapping());
-                        r2o.rewrite_provided_distribution(right)
-                    }
-                }
-            }
-            (_, _) => unreachable!(
-                "suspicious distribution: left: {:?}, right: {:?}",
-                left, right
-            ),
-        }
     }
 
     /// Convert this hash join to a delta join plan
@@ -265,24 +232,12 @@ impl StreamHashJoin {
     pub fn derive_dist_key_in_join_key(&self) -> Vec<usize> {
         let left_dk_indices = self.left().distribution().dist_column_indices().to_vec();
         let right_dk_indices = self.right().distribution().dist_column_indices().to_vec();
-        let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
-        let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
 
-        assert_eq!(left_jk_indices.len(), right_jk_indices.len());
-
-        let mut dk_indices_in_jk = vec![];
-
-        for (l_dk_idx, r_dk_idx) in left_dk_indices.iter().zip_eq_fast(right_dk_indices.iter()) {
-            for dk_idx_in_jk in left_jk_indices.iter().positions(|idx| idx == l_dk_idx) {
-                if right_jk_indices[dk_idx_in_jk] == *r_dk_idx {
-                    dk_indices_in_jk.push(dk_idx_in_jk);
-                    break;
-                }
-            }
-        }
-
-        assert_eq!(dk_indices_in_jk.len(), left_dk_indices.len());
-        dk_indices_in_jk
+        StreamJoinCommon::get_dist_key_in_join_key(
+            &left_dk_indices,
+            &right_dk_indices,
+            self.eq_join_predicate(),
+        )
     }
 
     pub fn inequality_pairs(&self) -> &Vec<(bool, InequalityInputPair)> {
