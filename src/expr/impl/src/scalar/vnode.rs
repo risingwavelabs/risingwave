@@ -53,12 +53,11 @@ fn build_user(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpres
 
     let vnode_count = children
         .next()
-        .unwrap() // always exist, enforced in binder
+        .unwrap() // always exist, argument number enforced in binder
         .eval_const() // required to be constant
-        .ok()
-        .flatten() // required to be non-null
-        .context("the first argument (vnode count) must be a non-null constant")?
-        .into_int16() as usize;
+        .context("the first argument (vnode count) must be a constant")?
+        .context("the first argument (vnode count) must not be NULL")?
+        .into_int16() as usize; // always int16, casted during type inference
     if vnode_count == 0 {
         return Err(anyhow::anyhow!("the first argument (vnode count) must not be zero").into());
     }
