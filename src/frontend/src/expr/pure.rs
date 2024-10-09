@@ -261,7 +261,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapContains
             | Type::MapDelete
             | Type::MapInsert
-            | Type::MapLength =>
+            | Type::MapLength
+            | Type::VnodeUser =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -270,8 +271,7 @@ impl ExprVisitor for ImpureAnalyzer {
                     .for_each(|expr| self.visit_expr(expr));
             }
             // expression output is not deterministic
-            Type::Vnode
-            | Type::VnodeUser
+            Type::Vnode // obtain vnode count from the context
             | Type::TestPaidTier
             | Type::Proctime
             | Type::PgSleep
