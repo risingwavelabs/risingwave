@@ -47,7 +47,8 @@ message MetaSnapshotManifest {
 message MetaSnapshotMetadata {
   uint64 id = 1;
   uint64 hummock_version_id = 2;
-  uint64 max_committed_epoch = 3;
+  reserved 3;
+  reserved 'max_committed_epoch';
   reserved 4;
   reserved 'safe_epoch';
   optional uint32 format_version = 5;

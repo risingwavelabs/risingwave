@@ -14,6 +14,7 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use bytes::{Bytes, BytesMut};
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
@@ -540,8 +541,20 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
 
         let writer_output = self.writer.finish(meta).await?;
+        // The timestamp is only used during full GC.
+        //
+        // Ideally object store object's last_modified should be used.
+        // However, it'll incur additional IO overhead since S3 lacks an interface to retrieve the last_modified timestamp after the PUT operation on an object.
+        //
+        // The local timestamp below is expected to precede the last_modified of object store object, given that the object store object is created afterward.
+        // It should help alleviate the clock drift issue.
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Clock may have gone backwards")
+            .as_secs();
         Ok(SstableBuilderOutput::<W::Output> {
-            sst_info: LocalSstableInfo::new(sst_info, self.table_stats),
+            sst_info: LocalSstableInfo::new(sst_info, self.table_stats, now),
             writer_output,
             stats: SstableBuilderOutputStats {
                 bloom_filter_size,

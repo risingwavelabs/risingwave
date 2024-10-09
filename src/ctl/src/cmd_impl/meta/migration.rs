@@ -439,6 +439,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             create_type: Set(CreateType::Foreground),
             timezone: Set(table_fragment.timezone()),
             parallelism: Set(streaming_parallelism),
+            max_parallelism: Set(table_fragment.max_parallelism as _),
         })
         .exec(&meta_store_sql.conn)
         .await?;
@@ -744,7 +745,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 .map(|vd| hummock_version_delta::ActiveModel {
                     id: Set(vd.id.to_u64() as _),
                     prev_id: Set(vd.prev_id.to_u64() as _),
-                    max_committed_epoch: Set(vd.visible_table_committed_epoch() as _),
+                    max_committed_epoch: Set(vd.max_committed_epoch_for_migration() as _),
                     safe_epoch: Set(0 as _),
                     trivial_move: Set(vd.trivial_move),
                     full_version_delta: Set((&vd.to_protobuf()).into()),

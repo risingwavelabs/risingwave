@@ -192,11 +192,9 @@ impl GooglePubSubSinkWriter {
         sink_from_name: String,
     ) -> Result<Self> {
         let environment = if let Some(ref cred) = config.credentials {
-            let auth_config = project::Config {
-                audience: Some(apiv1::conn_pool::AUDIENCE),
-                scopes: Some(&apiv1::conn_pool::SCOPES),
-                sub: None,
-            };
+            let mut auth_config = project::Config::default();
+            auth_config = auth_config.with_audience(apiv1::conn_pool::AUDIENCE);
+            auth_config = auth_config.with_scopes(&apiv1::conn_pool::SCOPES);
             let cred_file = CredentialsFile::new_from_str(cred).await.map_err(|e| {
                 SinkError::GooglePubSub(
                     anyhow!(e).context("Failed to create Google Cloud Pub/Sub credentials file"),

@@ -118,7 +118,6 @@ fn gen_version(
     let committed_epoch = test_epoch(new_epoch_idx as _);
     let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
         id: new_epoch_idx as _,
-        max_committed_epoch: committed_epoch,
         ..Default::default()
     });
     version.table_watermarks = (0..table_count)

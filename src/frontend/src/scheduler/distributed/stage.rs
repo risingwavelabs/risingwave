@@ -655,7 +655,7 @@ impl StageRunner {
 
         let shutdown_rx0 = shutdown_rx.clone();
 
-        expr_context_scope(expr_context, async {
+        let result = expr_context_scope(expr_context, async {
             let executor = executor.build().await?;
             let chunk_stream = executor.execute();
             let cancelled = pin!(shutdown_rx.cancelled());
@@ -682,7 +682,19 @@ impl StageRunner {
                 }
             }
             Ok(())
-        }).await?;
+        }).await;
+
+        if let Err(err) = &result {
+            // If we encountered error when executing root stage locally, we have to notify the result fetcher, which is
+            // returned by `distribute_execute` and being listened by the FE handler task. Otherwise the FE handler cannot
+            // properly throw the error to the PG client.
+            if let Err(_e) = result_tx
+                .send(Err(TaskExecutionError(err.to_report_string())))
+                .await
+            {
+                warn!("Send task execution failed");
+            }
+        }
 
         // Terminated by other tasks execution error, so no need to return error here.
         match shutdown_rx0.message() {
@@ -701,7 +713,9 @@ impl StageRunner {
             self.stage.id
         );
 
-        Ok(())
+        // We still have to throw the error in this current task, so that `StageRunner::run` can further
+        // send `Failed` event to stop other stages.
+        result.map(|_| ())
     }
 
     async fn schedule_tasks_for_all(&mut self, shutdown_rx: ShutdownToken) -> SchedulerResult<()> {

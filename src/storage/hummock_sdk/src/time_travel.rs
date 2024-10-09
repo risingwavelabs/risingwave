@@ -91,6 +91,7 @@ fn refill_sstable_info(
 impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockVersion {
     fn from(p: (&HummockVersion, &HashSet<CompactionGroupId>)) -> Self {
         let (version, select_group) = p;
+        #[expect(deprecated)]
         Self {
             id: version.id,
             levels: version
@@ -107,7 +108,7 @@ impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockV
                     }
                 })
                 .collect(),
-            max_committed_epoch: version.visible_table_committed_epoch(),
+            max_committed_epoch: version.max_committed_epoch,
             table_watermarks: version.table_watermarks.clone(),
             // TODO: optimization: strip table change log based on select_group
             table_change_log: version
@@ -136,6 +137,7 @@ pub type IncompleteHummockVersionDelta = HummockVersionDeltaCommon<SstableIdInVe
 impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHummockVersionDelta {
     fn from(p: (&HummockVersionDelta, &HashSet<CompactionGroupId>)) -> Self {
         let (delta, select_group) = p;
+        #[expect(deprecated)]
         Self {
             id: delta.id,
             prev_id: delta.prev_id,
@@ -150,7 +152,7 @@ impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHum
                     }
                 })
                 .collect(),
-            max_committed_epoch: delta.visible_table_committed_epoch(),
+            max_committed_epoch: delta.max_committed_epoch,
             trivial_move: delta.trivial_move,
             new_table_watermarks: delta.new_table_watermarks.clone(),
             removed_table_ids: delta.removed_table_ids.clone(),

@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Sub;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::{StreamExt, TryStreamExt};
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -60,12 +58,6 @@ impl Vacuum {
         full_scan_task: FullScanTask,
         metadata_iter: ObjectMetadataIter,
     ) -> HummockResult<(Vec<HummockSstableObjectId>, u64, u64, Option<String>)> {
-        let timestamp_watermark = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .sub(Duration::from_secs(full_scan_task.sst_retention_time_sec))
-            .as_secs_f64();
-
         let mut total_object_count = 0;
         let mut total_object_size = 0;
         let mut next_start_after: Option<String> = None;
@@ -83,7 +75,7 @@ impl Vacuum {
                             next_start_after = Some(o.key.clone());
                             tracing::debug!(next_start_after, "set next start after");
                         }
-                        if o.last_modified < timestamp_watermark {
+                        if o.last_modified < full_scan_task.sst_retention_watermark as f64 {
                             Some(Ok(SstableStore::get_object_id_from_path(&o.key)))
                         } else {
                             None
@@ -109,7 +101,7 @@ impl Vacuum {
         sstable_store: SstableStoreRef,
     ) -> HummockResult<(Vec<HummockSstableObjectId>, u64, u64, Option<String>)> {
         tracing::info!(
-            timestamp = full_scan_task.sst_retention_time_sec,
+            sst_retention_watermark = full_scan_task.sst_retention_watermark,
             prefix = full_scan_task.prefix.as_ref().unwrap_or(&String::from("")),
             start_after = full_scan_task.start_after,
             limit = full_scan_task.limit,

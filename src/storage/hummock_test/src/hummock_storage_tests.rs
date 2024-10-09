@@ -25,7 +25,7 @@ use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
@@ -471,7 +471,11 @@ async fn test_state_store_sync() {
 
     let read_version = hummock_storage.read_version();
 
-    let base_epoch = read_version.read().committed().max_committed_epoch();
+    let base_epoch = read_version
+        .read()
+        .committed()
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
     let epoch1 = test_epoch(base_epoch.next_epoch());
     test_env
         .storage
@@ -842,7 +846,8 @@ async fn test_delete_get() {
         .read_version()
         .read()
         .committed()
-        .max_committed_epoch();
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
 
     let epoch1 = initial_epoch.next_epoch();
     test_env
@@ -944,7 +949,8 @@ async fn test_multiple_epoch_sync() {
         .read_version()
         .read()
         .committed()
-        .max_committed_epoch();
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
 
     let epoch1 = initial_epoch.next_epoch();
     test_env
@@ -1655,8 +1661,12 @@ async fn test_hummock_version_reader() {
                         .read_version()
                         .read()
                         .committed()
-                        .max_committed_epoch(),
-                    read_snapshot.2.max_committed_epoch()
+                        .table_committed_epoch(TEST_TABLE_ID)
+                        .unwrap(),
+                    read_snapshot
+                        .2
+                        .table_committed_epoch(TEST_TABLE_ID)
+                        .unwrap()
                 );
 
                 let iter = hummock_version_reader
@@ -2406,7 +2416,6 @@ async fn test_table_watermark() {
 
     let check_version_table_watermark = |version: PinnedVersion| {
         let epoch = version
-            .version()
             .state_table_info
             .info()
             .get(&TEST_TABLE_ID)
@@ -2414,12 +2423,11 @@ async fn test_table_watermark() {
             .committed_epoch;
         let table_watermarks = TableWatermarksIndex::new_committed(
             version
-                .version()
                 .table_watermarks
                 .get(&TEST_TABLE_ID)
                 .unwrap()
                 .clone(),
-            version.max_committed_epoch(),
+            epoch,
         );
         assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction());
         assert_eq!(
@@ -2574,50 +2582,43 @@ async fn test_commit_multi_epoch() {
         HashMap::from_iter(object_ids.iter().map(|object_id| (*object_id, context_id)))
     };
     let existing_table_id = TableId::new(1);
-    let initial_epoch = test_env
-        .manager
-        .get_current_version()
-        .await
-        .max_committed_epoch();
+    let initial_epoch = INVALID_EPOCH;
 
-    let commit_epoch = |epoch,
-                        sst: SstableInfo,
+    let commit_epoch =
+        |epoch, sst: SstableInfo, new_table_fragment_info, tables_to_commit: &[TableId]| {
+            let manager = &test_env.manager;
+            let tables_to_commit = tables_to_commit.iter().cloned().collect();
+            async move {
+                manager
+                    .commit_epoch(CommitEpochInfo {
+                        new_table_watermarks: Default::default(),
+                        sst_to_context: context_id_map(&[sst.object_id]),
+                        sstables: vec![LocalSstableInfo {
+                            table_stats: sst
+                                .table_ids
+                                .iter()
+                                .map(|&table_id| {
+                                    (
+                                        table_id,
+                                        TableStats {
+                                            total_compressed_size: 10,
+                                            ..Default::default()
+                                        },
+                                    )
+                                })
+                                .collect(),
+                            sst_info: sst,
+                            created_at: u64::MAX,
+                        }],
                         new_table_fragment_info,
-                        tables_to_commit: &[TableId],
-                        is_visible_table_committed_epoch| {
-        let manager = &test_env.manager;
-        let tables_to_commit = tables_to_commit.iter().cloned().collect();
-        async move {
-            manager
-                .commit_epoch(CommitEpochInfo {
-                    new_table_watermarks: Default::default(),
-                    sst_to_context: context_id_map(&[sst.object_id]),
-                    sstables: vec![LocalSstableInfo {
-                        table_stats: sst
-                            .table_ids
-                            .iter()
-                            .map(|&table_id| {
-                                (
-                                    table_id,
-                                    TableStats {
-                                        total_compressed_size: 10,
-                                        ..Default::default()
-                                    },
-                                )
-                            })
-                            .collect(),
-                        sst_info: sst,
-                    }],
-                    new_table_fragment_info,
-                    change_log_delta: Default::default(),
-                    committed_epoch: epoch,
-                    tables_to_commit,
-                    is_visible_table_committed_epoch,
-                })
-                .await
-                .unwrap();
-        }
-    };
+                        change_log_delta: Default::default(),
+                        committed_epoch: epoch,
+                        tables_to_commit,
+                    })
+                    .await
+                    .unwrap();
+            }
+        };
 
     let epoch1 = initial_epoch.next_epoch();
     let sst1_epoch1 = SstableInfo {
@@ -2637,7 +2638,6 @@ async fn test_commit_multi_epoch() {
             internal_table_ids: vec![existing_table_id],
         },
         &[existing_table_id],
-        true,
     )
     .await;
 
@@ -2650,11 +2650,8 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 1);
         let sub_level = &sub_levels[0];
-        assert_eq!(sub_level.sub_level_id, epoch1);
         assert_eq!(sub_level.table_infos.len(), 1);
         assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch1.object_id);
-
-        assert_eq!(version.visible_table_committed_epoch(), epoch1);
 
         let info = version
             .state_table_info
@@ -2686,7 +2683,6 @@ async fn test_commit_multi_epoch() {
         sst1_epoch2.clone(),
         NewTableFragmentInfo::None,
         &[existing_table_id],
-        true,
     )
     .await;
 
@@ -2699,15 +2695,11 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 2);
         let sub_level = &sub_levels[0];
-        assert_eq!(sub_level.sub_level_id, epoch1);
         assert_eq!(sub_level.table_infos.len(), 1);
         assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch1.object_id);
         let sub_level = &sub_levels[1];
-        assert_eq!(sub_level.sub_level_id, epoch2);
         assert_eq!(sub_level.table_infos.len(), 1);
         assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch2.object_id);
-
-        assert_eq!(version.visible_table_committed_epoch(), epoch2);
 
         let info = version
             .state_table_info
@@ -2739,7 +2731,6 @@ async fn test_commit_multi_epoch() {
             table_ids: HashSet::from_iter([new_table_id]),
         },
         &[new_table_id],
-        false,
     )
     .await;
 
@@ -2754,11 +2745,8 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &new_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 1);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
         assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
-
-        assert_eq!(version.visible_table_committed_epoch(), epoch2);
 
         let info = version.state_table_info.info().get(&new_table_id).unwrap();
         assert_eq!(info.committed_epoch, epoch1);
@@ -2781,7 +2769,6 @@ async fn test_commit_multi_epoch() {
         sst2_epoch2.clone(),
         NewTableFragmentInfo::None,
         &[new_table_id],
-        false,
     )
     .await;
 
@@ -2792,15 +2779,11 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &new_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 2);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
         assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
         let sub_level2 = &sub_levels[1];
-        assert_eq!(sub_level2.sub_level_id, epoch2);
         assert_eq!(sub_level2.table_infos.len(), 1);
         assert_eq!(sub_level2.table_infos[0].object_id, sst2_epoch2.object_id);
-
-        assert_eq!(version.visible_table_committed_epoch(), epoch2);
 
         let info = version.state_table_info.info().get(&new_table_id).unwrap();
         assert_eq!(info.committed_epoch, epoch2);
@@ -2823,7 +2806,6 @@ async fn test_commit_multi_epoch() {
         sst_epoch3.clone(),
         NewTableFragmentInfo::None,
         &[existing_table_id, new_table_id],
-        true,
     )
     .await;
 
@@ -2836,15 +2818,12 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &old_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 3);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
         assert_eq!(sub_level1.table_infos[0].object_id, sst1_epoch1.object_id);
         let sub_level2 = &sub_levels[1];
-        assert_eq!(sub_level2.sub_level_id, epoch2);
         assert_eq!(sub_level2.table_infos.len(), 1);
         assert_eq!(sub_level2.table_infos[0].object_id, sst1_epoch2.object_id);
         let sub_level3 = &sub_levels[2];
-        assert_eq!(sub_level3.sub_level_id, epoch3);
         assert_eq!(sub_level3.table_infos.len(), 1);
         assert_eq!(sub_level3.table_infos[0].object_id, sst_epoch3.object_id);
 
@@ -2852,19 +2831,14 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &new_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 3);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.sub_level_id, epoch1);
         assert_eq!(sub_level1.table_infos.len(), 1);
         assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
         let sub_level2 = &sub_levels[1];
-        assert_eq!(sub_level2.sub_level_id, epoch2);
         assert_eq!(sub_level2.table_infos.len(), 1);
         assert_eq!(sub_level2.table_infos[0].object_id, sst2_epoch2.object_id);
         let sub_level3 = &sub_levels[1];
-        assert_eq!(sub_level3.sub_level_id, epoch2);
         assert_eq!(sub_level3.table_infos.len(), 1);
         assert_eq!(sub_level3.table_infos[0].object_id, sst2_epoch2.object_id);
-
-        assert_eq!(version.visible_table_committed_epoch(), epoch3);
 
         let info = version.state_table_info.info().get(&new_table_id).unwrap();
         assert_eq!(info.committed_epoch, epoch3);
