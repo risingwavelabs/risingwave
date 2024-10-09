@@ -4645,6 +4645,17 @@ def section_nimtable_metrics(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_bytes(
+                    "Iceberg Write Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('iceberg_write_size')}) by (sink_name)",
+                            "write - {{sink_name}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
@@ -4831,5 +4842,6 @@ dashboard = Dashboard(
         *section_network_connection(panels),
         *section_iceberg_metrics(panels),
         *section_udf(panels),
+        *section_nimtable_metrics(panels),
     ],
 ).auto_panel_ids()

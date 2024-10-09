@@ -42,6 +42,8 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::metrics::LabelGuardedIntCounter;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -412,6 +414,7 @@ impl Sink for IcebergSink {
 pub struct IcebergWriter {
     inner_writer: IcebergWriterEnum,
     schema: SchemaRef,
+    iceberg_write_size: LabelGuardedIntCounter<3>,
 }
 
 enum IcebergWriterEnum {
@@ -479,6 +482,7 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
+                iceberg_write_size: writer_param.sink_metrics.iceberg_write_size.clone(),
             })
         } else {
             let partition_data_file_builder =
@@ -502,6 +506,7 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
+                iceberg_write_size: writer_param.sink_metrics.iceberg_write_size.clone(),
             })
         }
     }
@@ -559,6 +564,7 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
+                iceberg_write_size: writer_param.sink_metrics.iceberg_write_size.clone(),
             })
         } else {
             let partition_delta_builder =
@@ -582,6 +588,7 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
+                iceberg_write_size: writer_param.sink_metrics.iceberg_write_size.clone(),
             })
         }
     }
@@ -604,6 +611,7 @@ impl SinkWriter for IcebergWriter {
             return Ok(());
         }
 
+        let write_batch_size = chunk.estimated_heap_size();
         match &mut self.inner_writer {
             IcebergWriterEnum::AppendOnly(writer) => {
                 // filter chunk
@@ -634,6 +642,9 @@ impl SinkWriter for IcebergWriter {
                     .await?;
             }
         }
+
+        self.iceberg_write_size.inc_by(write_batch_size as _);
+
         Ok(())
     }
 
