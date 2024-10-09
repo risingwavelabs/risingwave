@@ -19,6 +19,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use thiserror_ext::AsReport;
 use tokio_postgres;
 
 use crate::error::BatchError;
@@ -139,7 +140,10 @@ impl PostgresQueryExecutor {
 
         tokio::spawn(async move {
             if let Err(e) = conn.await {
-                tracing::error!("postgres_query_executor: connection error: {:?}", e);
+                tracing::error!(
+                    "postgres_query_executor: connection error: {:?}",
+                    e.as_report()
+                );
             }
         });
 

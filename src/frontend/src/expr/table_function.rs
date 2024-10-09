@@ -20,6 +20,7 @@ use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{create_parquet_stream_builder, list_s3_directory};
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
+use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 use tokio_postgres;
 use tokio_postgres::types::Type as TokioPgType;
@@ -303,7 +304,10 @@ impl TableFunction {
 
                     tokio::spawn(async move {
                         if let Err(e) = connection.await {
-                            eprintln!("connection error: {}", e);
+                            tracing::error!(
+                                "postgres_query_executor: connection error: {:?}",
+                                e.as_report()
+                            );
                         }
                     });
 
