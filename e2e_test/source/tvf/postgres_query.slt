@@ -7,3 +7,13 @@ PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test ps
 query II
 select * from postgres_query('db', '5432', 'postgres', 'postgres', 'cdc_test', 'select * from test where id > 90;');
 ----
+91 91
+92 92
+93 93
+94 94
+95 95
+96 96
+97 97
+98 98
+99 99
+100 100
