@@ -228,13 +228,6 @@ impl TableFunction {
         })
     }
 
-    // CREATE SOURCE multiverse WITH (
-    // connector = 'postgres-cdc',
-    // hostname = '127.0.0.1',
-    // port = '5432',
-    // username = 'test',
-    // password = 'connector',
-    // database.name = 'test',
     pub fn new_postgres_query(args: Vec<ExprImpl>) -> RwResult<Self> {
         let evaled_args = {
             let mut evaled_args: Vec<String> = Vec::with_capacity(6);
