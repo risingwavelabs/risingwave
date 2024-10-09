@@ -26,6 +26,7 @@ use gcp_bigquery_client::model::query_request::QueryRequest;
 use gcp_bigquery_client::model::table::Table;
 use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
+use gcp_bigquery_client::yup_oauth2::ServiceAccountKey;
 use gcp_bigquery_client::Client;
 use google_cloud_bigquery::grpc::apiv1::conn_pool::{WriteConnectionManager, DOMAIN};
 use google_cloud_gax::conn::{ConnectionOptions, Environment};
@@ -54,7 +55,6 @@ use tonic::{async_trait, Response, Status};
 use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
-use yup_oauth2::ServiceAccountKey;
 
 use super::encoder::{ProtoEncoder, ProtoHeader, RowEncoder, SerTo};
 use super::log_store::{LogStoreReadItem, TruncateOffset};
