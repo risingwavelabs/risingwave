@@ -451,10 +451,6 @@ impl ScheduledBarriers {
         self.force_checkpoint = true;
     }
 
-    pub fn is_forced_next_checkpoint(&self) -> bool {
-        self.force_checkpoint
-    }
-
     /// Update the `checkpoint_frequency`
     pub fn set_checkpoint_frequency(&mut self, frequency: usize) {
         self.checkpoint_frequency = frequency;
