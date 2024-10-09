@@ -18,8 +18,6 @@ use std::sync::LazyLock;
 use risingwave_common::bail;
 use risingwave_common::catalog::{max_column_id, ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{DataType, StructType};
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType as PbDataType;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
@@ -114,13 +112,14 @@ pub fn gen_default_addition_col_name(
     connector_name: &str,
     additional_col_type: &str,
     inner_field_name: Option<&str>,
-    data_type: Option<&str>,
+    data_type: Option<&DataType>,
 ) -> String {
+    let legacy_dt_name = format!("{:?}", data_type).to_lowercase();
     let col_name = [
         Some(connector_name),
         Some(additional_col_type),
         inner_field_name,
-        data_type,
+        Some(&legacy_dt_name),
     ];
     col_name.iter().fold("_rw".to_string(), |name, ele| {
         if let Some(ele) = ele {
@@ -137,7 +136,7 @@ pub fn build_additional_column_desc(
     additional_col_type: &str,
     column_alias: Option<String>,
     inner_field_name: Option<&str>,
-    data_type: Option<&str>,
+    data_type: Option<&DataType>,
     reject_unknown_connector: bool,
     is_cdc_backfill_table: bool,
 ) -> ConnectorResult<ColumnDesc> {
@@ -348,42 +347,15 @@ fn build_header_catalog(
     column_id: ColumnId,
     col_name: &str,
     inner_field_name: Option<&str>,
-    data_type: Option<&str>,
+    data_type: Option<&DataType>,
 ) -> ColumnDesc {
     if let Some(inner) = inner_field_name {
-        let (data_type, pb_data_type) = {
-            if let Some(type_name) = data_type {
-                match type_name {
-                    "bytea" => (
-                        DataType::Bytea,
-                        PbDataType {
-                            type_name: TypeName::Bytea as i32,
-                            ..Default::default()
-                        },
-                    ),
-                    "varchar" => (
-                        DataType::Varchar,
-                        PbDataType {
-                            type_name: TypeName::Varchar as i32,
-                            ..Default::default()
-                        },
-                    ),
-                    _ => unreachable!(),
-                }
-            } else {
-                (
-                    DataType::Bytea,
-                    PbDataType {
-                        type_name: TypeName::Bytea as i32,
-                        ..Default::default()
-                    },
-                )
-            }
-        };
+        let data_type = data_type.unwrap_or(&DataType::Bytea);
+        let pb_data_type = data_type.to_protobuf();
         ColumnDesc::named_with_additional_column(
             col_name,
             column_id,
-            data_type,
+            data_type.clone(),
             AdditionalColumn {
                 column_type: Some(AdditionalColumnType::HeaderInner(AdditionalColumnHeader {
                     inner_field: inner.to_string(),
@@ -423,7 +395,12 @@ mod test {
             "_rw_kafka_header_inner"
         );
         assert_eq!(
-            gen_default_addition_col_name("kafka", "header", Some("inner"), Some("varchar")),
+            gen_default_addition_col_name(
+                "kafka",
+                "header",
+                Some("inner"),
+                Some(&DataType::Varchar)
+            ),
             "_rw_kafka_header_inner_varchar"
         );
     }
