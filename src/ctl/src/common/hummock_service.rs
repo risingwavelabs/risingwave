@@ -116,11 +116,8 @@ impl HummockServiceOpts {
         &mut self,
         meta_client: &MetaClient,
     ) -> Result<(MonitoredStateStore<HummockStorage>, Metrics)> {
-        let (heartbeat_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
-            meta_client.clone(),
-            Duration::from_millis(1000),
-            vec![],
-        );
+        let (heartbeat_handle, heartbeat_shutdown_sender) =
+            MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000));
         self.heartbeat_handle = Some(heartbeat_handle);
         self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);
 

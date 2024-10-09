@@ -21,6 +21,7 @@
 #![feature(is_sorted)]
 #![feature(let_chains)]
 #![feature(btree_cursors)]
+#![feature(strict_overflow_ops)]
 
 mod key_cmp;
 use std::cmp::Ordering;
@@ -176,13 +177,15 @@ pub struct SyncResult {
 pub struct LocalSstableInfo {
     pub sst_info: SstableInfo,
     pub table_stats: TableStatsMap,
+    pub created_at: u64,
 }
 
 impl LocalSstableInfo {
-    pub fn new(sst_info: SstableInfo, table_stats: TableStatsMap) -> Self {
+    pub fn new(sst_info: SstableInfo, table_stats: TableStatsMap, created_at: u64) -> Self {
         Self {
             sst_info,
             table_stats,
+            created_at,
         }
     }
 
@@ -190,6 +193,7 @@ impl LocalSstableInfo {
         Self {
             sst_info,
             table_stats: Default::default(),
+            created_at: u64::MAX,
         }
     }
 

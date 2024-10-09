@@ -148,7 +148,7 @@ pub struct FrontendOpts {
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
 
-    #[clap(long, hide = true, env = "RW_ENABLE_BARRIER_READ")]
+    #[clap(long, hide = true, env = "ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
 

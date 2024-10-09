@@ -819,11 +819,12 @@ impl StorageWriterClient {
     }
 
     fn bigquery_grpc_auth_config() -> google_cloud_auth::project::Config<'static> {
-        google_cloud_auth::project::Config {
-            audience: Some(google_cloud_bigquery::grpc::apiv1::conn_pool::AUDIENCE),
-            scopes: Some(&google_cloud_bigquery::grpc::apiv1::conn_pool::SCOPES),
-            sub: None,
-        }
+        let mut auth_config = google_cloud_auth::project::Config::default();
+        auth_config =
+            auth_config.with_audience(google_cloud_bigquery::grpc::apiv1::conn_pool::AUDIENCE);
+        auth_config =
+            auth_config.with_scopes(&google_cloud_bigquery::grpc::apiv1::conn_pool::SCOPES);
+        auth_config
     }
 }
 

@@ -878,7 +878,7 @@ impl SyncedData {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::future::{poll_fn, Future};
     use std::sync::Arc;
     use std::task::Poll;
@@ -888,8 +888,9 @@ mod tests {
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_pb::hummock::PbHummockVersion;
+    use risingwave_pb::hummock::{PbHummockVersion, StateTableInfo};
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::oneshot;
@@ -908,19 +909,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_clear_shared_buffer() {
-        let epoch0 = test_epoch(233);
         let mut next_version_id = 1;
-        let mut make_new_version = |max_committed_epoch| {
+        let mut make_new_version = || {
             let id = next_version_id;
             next_version_id += 1;
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
                 id,
-                max_committed_epoch,
                 ..Default::default()
             })
         };
 
-        let initial_version = PinnedVersion::new(make_new_version(epoch0), unbounded_channel().0);
+        let initial_version = PinnedVersion::new(make_new_version(), unbounded_channel().0);
 
         let (version_update_tx, version_update_rx) = unbounded_channel();
         let (refill_task_tx, mut refill_task_rx) = unbounded_channel();
@@ -961,8 +960,7 @@ mod tests {
         send_clear(initial_version.id()).await.unwrap();
 
         // test normal refill finish
-        let epoch1 = epoch0 + 1;
-        let version1 = make_new_version(epoch1);
+        let version1 = make_new_version();
         {
             version_update_tx
                 .send(HummockVersionUpdate::PinnedVersion(Box::new(
@@ -981,10 +979,8 @@ mod tests {
         }
 
         // test recovery with pending refill task
-        let epoch2 = epoch1 + 1;
-        let version2 = make_new_version(epoch2);
-        let epoch3 = epoch2 + 1;
-        let version3 = make_new_version(epoch3);
+        let version2 = make_new_version();
+        let version3 = make_new_version();
         {
             version_update_tx
                 .send(HummockVersionUpdate::PinnedVersion(Box::new(
@@ -1016,10 +1012,8 @@ mod tests {
         }
 
         // test recovery with later arriving version update
-        let epoch4 = epoch3 + 1;
-        let version4 = make_new_version(epoch4);
-        let epoch5 = epoch4 + 1;
-        let version5 = make_new_version(epoch5);
+        let version4 = make_new_version();
+        let version5 = make_new_version();
         {
             let mut rx = send_clear(version5.id);
             assert_pending(&mut rx).await;
@@ -1046,7 +1040,13 @@ mod tests {
         let initial_version = PinnedVersion::new(
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
                 id: 1,
-                max_committed_epoch: epoch0,
+                state_table_info: HashMap::from_iter([(
+                    TEST_TABLE_ID.table_id,
+                    StateTableInfo {
+                        committed_epoch: epoch0,
+                        compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                    },
+                )]),
                 ..Default::default()
             }),
             unbounded_channel().0,

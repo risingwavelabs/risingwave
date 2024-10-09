@@ -41,7 +41,6 @@ impl From<Model> for PbHummockVersionDelta {
         let ret = value.full_version_delta.to_protobuf();
         assert_eq!(value.id, ret.id as i64);
         assert_eq!(value.prev_id, ret.prev_id as i64);
-        assert_eq!(value.max_committed_epoch, ret.max_committed_epoch as i64);
         assert_eq!(value.trivial_move, ret.trivial_move);
         ret
     }

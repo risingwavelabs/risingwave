@@ -507,7 +507,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .max_committed_epoch_for_test()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -616,7 +617,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .max_committed_epoch_for_test()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -808,7 +810,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .max_committed_epoch_for_test()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -1039,7 +1042,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .max_committed_epoch_for_test()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -1236,7 +1240,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .max_committed_epoch_for_test()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -1375,7 +1380,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .max_committed_epoch_for_test()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -1714,7 +1720,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .max_committed_epoch_for_test()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
