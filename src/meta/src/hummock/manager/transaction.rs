@@ -159,7 +159,7 @@ impl<'a> HummockVersionTransaction<'a> {
                         .last()
                         .map(|level| level.sub_level_id + 1)
                 })
-                .unwrap_or(Epoch::now().0);
+                .unwrap_or_else(|| Epoch::now().0);
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
