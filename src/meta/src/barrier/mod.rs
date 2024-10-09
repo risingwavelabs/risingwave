@@ -1244,10 +1244,11 @@ impl GlobalBarrierManagerContext {
         notifiers.into_iter().for_each(|notifier| {
             notifier.notify_collected();
         });
-        try_join_all(finished_jobs.into_iter().map(|finished_job| {
-            let metadata_manager = &self.metadata_manager;
-            async move { finished_job.finish(metadata_manager).await }
-        }))
+        try_join_all(
+            finished_jobs
+                .into_iter()
+                .map(|finished_job| finished_job.finish(&self.metadata_manager)),
+        )
         .await?;
         let duration_sec = enqueue_time.stop_and_record();
         self.report_complete_event(duration_sec, &command_ctx);
