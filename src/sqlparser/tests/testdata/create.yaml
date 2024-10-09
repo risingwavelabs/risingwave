@@ -67,7 +67,7 @@
     CREATE TABLE t
       (raw BYTEA)
       INCLUDE header AS all_headers
-      INCLUDE header 'foo' AS foo_bytea
+      INCLUDE header 'foo' AS foo_bytea, -- tolerate extra comma due to previous bug #18800
       INCLUDE header 'foo' VARCHAR AS foo_str
     WITH (
       connector = 'kafka',
