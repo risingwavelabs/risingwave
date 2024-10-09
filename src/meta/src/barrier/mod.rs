@@ -484,11 +484,12 @@ impl CheckpointControl {
                 let finished_jobs = self
                     .create_mview_tracker
                     .apply_collected_command(&node, &self.hummock_version_stats);
-                if let Err(e) = self
-                    .context
-                    .clone()
-                    .complete_barrier(node, finished_jobs, HashMap::new())
-                    .await
+                if node.command_ctx.kind.is_checkpoint()
+                    && let Err(e) = self
+                        .context
+                        .clone()
+                        .complete_barrier(node, finished_jobs, HashMap::new())
+                        .await
                 {
                     error!(
                         prev_epoch,
@@ -568,7 +569,7 @@ enum CompletingCommand {
         // The join handle of a spawned task that completes the barrier.
         // The return value indicate whether there is some create streaming job command
         // that has finished but not checkpointed. If there is any, we will force checkpoint on the next barrier
-        join_handle: JoinHandle<MetaResult<Option<HummockVersionStats>>>,
+        join_handle: JoinHandle<MetaResult<HummockVersionStats>>,
     },
     CreatingStreamingJob {
         table_id: TableId,
@@ -1194,7 +1195,7 @@ impl GlobalBarrierManagerContext {
         node: EpochNode,
         mut finished_jobs: Vec<TrackingJob>,
         backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
-    ) -> MetaResult<Option<HummockVersionStats>> {
+    ) -> MetaResult<HummockVersionStats> {
         tracing::trace!(
             prev_epoch = node.command_ctx.prev_epoch.value().0,
             kind = ?node.command_ctx.kind,
@@ -1207,12 +1208,10 @@ impl GlobalBarrierManagerContext {
             state,
             ..
         } = node;
+        let epochs = must_match!(&command_ctx.kind, BarrierKind::Checkpoint(epochs) => epochs);
         assert!(state.node_to_collect.is_empty());
         assert!(state.creating_jobs_to_wait.is_empty());
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
-        if !state.finished_table_ids.is_empty() {
-            assert!(command_ctx.kind.is_checkpoint());
-        }
         finished_jobs.extend(state.finished_table_ids.into_values().map(|info| {
             TrackingJob::New(TrackingCommand {
                 info,
@@ -1220,14 +1219,18 @@ impl GlobalBarrierManagerContext {
             })
         }));
 
-        let result = self
-            .update_snapshot(
-                &command_ctx,
-                state.table_ids_to_commit,
+        let result: MetaResult<HummockVersionStats> = try {
+            let commit_info = collect_commit_epoch_info(
                 state.resps,
+                &command_ctx,
+                epochs,
                 backfill_pinned_log_epoch,
-            )
-            .await;
+                state.table_ids_to_commit,
+            );
+            self.hummock_manager.commit_epoch(commit_info).await?;
+            command_ctx.post_collect().await?;
+            self.hummock_manager.get_version_stats().await
+        };
 
         let version_stats = match result {
             Ok(version_stats) => version_stats,
@@ -1253,45 +1256,6 @@ impl GlobalBarrierManagerContext {
             .last_committed_barrier_time
             .set(command_ctx.curr_epoch.value().as_unix_secs() as i64);
         Ok(version_stats)
-    }
-
-    async fn update_snapshot(
-        &self,
-        command_ctx: &CommandContext,
-        tables_to_commit: HashSet<TableId>,
-        resps: Vec<BarrierCompleteResponse>,
-        backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
-    ) -> MetaResult<Option<HummockVersionStats>> {
-        {
-            {
-                match &command_ctx.kind {
-                    BarrierKind::Initial => {}
-                    BarrierKind::Checkpoint(epochs) => {
-                        let commit_info = collect_commit_epoch_info(
-                            resps,
-                            command_ctx,
-                            epochs,
-                            backfill_pinned_log_epoch,
-                            tables_to_commit,
-                        );
-                        self.hummock_manager.commit_epoch(commit_info).await?;
-                    }
-                    BarrierKind::Barrier => {
-                        // if we collect a barrier(checkpoint = false),
-                        // we need to ensure that command is Plain and the notifier's checkpoint is
-                        // false
-                        assert!(!command_ctx.command.need_checkpoint());
-                    }
-                }
-
-                command_ctx.post_collect().await?;
-                Ok(if command_ctx.kind.is_checkpoint() {
-                    Some(self.hummock_manager.get_version_stats().await)
-                } else {
-                    None
-                })
-            }
-        }
     }
 
     pub fn hummock_manager(&self) -> &HummockManagerRef {
@@ -1392,18 +1356,26 @@ impl CheckpointControl {
     pub(super) async fn next_completed_barrier(
         &mut self,
     ) -> MetaResult<Option<BarrierCompleteOutput>> {
-        if matches!(&self.completing_command, CompletingCommand::None) {
-            // If there is no completing barrier, try to start completing the earliest barrier if
-            // it has been collected.
-            if let Some((_, EpochNode { state, .. })) = self.command_ctx_queue.first_key_value()
-                && !state.is_inflight()
+        // If there is no completing barrier, try to start completing the earliest barrier if
+        // it has been collected.
+        while let CompletingCommand::None = &self.completing_command
+            && let Some((_, EpochNode { state, .. })) = self.command_ctx_queue.first_key_value()
+            && !state.is_inflight()
+        {
             {
                 let (_, node) = self.command_ctx_queue.pop_first().expect("non-empty");
                 assert!(node.state.creating_jobs_to_wait.is_empty());
-                let table_ids_to_finish = node.state.finished_table_ids.keys().cloned().collect();
                 let finished_jobs = self
                     .create_mview_tracker
                     .apply_collected_command(&node, &self.hummock_version_stats);
+                if !node.command_ctx.kind.is_checkpoint() {
+                    assert!(finished_jobs.is_empty());
+                    node.notifiers.into_iter().for_each(|notifier| {
+                        notifier.notify_collected();
+                    });
+                    continue;
+                }
+                let table_ids_to_finish = node.state.finished_table_ids.keys().cloned().collect();
                 let command_ctx = node.command_ctx.clone();
                 let join_handle = tokio::spawn(self.context.clone().complete_barrier(
                     node,
@@ -1424,7 +1396,11 @@ impl CheckpointControl {
                     join_handle,
                     table_ids_to_finish,
                 };
-            } else {
+            }
+        }
+
+        if matches!(&self.completing_command, CompletingCommand::None) {
+            {
                 for (table_id, job) in &mut self.creating_streaming_job_controls {
                     let (upstream_epochs_to_notify, commit_info) = job.start_completing();
                     for upstream_epoch in upstream_epochs_to_notify {
@@ -1482,9 +1458,7 @@ impl CheckpointControl {
                 let completed_command =
                     replace(&mut self.completing_command, next_completing_command_status);
                 join_result.map(move | version_stats| {
-                        if let Some(new_version_stats) = version_stats {
-                            self.hummock_version_stats = new_version_stats;
-                        }
+                        self.hummock_version_stats = version_stats;
                         must_match!(
                             completed_command,
                             CompletingCommand::GlobalStreamingGraph { command_ctx, table_ids_to_finish, require_next_checkpoint, .. } => {
