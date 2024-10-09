@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use risingwave_common::config::{
@@ -296,6 +297,8 @@ pub struct MetaOpts {
     // Cluster limits
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
     pub actor_cnt_per_worker_parallelism_soft_limit: usize,
+
+    pub license_key_path: Option<PathBuf>,
 }
 
 impl MetaOpts {
@@ -362,6 +365,7 @@ impl MetaOpts {
             table_info_statistic_history_times: 240,
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
+            license_key_path: None,
         }
     }
 }
@@ -523,6 +527,7 @@ impl MetaSrvEnv {
                 }
             }
         };
+
         Ok(env)
     }
 
