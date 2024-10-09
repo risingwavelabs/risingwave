@@ -45,7 +45,7 @@ impl BatchPostgresQuery {
     pub fn clone_with_dist(&self) -> Self {
         let base = self
             .base
-            .clone_with_new_distribution(Distribution::SomeShard);
+            .clone_with_new_distribution(Distribution::Single);
         Self {
             base,
             core: self.core.clone(),
