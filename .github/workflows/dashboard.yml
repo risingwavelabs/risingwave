@@ -2,10 +2,10 @@ name: Dashboard
 on:
   push:
     branches: [main]
-    paths: [dashboard/**, proto/**]
+#    paths: [dashboard/**, proto/**]
   pull_request:
     branches: [main]
-    paths: [dashboard/**, proto/**]
+#    paths: [dashboard/**, proto/**]
   workflow_dispatch:
 jobs:
   dashboard-ui-deploy:
