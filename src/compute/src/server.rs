@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use risingwave_batch::monitor::{
     GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_SPILL_METRICS,
+    GLOBAL_NIMTABLE_READ_METRICS,
 };
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::spill::spill_op::SpillOp;
@@ -347,6 +348,9 @@ pub async fn compute_node_serve(
     let batch_client_pool = Arc::new(ComputeClientPool::new(
         config.batch_exchange_connection_pool_size(),
     ));
+
+    let nimtable_read_metrics = Arc::new(GLOBAL_NIMTABLE_READ_METRICS.clone());
+
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
         advertise_addr.clone(),
@@ -358,6 +362,7 @@ pub async fn compute_node_serve(
         dml_mgr.clone(),
         source_metrics.clone(),
         batch_spill_metrics.clone(),
+        nimtable_read_metrics.clone(),
         config.server.metrics_level,
     );
 

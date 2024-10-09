@@ -4637,11 +4637,11 @@ def section_nimtable_metrics(outer_panels):
             [
                 panels.timeseries_bytes(
                     "Iceberg Table Storage Size",
-                    "iceberg table storage size group by database, schema, source",
+                    "iceberg table storage size group by table",
                     [
                         panels.target(
-                            f"sum({metric('nimtable_storage_data_file_size')}) by (database, schema, source)",
-                            "storage size {{database}} {{schema}} {{source}}",
+                            f"sum({metric('nimtable_storage_data_file_size')}) by (table)",
+                            "storage size @ {{table}}",
                         ),
                     ],
                 ),
@@ -4651,8 +4651,29 @@ def section_nimtable_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum({metric('iceberg_write_size')}) by (sink_name)",
-                            "write - {{sink_name}}",
+                            f"sum({metric('iceberg_write_bytes')}) by (sink_name)",
+                            "write @ {{sink_name}}",
+                        ),
+
+                        panels.target(
+                            f"sum({metric('iceberg_write_bytes')})",
+                            "total write",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Iceberg Read Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('nimtable_read_bytes')}) by (table_name)",
+                            "read @ {{table_name}}",
+                        ),
+
+                        panels.target(
+                            f"sum({metric('nimtable_read_bytes')})",
+                            "total read",
                         ),
                     ],
                 ),

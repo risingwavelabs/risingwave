@@ -22,7 +22,9 @@ use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics};
+use crate::monitor::{
+    BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics, NimtableReadMetrics,
+};
 use crate::task::BatchManager;
 
 /// The global environment for task execution.
@@ -59,6 +61,8 @@ pub struct BatchEnvironment {
     /// Batch spill metrics
     spill_metrics: Arc<BatchSpillMetrics>,
 
+    nimtable_read_metrics: Arc<NimtableReadMetrics>,
+
     metric_level: MetricLevel,
 }
 
@@ -75,6 +79,7 @@ impl BatchEnvironment {
         dml_manager: DmlManagerRef,
         source_metrics: Arc<SourceMetrics>,
         spill_metrics: Arc<BatchSpillMetrics>,
+        nimtable_read_metrics: Arc<NimtableReadMetrics>,
         metric_level: MetricLevel,
     ) -> Self {
         BatchEnvironment {
@@ -88,6 +93,7 @@ impl BatchEnvironment {
             dml_manager,
             source_metrics,
             spill_metrics,
+            nimtable_read_metrics,
             metric_level,
         }
     }
@@ -116,6 +122,7 @@ impl BatchEnvironment {
             source_metrics: Arc::new(SourceMetrics::default()),
             executor_metrics: BatchExecutorMetrics::for_test(),
             spill_metrics: BatchSpillMetrics::for_test(),
+            nimtable_read_metrics: NimtableReadMetrics::for_test(),
             metric_level: MetricLevel::Debug,
         }
     }
@@ -162,6 +169,10 @@ impl BatchEnvironment {
 
     pub fn spill_metrics(&self) -> Arc<BatchSpillMetrics> {
         self.spill_metrics.clone()
+    }
+
+    pub fn nimtable_read_metrics(&self) -> Arc<NimtableReadMetrics> {
+        self.nimtable_read_metrics.clone()
     }
 
     pub fn metric_level(&self) -> MetricLevel {

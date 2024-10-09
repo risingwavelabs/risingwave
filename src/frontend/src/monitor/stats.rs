@@ -273,7 +273,7 @@ impl NimtableMetrics {
         let nimtable_storage_data_file_size = register_guarded_int_gauge_vec_with_registry!(
             "nimtable_storage_data_file_size",
             "Total size of nimtable storage data file",
-            &["database", "schema", "source"],
+            &["database", "schema", "table"],
             registry
         )
         .unwrap();

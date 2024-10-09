@@ -19,7 +19,7 @@ use prometheus::{
     histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
     Histogram, IntGauge, Registry,
 };
-use risingwave_common::metrics::TrAdderGauge;
+use risingwave_common::metrics::{LabelGuardedIntCounterVec, TrAdderGauge};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 /// Metrics for batch executor.
@@ -70,16 +70,19 @@ pub type BatchMetrics = Arc<BatchMetricsInner>;
 pub struct BatchMetricsInner {
     batch_manager_metrics: Arc<BatchManagerMetrics>,
     executor_metrics: Arc<BatchExecutorMetrics>,
+    nimtable_read_metrics: Arc<NimtableReadMetrics>,
 }
 
 impl BatchMetricsInner {
     pub fn new(
         batch_manager_metrics: Arc<BatchManagerMetrics>,
         executor_metrics: Arc<BatchExecutorMetrics>,
+        nimtable_read_metrics: Arc<NimtableReadMetrics>,
     ) -> Self {
         Self {
             batch_manager_metrics,
             executor_metrics,
+            nimtable_read_metrics,
         }
     }
 
@@ -91,11 +94,16 @@ impl BatchMetricsInner {
         &self.batch_manager_metrics
     }
 
+    pub fn nimtable_read_metrics(&self) -> &NimtableReadMetrics {
+        &self.nimtable_read_metrics
+    }
+
     #[cfg(test)]
     pub fn for_test() -> BatchMetrics {
         Arc::new(Self {
             batch_manager_metrics: BatchManagerMetrics::for_test(),
             executor_metrics: BatchExecutorMetrics::for_test(),
+            nimtable_read_metrics: NimtableReadMetrics::for_test(),
         })
     }
 }
@@ -176,3 +184,31 @@ impl BatchSpillMetrics {
         Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone())
     }
 }
+
+#[derive(Clone)]
+pub struct NimtableReadMetrics {
+    pub nimtable_read_bytes: LabelGuardedIntCounterVec<1>,
+}
+
+impl NimtableReadMetrics {
+    fn new(registry: &Registry) -> Self {
+        let nimtable_read_bytes = register_guarded_int_counter_vec_with_registry!(
+            "nimtable_read_bytes",
+            "Total size of nimtable read requests",
+            &["table_name"],
+            registry
+        )
+        .unwrap();
+
+        Self {
+            nimtable_read_bytes,
+        }
+    }
+
+    pub fn for_test() -> Arc<Self> {
+        Arc::new(GLOBAL_NIMTABLE_READ_METRICS.clone())
+    }
+}
+
+pub static GLOBAL_NIMTABLE_READ_METRICS: LazyLock<NimtableReadMetrics> =
+    LazyLock::new(|| NimtableReadMetrics::new(&GLOBAL_METRICS_REGISTRY));

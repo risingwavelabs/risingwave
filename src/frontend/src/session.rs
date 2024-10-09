@@ -1734,7 +1734,11 @@ async fn report_iceberg_metrics(
 
             metrics
                 .nimtable_storage_data_file_size
-                .with_guarded_label_values(&[&database.name, &schema_name, &source.name])
+                .with_guarded_label_values(&[
+                    &database.name,
+                    &schema_name,
+                    &table.identifier().name(),
+                ])
                 .set(data_files_size as _);
         } else {
             unreachable!()

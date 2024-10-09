@@ -187,7 +187,7 @@ pub struct StreamingMetrics {
     iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
     iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
     iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
-    iceberg_write_size: LabelGuardedIntCounterVec<3>,
+    iceberg_write_bytes: LabelGuardedIntCounterVec<3>,
 
     // Memory management
     pub lru_runtime_loop_count: IntCounter,
@@ -1114,8 +1114,8 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let iceberg_write_size = register_guarded_int_counter_vec_with_registry!(
-            "iceberg_write_size",
+        let iceberg_write_bytes = register_guarded_int_counter_vec_with_registry!(
+            "iceberg_write_bytes",
             "The write size of iceberg writer",
             &["actor_id", "sink_id", "sink_name"],
             registry
@@ -1217,7 +1217,7 @@ impl StreamingMetrics {
             iceberg_rolling_unflushed_data_file,
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
-            iceberg_write_size,
+            iceberg_write_bytes,
             lru_runtime_loop_count,
             lru_latest_sequence,
             lru_watermark_sequence,
@@ -1299,9 +1299,11 @@ impl StreamingMetrics {
         let iceberg_partition_num = self
             .iceberg_partition_num
             .with_guarded_label_values(&label_list);
-        let iceberg_write_size =
-            self.iceberg_write_size
-                .with_guarded_label_values(&[connector, sink_id_str, sink_name]);
+        let iceberg_write_bytes = self.iceberg_write_bytes.with_guarded_label_values(&[
+            connector,
+            sink_id_str,
+            sink_name,
+        ]);
 
         SinkMetrics {
             sink_commit_duration_metrics,
@@ -1317,7 +1319,7 @@ impl StreamingMetrics {
             iceberg_rolling_unflushed_data_file,
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
-            iceberg_write_size,
+            iceberg_write_bytes,
         }
     }
 

@@ -414,7 +414,7 @@ impl Sink for IcebergSink {
 pub struct IcebergWriter {
     inner_writer: IcebergWriterEnum,
     schema: SchemaRef,
-    iceberg_write_size: LabelGuardedIntCounter<3>,
+    iceberg_write_bytes: LabelGuardedIntCounter<3>,
 }
 
 enum IcebergWriterEnum {
@@ -482,7 +482,7 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
-                iceberg_write_size: writer_param.sink_metrics.iceberg_write_size.clone(),
+                iceberg_write_bytes: writer_param.sink_metrics.iceberg_write_bytes.clone(),
             })
         } else {
             let partition_data_file_builder =
@@ -506,7 +506,7 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
-                iceberg_write_size: writer_param.sink_metrics.iceberg_write_size.clone(),
+                iceberg_write_bytes: writer_param.sink_metrics.iceberg_write_bytes.clone(),
             })
         }
     }
@@ -564,7 +564,7 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
-                iceberg_write_size: writer_param.sink_metrics.iceberg_write_size.clone(),
+                iceberg_write_bytes: writer_param.sink_metrics.iceberg_write_bytes.clone(),
             })
         } else {
             let partition_delta_builder =
@@ -588,7 +588,7 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
-                iceberg_write_size: writer_param.sink_metrics.iceberg_write_size.clone(),
+                iceberg_write_bytes: writer_param.sink_metrics.iceberg_write_bytes.clone(),
             })
         }
     }
@@ -643,7 +643,7 @@ impl SinkWriter for IcebergWriter {
             }
         }
 
-        self.iceberg_write_size.inc_by(write_batch_size as _);
+        self.iceberg_write_bytes.inc_by(write_batch_size as _);
 
         Ok(())
     }

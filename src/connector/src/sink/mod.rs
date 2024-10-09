@@ -303,7 +303,7 @@ pub struct SinkMetrics {
     pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<3>,
     pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<3>,
     pub iceberg_partition_num: LabelGuardedIntGauge<3>,
-    pub iceberg_write_size: LabelGuardedIntCounter<3>,
+    pub iceberg_write_bytes: LabelGuardedIntCounter<3>,
 }
 
 impl SinkMetrics {
@@ -323,7 +323,7 @@ impl SinkMetrics {
             iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
             iceberg_position_delete_cache_num: LabelGuardedIntGauge::test_int_gauge(),
             iceberg_partition_num: LabelGuardedIntGauge::test_int_gauge(),
-            iceberg_write_size: LabelGuardedIntCounter::test_int_counter(),
+            iceberg_write_bytes: LabelGuardedIntCounter::test_int_counter(),
         }
     }
 }

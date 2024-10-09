@@ -28,6 +28,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_connector::WithOptionsSecResolved;
@@ -36,6 +37,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::BatchError;
 use crate::executor::{DataChunk, Executor};
+use crate::monitor::BatchMetrics;
 use crate::task::BatchTaskContext;
 
 static POSITION_DELETE_FILE_FILE_PATH_INDEX: usize = 0;
@@ -51,6 +53,8 @@ pub struct IcebergScanExecutor {
     batch_size: usize,
     schema: Schema,
     identity: String,
+
+    metrics: Option<BatchMetrics>,
 }
 
 impl Executor for IcebergScanExecutor {
@@ -78,6 +82,7 @@ impl IcebergScanExecutor {
         batch_size: usize,
         schema: Schema,
         identity: String,
+        metrics: Option<BatchMetrics>,
     ) -> Self {
         Self {
             iceberg_config,
@@ -89,6 +94,7 @@ impl IcebergScanExecutor {
             batch_size,
             schema,
             identity,
+            metrics,
         }
     }
 
@@ -145,6 +151,13 @@ impl IcebergScanExecutor {
                 // equality delete
                 let chunk = equality_delete_filter.filter(chunk, data_sequence_number)?;
                 assert_eq!(chunk.data_types(), data_types);
+                self.metrics.as_ref().map(|metrics| {
+                    metrics
+                        .nimtable_read_metrics()
+                        .nimtable_read_bytes
+                        .with_guarded_label_values(&[table.identifier().name()])
+                        .inc_by(chunk.estimated_heap_size() as _);
+                });
                 yield chunk;
             }
             position_delete_filter.remove_file_path(&data_file_path);
@@ -195,6 +208,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             })
             .collect();
         let schema = Schema::new(fields);
+        let metrics = source.context().batch_metrics();
 
         if let ConnectorProperties::Iceberg(iceberg_properties) = config
             && let SplitImpl::Iceberg(split) = &split_list[0]
@@ -219,6 +233,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 source.context.get_config().developer.chunk_size,
                 schema,
                 source.plan_node().get_identity().clone(),
+                metrics,
             )))
         } else {
             unreachable!()
