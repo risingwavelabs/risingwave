@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeConfig, S3FifoConfig};
+use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -893,7 +893,7 @@ pub struct FileCacheConfig {
     pub recover_mode: RecoverMode,
 
     #[serde(default = "default::file_cache::runtime_config")]
-    pub runtime_config: RuntimeConfig,
+    pub runtime_config: RuntimeOptions,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1709,7 +1709,7 @@ pub mod default {
     }
 
     pub mod file_cache {
-        use foyer::{Compression, RecoverMode, RuntimeConfig, TokioRuntimeConfig};
+        use foyer::{Compression, RecoverMode, RuntimeOptions, TokioRuntimeOptions};
 
         pub fn dir() -> String {
             "".to_string()
@@ -1755,8 +1755,8 @@ pub mod default {
             RecoverMode::None
         }
 
-        pub fn runtime_config() -> RuntimeConfig {
-            RuntimeConfig::Unified(TokioRuntimeConfig::default())
+        pub fn runtime_config() -> RuntimeOptions {
+            RuntimeOptions::Unified(TokioRuntimeOptions::default())
         }
     }
 

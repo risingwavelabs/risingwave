@@ -4962,6 +4962,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f81ec6369c545a7d40e4589b5597581fa1c441fe1cce96dd1de43159910a36a2"
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4987,9 +4993,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.11.5"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2de727a58f28ad9c5ff9952979d2392851b5917785ca657e07277890109cd3a0"
+checksum = "f7d369127d4362f683e2a0e56c307b555a3bdad6fe40dedb4e7a3821ac467805"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5005,16 +5011,16 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.9.5"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be6577040f1b773e4a606180638ec48f5528d3d843d73092c06b5a8876bc4576"
+checksum = "e857d63c66248e04724b0c7c115c70272758fd404b138fa690c3393dd6900596"
 dependencies = [
  "bytes",
  "cfg-if",
  "crossbeam",
  "fastrace",
  "futures",
- "hashbrown 0.14.3",
+ "hashbrown 0.15.0",
  "itertools 0.13.0",
  "madsim-tokio",
  "metrics",
@@ -5025,9 +5031,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.9.5"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01dbfd6763227809019a1dc01c98b6a78949c63d3a204d0a6f8e0325f077ab5c"
+checksum = "e0ad1aa484e1be861d8b52cb7bffac740f0cfcb4e737cbb113001a8be9c9e310"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5035,9 +5041,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.7.5"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02c59933e075daa88363e228475ce4fa9098689b9e13a26442666a3a3142da8d"
+checksum = "7b4dcc4b11bea8f8a5b6e920e324e92b7024e8d3f529e6ff81626f0d7610bc4d"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -5046,7 +5052,7 @@ dependencies = [
  "foyer-common",
  "foyer-intrusive",
  "futures",
- "hashbrown 0.14.3",
+ "hashbrown 0.15.0",
  "itertools 0.13.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
@@ -5057,9 +5063,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.10.5"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6976958440e7fee57bd25f6c04df0759484c18a233f00740f6c2c5a47b939d90"
+checksum = "aa74349f658206beac7c1a3f3b4868925bac55f0ae431579fe097835a998f36d"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -5078,11 +5084,14 @@ dependencies = [
  "foyer-memory",
  "fs4",
  "futures",
+ "hashbrown 0.15.0",
  "itertools 0.13.0",
  "libc",
  "lz4",
  "madsim-tokio",
+ "ordered_hash_map",
  "parking_lot 0.12.1",
+ "paste",
  "pin-project",
  "rand",
  "serde",
@@ -5785,6 +5794,11 @@ name = "hashbrown"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e087f84d4f86bf4b218b927129862374b72199ae7d8657835f1e89000eea4fb"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
+]
 
 [[package]]
 name = "hashlink"
@@ -8366,6 +8380,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ordered_hash_map"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab0e5f22bf6dd04abd854a8874247813a8fa2c8c1260eba6fbb150270ce7c176"
+dependencies = [
+ "hashbrown 0.13.2",
+]
+
+[[package]]
 name = "os_pipe"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10337,7 +10360,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "futures-util",
- "hashbrown 0.14.3",
+ "hashbrown 0.15.0",
  "hytra",
  "iceberg",
  "itertools 0.13.0",
@@ -10516,7 +10539,7 @@ dependencies = [
  "foyer",
  "futures",
  "governor",
- "hashbrown 0.14.3",
+ "hashbrown 0.15.0",
  "hex",
  "http 1.1.0",
  "http-body 0.4.5",
