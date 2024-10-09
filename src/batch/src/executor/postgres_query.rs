@@ -135,7 +135,14 @@ impl PostgresQueryExecutor {
             "host={} port={} user={} password={} dbname={}",
             self.host, self.port, self.username, self.password, self.database
         );
-        let (client, _conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await?;
+        let (client, conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await?;
+
+        tokio::spawn(async move {
+            if let Err(e) = conn.await {
+                tracing::error!("postgres_query_executor: connection error: {:?}", e);
+            }
+        });
+
         // TODO(kwannoel): Use pagination using CURSOR.
         let rows = client.query(&self.query, &[]).await?;
         let mut builder = DataChunkBuilder::new(self.schema.data_types(), 1024);

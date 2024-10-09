@@ -28,6 +28,14 @@ use super::{infer_type, Expr, ExprImpl, ExprRewriter, Literal, RwResult};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::error::ErrorCode::BindError;
 
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .thread_name("rw-binder-ext-query")
+        .enable_all()
+        .build()
+        .expect("failed to build external system querying runtime")
+});
+
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
 ///
@@ -143,14 +151,6 @@ impl TableFunction {
 
             #[cfg(not(madsim))]
             {
-                static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-                    tokio::runtime::Builder::new_multi_thread()
-                        .thread_name("rw-file-scan")
-                        .enable_all()
-                        .build()
-                        .expect("failed to build file-scan runtime")
-                });
-
                 let files = if eval_args[5].ends_with('/') {
                     let files = tokio::task::block_in_place(|| {
                         RUNTIME.block_on(async {
@@ -292,17 +292,9 @@ impl TableFunction {
 
         #[cfg(not(madsim))]
         {
-            static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-                tokio::runtime::Builder::new_multi_thread()
-                    .thread_name("rw-postgres-binder-query")
-                    .enable_all()
-                    .build()
-                    .expect("failed to build postgres-query runtime")
-            });
-
             let schema = tokio::task::block_in_place(|| {
                 RUNTIME.block_on(async {
-                    let (client, _conn) = tokio_postgres::connect(
+                    let (client, connection) = tokio_postgres::connect(
                         format!(
                             "host={} port={} user={} password={} dbname={}",
                             evaled_args[0],
@@ -315,6 +307,12 @@ impl TableFunction {
                         tokio_postgres::NoTls,
                     )
                     .await?;
+
+                    tokio::spawn(async move {
+                        if let Err(e) = connection.await {
+                            eprintln!("connection error: {}", e);
+                        }
+                    });
 
                     let statement = client.prepare(evaled_args[5].as_str()).await?;
 
