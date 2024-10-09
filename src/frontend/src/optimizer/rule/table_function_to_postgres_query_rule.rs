@@ -23,7 +23,7 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalPostgresQuery, LogicalTableFunction};
 use crate::optimizer::PlanRef;
 
-/// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalPostgresQuery`
+/// Transform a special `TableFunction` (with `POSTGRES_QUERY` table function type) into a `LogicalPostgresQuery`
 pub struct TableFunctionToPostgresQueryRule {}
 impl Rule for TableFunctionToPostgresQueryRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
