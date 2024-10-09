@@ -451,9 +451,37 @@ public class PostgresStreamingChangeEventSource
 
             boolean receivedMessage =
                     stream.readPending(
-                            message -> {
-                                final Lsn lsn = stream.lastReceivedLsn();
-                                resumeLsn.set(walPosition.resumeFromLsn(lsn, message).orElse(null));
+                            /* patched code */
+                            new ReplicationStream.ReplicationMessageProcessor() {
+                                @Override
+                                public void process(ReplicationMessage message)
+                                        throws SQLException, InterruptedException {
+                                    final Lsn lsn = stream.lastReceivedLsn();
+                                    resumeLsn.set(
+                                            walPosition.resumeFromLsn(lsn, message).orElse(null));
+                                }
+
+                                @Override
+                                public EventDispatcher<PostgresPartition, TableId>
+                                        getEventDispatcher() {
+                                    return dispatcher;
+                                }
+
+                                @Override
+                                public PostgresPartition getPartition() {
+                                    return partition;
+                                }
+
+                                @Override
+                                public OffsetContext getOffsetContext() {
+                                    return offsetContext;
+                                }
+
+                                @Override
+                                public boolean includeSchemaChange() {
+                                    return connectorConfig.includeSchemaChangeRecords();
+                                }
+                                /* patched code */
                             });
 
             if (receivedMessage) {

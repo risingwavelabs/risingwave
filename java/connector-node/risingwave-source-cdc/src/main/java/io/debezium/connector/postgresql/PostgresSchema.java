@@ -344,8 +344,9 @@ public class PostgresSchema extends RelationalDatabaseSchema
         return false;
     }
 
+    // patched: PostgreSQL don't need to store history, so we always return true
     @Override
     public boolean historyExists() {
-        return false;
+        return true;
     }
 }
