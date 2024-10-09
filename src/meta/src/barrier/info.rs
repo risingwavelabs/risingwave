@@ -59,7 +59,9 @@ impl InflightGraphInfo {
             let mut map: HashMap<_, HashSet<_>> = HashMap::new();
             for info in fragment_infos.values() {
                 for (actor_id, worker_id) in &info.actors {
-                    map.entry(*worker_id).or_default().insert(*actor_id);
+                    map.entry(*worker_id as WorkerId)
+                        .or_default()
+                        .insert(*actor_id as ActorId);
                 }
             }
             map
@@ -71,7 +73,7 @@ impl InflightGraphInfo {
                 fragment
                     .actors
                     .iter()
-                    .map(|(actor_id, workder_id)| (*actor_id, *workder_id))
+                    .map(|(actor_id, worker_id)| (*actor_id as ActorId, *worker_id as WorkerId))
             })
             .collect();
 
@@ -80,6 +82,10 @@ impl InflightGraphInfo {
             actor_location_map,
             fragment_infos,
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fragment_infos.is_empty()
     }
 
     /// Update worker nodes snapshot. We need to support incremental updates for it in the future.
@@ -133,8 +139,8 @@ impl InflightGraphInfo {
                             .expect("should exist");
                         let actors = &mut info.actors;
                         for (actor_id, node_id) in &new_actors {
-                            assert!(to_add.insert(*actor_id, *node_id).is_none());
-                            assert!(actors.insert(*actor_id, *node_id).is_none());
+                            assert!(to_add.insert(*actor_id as _, *node_id as _).is_none());
+                            assert!(actors.insert(*actor_id as _, *node_id as _).is_none());
                         }
                     }
                     CommandFragmentChanges::RemoveFragment => {}
@@ -142,11 +148,16 @@ impl InflightGraphInfo {
             }
             for (actor_id, node_id) in to_add {
                 assert!(
-                    self.actor_map.entry(node_id).or_default().insert(actor_id),
+                    self.actor_map
+                        .entry(node_id as _)
+                        .or_default()
+                        .insert(actor_id as _),
                     "duplicate actor in command changes"
                 );
                 assert!(
-                    self.actor_location_map.insert(actor_id, node_id).is_none(),
+                    self.actor_location_map
+                        .insert(actor_id as _, node_id as _)
+                        .is_none(),
                     "duplicate actor in command changes"
                 );
             }
@@ -193,7 +204,7 @@ impl InflightGraphInfo {
                             .expect("should exist");
                         for actor_id in to_remove {
                             assert!(all_to_remove.insert(*actor_id));
-                            assert!(info.actors.remove(actor_id).is_some());
+                            assert!(info.actors.remove(&(*actor_id as _)).is_some());
                         }
                     }
                     CommandFragmentChanges::RemoveFragment => {
@@ -202,7 +213,7 @@ impl InflightGraphInfo {
                             .remove(fragment_id)
                             .expect("should exist");
                         for (actor_id, _) in info.actors {
-                            assert!(all_to_remove.insert(actor_id));
+                            assert!(all_to_remove.insert(actor_id as _));
                         }
                     }
                 }
@@ -251,8 +262,8 @@ impl InflightGraphInfo {
             info.actors
                 .iter()
                 .filter_map(move |(actor_id, actor_node_id)| {
-                    if *actor_node_id == node_id {
-                        Some(*actor_id)
+                    if (*actor_node_id as WorkerId) == node_id {
+                        Some(*actor_id as _)
                     } else {
                         None
                     }
@@ -261,9 +272,12 @@ impl InflightGraphInfo {
     }
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
-        self.fragment_infos
-            .values()
-            .flat_map(|info| info.state_table_ids.iter().cloned())
+        self.fragment_infos.values().flat_map(|info| {
+            info.state_table_ids
+                .iter()
+                .cloned()
+                .map(|id| TableId::new(id as _))
+        })
     }
 
     pub fn worker_ids(&self) -> impl Iterator<Item = WorkerId> + '_ {

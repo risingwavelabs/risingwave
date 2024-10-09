@@ -414,11 +414,10 @@ mod tests {
 
     use super::*;
     use crate::manager::WorkerKey;
-    use crate::storage::{MemStore, MetaStoreBoxExt};
 
     #[tokio::test]
     async fn test_multiple_subscribers_one_worker() {
-        let mgr = NotificationManager::new(SqlMetaStore::for_test()).await;
+        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
         let worker_key1 = WorkerKey(HostAddress {
             host: "a".to_string(),
             port: 1,

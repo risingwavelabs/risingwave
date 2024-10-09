@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{visit_fragment, visit_stream_node};
 use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::ObjectId;
+use risingwave_meta_model_v2::{ObjectId, SourceId};
 use risingwave_pb::catalog::{connection, CreateType};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -25,9 +25,7 @@ use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use thiserror_ext::AsReport;
 
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{
-    MetadataManager, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION,
-};
+use crate::manager::{NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION};
 use crate::model::StreamContext;
 use crate::rpc::ddl_controller::{
     fill_table_stream_graph_info, DdlController, DropMode, ReplaceTableInfo,
@@ -47,7 +45,12 @@ impl DdlController {
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         self.metadata_manager
             .catalog_controller
-            .create_job_catalog(&mut streaming_job, &ctx, &fragment_graph.parallelism)
+            .create_job_catalog(
+                &mut streaming_job,
+                &ctx,
+                &fragment_graph.parallelism,
+                fragment_graph.max_parallelism as _,
+            )
             .await?;
         let job_id = streaming_job.id();
 
@@ -121,7 +124,7 @@ impl DdlController {
                     tracing::warn!(id = job_id, "aborted streaming job");
                     if let Some(source_id) = source_id {
                         self.source_manager
-                            .unregister_sources(vec![source_id])
+                            .unregister_sources(vec![source_id as SourceId])
                             .await;
                     }
                 }
@@ -138,7 +141,7 @@ impl DdlController {
         affected_table_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
-            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
+            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
         streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
 
@@ -147,7 +150,7 @@ impl DdlController {
         let table_id_map = self
             .metadata_manager
             .catalog_controller
-            .create_internal_table_catalog(streaming_job.id() as _, internal_tables)
+            .create_internal_table_catalog(&streaming_job, internal_tables)
             .await?;
         fragment_graph.refill_internal_table_ids(table_id_map);
 
@@ -160,7 +163,7 @@ impl DdlController {
                 } = replace_table_info;
 
                 let fragment_graph =
-                    StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
+                    StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
                 streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
                 streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
                 let streaming_job = streaming_job;
@@ -299,7 +302,7 @@ impl DdlController {
             };
 
             let fragment_graph =
-                StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
+                StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
             streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
             streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
             let streaming_job = streaming_job;
@@ -315,6 +318,7 @@ impl DdlController {
                     &stream_ctx,
                     table.get_version()?,
                     &fragment_graph.specified_parallelism(),
+                    fragment_graph.max_parallelism(),
                 )
                 .await? as u32;
 
@@ -409,7 +413,7 @@ impl DdlController {
                     .into_iter()
                     .map(|(source_id, fragments)| {
                         (
-                            source_id as u32,
+                            source_id,
                             fragments.into_iter().map(|id| id as u32).collect(),
                         )
                     })
@@ -444,8 +448,7 @@ impl DdlController {
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         // 1. build fragment graph.
-        let fragment_graph =
-            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
+        let fragment_graph = StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
         streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
         let streaming_job = streaming_job;
@@ -461,6 +464,7 @@ impl DdlController {
                 &ctx,
                 table.get_version()?,
                 &fragment_graph.specified_parallelism(),
+                fragment_graph.max_parallelism(),
             )
             .await?;
 
@@ -526,7 +530,7 @@ impl DdlController {
                 );
 
                 if sink.original_target_columns.is_empty() {
-                    updated_sink_catalogs.push(sink.id);
+                    updated_sink_catalogs.push(sink.id as _);
                 }
             }
 

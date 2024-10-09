@@ -60,6 +60,7 @@ impl ReplayPolicyWrapper {
     }
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct NatsProperties {
     #[serde(flatten)]
@@ -75,7 +76,8 @@ pub struct NatsProperties {
         rename = "scan.startup.timestamp.millis",
         alias = "scan.startup.timestamp_millis"
     )]
-    pub start_time: Option<String>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub start_timestamp_millis: Option<i64>,
 
     #[serde(rename = "stream")]
     pub stream: String,

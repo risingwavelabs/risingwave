@@ -18,12 +18,13 @@ use std::vec;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::expr::agg_call::Type;
+use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
@@ -36,7 +37,8 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
-use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
+use crate::controller::cluster::StreamingClusterInfo;
+use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::TableFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
@@ -45,7 +47,7 @@ use crate::MetaResult;
 
 fn make_inputref(idx: u32) -> ExprNode {
     ExprNode {
-        function_type: Type::Unspecified as i32,
+        function_type: PbAggKind::Unspecified as i32,
         return_type: Some(DataType {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
@@ -56,7 +58,7 @@ fn make_inputref(idx: u32) -> ExprNode {
 
 fn make_sum_aggcall(idx: u32) -> AggCall {
     AggCall {
-        r#type: Type::Sum as i32,
+        kind: PbAggKind::Sum as i32,
         args: vec![PbInputRef {
             index: idx,
             r#type: Some(DataType {
@@ -415,6 +417,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
+        max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
     }
 }
 
@@ -445,7 +448,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let expr_context = ExprContext {
         time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
     };
-    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job).await?;
+    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
     let internal_tables = fragment_graph.internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
@@ -454,9 +457,8 @@ async fn test_graph_builder() -> MetaResult<()> {
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
-    let ActorGraphBuildResult { graph, .. } = actor_graph_builder
-        .generate_graph(&env, &job, expr_context)
-        .await?;
+    let ActorGraphBuildResult { graph, .. } =
+        actor_graph_builder.generate_graph(&env, &job, expr_context)?;
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();

@@ -17,13 +17,3 @@ mod compaction_status;
 pub mod ext;
 
 pub use compaction_group_config::CompactionGroup;
-
-/// Column family names for hummock.
-/// Deprecated `cf_name` should be reserved for backward compatibility.
-const HUMMOCK_VERSION_DELTA_CF_NAME: &str = "cf/hummock_1";
-const HUMMOCK_PINNED_VERSION_CF_NAME: &str = "cf/hummock_2";
-const HUMMOCK_PINNED_SNAPSHOT_CF_NAME: &str = "cf/hummock_3";
-const HUMMOCK_COMPACTION_STATUS_CF_NAME: &str = "cf/hummock_4";
-const HUMMOCK_COMPACT_TASK_ASSIGNMENT: &str = "cf/hummock_5";
-const HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME: &str = "cf/hummock_6";
-const HUMMOCK_VERSION_STATS_CF_NAME: &str = "cf/hummock_7";

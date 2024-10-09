@@ -21,15 +21,21 @@ use fs_err::File;
 use super::{ExecuteContext, Task};
 use crate::wait::wait;
 
-/// Check if a log pattern is found in the log output indicating the service is ready.
+/// Check if all log patterns are found in the log output indicating the service is ready.
 pub struct LogReadyCheckTask {
-    pattern: String,
+    patterns: Vec<String>,
 }
 
 impl LogReadyCheckTask {
     pub fn new(pattern: impl Into<String>) -> Result<Self> {
         Ok(Self {
-            pattern: pattern.into(),
+            patterns: vec![pattern.into()],
+        })
+    }
+
+    pub fn new_all(patterns: impl IntoIterator<Item = impl Into<String>>) -> Result<Self> {
+        Ok(Self {
+            patterns: patterns.into_iter().map(Into::into).collect(),
         })
     }
 }
@@ -41,7 +47,7 @@ impl Task for LogReadyCheckTask {
         };
 
         ctx.pb.set_message("waiting for ready...");
-        ctx.wait_log_contains(&self.pattern)
+        ctx.wait_log_contains(&self.patterns)
             .with_context(|| format!("failed to wait for service `{id}` to be ready"))?;
 
         ctx.complete_spin();
@@ -54,8 +60,7 @@ impl<W> ExecuteContext<W>
 where
     W: std::io::Write,
 {
-    fn wait_log_contains(&mut self, pattern: impl AsRef<str>) -> anyhow::Result<()> {
-        let pattern = pattern.as_ref();
+    fn wait_log_contains(&mut self, patterns: &[String]) -> anyhow::Result<()> {
         let log_path = self.log_path().to_path_buf();
 
         let mut content = String::new();
@@ -68,11 +73,13 @@ where
                 offset += file.read_to_string(&mut content)?;
 
                 // Always going through the whole log file could be stupid, but it's reliable.
-                if content.contains(pattern) {
-                    Ok(())
-                } else {
-                    bail!("pattern \"{}\" not found in log", pattern)
+                for pattern in patterns {
+                    if !content.contains(pattern) {
+                        bail!("pattern \"{}\" not found in log", pattern)
+                    }
                 }
+
+                Ok(())
             },
             &mut self.log,
             self.status_file.as_ref().unwrap(),

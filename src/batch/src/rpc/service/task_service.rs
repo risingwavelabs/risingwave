@@ -27,7 +27,7 @@ use tonic::{Request, Response, Status};
 
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::task::{
-    BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, StateReporter, TaskId,
+    BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, StateReporter,
     TASK_STATUS_BUFFER_SIZE,
 };
 
@@ -74,10 +74,7 @@ impl TaskService for BatchServiceImpl {
                 task_id.as_ref().expect("no task id found"),
                 plan.expect("no plan found").clone(),
                 epoch.expect("no epoch found"),
-                ComputeNodeContext::new(
-                    self.env.clone(),
-                    TaskId::from(task_id.as_ref().expect("no task id found")),
-                ),
+                ComputeNodeContext::new(self.env.clone()),
                 state_reporter,
                 TracingContext::from_protobuf(&tracing_context),
                 expr_context.expect("no expression context found"),
@@ -143,7 +140,7 @@ impl BatchServiceImpl {
         let tracing_context = TracingContext::from_protobuf(&tracing_context);
         let expr_context = expr_context.expect("no expression context found");
 
-        let context = ComputeNodeContext::new_for_local(env.clone());
+        let context = ComputeNodeContext::new(env.clone());
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
             plan,

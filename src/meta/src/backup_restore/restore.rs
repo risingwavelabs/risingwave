@@ -192,273 +192,265 @@ pub async fn restore(opts: RestoreOpts) -> BackupResult<()> {
     result
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use itertools::Itertools;
-    use risingwave_backup::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
-    use risingwave_backup::storage::MetaSnapshotStorage;
-    use risingwave_common::config::{MetaBackend, SystemConfig};
-    use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_hummock_sdk::HummockVersionId;
-    use risingwave_pb::hummock::HummockVersionStats;
-    use risingwave_pb::meta::SystemParams;
-
-    use crate::backup_restore::restore::restore_impl;
-    use crate::backup_restore::utils::{get_backup_store, get_meta_store};
-    use crate::backup_restore::RestoreOpts;
-
-    type MetaSnapshot = MetaSnapshotV1;
-
-    fn get_restore_opts() -> RestoreOpts {
-        RestoreOpts {
-            meta_snapshot_id: 1,
-            meta_store_type: MetaBackend::Mem,
-            sql_endpoint: "".to_string(),
-            sql_username: "".to_string(),
-            sql_password: "".to_string(),
-            sql_database: "".to_string(),
-            backup_storage_url: "memory".to_string(),
-            backup_storage_directory: "".to_string(),
-            hummock_storage_url: "memory".to_string(),
-            hummock_storage_directory: "".to_string(),
-            dry_run: false,
-            read_attempt_timeout_ms: 60000,
-            read_retry_attempts: 3,
-        }
-    }
-
-    fn get_system_params() -> SystemParams {
-        SystemParams {
-            state_store: Some("state_store".into()),
-            data_directory: Some("data_directory".into()),
-            use_new_object_prefix_strategy: Some(true),
-            backup_storage_url: Some("backup_storage_url".into()),
-            backup_storage_directory: Some("backup_storage_directory".into()),
-            ..SystemConfig::default().into_init_system_params()
-        }
-    }
-
-    // TODO: support in-memory sql restore tests.
-    // #[tokio::test]
-    // async fn test_restore_basic() {
-    //     let opts = get_restore_opts();
-    //     let backup_store = get_backup_store(opts.clone()).await.unwrap();
-    //     let nonempty_meta_store = get_meta_store(opts.clone()).await.unwrap();
-    //     dispatch_meta_store!(nonempty_meta_store.clone(), store, {
-    //         let stats = HummockVersionStats::default();
-    //         stats.insert(&store).await.unwrap();
-    //     });
-    //     let empty_meta_store = get_meta_store(opts.clone()).await.unwrap();
-    //     let system_param = get_system_params();
-    //     let snapshot = MetaSnapshot {
-    //         id: opts.meta_snapshot_id,
-    //         metadata: ClusterMetadata {
-    //             hummock_version: {
-    //                 let mut version = HummockVersion::default();
-    //                 version.id = HummockVersionId::new(123);
-    //                 version
-    //             },
-    //             system_param: system_param.clone(),
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     };
-    //
-    //     // target snapshot not found
-    //     restore_impl(opts.clone(), None, Some(backup_store.clone()))
-    //         .await
-    //         .unwrap_err();
-    //
-    //     backup_store.create(&snapshot, None).await.unwrap();
-    //     restore_impl(opts.clone(), None, Some(backup_store.clone()))
-    //         .await
-    //         .unwrap();
-    //
-    //     // target meta store not empty
-    //     restore_impl(
-    //         opts.clone(),
-    //         Some(nonempty_meta_store),
-    //         Some(backup_store.clone()),
-    //     )
-    //     .await
-    //     .unwrap_err();
-    //
-    //     restore_impl(
-    //         opts.clone(),
-    //         Some(empty_meta_store.clone()),
-    //         Some(backup_store.clone()),
-    //     )
-    //     .await
-    //     .unwrap();
-    //
-    //     dispatch_meta_store!(empty_meta_store, store, {
-    //         let restored_system_param = SystemParams::get(&store).await.unwrap().unwrap();
-    //         assert_eq!(restored_system_param, system_param);
-    //     });
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_restore_default_cf() {
-    //     let opts = get_restore_opts();
-    //     let backup_store = get_backup_store(opts.clone()).await.unwrap();
-    //     let snapshot = MetaSnapshot {
-    //         id: opts.meta_snapshot_id,
-    //         metadata: ClusterMetadata {
-    //             default_cf: HashMap::from([(vec![1u8, 2u8], memcomparable::to_vec(&10).unwrap())]),
-    //             system_param: get_system_params(),
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     };
-    //     backup_store.create(&snapshot, None).await.unwrap();
-    //
-    //     // `snapshot_2` is a superset of `snapshot`
-    //     let mut snapshot_2 = MetaSnapshot {
-    //         id: snapshot.id + 1,
-    //         ..snapshot.clone()
-    //     };
-    //     snapshot_2
-    //         .metadata
-    //         .default_cf
-    //         .insert(vec![1u8, 2u8], memcomparable::to_vec(&10).unwrap());
-    //     snapshot_2
-    //         .metadata
-    //         .default_cf
-    //         .insert(vec![10u8, 20u8], memcomparable::to_vec(&10).unwrap());
-    //     backup_store.create(&snapshot_2, None).await.unwrap();
-    //     let empty_meta_store = get_meta_store(opts.clone()).await.unwrap();
-    //     restore_impl(
-    //         opts.clone(),
-    //         Some(empty_meta_store.clone()),
-    //         Some(backup_store.clone()),
-    //     )
-    //     .await
-    //     .unwrap();
-    //     dispatch_meta_store!(empty_meta_store, store, {
-    //         let mut kvs = store
-    //             .list_cf(DEFAULT_COLUMN_FAMILY)
-    //             .await
-    //             .unwrap()
-    //             .into_iter()
-    //             .map(|(_, v)| v)
-    //             .collect_vec();
-    //         kvs.sort();
-    //         assert_eq!(
-    //             kvs,
-    //             vec![
-    //                 memcomparable::to_vec(&10).unwrap(),
-    //                 memcomparable::to_vec(&10).unwrap()
-    //             ]
-    //         );
-    //     });
-    // }
-    //
-    // #[tokio::test]
-    // #[should_panic]
-    // async fn test_sanity_check_superset_requirement() {
-    //     let opts = get_restore_opts();
-    //     let backup_store = get_backup_store(opts.clone()).await.unwrap();
-    //     let snapshot = MetaSnapshot {
-    //         id: opts.meta_snapshot_id,
-    //         metadata: ClusterMetadata {
-    //             default_cf: HashMap::from([(vec![1u8, 2u8], memcomparable::to_vec(&10).unwrap())]),
-    //             system_param: get_system_params(),
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     };
-    //     backup_store.create(&snapshot, None).await.unwrap();
-    //
-    //     // violate superset requirement
-    //     let mut snapshot_2 = MetaSnapshot {
-    //         id: snapshot.id + 1,
-    //         ..Default::default()
-    //     };
-    //     snapshot_2
-    //         .metadata
-    //         .default_cf
-    //         .insert(vec![10u8, 20u8], memcomparable::to_vec(&1).unwrap());
-    //     backup_store.create(&snapshot_2, None).await.unwrap();
-    //     restore_impl(opts.clone(), None, Some(backup_store.clone()))
-    //         .await
-    //         .unwrap();
-    // }
-    //
-    // #[tokio::test]
-    // #[should_panic]
-    // async fn test_sanity_check_monotonicity_requirement() {
-    //     let opts = get_restore_opts();
-    //     let backup_store = get_backup_store(opts.clone()).await.unwrap();
-    //     let snapshot = MetaSnapshot {
-    //         id: opts.meta_snapshot_id,
-    //         metadata: ClusterMetadata {
-    //             default_cf: HashMap::from([(vec![1u8, 2u8], memcomparable::to_vec(&10).unwrap())]),
-    //             system_param: get_system_params(),
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     };
-    //     backup_store.create(&snapshot, None).await.unwrap();
-    //
-    //     // violate monotonicity requirement
-    //     let mut snapshot_2 = MetaSnapshot {
-    //         id: snapshot.id + 1,
-    //         ..Default::default()
-    //     };
-    //     snapshot_2
-    //         .metadata
-    //         .default_cf
-    //         .insert(vec![1u8, 2u8], memcomparable::to_vec(&9).unwrap());
-    //     backup_store.create(&snapshot_2, None).await.unwrap();
-    //     restore_impl(opts.clone(), None, Some(backup_store.clone()))
-    //         .await
-    //         .unwrap();
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_dry_run() {
-    //     let mut opts = get_restore_opts();
-    //     assert!(!opts.dry_run);
-    //     opts.dry_run = true;
-    //     let backup_store = get_backup_store(opts.clone()).await.unwrap();
-    //     let empty_meta_store = get_meta_store(opts.clone()).await.unwrap();
-    //     let system_param = get_system_params();
-    //     let snapshot = MetaSnapshot {
-    //         id: opts.meta_snapshot_id,
-    //         metadata: ClusterMetadata {
-    //             default_cf: HashMap::from([
-    //                 (
-    //                     "some_key_1".as_bytes().to_vec(),
-    //                     memcomparable::to_vec(&10).unwrap(),
-    //                 ),
-    //                 (
-    //                     "some_key_2".as_bytes().to_vec(),
-    //                     memcomparable::to_vec(&"some_value_2".to_string()).unwrap(),
-    //                 ),
-    //             ]),
-    //             hummock_version: {
-    //                 let mut version = HummockVersion::default();
-    //                 version.id = HummockVersionId::new(123);
-    //                 version
-    //             },
-    //             system_param: system_param.clone(),
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     };
-    //     backup_store.create(&snapshot, None).await.unwrap();
-    //     restore_impl(
-    //         opts.clone(),
-    //         Some(empty_meta_store.clone()),
-    //         Some(backup_store.clone()),
-    //     )
-    //     .await
-    //     .unwrap();
-    //
-    //     dispatch_meta_store!(empty_meta_store, store, {
-    //         assert!(SystemParams::get(&store).await.unwrap().is_none());
-    //     });
-    // }
-}
+// #[cfg(test)]
+// mod tests {
+//
+//     // use risingwave_backup::meta_snapshot_v1::MetaSnapshotV1;
+//     // use risingwave_common::config::{MetaBackend, SystemConfig};
+//     // use risingwave_pb::meta::SystemParams;
+//     //
+//     // use crate::backup_restore::RestoreOpts;
+//
+//     // type MetaSnapshot = MetaSnapshotV1;
+//
+//     // fn get_restore_opts() -> RestoreOpts {
+//     //     RestoreOpts {
+//     //         meta_snapshot_id: 1,
+//     //         meta_store_type: MetaBackend::Mem,
+//     //         sql_endpoint: "".to_string(),
+//     //         sql_username: "".to_string(),
+//     //         sql_password: "".to_string(),
+//     //         sql_database: "".to_string(),
+//     //         backup_storage_url: "memory".to_string(),
+//     //         backup_storage_directory: "".to_string(),
+//     //         hummock_storage_url: "memory".to_string(),
+//     //         hummock_storage_directory: "".to_string(),
+//     //         dry_run: false,
+//     //         read_attempt_timeout_ms: 60000,
+//     //         read_retry_attempts: 3,
+//     //     }
+//     // }
+//
+//     // fn get_system_params() -> SystemParams {
+//     //     SystemParams {
+//     //         state_store: Some("state_store".into()),
+//     //         data_directory: Some("data_directory".into()),
+//     //         use_new_object_prefix_strategy: Some(true),
+//     //         backup_storage_url: Some("backup_storage_url".into()),
+//     //         backup_storage_directory: Some("backup_storage_directory".into()),
+//     //         ..SystemConfig::default().into_init_system_params()
+//     //     }
+//     // }
+//
+//     // TODO: support in-memory sql restore tests.
+//     // #[tokio::test]
+//     // async fn test_restore_basic() {
+//     //     let opts = get_restore_opts();
+//     //     let backup_store = get_backup_store(opts.clone()).await.unwrap();
+//     //     let nonempty_meta_store = get_meta_store(opts.clone()).await.unwrap();
+//     //     dispatch_meta_store!(nonempty_meta_store.clone(), store, {
+//     //         let stats = HummockVersionStats::default();
+//     //         stats.insert(&store).await.unwrap();
+//     //     });
+//     //     let empty_meta_store = get_meta_store(opts.clone()).await.unwrap();
+//     //     let system_param = get_system_params();
+//     //     let snapshot = MetaSnapshot {
+//     //         id: opts.meta_snapshot_id,
+//     //         metadata: ClusterMetadata {
+//     //             hummock_version: {
+//     //                 let mut version = HummockVersion::default();
+//     //                 version.id = HummockVersionId::new(123);
+//     //                 version
+//     //             },
+//     //             system_param: system_param.clone(),
+//     //             ..Default::default()
+//     //         },
+//     //         ..Default::default()
+//     //     };
+//     //
+//     //     // target snapshot not found
+//     //     restore_impl(opts.clone(), None, Some(backup_store.clone()))
+//     //         .await
+//     //         .unwrap_err();
+//     //
+//     //     backup_store.create(&snapshot, None).await.unwrap();
+//     //     restore_impl(opts.clone(), None, Some(backup_store.clone()))
+//     //         .await
+//     //         .unwrap();
+//     //
+//     //     // target meta store not empty
+//     //     restore_impl(
+//     //         opts.clone(),
+//     //         Some(nonempty_meta_store),
+//     //         Some(backup_store.clone()),
+//     //     )
+//     //     .await
+//     //     .unwrap_err();
+//     //
+//     //     restore_impl(
+//     //         opts.clone(),
+//     //         Some(empty_meta_store.clone()),
+//     //         Some(backup_store.clone()),
+//     //     )
+//     //     .await
+//     //     .unwrap();
+//     //
+//     //     dispatch_meta_store!(empty_meta_store, store, {
+//     //         let restored_system_param = SystemParams::get(&store).await.unwrap().unwrap();
+//     //         assert_eq!(restored_system_param, system_param);
+//     //     });
+//     // }
+//     //
+//     // #[tokio::test]
+//     // async fn test_restore_default_cf() {
+//     //     let opts = get_restore_opts();
+//     //     let backup_store = get_backup_store(opts.clone()).await.unwrap();
+//     //     let snapshot = MetaSnapshot {
+//     //         id: opts.meta_snapshot_id,
+//     //         metadata: ClusterMetadata {
+//     //             default_cf: HashMap::from([(vec![1u8, 2u8], memcomparable::to_vec(&10).unwrap())]),
+//     //             system_param: get_system_params(),
+//     //             ..Default::default()
+//     //         },
+//     //         ..Default::default()
+//     //     };
+//     //     backup_store.create(&snapshot, None).await.unwrap();
+//     //
+//     //     // `snapshot_2` is a superset of `snapshot`
+//     //     let mut snapshot_2 = MetaSnapshot {
+//     //         id: snapshot.id + 1,
+//     //         ..snapshot.clone()
+//     //     };
+//     //     snapshot_2
+//     //         .metadata
+//     //         .default_cf
+//     //         .insert(vec![1u8, 2u8], memcomparable::to_vec(&10).unwrap());
+//     //     snapshot_2
+//     //         .metadata
+//     //         .default_cf
+//     //         .insert(vec![10u8, 20u8], memcomparable::to_vec(&10).unwrap());
+//     //     backup_store.create(&snapshot_2, None).await.unwrap();
+//     //     let empty_meta_store = get_meta_store(opts.clone()).await.unwrap();
+//     //     restore_impl(
+//     //         opts.clone(),
+//     //         Some(empty_meta_store.clone()),
+//     //         Some(backup_store.clone()),
+//     //     )
+//     //     .await
+//     //     .unwrap();
+//     //     dispatch_meta_store!(empty_meta_store, store, {
+//     //         let mut kvs = store
+//     //             .list_cf(DEFAULT_COLUMN_FAMILY)
+//     //             .await
+//     //             .unwrap()
+//     //             .into_iter()
+//     //             .map(|(_, v)| v)
+//     //             .collect_vec();
+//     //         kvs.sort();
+//     //         assert_eq!(
+//     //             kvs,
+//     //             vec![
+//     //                 memcomparable::to_vec(&10).unwrap(),
+//     //                 memcomparable::to_vec(&10).unwrap()
+//     //             ]
+//     //         );
+//     //     });
+//     // }
+//     //
+//     // #[tokio::test]
+//     // #[should_panic]
+//     // async fn test_sanity_check_superset_requirement() {
+//     //     let opts = get_restore_opts();
+//     //     let backup_store = get_backup_store(opts.clone()).await.unwrap();
+//     //     let snapshot = MetaSnapshot {
+//     //         id: opts.meta_snapshot_id,
+//     //         metadata: ClusterMetadata {
+//     //             default_cf: HashMap::from([(vec![1u8, 2u8], memcomparable::to_vec(&10).unwrap())]),
+//     //             system_param: get_system_params(),
+//     //             ..Default::default()
+//     //         },
+//     //         ..Default::default()
+//     //     };
+//     //     backup_store.create(&snapshot, None).await.unwrap();
+//     //
+//     //     // violate superset requirement
+//     //     let mut snapshot_2 = MetaSnapshot {
+//     //         id: snapshot.id + 1,
+//     //         ..Default::default()
+//     //     };
+//     //     snapshot_2
+//     //         .metadata
+//     //         .default_cf
+//     //         .insert(vec![10u8, 20u8], memcomparable::to_vec(&1).unwrap());
+//     //     backup_store.create(&snapshot_2, None).await.unwrap();
+//     //     restore_impl(opts.clone(), None, Some(backup_store.clone()))
+//     //         .await
+//     //         .unwrap();
+//     // }
+//     //
+//     // #[tokio::test]
+//     // #[should_panic]
+//     // async fn test_sanity_check_monotonicity_requirement() {
+//     //     let opts = get_restore_opts();
+//     //     let backup_store = get_backup_store(opts.clone()).await.unwrap();
+//     //     let snapshot = MetaSnapshot {
+//     //         id: opts.meta_snapshot_id,
+//     //         metadata: ClusterMetadata {
+//     //             default_cf: HashMap::from([(vec![1u8, 2u8], memcomparable::to_vec(&10).unwrap())]),
+//     //             system_param: get_system_params(),
+//     //             ..Default::default()
+//     //         },
+//     //         ..Default::default()
+//     //     };
+//     //     backup_store.create(&snapshot, None).await.unwrap();
+//     //
+//     //     // violate monotonicity requirement
+//     //     let mut snapshot_2 = MetaSnapshot {
+//     //         id: snapshot.id + 1,
+//     //         ..Default::default()
+//     //     };
+//     //     snapshot_2
+//     //         .metadata
+//     //         .default_cf
+//     //         .insert(vec![1u8, 2u8], memcomparable::to_vec(&9).unwrap());
+//     //     backup_store.create(&snapshot_2, None).await.unwrap();
+//     //     restore_impl(opts.clone(), None, Some(backup_store.clone()))
+//     //         .await
+//     //         .unwrap();
+//     // }
+//     //
+//     // #[tokio::test]
+//     // async fn test_dry_run() {
+//     //     let mut opts = get_restore_opts();
+//     //     assert!(!opts.dry_run);
+//     //     opts.dry_run = true;
+//     //     let backup_store = get_backup_store(opts.clone()).await.unwrap();
+//     //     let empty_meta_store = get_meta_store(opts.clone()).await.unwrap();
+//     //     let system_param = get_system_params();
+//     //     let snapshot = MetaSnapshot {
+//     //         id: opts.meta_snapshot_id,
+//     //         metadata: ClusterMetadata {
+//     //             default_cf: HashMap::from([
+//     //                 (
+//     //                     "some_key_1".as_bytes().to_vec(),
+//     //                     memcomparable::to_vec(&10).unwrap(),
+//     //                 ),
+//     //                 (
+//     //                     "some_key_2".as_bytes().to_vec(),
+//     //                     memcomparable::to_vec(&"some_value_2".to_string()).unwrap(),
+//     //                 ),
+//     //             ]),
+//     //             hummock_version: {
+//     //                 let mut version = HummockVersion::default();
+//     //                 version.id = HummockVersionId::new(123);
+//     //                 version
+//     //             },
+//     //             system_param: system_param.clone(),
+//     //             ..Default::default()
+//     //         },
+//     //         ..Default::default()
+//     //     };
+//     //     backup_store.create(&snapshot, None).await.unwrap();
+//     //     restore_impl(
+//     //         opts.clone(),
+//     //         Some(empty_meta_store.clone()),
+//     //         Some(backup_store.clone()),
+//     //     )
+//     //     .await
+//     //     .unwrap();
+//     //
+//     //     dispatch_meta_store!(empty_meta_store, store, {
+//     //         assert!(SystemParams::get(&store).await.unwrap().is_none());
+//     //     });
+//     // }
+// }

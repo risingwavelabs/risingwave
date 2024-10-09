@@ -22,8 +22,7 @@ use risingwave_common::hash::ActorMapping;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
-use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model_v2::{ObjectId, WorkerId};
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
@@ -45,11 +44,9 @@ use super::info::{CommandFragmentChanges, InflightGraphInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::manager::{DdlType, MetadataManager, StreamingJob};
+use crate::manager::{DdlType, StreamingJob};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
-use crate::stream::{
-    build_actor_connector_splits, validate_assignment, SplitAssignment, ThrottleConfig,
-};
+use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -118,7 +115,7 @@ impl ReplaceTablePlan {
                     .iter()
                     .map(|actor| {
                         (
-                            actor.actor_id,
+                            actor.actor_id as i32,
                             self.new_table_fragments
                                 .actor_status
                                 .get(&actor.actor_id)
@@ -130,7 +127,7 @@ impl ReplaceTablePlan {
                 state_table_ids: fragment
                     .state_table_ids
                     .iter()
-                    .map(|table_id| TableId::new(*table_id))
+                    .map(|table_id| *table_id as ObjectId)
                     .collect(),
                 is_injectable: TableFragments::is_injectable(fragment.fragment_type_mask),
             });
@@ -176,7 +173,7 @@ impl CreateStreamingJobCommandInfo {
                         .iter()
                         .map(|actor| {
                             (
-                                actor.actor_id,
+                                actor.actor_id as i32,
                                 self.table_fragments
                                     .actor_status
                                     .get(&actor.actor_id)
@@ -188,7 +185,7 @@ impl CreateStreamingJobCommandInfo {
                     state_table_ids: fragment
                         .state_table_ids
                         .iter()
-                        .map(|table_id| TableId::new(*table_id))
+                        .map(|table_id| *table_id as ObjectId)
                         .collect(),
                     is_injectable: TableFragments::is_injectable(fragment.fragment_type_mask),
                 },
@@ -445,6 +442,8 @@ pub struct CommandContext {
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
 
+    pub table_ids_to_commit: HashSet<TableId>,
+
     pub current_paused_reason: Option<PausedReason>,
 
     pub command: Command,
@@ -473,12 +472,12 @@ impl std::fmt::Debug for CommandContext {
 }
 
 impl CommandContext {
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         node_map: HashMap<WorkerId, PbWorkerNode>,
         subscription_info: InflightSubscriptionInfo,
         prev_epoch: TracedEpoch,
         curr_epoch: TracedEpoch,
+        table_ids_to_commit: HashSet<TableId>,
         current_paused_reason: Option<PausedReason>,
         command: Command,
         kind: BarrierKind,
@@ -490,6 +489,7 @@ impl CommandContext {
             subscription_info,
             prev_epoch,
             curr_epoch,
+            table_ids_to_commit,
             current_paused_reason,
             command,
             kind,
@@ -525,14 +525,9 @@ impl Command {
                 }
 
                 Command::SourceSplitAssignment(change) => {
-                    let mut checked_assignment = change.clone();
-                    checked_assignment
-                        .iter_mut()
-                        .for_each(|(_, assignment)| validate_assignment(assignment));
-
                     let mut diff = HashMap::new();
 
-                    for actor_splits in checked_assignment.values() {
+                    for actor_splits in change.values() {
                         diff.extend(actor_splits.clone());
                     }
 
@@ -580,12 +575,7 @@ impl Command {
                         })
                         .collect();
                     let added_actors = table_fragments.actor_ids();
-
-                    let mut checked_split_assignment = split_assignment.clone();
-                    checked_split_assignment
-                        .iter_mut()
-                        .for_each(|(_, assignment)| validate_assignment(assignment));
-                    let actor_splits = checked_split_assignment
+                    let actor_splits = split_assignment
                         .values()
                         .flat_map(build_actor_connector_splits)
                         .collect();
@@ -791,10 +781,7 @@ impl Command {
                     let mut actor_splits = HashMap::new();
 
                     for reschedule in reschedules.values() {
-                        let mut checked_assignment = reschedule.actor_splits.clone();
-                        validate_assignment(&mut checked_assignment);
-
-                        for (actor_id, splits) in &checked_assignment {
+                        for (actor_id, splits) in &reschedule.actor_splits {
                             actor_splits.insert(
                                 *actor_id as ActorId,
                                 ConnectorSplits {
@@ -961,7 +948,13 @@ impl Command {
 }
 
 impl CommandContext {
-    pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
+    pub async fn wait_epoch_commit(&self) -> MetaResult<()> {
+        let table_id = self.table_ids_to_commit.iter().next().cloned();
+        // try wait epoch on an existing random table id
+        let Some(table_id) = table_id else {
+            // no need to wait epoch when there is no table id
+            return Ok(());
+        };
         let futures = self.node_map.values().map(|worker_node| async {
             let client = self
                 .barrier_manager_context
@@ -969,7 +962,10 @@ impl CommandContext {
                 .stream_client_pool()
                 .get(worker_node)
                 .await?;
-            let request = WaitEpochCommitRequest { epoch };
+            let request = WaitEpochCommitRequest {
+                epoch: self.prev_epoch.value().0,
+                table_id: table_id.table_id,
+            };
             client.wait_epoch_commit(request).await
         });
 
@@ -992,7 +988,7 @@ impl CommandContext {
                     // storage version with this epoch is synced to all compute nodes before the
                     // execution of the next command of `Update`, as some newly created operators
                     // may immediately initialize their states on that barrier.
-                    self.wait_epoch_commit(self.prev_epoch.value().0).await?;
+                    self.wait_epoch_commit().await?;
                 }
             }
 
@@ -1035,22 +1031,12 @@ impl CommandContext {
                     .hummock_manager
                     .unregister_table_ids(table_fragments.all_table_ids().map(TableId::new))
                     .await?;
-
-                self.barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .try_abort_creating_streaming_job(
-                        table_fragments.table_id().table_id as _,
-                        true,
-                    )
-                    .await?;
             }
 
             Command::CreateStreamingJob { info, job_type } => {
                 let CreateStreamingJobCommandInfo {
                     table_fragments,
                     dispatchers,
-                    upstream_root_actors,
                     init_split_assignment,
                     ..
                 } = info;

@@ -77,10 +77,6 @@ impl Transaction {
         self.operations.append(operations.as_mut());
     }
 
-    pub(super) fn into_parts(self) -> (Vec<Precondition>, Vec<Operation>) {
-        (self.preconditions, self.operations)
-    }
-
     #[cfg(test)]
     pub fn get_operations(&self) -> &Vec<Operation> {
         &self.operations

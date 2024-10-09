@@ -25,20 +25,15 @@ use risingwave_pb::user::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::manager::MetaSrvEnv;
 use crate::MetaResult;
 
 pub struct UserServiceImpl {
-    env: MetaSrvEnv,
     metadata_manager: MetadataManager,
 }
 
 impl UserServiceImpl {
-    pub fn new(env: MetaSrvEnv, metadata_manager: MetadataManager) -> Self {
-        Self {
-            env,
-            metadata_manager,
-        }
+    pub fn new(metadata_manager: MetadataManager) -> Self {
+        Self { metadata_manager }
     }
 
     /// Expands `GrantPrivilege` with object `GrantAllTables` or `GrantAllSources` to specific
@@ -55,13 +50,10 @@ impl UserServiceImpl {
                     .metadata_manager
                     .catalog_controller
                     .list_readonly_table_ids(*schema_id as _)
-                    .await?
-                    .into_iter()
-                    .map(|id| id as _)
-                    .collect();
+                    .await?;
                 for table_id in tables {
                     let mut privilege = privilege.clone();
-                    privilege.object = Some(Object::TableId(table_id));
+                    privilege.object = Some(Object::TableId(table_id as _));
                     if let Some(true) = with_grant_option {
                         privilege
                             .action_with_opts
@@ -75,21 +67,15 @@ impl UserServiceImpl {
                     .metadata_manager
                     .catalog_controller
                     .list_dml_table_ids(*schema_id as _)
-                    .await?
-                    .into_iter()
-                    .map(|id| id as _)
-                    .collect();
+                    .await?;
                 let views = self
                     .metadata_manager
                     .catalog_controller
                     .list_view_ids(*schema_id as _)
-                    .await?
-                    .into_iter()
-                    .map(|id| id as _)
-                    .collect();
+                    .await?;
                 for table_id in tables {
                     let mut privilege = privilege.clone();
-                    privilege.object = Some(Object::TableId(table_id));
+                    privilege.object = Some(Object::TableId(table_id as _));
                     if let Some(true) = with_grant_option {
                         privilege
                             .action_with_opts
@@ -100,7 +86,7 @@ impl UserServiceImpl {
                 }
                 for view_id in views {
                     let mut privilege = privilege.clone();
-                    privilege.object = Some(Object::ViewId(view_id));
+                    privilege.object = Some(Object::ViewId(view_id as _));
                     if let Some(true) = with_grant_option {
                         privilege
                             .action_with_opts
@@ -114,13 +100,10 @@ impl UserServiceImpl {
                     .metadata_manager
                     .catalog_controller
                     .list_source_ids(*schema_id as _)
-                    .await?
-                    .into_iter()
-                    .map(|id| id as _)
-                    .collect();
+                    .await?;
                 for source_id in sources {
                     let mut privilege = privilege.clone();
-                    privilege.object = Some(Object::SourceId(source_id));
+                    privilege.object = Some(Object::SourceId(source_id as _));
                     if let Some(with_grant_option) = with_grant_option {
                         privilege.action_with_opts.iter_mut().for_each(|p| {
                             p.with_grant_option = with_grant_option;

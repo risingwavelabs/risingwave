@@ -18,16 +18,12 @@ mod stream;
 use std::collections::btree_map::{Entry, VacantEntry};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::io::Write;
 use std::ops::{Deref, DerefMut};
 
-use anyhow::Context as _;
 use async_trait::async_trait;
 pub use error::*;
 pub use stream::*;
 use uuid::Uuid;
-
-use crate::storage::Transaction;
 
 /// A global, unique identifier of an actor
 pub type ActorId = u32;
@@ -50,12 +46,6 @@ impl Default for ClusterId {
 impl ClusterId {
     pub fn new() -> Self {
         Self(Uuid::new_v4().to_string())
-    }
-
-    fn from_bytes(bytes: Vec<u8>) -> MetadataModelResult<Self> {
-        Ok(Self(
-            String::from_utf8(bytes).map_err(MetadataModelError::internal)?,
-        ))
     }
 }
 
@@ -593,10 +583,8 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-
     use super::*;
-    use crate::storage::Operation;
+    use crate::storage::{Operation, Transaction};
 
     #[derive(PartialEq, Clone, Debug)]
     struct TestTransactional {

@@ -37,7 +37,7 @@ use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
     TracedInitOptions, TracedNewLocalOptions, TracedReadOptions, TracedSealCurrentEpochOptions,
-    TracedSubResp, UniqueIdGenerator,
+    TracedSubResp, TracedTryWaitEpochOptions, UniqueIdGenerator,
 };
 
 // Global collector instance used for trace collection
@@ -216,8 +216,14 @@ impl TraceSpan {
         Self::new_global_op(Operation::SealCurrentEpoch { epoch, opts }, storage_type)
     }
 
-    pub fn new_try_wait_epoch_span(epoch: HummockReadEpoch) -> MayTraceSpan {
-        Self::new_global_op(Operation::TryWaitEpoch(epoch.into()), StorageType::Global)
+    pub fn new_try_wait_epoch_span(
+        epoch: HummockReadEpoch,
+        options: TracedTryWaitEpochOptions,
+    ) -> MayTraceSpan {
+        Self::new_global_op(
+            Operation::TryWaitEpoch(epoch.into(), options),
+            StorageType::Global,
+        )
     }
 
     pub fn new_get_span(

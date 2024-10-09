@@ -151,6 +151,16 @@ impl Distribution {
         }
     }
 
+    /// Get the vnode count of the distribution.
+    ///
+    /// For backwards compatibility, [`VirtualNode::COUNT_FOR_COMPAT`] is used for singleton.
+    pub fn vnode_count(&self) -> usize {
+        match self {
+            Distribution::Singleton(_) => VirtualNode::COUNT_FOR_COMPAT,
+            Distribution::Hash(mapping) => mapping.len(),
+        }
+    }
+
     /// Create a distribution from a persisted protobuf `Fragment`.
     pub fn from_fragment(
         fragment: &risingwave_pb::meta::table_fragments::Fragment,
@@ -161,7 +171,7 @@ impl Distribution {
             FragmentDistributionType::Single => {
                 let actor_id = fragment.actors.iter().exactly_one().unwrap().actor_id;
                 let location = actor_location.get(&actor_id).unwrap();
-                let worker_slot_id = WorkerSlotId::new(*location, 0);
+                let worker_slot_id = WorkerSlotId::new(*location as _, 0);
                 Distribution::Singleton(worker_slot_id)
             }
             FragmentDistributionType::Hash => {
@@ -177,7 +187,11 @@ impl Distribution {
                     .collect();
 
                 let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
-                let mapping = actor_mapping.to_worker_slot(actor_location);
+                let actor_location = actor_location
+                    .iter()
+                    .map(|(&k, &v)| (k, v as u32))
+                    .collect();
+                let mapping = actor_mapping.to_worker_slot(&actor_location);
 
                 Distribution::Hash(mapping)
             }
@@ -214,35 +228,40 @@ impl Scheduler {
         streaming_job_id: u32,
         workers: &HashMap<u32, WorkerNode>,
         default_parallelism: NonZeroUsize,
+        expected_vnode_count: usize,
     ) -> MetaResult<Self> {
         // Group worker slots with worker node.
 
         let slots = workers
             .iter()
-            .map(|(worker_id, worker)| (*worker_id, worker.parallelism as usize))
+            .map(|(worker_id, worker)| (*worker_id as WorkerId, worker.parallelism as usize))
             .collect();
 
         let parallelism = default_parallelism.get();
+        assert!(
+            parallelism <= expected_vnode_count,
+            "parallelism should be limited by vnode count in previous steps"
+        );
+
         let scheduled = schedule_units_for_slots(&slots, parallelism, streaming_job_id)?;
 
         let scheduled_worker_slots = scheduled
             .into_iter()
             .flat_map(|(worker_id, size)| {
-                (0..size).map(move |slot| WorkerSlotId::new(worker_id, slot))
+                (0..size).map(move |slot| WorkerSlotId::new(worker_id as _, slot))
             })
             .collect_vec();
 
         assert_eq!(scheduled_worker_slots.len(), parallelism);
 
         // Build the default hash mapping uniformly.
-        // TODO(var-vnode): use vnode count from config
         let default_hash_mapping =
-            WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, VirtualNode::COUNT);
+            WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, expected_vnode_count);
 
         let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
         let default_single_worker_id = single_scheduled.keys().exactly_one().cloned().unwrap();
 
-        let default_singleton_worker_slot = WorkerSlotId::new(default_single_worker_id, 0);
+        let default_singleton_worker_slot = WorkerSlotId::new(default_single_worker_id as _, 0);
 
         Ok(Self {
             default_hash_mapping,
@@ -350,7 +369,7 @@ impl Locations {
     pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
         self.actor_locations
             .iter()
-            .map(|(actor_id, worker_slot_id)| (worker_slot_id.worker_id(), *actor_id))
+            .map(|(actor_id, worker_slot_id)| (worker_slot_id.worker_id() as WorkerId, *actor_id))
             .into_group_map()
     }
 
@@ -360,7 +379,7 @@ impl Locations {
             .iter()
             .map(|(actor_id, worker_slot_id)| ActorInfo {
                 actor_id: *actor_id,
-                host: self.worker_locations[&worker_slot_id.worker_id()]
+                host: self.worker_locations[&(worker_slot_id.worker_id() as WorkerId)]
                     .host
                     .clone(),
             })

@@ -17,7 +17,7 @@ use std::ops::AddAssign;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::hash::{VirtualNode, WorkerSlotId};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::{SourceId, WorkerId};
 use risingwave_pb::common::PbActorLocation;
@@ -37,9 +37,6 @@ use risingwave_pb::stream_plan::{
 use super::{ActorId, FragmentId};
 use crate::model::MetadataModelResult;
 use crate::stream::{build_actor_connector_splits, build_actor_split_impls, SplitAssignment};
-
-/// Column family name for table fragments.
-const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
 /// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -115,6 +112,18 @@ pub struct TableFragments {
 
     /// The parallelism assigned to this table fragments
     pub assigned_parallelism: TableParallelism,
+
+    /// The max parallelism specified when the streaming job was created, i.e., expected vnode count.
+    ///
+    /// The reason for persisting this value is mainly to check if a parallelism change (via `ALTER
+    /// .. SET PARALLELISM`) is valid, so that the behavior can be consistent with the creation of
+    /// the streaming job.
+    ///
+    /// Note that the actual vnode count, denoted by `vnode_count` in `fragments`, may be different
+    /// from this value (see `StreamFragmentGraph.max_parallelism` for more details.). As a result,
+    /// checking the parallelism change with this value can be inaccurate in some cases. However,
+    /// when generating resizing plans, we still take the `vnode_count` of each fragment into account.
+    pub max_parallelism: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -160,6 +169,7 @@ impl TableFragments {
             parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_string(),
             backfill_done: true,
+            max_parallelism: Some(self.max_parallelism as _),
         }
     }
 
@@ -180,6 +190,9 @@ impl TableFragments {
             actor_splits: build_actor_split_impls(&prost.actor_splits),
             ctx,
             assigned_parallelism: prost.parallelism.unwrap_or(default_parallelism).into(),
+            max_parallelism: prost
+                .max_parallelism
+                .map_or(VirtualNode::COUNT_FOR_COMPAT, |v| v as _),
         }
     }
 }
@@ -193,6 +206,7 @@ impl TableFragments {
             &BTreeMap::new(),
             StreamContext::default(),
             TableParallelism::Adaptive,
+            VirtualNode::COUNT_FOR_TEST,
         )
     }
 
@@ -204,6 +218,7 @@ impl TableFragments {
         actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
         ctx: StreamContext,
         table_parallelism: TableParallelism,
+        max_parallelism: usize,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
@@ -226,6 +241,7 @@ impl TableFragments {
             actor_splits: HashMap::default(),
             ctx,
             assigned_parallelism: table_parallelism,
+            max_parallelism,
         }
     }
 
@@ -415,7 +431,7 @@ impl TableFragments {
             for actor in &fragment.actors {
                 if let Some(source_id) = actor.nodes.as_ref().unwrap().find_stream_source() {
                     source_fragments
-                        .entry(source_id)
+                        .entry(source_id as SourceId)
                         .or_insert(BTreeSet::new())
                         .insert(fragment.fragment_id as FragmentId);
 
@@ -438,7 +454,7 @@ impl TableFragments {
                         return Err(anyhow::anyhow!("SourceBackfill should have only one upstream fragment, found {:?} for fragment {}", fragment.upstream_fragment_ids, fragment.fragment_id).into());
                     }
                     source_fragments
-                        .entry(source_id)
+                        .entry(source_id as SourceId)
                         .or_insert(BTreeSet::new())
                         .insert((fragment.fragment_id, fragment.upstream_fragment_ids[0]));
 
@@ -529,7 +545,7 @@ impl TableFragments {
                     .actor_status
                     .get(&actor.actor_id)
                     .expect("should exist")
-                    .worker_id();
+                    .worker_id() as WorkerId;
                 actor_map.entry(worker_id).or_default().push(actor.clone());
             });
         actor_map

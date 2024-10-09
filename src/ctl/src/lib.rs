@@ -19,7 +19,6 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
-use itertools::Itertools;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
@@ -27,9 +26,7 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::Compressi
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
-use crate::cmd_impl::hummock::{
-    build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
-};
+use crate::cmd_impl::hummock::{build_compaction_config_vec, list_pinned_versions};
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
 
@@ -148,8 +145,6 @@ enum HummockCommands {
     },
     /// List pinned versions of each worker.
     ListPinnedVersions {},
-    /// List pinned snapshots of each worker.
-    ListPinnedSnapshots {},
     /// List all compaction groups.
     ListCompactionGroup,
     /// Update compaction config for compaction groups.
@@ -555,9 +550,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => cmd_impl::hummock::trigger_full_gc(context, sst_retention_time_sec, prefix).await?,
         Commands::Hummock(HummockCommands::ListPinnedVersions {}) => {
             list_pinned_versions(context).await?
-        }
-        Commands::Hummock(HummockCommands::ListPinnedSnapshots {}) => {
-            list_pinned_snapshots(context).await?
         }
         Commands::Hummock(HummockCommands::ListCompactionGroup) => {
             cmd_impl::hummock::list_compaction_group(context).await?

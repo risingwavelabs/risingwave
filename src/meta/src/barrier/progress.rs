@@ -19,7 +19,7 @@ use std::mem::take;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::ObjectId;
-use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::catalog::CreateType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -27,7 +27,7 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 use crate::barrier::{
     Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, EpochNode, ReplaceTablePlan,
 };
-use crate::manager::{DdlType, MetadataManager, StreamingJob};
+use crate::manager::{DdlType, MetadataManager};
 use crate::model::{ActorId, TableFragments};
 use crate::MetaResult;
 

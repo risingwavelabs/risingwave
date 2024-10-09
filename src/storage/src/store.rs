@@ -35,7 +35,8 @@ use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection
 use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
-    TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
+    TracedWriteOptions,
 };
 use risingwave_pb::hummock::PbVnodeWatermark;
 
@@ -344,6 +345,34 @@ pub trait StateStoreWrite: StaticSendSync {
 
 pub trait SyncFuture = Future<Output = StorageResult<SyncResult>> + Send + 'static;
 
+#[derive(Clone)]
+pub struct TryWaitEpochOptions {
+    pub table_id: TableId,
+}
+
+impl TryWaitEpochOptions {
+    #[cfg(any(test, feature = "test"))]
+    pub fn for_test(table_id: TableId) -> Self {
+        Self { table_id }
+    }
+}
+
+impl From<TracedTryWaitEpochOptions> for TryWaitEpochOptions {
+    fn from(value: TracedTryWaitEpochOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+        }
+    }
+}
+
+impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
+    fn from(value: TryWaitEpochOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+        }
+    }
+}
+
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
@@ -352,6 +381,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn try_wait_epoch(
         &self,
         epoch: HummockReadEpoch,
+        options: TryWaitEpochOptions,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture;
@@ -493,7 +523,6 @@ pub struct ReadOptions {
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Bytes>,
-    pub ignore_range_tombstone: bool,
     pub prefetch_options: PrefetchOptions,
     pub cache_policy: CachePolicy,
 
@@ -509,7 +538,6 @@ impl From<TracedReadOptions> for ReadOptions {
     fn from(value: TracedReadOptions) -> Self {
         Self {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
-            ignore_range_tombstone: value.ignore_range_tombstone,
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
             retention_seconds: value.retention_seconds,
@@ -524,7 +552,6 @@ impl From<ReadOptions> for TracedReadOptions {
     fn from(value: ReadOptions) -> Self {
         Self {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
-            ignore_range_tombstone: value.ignore_range_tombstone,
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
             retention_seconds: value.retention_seconds,
@@ -727,7 +754,7 @@ impl NewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
-            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT)),
+            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
         }
     }
 }

@@ -21,7 +21,6 @@ use risingwave_meta::controller::cluster::ClusterControllerRef;
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_pb::backup_service::MetaBackupManifestId;
-use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc::UnboundedReceiver;

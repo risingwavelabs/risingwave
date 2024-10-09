@@ -336,7 +336,10 @@ fn task_main(
                         risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                     task.execute(&mut ctx)?;
                 } else {
-                    let mut task = risedev::LogReadyCheckTask::new("ready to accept connections")?;
+                    let mut task = risedev::LogReadyCheckTask::new_all([
+                        "ready to accept connections", // also appears in init process
+                        "listening on IPv4 address",   // only appears when ready
+                    ])?;
                     task.execute(&mut ctx)?;
                 }
                 ctx.pb

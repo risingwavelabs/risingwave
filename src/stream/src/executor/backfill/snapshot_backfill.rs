@@ -40,7 +40,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{try_stream, StreamExt};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BackfillExecutor, Barrier, BoxedMessageStream,
-    DispatcherBarrier, DispatcherMessage, Execute, Executor, Message, Mutation,
+    DispatcherBarrier, DispatcherMessage, Execute, MergeExecutorInput, Message, Mutation,
     StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgressReporter;
@@ -50,7 +50,7 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     upstream_table: StorageTable<S>,
 
     /// Upstream with the same schema with the upstream table.
-    upstream: Executor,
+    upstream: MergeExecutorInput,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
@@ -68,9 +68,9 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
 
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
     #[expect(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         upstream_table: StorageTable<S>,
-        upstream: Executor,
+        upstream: MergeExecutorInput,
         output_indices: Vec<usize>,
         actor_ctx: ActorContextRef,
         progress: CreateMviewProgressReporter,
@@ -101,15 +101,14 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         debug!("snapshot backfill executor start");
-        let mut upstream = erase_upstream_mutation(self.upstream.execute());
         let upstream_table_id = self.upstream_table.table_id();
-        let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let first_barrier = expect_first_barrier(&mut self.upstream).await?;
         debug!(epoch = ?first_barrier.epoch, "get first upstream barrier");
         let first_recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
         debug!(epoch = ?first_recv_barrier.epoch, "get first inject barrier");
         let should_backfill = first_barrier.epoch != first_recv_barrier.epoch;
 
-        {
+        let mut barrier_epoch = {
             if should_backfill {
                 let subscriber_ids = first_recv_barrier
                     .added_subscriber_on_mv_table(upstream_table_id)
@@ -140,7 +139,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     .with_guarded_label_values(&[&table_id_str, &actor_id_str, "consume_upstream"]);
 
                 let mut upstream_buffer = UpstreamBuffer::new(
-                    &mut upstream,
+                    &mut self.upstream,
                     upstream_table_id,
                     snapshot_backfill_table_fragment_id,
                     consume_upstream_row_count,
@@ -219,13 +218,12 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     // use `upstream_buffer.run_future` to poll upstream concurrently so that we won't have back-pressure
                     // on the upstream. Otherwise, in `batch_iter_log_with_pk_bounds`, we may wait upstream epoch to be committed,
                     // and the back-pressure may cause the upstream unable to consume the barrier and then cause deadlock.
-                    let stream =
-                        upstream_buffer
-                            .run_future(self.upstream_table.batch_iter_log_with_pk_bounds(
-                                barrier_epoch.prev,
-                                barrier_epoch.prev,
-                            ))
-                            .await?;
+                    let stream = upstream_buffer
+                        .run_future(self.upstream_table.batch_iter_log_with_pk_bounds(
+                            barrier_epoch.prev,
+                            HummockReadEpoch::Committed(barrier_epoch.prev),
+                        ))
+                        .await?;
                     let data_types = self.upstream_table.schema().data_types();
                     let builder = create_builder(None, self.chunk_size, data_types);
                     let stream = read_change_log(stream, builder);
@@ -250,6 +248,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     table_id = self.upstream_table.table_id().table_id,
                     "finish consuming log store"
                 );
+                barrier_epoch
             } else {
                 info!(
                     table_id = self.upstream_table.table_id().table_id,
@@ -258,19 +257,17 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 let first_recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                 assert_eq!(first_barrier.epoch, first_recv_barrier.epoch);
                 yield Message::Barrier(first_recv_barrier);
+                first_barrier.epoch
             }
-        }
+        };
+        let mut upstream = self.upstream.into_executor(self.barrier_rx).execute();
         // Phase 3: consume upstream
         while let Some(msg) = upstream.try_next().await? {
-            yield match msg {
-                DispatcherMessage::Chunk(chunk) => Message::Chunk(chunk),
-                DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
-                DispatcherMessage::Barrier(barrier) => {
-                    let recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
-                    assert_eq!(barrier.epoch, recv_barrier.epoch);
-                    Message::Barrier(recv_barrier)
-                }
-            };
+            if let Message::Barrier(barrier) = &msg {
+                assert_eq!(barrier.epoch.prev, barrier_epoch.curr);
+                barrier_epoch = barrier.epoch;
+            }
+            yield msg;
         }
     }
 }
@@ -404,33 +401,8 @@ impl<'a> UpstreamBufferState for StateOfConsumingLogStore<'a> {
     }
 }
 
-mod erase_upstream_mutation {
-    use futures::TryStreamExt;
-
-    use crate::executor::prelude::Stream;
-    use crate::executor::{BoxedMessageStream, DispatcherMessageStreamItem};
-
-    pub(super) fn erase_upstream_mutation(upstream: BoxedMessageStream) -> UpstreamStream {
-        upstream.map_ok(|msg| {
-            msg.map_mutation(|mutation| {
-                if let Some(mutation) = mutation {
-                    // TODO: assert none mutation after we explicitly erase mutation
-                    warn!(
-                        ?mutation,
-                        "receive non-empty mutation from upstream. ignored"
-                    );
-                };
-            })
-        })
-    }
-
-    pub(super) type UpstreamStream = impl Stream<Item = DispatcherMessageStreamItem> + Unpin;
-}
-
-use erase_upstream_mutation::*;
-
 struct UpstreamBuffer<'a, S> {
-    upstream: &'a mut UpstreamStream,
+    upstream: &'a mut MergeExecutorInput,
     state: S,
     consume_upstream_row_count: LabelGuardedIntCounter<3>,
     upstream_table_id: TableId,
@@ -439,7 +411,7 @@ struct UpstreamBuffer<'a, S> {
 
 impl<'a> UpstreamBuffer<'a, StateOfConsumingSnapshot> {
     fn new(
-        upstream: &'a mut UpstreamStream,
+        upstream: &'a mut MergeExecutorInput,
         upstream_table_id: TableId,
         current_subscriber_id: u32,
         consume_upstream_row_count: LabelGuardedIntCounter<3>,

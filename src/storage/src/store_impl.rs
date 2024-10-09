@@ -18,9 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::{
-    DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker, RuntimeConfigBuilder,
-};
+use foyer::{DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -570,8 +568,9 @@ pub mod verify {
         fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.actual.try_wait_epoch(epoch)
+            self.actual.try_wait_epoch(epoch, options)
         }
 
         fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
@@ -657,23 +656,14 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                     .with_flushers(opts.meta_file_cache_flushers)
                     .with_reclaimers(opts.meta_file_cache_reclaimers)
-                    .with_buffer_threshold(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                    .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
                     .with_clean_region_threshold(
                         opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                     )
                     .with_recover_mode(opts.meta_file_cache_recover_mode)
                     .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                    .with_compression(
-                        opts.meta_file_cache_compression
-                            .as_str()
-                            .try_into()
-                            .map_err(HummockError::foyer_error)?,
-                    )
-                    .with_runtime_config(
-                        RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.meta.runtime")
-                            .build(),
-                    );
+                    .with_compression(opts.meta_file_cache_compression)
+                    .with_runtime_config(opts.meta_file_cache_runtime_config.clone());
                 if opts.meta_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
                         opts.meta_file_cache_insert_rate_limit_mb * MB,
@@ -711,23 +701,14 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.data_file_cache_indexer_shards)
                     .with_flushers(opts.data_file_cache_flushers)
                     .with_reclaimers(opts.data_file_cache_reclaimers)
-                    .with_buffer_threshold(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                    .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
                     .with_clean_region_threshold(
                         opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                     )
                     .with_recover_mode(opts.data_file_cache_recover_mode)
                     .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                    .with_compression(
-                        opts.data_file_cache_compression
-                            .as_str()
-                            .try_into()
-                            .map_err(HummockError::foyer_error)?,
-                    )
-                    .with_runtime_config(
-                        RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.data.runtime")
-                            .build(),
-                    );
+                    .with_compression(opts.data_file_cache_compression)
+                    .with_runtime_config(opts.data_file_cache_runtime_config.clone());
                 if opts.data_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
                         opts.data_file_cache_insert_rate_limit_mb * MB,
@@ -1154,7 +1135,11 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreExt: StaticSendSync {
-        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
+        async fn try_wait_epoch(
+            &self,
+            epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
+        ) -> StorageResult<()>;
 
         fn sync(
             &self,
@@ -1167,8 +1152,12 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStore> DynamicDispatchedStateStoreExt for S {
-        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.try_wait_epoch(epoch).await
+        async fn try_wait_epoch(
+            &self,
+            epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
+        ) -> StorageResult<()> {
+            self.try_wait_epoch(epoch, options).await
         }
 
         fn sync(
@@ -1253,8 +1242,9 @@ pub mod boxed_state_store {
         fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref().try_wait_epoch(epoch)
+            self.deref().try_wait_epoch(epoch, options)
         }
 
         fn sync(

@@ -16,12 +16,6 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 apache-avro = { workspace = true }
-arrow-array = { workspace = true }
-arrow-array-iceberg = { workspace = true }
-arrow-row = { workspace = true }
-arrow-schema = { workspace = true }
-arrow-schema-iceberg = { workspace = true }
-arrow-select = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
 async-nats = "0.35"
@@ -61,16 +55,16 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-bigquery = { version = "0.12.0", features = ["auth"] }
+google-cloud-bigquery = { version = "0.13.0", features = ["auth"] }
 google-cloud-gax = "0.19.0"
 google-cloud-googleapis = { version = "0.15", features = ["pubsub", "bigquery"] }
-google-cloud-pubsub = "0.28"
+google-cloud-pubsub = "0.29"
 http = "0.2"
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
 icelake = { workspace = true }
-indexmap = { version = "2.2.6", features = ["serde"] }
+indexmap = { version = "2.6.0", features = ["serde"] }
 itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = { workspace = true }
@@ -105,7 +99,6 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = { version = "0.14", features = ["serde"] }
 prost-types = "0.13"
-protobuf-native = "0.2.2"
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
@@ -135,7 +128,7 @@ rustls-native-certs = "0.7"
 rustls-pemfile = "2"
 rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
-sea-schema = { version = "0.14", default-features = false, features = [
+sea-schema = { version = "0.15", default-features = false, features = [
     "discovery",
     "sqlx-postgres",
     "sqlx-mysql",
@@ -194,21 +187,19 @@ assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 deltalake = { workspace = true, features = ["datafusion"] }
 expect-test = "1"
+fs-err = "2"
 paste = "1"
 pretty_assertions = "1"
+proc-macro2 = "1.0"
 quote = "1"
 rand = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
-syn = { version = "1", features = ["full"] }
+syn = { version = "2", features = ["full"] }
 tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
 walkdir = "2"
-
-[build-dependencies]
-prost-build = "0.12"
-protobuf-src = "1"
 
 [[bench]]
 name = "debezium_json_parser"

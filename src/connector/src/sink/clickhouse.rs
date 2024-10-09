@@ -39,7 +39,7 @@ use super::decouple_checkpoint_log_sink::{
     default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
 };
 use super::writer::SinkWriter;
-use super::{DummySinkCommitCoordinator, SinkWriterParam};
+use super::{DummySinkCommitCoordinator, SinkWriterMetrics, SinkWriterParam};
 use crate::error::ConnectorResult;
 use crate::sink::{
     Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -425,6 +425,7 @@ impl ClickHouseSink {
         fields_type: &DataType,
         ck_column: &SystemColumn,
     ) -> Result<()> {
+        // FIXME: the "contains" based implementation is wrong
         let is_match = match fields_type {
             risingwave_common::types::DataType::Boolean => Ok(ck_column.r#type.contains("Bool")),
             risingwave_common::types::DataType::Int16 => Ok(ck_column.r#type.contains("UInt16")
@@ -552,7 +553,7 @@ impl Sink for ClickHouseSink {
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
-            writer_param.sink_metrics,
+            SinkWriterMetrics::new(&writer_param),
             commit_checkpoint_interval,
         ))
     }

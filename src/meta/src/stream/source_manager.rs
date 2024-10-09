@@ -106,7 +106,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
             Arc::new(SourceEnumeratorContext {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
-                    source_id: self.source_id,
+                    source_id: self.source_id as u32,
                 },
             }),
         )
@@ -144,7 +144,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
             .with_guarded_label_values(&[source.id.to_string().as_str(), &source.name]);
 
         Ok(Self {
-            source_id: source.id,
+            source_id: source.id as SourceId,
             source_name: source.name.clone(),
             current_splits: splits,
             enumerator,
@@ -236,6 +236,12 @@ pub struct SourceManagerCore {
     actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
+pub struct SourceManagerRunningInfo {
+    pub source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+    pub backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+}
+
 impl SourceManagerCore {
     fn new(
         metadata_manager: MetadataManager,
@@ -271,8 +277,13 @@ impl SourceManagerCore {
             let backfill_fragment_ids = self.backfill_fragments.get(source_id);
 
             let Some(discovered_splits) = handle.discovered_splits().await else {
-                return Ok(split_assignment);
+                tracing::info!(
+                    "The discover loop for source {} is not ready yet; we'll wait for the next run",
+                    source_id
+                );
+                continue;
             };
+
             if discovered_splits.is_empty() {
                 tracing::warn!("No splits discovered for source {}", source_id);
             }
@@ -589,32 +600,6 @@ where
     )
 }
 
-pub fn validate_assignment(assignment: &mut HashMap<ActorId, Vec<SplitImpl>>) {
-    // check if one split is assign to multiple actors
-    let mut split_to_actor = HashMap::new();
-    for (actor_id, splits) in &mut *assignment {
-        let _ = splits.iter().map(|split| {
-            split_to_actor
-                .entry(split.id())
-                .or_insert_with(Vec::new)
-                .push(*actor_id)
-        });
-    }
-
-    for (split_id, actor_ids) in &mut split_to_actor {
-        if actor_ids.len() > 1 {
-            tracing::warn!(split_id = ?split_id, actor_ids = ?actor_ids, "split is assigned to multiple actors");
-        }
-        // keep the first actor and remove the rest from the assignment
-        for actor_id in actor_ids.iter().skip(1) {
-            assignment
-                .get_mut(actor_id)
-                .unwrap()
-                .retain(|split| split.id() != *split_id);
-        }
-    }
-}
-
 fn align_backfill_splits(
     backfill_actors: impl IntoIterator<Item = (ActorId, Vec<ActorId>)>,
     upstream_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
@@ -656,11 +641,7 @@ impl SourceManager {
             }
         }
 
-        let mut actor_splits = HashMap::new();
-        let mut source_fragments = HashMap::new();
-        let mut backfill_fragments = HashMap::new();
-
-        source_fragments = metadata_manager
+        let source_fragments = metadata_manager
             .catalog_controller
             .load_source_fragment_ids()
             .await?
@@ -672,7 +653,7 @@ impl SourceManager {
                 )
             })
             .collect();
-        backfill_fragments = metadata_manager
+        let backfill_fragments = metadata_manager
             .catalog_controller
             .load_backfill_fragment_ids()
             .await?
@@ -687,7 +668,7 @@ impl SourceManager {
                 )
             })
             .collect();
-        actor_splits = metadata_manager
+        let actor_splits = metadata_manager
             .catalog_controller
             .load_actor_splits()
             .await?
@@ -971,7 +952,10 @@ impl SourceManager {
     /// register connector worker for source.
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         let mut core = self.core.lock().await;
-        if core.managed_sources.contains_key(&source.get_id()) {
+        if core
+            .managed_sources
+            .contains_key(&(source.get_id() as SourceId))
+        {
             tracing::warn!("source {} already registered", source.get_id());
         } else {
             Self::create_source_worker(source, &mut core.managed_sources, self.metrics.clone())
@@ -1037,7 +1021,7 @@ impl SourceManager {
         });
 
         managed_sources.insert(
-            source_id,
+            source_id as SourceId,
             ConnectorSourceWorkerHandle {
                 handle,
                 sync_call_tx,
@@ -1094,7 +1078,7 @@ impl SourceManager {
         });
 
         managed_sources.insert(
-            source_id,
+            source_id as SourceId,
             ConnectorSourceWorkerHandle {
                 handle,
                 sync_call_tx,
@@ -1109,6 +1093,15 @@ impl SourceManager {
     pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
         let core = self.core.lock().await;
         core.actor_splits.clone()
+    }
+
+    pub async fn get_running_info(&self) -> SourceManagerRunningInfo {
+        let core = self.core.lock().await;
+        SourceManagerRunningInfo {
+            source_fragments: core.source_fragments.clone(),
+            backfill_fragments: core.backfill_fragments.clone(),
+            actor_splits: core.actor_splits.clone(),
+        }
     }
 
     /// Checks whether the external source metadata has changed, and sends a split assignment command
@@ -1189,14 +1182,11 @@ mod tests {
 
     use risingwave_common::types::JsonbVal;
     use risingwave_connector::error::ConnectorResult;
-    use risingwave_connector::source::test_source::TestSourceSplit;
-    use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+    use risingwave_connector::source::{SplitId, SplitMetaData};
     use serde::{Deserialize, Serialize};
 
-    use super::validate_assignment;
     use crate::model::{ActorId, FragmentId};
     use crate::stream::source_manager::{reassign_splits, SplitDiffOptions};
-    use crate::stream::SplitAssignment;
 
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
     struct TestSplit {
@@ -1315,49 +1305,6 @@ mod tests {
         .unwrap();
 
         assert!(!diff.is_empty())
-    }
-
-    #[test]
-    fn test_validate_assignment() {
-        let mut fragment_assignment: SplitAssignment;
-        let test_assignment: HashMap<ActorId, Vec<SplitImpl>> = maplit::hashmap! {
-            0 => vec![SplitImpl::Test(
-                TestSourceSplit {id: "1".into(), properties: Default::default(), offset: Default::default()}
-            ), SplitImpl::Test(
-                TestSourceSplit {id: "2".into(), properties: Default::default(), offset: Default::default()}
-            )],
-            1 => vec![SplitImpl::Test(
-                TestSourceSplit {id: "3".into(), properties: Default::default(), offset: Default::default()}
-            )],
-            2 => vec![SplitImpl::Test(
-                TestSourceSplit {id: "1".into(), properties: Default::default(), offset: Default::default()}
-            )],
-        };
-        fragment_assignment = maplit::hashmap! {
-            1 => test_assignment,
-        };
-
-        fragment_assignment.iter_mut().for_each(|(_, assignment)| {
-            validate_assignment(assignment);
-        });
-
-        {
-            let mut split_to_actor = HashMap::new();
-            for actor_to_splits in fragment_assignment.values() {
-                for (actor_id, splits) in actor_to_splits {
-                    let _ = splits.iter().map(|split| {
-                        split_to_actor
-                            .entry(split.id())
-                            .or_insert_with(Vec::new)
-                            .push(*actor_id)
-                    });
-                }
-            }
-
-            for actor_ids in split_to_actor.values() {
-                assert_eq!(actor_ids.len(), 1);
-            }
-        }
     }
 
     #[test]

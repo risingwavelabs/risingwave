@@ -21,7 +21,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
@@ -42,7 +42,6 @@ use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
     CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY,
     CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR,
@@ -1351,8 +1350,7 @@ pub async fn extract_iceberg_columns(
 ) -> anyhow::Result<Vec<ColumnCatalog>> {
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
-        let iceberg_config: IcebergConfig = properties.to_iceberg_config();
-        let table = iceberg_config.load_table_v2().await?;
+        let table = properties.load_table_v2().await?;
         let iceberg_schema: arrow_schema_iceberg::Schema =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
@@ -1394,8 +1392,6 @@ pub async fn check_iceberg_source(
         )));
     };
 
-    let iceberg_config = properties.to_iceberg_config();
-
     let schema = Schema {
         fields: columns
             .iter()
@@ -1404,7 +1400,7 @@ pub async fn check_iceberg_source(
             .collect(),
     };
 
-    let table = iceberg_config.load_table_v2().await?;
+    let table = properties.load_table_v2().await?;
 
     let iceberg_schema = iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
@@ -1666,7 +1662,7 @@ pub async fn handle_create_source(
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
     let is_shared = create_cdc_source_job
         || (with_properties.is_shareable_non_cdc_connector()
-            && session.config().rw_enable_shared_source());
+            && session.config().enable_shared_source());
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema)?
@@ -1724,12 +1720,10 @@ pub async fn handle_create_source(
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
             build_graph(stream_plan)?
         };
-        catalog_writer
-            .create_source_with_graph(source, graph)
-            .await?;
+        catalog_writer.create_source(source, Some(graph)).await?;
     } else {
         // For other sources we don't create a streaming job
-        catalog_writer.create_source(source).await?;
+        catalog_writer.create_source(source, None).await?;
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))

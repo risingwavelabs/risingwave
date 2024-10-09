@@ -5,6 +5,7 @@ set -euo pipefail
 RW_PREFIX=$PWD/.risingwave
 PREFIX_BIN=$RW_PREFIX/bin
 PREFIX_LOG=$RW_PREFIX/log
+RW_SQLITE_DB=$PREFIX_DATA/metadata.db
 
 start_standalone() {
   RUST_BACKTRACE=1 \
@@ -17,8 +18,8 @@ start_standalone() {
                     --advertise-addr 127.0.0.1:5690 \
                     --dashboard-host 127.0.0.1:5691 \
                     --prometheus-host 127.0.0.1:1250 \
-                    --backend etcd \
-                    --etcd-endpoints 127.0.0.1:2388 \
+                    --backend sqlite \
+                    --sql-endpoint sqlite://${RW_SQLITE_DB}?mode=rwc \
                     --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
                     --data-directory hummock_001 \
                     --config-path src/config/standalone-example.toml" \

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::mem::take;
 use std::sync::Arc;
 
@@ -20,14 +20,13 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
-use risingwave_pb::stream_service::BuildActorInfo;
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{BarrierKind, TracedEpoch};
-use crate::model::ActorId;
 
 #[derive(Debug)]
 pub(super) enum CreatingStreamingJobStatus {
@@ -40,10 +39,9 @@ pub(super) enum CreatingStreamingJobStatus {
         backfill_epoch: u64,
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
-        snapshot_backfill_actors: HashMap<WorkerId, HashSet<ActorId>>,
         /// Info of the first barrier: (`actors_to_create`, `mutation`)
         /// Take the mutation out when injecting the first barrier
-        initial_barrier_info: Option<(HashMap<WorkerId, Vec<BuildActorInfo>>, Mutation)>,
+        initial_barrier_info: Option<(HashMap<WorkerId, Vec<StreamActor>>, Mutation)>,
     },
     ConsumingLogStore {
         graph_info: InflightGraphInfo,
@@ -62,7 +60,7 @@ pub(super) struct CreatingJobInjectBarrierInfo {
     pub curr_epoch: TracedEpoch,
     pub prev_epoch: TracedEpoch,
     pub kind: BarrierKind,
-    pub new_actors: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
+    pub new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
     pub mutation: Option<Mutation>,
 }
 

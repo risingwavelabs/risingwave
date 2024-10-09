@@ -70,7 +70,8 @@ fn criterion_benchmark(c: &mut Criterion) {
             hummock_options,
             sstable_store,
             meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref, cluster_ctl_ref, worker_id),
+            get_notification_client_for_test(env, hummock_manager_ref, cluster_ctl_ref, worker_id)
+                .await,
         )
         .await
         .unwrap()
@@ -107,7 +108,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                     (Unbounded, Unbounded),
                     epoch,
                     ReadOptions {
-                        ignore_range_tombstone: true,
                         prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()

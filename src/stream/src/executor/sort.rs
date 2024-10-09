@@ -149,6 +149,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
 
     async fn create_executor<S: StateStore>(
@@ -170,12 +171,16 @@ mod tests {
         // note that the sort column is the first table pk column to ensure ordering
         let table_pk_indices = vec![sort_column_index, 0];
         let table_order_types = vec![OrderType::ascending(), OrderType::ascending()];
-        let buffer_table = StateTable::new_without_distribution(
+        let buffer_table = StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::new(1),
+                table_columns,
+                table_order_types,
+                table_pk_indices,
+                0,
+            ),
             store,
-            TableId::new(1),
-            table_columns,
-            table_order_types,
-            table_pk_indices,
+            None,
         )
         .await;
 

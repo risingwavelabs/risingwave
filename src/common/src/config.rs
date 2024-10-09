@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{LfuConfig, LruConfig, RecoverMode, S3FifoConfig};
+use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeConfig, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -191,9 +191,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_interval_sec")]
     pub full_gc_interval_sec: u64,
 
-    /// The spin interval when collecting global GC watermark in hummock.
-    #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
-    pub collect_gc_watermark_spin_interval_sec: u64,
+    /// Max number of object per full GC job can fetch.
+    #[serde(default = "default::meta::full_gc_object_limit")]
+    pub full_gc_object_limit: u64,
 
     /// Schedule compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
@@ -297,8 +297,11 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    #[serde(default = "default::meta::periodic_split_compact_group_interval_sec")]
-    pub periodic_split_compact_group_interval_sec: u64,
+    #[serde(
+        default = "default::meta::periodic_scheduling_compaction_group_interval_sec",
+        alias = "periodic_split_compact_group_interval_sec"
+    )]
+    pub periodic_scheduling_compaction_group_interval_sec: u64,
 
     #[serde(default = "default::meta::move_table_size_limit")]
     pub move_table_size_limit: u64,
@@ -307,6 +310,7 @@ pub struct MetaConfig {
     pub split_group_size_limit: u64,
 
     #[serde(default = "default::meta::cut_table_size_limit")]
+    #[deprecated]
     pub cut_table_size_limit: u64,
 
     #[serde(default, flatten)]
@@ -317,7 +321,7 @@ pub struct MetaConfig {
     pub do_not_config_object_storage_lifecycle: bool,
 
     /// Count of partition in split group. Meta will assign this value to every new group when it splits from default-group by automatically.
-    /// Each partition contains aligned data of `VirtualNode::COUNT / partition_vnode_count` consecutive virtual-nodes of one state table.
+    /// Each partition contains aligned data of `vnode_count / partition_vnode_count` consecutive virtual-nodes of one state table.
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
 
@@ -346,7 +350,7 @@ pub struct MetaConfig {
 
     /// Count of partitions of tables in default group and materialized view group.
     /// The meta node will decide according to some strategy whether to cut the boundaries of the file according to the vnode alignment.
-    /// Each partition contains aligned data of `VirtualNode::COUNT / hybrid_partition_vnode_count` consecutive virtual-nodes of one state table.
+    /// Each partition contains aligned data of `vnode_count / hybrid_partition_vnode_count` consecutive virtual-nodes of one state table.
     /// Set it zero to disable this feature.
     #[serde(default = "default::meta::hybrid_partition_vnode_count")]
     pub hybrid_partition_vnode_count: u32,
@@ -471,6 +475,10 @@ pub struct MetaDeveloperConfig {
     /// CREATE MV/Table will be rejected when the number of actors exceeds this limit.
     #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
+    /// Max number of SSTs fetched from meta store per SELECT, during time travel Hummock version replay.
+    pub hummock_time_travel_sst_info_fetch_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -866,7 +874,7 @@ pub struct FileCacheConfig {
     pub indexer_shards: usize,
 
     #[serde(default = "default::file_cache::compression")]
-    pub compression: String,
+    pub compression: Compression,
 
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
@@ -882,6 +890,9 @@ pub struct FileCacheConfig {
     /// More details, see [`RecoverMode::None`], [`RecoverMode::Quiet`] and [`RecoverMode::Strict`],
     #[serde(default = "default::file_cache::recover_mode")]
     pub recover_mode: RecoverMode,
+
+    #[serde(default = "default::file_cache::runtime_config")]
+    pub runtime_config: RuntimeConfig,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1338,8 +1349,8 @@ pub mod default {
             86400
         }
 
-        pub fn collect_gc_watermark_spin_interval_sec() -> u64 {
-            5
+        pub fn full_gc_object_limit() -> u64 {
+            100_000
         }
 
         pub fn periodic_compaction_interval_sec() -> u64 {
@@ -1398,7 +1409,7 @@ pub mod default {
             1800 // 30mi
         }
 
-        pub fn periodic_split_compact_group_interval_sec() -> u64 {
+        pub fn periodic_scheduling_compaction_group_interval_sec() -> u64 {
             10 // 10s
         }
 
@@ -1697,7 +1708,7 @@ pub mod default {
     }
 
     pub mod file_cache {
-        use foyer::RecoverMode;
+        use foyer::{Compression, RecoverMode, RuntimeConfig, TokioRuntimeConfig};
 
         pub fn dir() -> String {
             "".to_string()
@@ -1731,8 +1742,8 @@ pub mod default {
             64
         }
 
-        pub fn compression() -> String {
-            "none".to_string()
+        pub fn compression() -> Compression {
+            Compression::None
         }
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
@@ -1741,6 +1752,10 @@ pub mod default {
 
         pub fn recover_mode() -> RecoverMode {
             RecoverMode::None
+        }
+
+        pub fn runtime_config() -> RuntimeConfig {
+            RuntimeConfig::Unified(TokioRuntimeConfig::default())
         }
     }
 
@@ -1873,6 +1888,10 @@ pub mod default {
 
         pub fn actor_cnt_per_worker_parallelism_hard_limit() -> usize {
             400
+        }
+
+        pub fn hummock_time_travel_sst_info_fetch_batch_size() -> usize {
+            10_000
         }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {
@@ -2156,7 +2175,7 @@ pub mod default {
         }
 
         pub fn opendal_upload_concurrency() -> usize {
-            8
+            256
         }
 
         pub fn upload_part_size() -> usize {
@@ -2621,6 +2640,27 @@ mod tests {
                     .developer
                     .retryable_service_error_codes,
                 vec!["dummy".to_string()]
+            );
+        }
+    }
+
+    #[test]
+    fn test_meta_configs_backward_compatibility() {
+        // Test periodic_space_reclaim_compaction_interval_sec
+        {
+            let config: RwConfig = toml::from_str(
+                r#"
+            [meta]
+            periodic_split_compact_group_interval_sec = 1
+            "#,
+            )
+            .unwrap();
+
+            assert_eq!(
+                config
+                    .meta
+                    .periodic_scheduling_compaction_group_interval_sec,
+                1
             );
         }
     }

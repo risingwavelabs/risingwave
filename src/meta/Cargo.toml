@@ -43,6 +43,7 @@ jsonbb = { workspace = true }
 maplit = "1.0.2"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
+notify = { version = "6", default-features = false, features = ["macos_fsevent"] }
 num-integer = "0.1"
 num-traits = "0.2"
 otlp-embedded = { workspace = true }
@@ -103,8 +104,10 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 expect-test = "1.5"
 rand = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
+tempfile = "3"
+tracing-subscriber = "0.3"
 
 [features]
 test = []

@@ -16,6 +16,7 @@ pub mod diagnose;
 mod env;
 pub mod event_log;
 mod idle;
+mod license;
 mod metadata;
 mod notification;
 mod notification_version;

@@ -17,6 +17,7 @@
 
 mod server;
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
@@ -176,6 +177,10 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_LICENSE_KEY")]
     #[override_opts(path = system.license_key)]
     pub license_key: Option<LicenseKey>,
+
+    /// The path of the license key file to be watched and hot-reloaded.
+    #[clap(long, env = "RW_LICENSE_KEY_PATH")]
+    pub license_key_file: Option<PathBuf>,
 
     /// 128-bit AES key for secret store in HEX format.
     #[educe(Debug(ignore))] // TODO: use newtype to redact debug impl
@@ -352,14 +357,16 @@ pub fn start(
                 hummock_time_travel_snapshot_interval: config
                     .meta
                     .hummock_time_travel_snapshot_interval,
+                hummock_time_travel_sst_info_fetch_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_sst_info_fetch_batch_size,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
                 full_gc_interval_sec: config.meta.full_gc_interval_sec,
-                collect_gc_watermark_spin_interval_sec: config
-                    .meta
-                    .collect_gc_watermark_spin_interval_sec,
+                full_gc_object_limit: config.meta.full_gc_object_limit,
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
@@ -378,9 +385,9 @@ pub fn start(
                 periodic_tombstone_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_tombstone_reclaim_compaction_interval_sec,
-                periodic_split_compact_group_interval_sec: config
+                periodic_scheduling_compaction_group_interval_sec: config
                     .meta
-                    .periodic_split_compact_group_interval_sec,
+                    .periodic_scheduling_compaction_group_interval_sec,
                 split_group_size_limit: config.meta.split_group_size_limit,
                 min_table_split_size: config.meta.move_table_size_limit,
                 table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
@@ -400,7 +407,6 @@ pub fn start(
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_task_max_progress_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
-                cut_table_size_limit: config.meta.cut_table_size_limit,
                 hybrid_partition_node_count: config.meta.hybrid_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
                 event_log_channel_max_size: config.meta.event_log_channel_max_size,
@@ -435,6 +441,7 @@ pub fn start(
                     .meta
                     .developer
                     .actor_cnt_per_worker_parallelism_soft_limit,
+                license_key_path: opts.license_key_file,
             },
             config.system.into_init_system_params(),
             Default::default(),

@@ -24,9 +24,8 @@ use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
-use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment};
+use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
-use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
@@ -35,9 +34,10 @@ use tracing::warn;
 use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
-use crate::manager::{LocalNotification, NotificationVersion, StreamingJob};
+use crate::controller::fragment::FragmentParallelismInfo;
+use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{ActorId, ClusterId, FragmentId, TableFragments, TableParallelism};
-use crate::stream::{to_build_actor_info, SplitAssignment};
+use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
@@ -205,9 +205,7 @@ impl MetadataManager {
     }
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> MetaResult<Option<PbWorkerNode>> {
-        self.cluster_controller
-            .get_worker_by_id(worker_id as _)
-            .await
+        self.cluster_controller.get_worker_by_id(worker_id).await
     }
 
     pub async fn count_worker_node(&self) -> MetaResult<HashMap<WorkerType, u64>> {
@@ -297,7 +295,7 @@ impl MetadataManager {
     pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> MetaResult<HashMap<FragmentId, usize>> {
+    ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
         Ok(self
             .catalog_controller
@@ -325,7 +323,7 @@ impl MetadataManager {
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, u32>)> {
+    ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, WorkerId>)> {
         let (upstream_root_fragments, actors) = self
             .catalog_controller
             .get_upstream_root_fragments(
@@ -338,7 +336,7 @@ impl MetadataManager {
 
         let actors = actors
             .into_iter()
-            .map(|(actor, worker)| (actor as u32, worker as u32))
+            .map(|(actor, worker)| (actor as u32, worker))
             .collect();
 
         Ok((
@@ -401,7 +399,10 @@ impl MetadataManager {
     pub async fn get_downstream_chain_fragments(
         &self,
         job_id: u32,
-    ) -> MetaResult<(Vec<(PbDispatchStrategy, PbFragment)>, HashMap<ActorId, u32>)> {
+    ) -> MetaResult<(
+        Vec<(PbDispatchStrategy, PbFragment)>,
+        HashMap<ActorId, WorkerId>,
+    )> {
         let (fragments, actors) = self
             .catalog_controller
             .get_downstream_chain_fragments(job_id as _)
@@ -409,7 +410,7 @@ impl MetadataManager {
 
         let actors = actors
             .into_iter()
-            .map(|(actor, worker)| (actor as u32, worker as u32))
+            .map(|(actor, worker)| (actor as u32, worker))
             .collect();
 
         Ok((fragments, actors))
@@ -508,20 +509,14 @@ impl MetadataManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-        subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
-    ) -> MetaResult<HashMap<WorkerId, Vec<BuildActorInfo>>> {
+    ) -> MetaResult<HashMap<WorkerId, Vec<StreamActor>>> {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
         for (_, fragments) in table_fragments {
             let tf = TableFragments::from_protobuf(fragments);
-            let table_id = tf.table_id();
             for (node_id, actors) in tf.worker_actors(include_inactive) {
                 let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actors.extend(
-                    actors
-                        .into_iter()
-                        .map(|actor| to_build_actor_info(actor, subscriptions, table_id)),
-                )
+                node_actors.extend(actors)
             }
         }
         Ok(actor_maps)
@@ -592,6 +587,12 @@ impl MetadataManager {
     ) -> MetaResult<HashMap<TableId, HashMap<u32, u64>>> {
         self.catalog_controller
             .get_mv_depended_subscriptions()
+            .await
+    }
+
+    pub async fn get_job_max_parallelism(&self, table_id: TableId) -> MetaResult<usize> {
+        self.catalog_controller
+            .get_max_parallelism_by_id(table_id.table_id as _)
             .await
     }
 

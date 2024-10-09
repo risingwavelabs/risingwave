@@ -54,11 +54,10 @@ async fn test_vacuum() {
             .chain(iter::once(nonexistent_id))
             .collect_vec(),
     };
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (_env, hummock_manager_ref, _cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     Vacuum::handle_vacuum_task(sstable_store, &vacuum_task.sstable_object_ids)
         .await
@@ -68,12 +67,11 @@ async fn test_vacuum() {
 
 #[tokio::test]
 async fn test_full_scan() {
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (_env, hummock_manager_ref, _cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
     let sstable_store = mock_sstable_store().await;
     let _mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref,
-        worker_node.id,
+        worker_id as _,
     ));
     let now_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     let object_store_list_result = vec![
@@ -91,28 +89,34 @@ async fn test_full_scan() {
     let object_metadata_iter = Box::pin(stream::iter(object_store_list_result.into_iter().map(Ok)));
 
     let task = FullScanTask {
-        sst_retention_time_sec: 10000,
+        sst_retention_watermark: 0,
         prefix: None,
+        start_after: None,
+        limit: None,
     };
-    let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
+    let (scan_result, ..) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
         .await
         .unwrap();
     assert!(scan_result.is_empty());
 
     let task = FullScanTask {
-        sst_retention_time_sec: 6000,
+        sst_retention_watermark: now_ts.sub(Duration::from_secs(6000)).as_secs(),
         prefix: None,
+        start_after: None,
+        limit: None,
     };
-    let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
+    let (scan_result, ..) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
         .await
         .unwrap();
     assert_eq!(scan_result.into_iter().sorted().collect_vec(), vec![1]);
 
     let task = FullScanTask {
-        sst_retention_time_sec: 2000,
+        sst_retention_watermark: u64::MAX,
         prefix: None,
+        start_after: None,
+        limit: None,
     };
-    let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter)
+    let (scan_result, ..) = Vacuum::full_scan_inner(task, object_metadata_iter)
         .await
         .unwrap();
     assert_eq!(scan_result.into_iter().sorted().collect_vec(), vec![1, 2]);

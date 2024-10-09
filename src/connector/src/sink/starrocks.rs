@@ -44,8 +44,8 @@ use super::doris_starrocks_connector::{
 };
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
-    SinkCommitCoordinator, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    SinkCommitCoordinator, SinkError, SinkParam, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
@@ -313,6 +313,8 @@ impl Sink for StarrocksSink {
             self.is_append_only,
             writer_param.executor_id,
         )?;
+
+        let metrics = SinkWriterMetrics::new(&writer_param);
         let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -331,7 +333,7 @@ impl Sink for StarrocksSink {
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
-            writer_param.sink_metrics,
+            metrics,
             commit_checkpoint_interval,
         ))
     }

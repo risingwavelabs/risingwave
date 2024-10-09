@@ -105,9 +105,14 @@ message WorkerSlotMapping {
   repeated uint64 data = 2;
 }
 
+message BatchQueryCommittedEpoch {
+  uint64 epoch = 1;
+  uint64 hummock_version_id = 2;
+}
+
 message BatchQueryEpoch {
   oneof epoch {
-    uint64 committed = 1;
+    BatchQueryCommittedEpoch committed = 1;
     uint64 current = 2;
     uint64 backup = 3;
     uint64 time_travel = 4;

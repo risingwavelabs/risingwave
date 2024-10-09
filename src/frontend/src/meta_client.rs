@@ -27,9 +27,9 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
+use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
@@ -48,11 +48,7 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 pub trait FrontendMetaClient: Send + Sync {
     async fn try_unregister(&self);
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
-
-    async fn get_snapshot(&self) -> Result<HummockSnapshot>;
-
-    async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
+    async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId>;
 
     async fn wait(&self) -> Result<()>;
 
@@ -71,11 +67,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
+    async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
+
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
-
-    async fn unpin_snapshot(&self) -> Result<()>;
-
-    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
 
@@ -97,9 +91,6 @@ pub trait FrontendMetaClient: Send + Sync {
 
     /// Returns vector of (worker_id, min_pinned_version_id)
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
-
-    /// Returns vector of (worker_id, min_pinned_snapshot_id)
-    async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
@@ -129,13 +120,6 @@ pub trait FrontendMetaClient: Send + Sync {
         rate_limit: Option<u32>,
     ) -> Result<()>;
 
-    async fn list_change_log_epochs(
-        &self,
-        table_id: u32,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Result<Vec<u64>>;
-
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
 
     async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
@@ -149,15 +133,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.try_unregister().await;
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.0.pin_snapshot().await
-    }
-
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        self.0.get_snapshot().await
-    }
-
-    async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
+    async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId> {
         self.0.flush(checkpoint).await
     }
 
@@ -192,16 +168,12 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_actor_states().await
     }
 
+    async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
+        self.0.list_actor_splits().await
+    }
+
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
         self.0.list_object_dependencies().await
-    }
-
-    async fn unpin_snapshot(&self) -> Result<()> {
-        self.0.unpin_snapshot().await
-    }
-
-    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()> {
-        self.0.unpin_snapshot_before(epoch).await
     }
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
@@ -253,21 +225,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         let ret = pinned_versions
             .into_iter()
             .map(|v| (v.context_id, v.min_pinned_id))
-            .collect();
-        Ok(ret)
-    }
-
-    async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>> {
-        let pinned_snapshots = self
-            .0
-            .risectl_get_pinned_snapshots_summary()
-            .await?
-            .summary
-            .unwrap()
-            .pinned_snapshots;
-        let ret = pinned_snapshots
-            .into_iter()
-            .map(|s| (s.context_id, s.minimal_pinned_snapshot))
             .collect();
         Ok(ret)
     }
@@ -332,17 +289,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .apply_throttle(kind, id, rate_limit)
             .await
             .map(|_| ())
-    }
-
-    async fn list_change_log_epochs(
-        &self,
-        table_id: u32,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Result<Vec<u64>> {
-        self.0
-            .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await
     }
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {

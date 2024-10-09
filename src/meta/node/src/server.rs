@@ -15,7 +15,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Context;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
@@ -79,7 +78,6 @@ use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend};
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
-use tracing::log;
 
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
@@ -89,9 +87,7 @@ use crate::hummock::HummockManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::rpc::election::sql::{
-    MySqlDriver, PostgresDriver, SqlBackendElectionClient, SqliteDriver,
-};
+use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };
@@ -161,13 +157,9 @@ pub async fn rpc_serve(
                 .acquire_timeout(Duration::from_secs(30));
 
             if is_sqlite {
-                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
                 // here we forcibly specify the number of connections as 1.
                 options.max_connections(1);
-                options.sqlx_slow_statements_logging_settings(
-                    log::LevelFilter::Warn,
-                    Duration::from_secs(1),
-                );
             }
 
             let conn = sea_orm::Database::connect(options).await?;
@@ -177,9 +169,7 @@ pub async fn rpc_serve(
             let id = address_info.advertise_addr.clone();
             let conn = meta_store_sql.conn.clone();
             let election_client: ElectionClientRef = match conn.get_database_backend() {
-                DbBackend::Sqlite => {
-                    Arc::new(SqlBackendElectionClient::new(id, SqliteDriver::new(conn)))
-                }
+                DbBackend::Sqlite => Arc::new(DummyElectionClient::new(id)),
                 DbBackend::Postgres => {
                     Arc::new(SqlBackendElectionClient::new(id, PostgresDriver::new(conn)))
                 }
@@ -356,6 +346,7 @@ pub async fn start_service_as_election_leader(
         meta_store_impl,
     )
     .await?;
+    let _ = env.may_start_watch_license_key_file()?;
     let system_params_reader = env.system_params_reader().await;
 
     let data_directory = system_params_reader.data_directory();
@@ -560,7 +551,7 @@ pub async fn start_service_as_election_leader(
     )
     .await;
 
-    let user_srv = UserServiceImpl::new(env.clone(), metadata_manager.clone());
+    let user_srv = UserServiceImpl::new(metadata_manager.clone());
 
     let scale_srv = ScaleServiceImpl::new(
         metadata_manager.clone(),

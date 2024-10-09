@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::time::Duration;
@@ -38,8 +37,6 @@ use crate::deserialize_duration_from_string;
 use crate::error::ConnectorResult;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
-// The file describes the common abstractions for each connector and can be used in both source and
-// sink.
 
 pub const PRIVATE_LINK_BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
@@ -563,13 +560,6 @@ impl KinesisCommon {
         Ok(KinesisClient::from_conf(builder.build()))
     }
 }
-#[derive(Debug, Deserialize)]
-pub struct UpsertMessage<'a> {
-    #[serde(borrow)]
-    pub primary_key: Cow<'a, [u8]>,
-    #[serde(borrow)]
-    pub record: Cow<'a, [u8]>,
-}
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -674,7 +664,7 @@ impl NatsCommon {
 
         let deliver_policy = match start_sequence {
             NatsOffset::Earliest => DeliverPolicy::All,
-            NatsOffset::Latest => DeliverPolicy::Last,
+            NatsOffset::Latest => DeliverPolicy::New,
             NatsOffset::SequenceNumber(v) => {
                 let parsed = v
                     .parse::<u64>()
@@ -684,7 +674,7 @@ impl NatsCommon {
                 }
             }
             NatsOffset::Timestamp(v) => DeliverPolicy::ByStartTime {
-                start_time: OffsetDateTime::from_unix_timestamp_nanos(v * 1_000_000)
+                start_time: OffsetDateTime::from_unix_timestamp_nanos(v as i128 * 1_000_000)
                     .context("invalid timestamp for nats offset")?,
             },
             NatsOffset::None => DeliverPolicy::All,

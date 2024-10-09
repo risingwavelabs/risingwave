@@ -12,14 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
-use risingwave_meta::stream::{
-    RescheduleOptions, ScaleControllerRef, TableRevision, WorkerReschedule,
-};
+use risingwave_meta::stream::{RescheduleOptions, ScaleControllerRef, WorkerReschedule};
 use risingwave_meta_model_v2::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
@@ -32,7 +28,6 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
-use crate::model::MetadataModel;
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 
 pub struct ScaleServiceImpl {
@@ -56,11 +51,6 @@ impl ScaleServiceImpl {
             stream_manager,
             barrier_manager,
         }
-    }
-
-    // TODO: deprecate it.
-    async fn get_revision(&self) -> TableRevision {
-        Default::default()
     }
 }
 
@@ -105,14 +95,12 @@ impl ScaleService for ScaleServiceImpl {
         let sources = self.metadata_manager.list_sources().await?;
         let source_infos = sources.into_iter().map(|s| (s.id, s)).collect();
 
-        let revision = self.get_revision().await.inner();
-
         Ok(Response::new(GetClusterInfoResponse {
             worker_nodes,
             table_fragments,
             actor_splits,
             source_infos,
-            revision,
+            revision: 0,
         }))
     }
 
@@ -125,20 +113,11 @@ impl ScaleService for ScaleServiceImpl {
 
         let RescheduleRequest {
             worker_reschedules,
-            revision,
             resolve_no_shuffle_upstream,
+            ..
         } = request.into_inner();
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_write_guard().await;
-
-        let current_revision = self.get_revision().await;
-
-        if revision != current_revision.inner() {
-            return Ok(Response::new(RescheduleResponse {
-                success: false,
-                revision: current_revision.inner(),
-            }));
-        }
 
         let streaming_job_ids = self
             .metadata_manager
@@ -181,11 +160,9 @@ impl ScaleService for ScaleServiceImpl {
             )
             .await?;
 
-        let next_revision = self.get_revision().await;
-
         Ok(Response::new(RescheduleResponse {
             success: true,
-            revision: next_revision.into(),
+            revision: 0,
         }))
     }
 

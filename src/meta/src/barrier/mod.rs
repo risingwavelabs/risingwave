@@ -29,7 +29,6 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::{bail, must_match};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -39,10 +38,8 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_meta_model_v2::WorkerId;
-use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -56,7 +53,6 @@ use self::command::CommandContext;
 use self::notifier::Notifier;
 use crate::barrier::creating_job::CreatingStreamingJobControl;
 use crate::barrier::info::InflightGraphInfo;
-use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::state::BarrierManagerState;
@@ -360,7 +356,7 @@ impl CheckpointControl {
         );
         if resp.partial_graph_id == u32::MAX {
             if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
-                assert!(node.state.node_to_collect.remove(&worker_id));
+                assert!(node.state.node_to_collect.remove(&(worker_id as _)));
                 if node.state.node_to_collect.is_empty() {
                     node.state
                         .creating_jobs_to_wait
@@ -386,7 +382,7 @@ impl CheckpointControl {
             self.creating_streaming_job_controls
                 .get_mut(&creating_table_id)
                 .expect("should exist")
-                .collect(prev_epoch, worker_id, resp);
+                .collect(prev_epoch, worker_id as _, resp);
         }
     }
 
@@ -600,7 +596,7 @@ impl GlobalBarrierManager {
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
         let initial_invalid_state = BarrierManagerState::new(
-            TracedEpoch::new(Epoch(INVALID_EPOCH)),
+            None,
             InflightGraphInfo::default(),
             InflightSubscriptionInfo::default(),
             None,
@@ -708,16 +704,13 @@ impl GlobalBarrierManager {
         }
 
         {
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
-
             // Bootstrap recovery. Here we simply trigger a recovery process to achieve the
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
             self.context
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap));
-            let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+            let span = tracing::info_span!("bootstrap_recovery");
             crate::telemetry::report_event(
                 risingwave_pb::telemetry::TelemetryEventStage::Recovery,
                 "normal_recovery",
@@ -827,7 +820,7 @@ impl GlobalBarrierManager {
                         .on_new_worker_node_map(self.active_streaming_nodes.current());
                     self.checkpoint_control.creating_streaming_job_controls.values().for_each(|job| job.on_new_worker_node_map(self.active_streaming_nodes.current()));
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node).await;
+                        self.control_stream_manager.add_worker(node, &self.state.inflight_subscription_info).await;
                     }
                 }
 
@@ -854,10 +847,10 @@ impl GlobalBarrierManager {
 
                         }
                         Err(e) => {
-                            let failed_command = self.checkpoint_control.command_wait_collect_from_worker(worker_id);
+                            let failed_command = self.checkpoint_control.command_wait_collect_from_worker(worker_id as _);
                             if failed_command.is_some()
-                                || self.state.inflight_graph_info.contains_worker(worker_id)
-                                || self.checkpoint_control.creating_streaming_job_controls.values().any(|job| job.is_wait_on_worker(worker_id)) {
+                                || self.state.inflight_graph_info.contains_worker(worker_id as _)
+                                || self.checkpoint_control.creating_streaming_job_controls.values().any(|job| job.is_wait_on_worker(worker_id as _)) {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
                                 if let Some(failed_command) = failed_command {
@@ -879,9 +872,11 @@ impl GlobalBarrierManager {
                                 assert_matches!(output.command_ctx.kind, BarrierKind::Barrier);
                                 self.scheduled_barriers.force_checkpoint_in_next_barrier();
                             }
-                            self.control_stream_manager.remove_partial_graph(
-                                output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
-                            );
+                            if !output.table_ids_to_finish.is_empty() {
+                                self.control_stream_manager.remove_partial_graph(
+                                    output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
+                                );
+                            }
                         }
                         Ok(None) => {}
                         Err(e) => {
@@ -948,7 +943,14 @@ impl GlobalBarrierManager {
             }
         }
 
-        let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
+        let Some((prev_epoch, curr_epoch)) = self.state.next_epoch_pair(&command) else {
+            // skip the command when there is nothing to do with the barrier
+            for mut notifier in notifiers {
+                notifier.notify_started();
+                notifier.notify_collected();
+            }
+            return Ok(());
+        };
 
         // Insert newly added creating job
         if let Command::CreateStreamingJob {
@@ -1024,11 +1026,14 @@ impl GlobalBarrierManager {
         });
         span.record("epoch", curr_epoch.value().0);
 
+        let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
+
         let command_ctx = Arc::new(CommandContext::new(
             self.active_streaming_nodes.current().clone(),
             pre_applied_subscription_info,
             prev_epoch.clone(),
             curr_epoch.clone(),
+            table_ids_to_commit.clone(),
             self.state.paused_reason(),
             command,
             kind,
@@ -1038,19 +1043,10 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let table_ids_to_commit: HashSet<_> = pre_applied_graph_info.existing_table_ids().collect();
-
-        let mut actors_to_pre_sync_barrier: HashMap<_, Vec<_>> = HashMap::new();
         let mut jobs_to_wait = HashSet::new();
 
         for (table_id, creating_job) in &mut self.checkpoint_control.creating_streaming_job_controls
         {
-            for (worker_id, actors) in creating_job.actors_to_pre_sync_barrier() {
-                actors_to_pre_sync_barrier
-                    .entry(*worker_id)
-                    .or_default()
-                    .extend(actors.iter().cloned())
-            }
             if let Some(wait_job) =
                 creating_job.on_new_command(&mut self.control_stream_manager, &command_ctx)?
             {
@@ -1065,7 +1061,6 @@ impl GlobalBarrierManager {
             &command_ctx,
             &pre_applied_graph_info,
             Some(&self.state.inflight_graph_info),
-            actors_to_pre_sync_barrier,
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
@@ -1078,16 +1073,9 @@ impl GlobalBarrierManager {
         };
 
         // Notify about the injection.
-        let prev_paused_reason = self.state.paused_reason();
         let curr_paused_reason = command_ctx.next_paused_reason();
 
-        let info = BarrierInfo {
-            prev_epoch: prev_epoch.value(),
-            curr_epoch: curr_epoch.value(),
-            prev_paused_reason,
-            curr_paused_reason,
-        };
-        notifiers.iter_mut().for_each(|n| n.notify_started(info));
+        notifiers.iter_mut().for_each(|n| n.notify_started());
 
         // Update the paused state after the barrier is injected.
         self.state.set_paused_reason(curr_paused_reason);
@@ -1112,12 +1100,9 @@ impl GlobalBarrierManager {
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
                     err.clone(),
                 )));
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
                 error = %err.as_report(),
-                prev_epoch = prev_epoch.value().0
             );
 
             crate::telemetry::report_event(
@@ -1144,12 +1129,9 @@ impl GlobalBarrierManager {
 
         self.context
             .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
-        let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-        let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
         let span = tracing::info_span!(
             "adhoc_recovery",
             error = %err.as_report(),
-            prev_epoch = prev_epoch.value().0
         );
 
         crate::telemetry::report_event(
@@ -1194,7 +1176,6 @@ impl GlobalBarrierManagerContext {
             change_log_delta: Default::default(),
             committed_epoch: epoch,
             tables_to_commit,
-            is_visible_table_committed_epoch: false,
         };
         self.hummock_manager.commit_epoch(info).await?;
         Ok(())
@@ -1275,13 +1256,6 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<Option<HummockVersionStats>> {
         {
             {
-                // We must ensure all epochs are committed in ascending order,
-                // because the storage engine will query from new to old in the order in which
-                // the L0 layer files are generated.
-                // See https://github.com/risingwave-labs/risingwave/issues/1251
-                // hummock_manager commit epoch.
-                let mut new_snapshot = None;
-
                 match &command_ctx.kind {
                     BarrierKind::Initial => {}
                     BarrierKind::Checkpoint(epochs) => {
@@ -1292,7 +1266,7 @@ impl GlobalBarrierManagerContext {
                             backfill_pinned_log_epoch,
                             tables_to_commit,
                         );
-                        new_snapshot = self.hummock_manager.commit_epoch(commit_info).await?;
+                        self.hummock_manager.commit_epoch(commit_info).await?;
                     }
                     BarrierKind::Barrier => {
                         // if we collect a barrier(checkpoint = false),
@@ -1303,16 +1277,6 @@ impl GlobalBarrierManagerContext {
                 }
 
                 command_ctx.post_collect().await?;
-                // Notify new snapshot after fragment_mapping changes have been notified in
-                // `post_collect`.
-                if let Some(snapshot) = new_snapshot {
-                    self.env
-                        .notification_manager()
-                        .notify_frontend_without_version(
-                            Operation::Update, // Frontends don't care about operation.
-                            Info::HummockSnapshot(snapshot),
-                        );
-                }
                 Ok(if command_ctx.kind.is_checkpoint() {
                     Some(self.hummock_manager.get_version_stats().await)
                 } else {
@@ -1320,6 +1284,10 @@ impl GlobalBarrierManagerContext {
                 })
             }
         }
+    }
+
+    pub fn hummock_manager(&self) -> &HummockManagerRef {
+        &self.hummock_manager
     }
 }
 
@@ -1620,7 +1588,13 @@ impl GlobalBarrierManagerContext {
             .load_all_actors()
             .await?;
 
-        Ok(InflightGraphInfo::new(all_actor_infos.fragment_infos))
+        Ok(InflightGraphInfo::new(
+            all_actor_infos
+                .fragment_infos
+                .into_iter()
+                .map(|(id, info)| (id as _, info))
+                .collect(),
+        ))
     }
 
     /// Serving `SHOW JOBS / SELECT * FROM rw_ddl_progress`
@@ -1660,23 +1634,24 @@ pub type BarrierManagerRef = GlobalBarrierManagerContext;
 fn collect_resp_info(
     resps: Vec<BarrierCompleteResponse>,
 ) -> (
-    HashMap<HummockSstableObjectId, WorkerId>,
+    HashMap<HummockSstableObjectId, u32>,
     Vec<LocalSstableInfo>,
     HashMap<TableId, TableWatermarks>,
     Vec<SstableInfo>,
 ) {
-    let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
+    let mut sst_to_worker: HashMap<HummockSstableObjectId, u32> = HashMap::new();
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
 
     for resp in resps {
-        let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
-            let sst_info = grouped.sst.expect("field not None");
+        let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
+            let sst_info = local_sst.sst.expect("field not None");
             sst_to_worker.insert(sst_info.object_id, resp.worker_id);
             LocalSstableInfo::new(
                 sst_info.into(),
-                from_prost_table_stats_map(grouped.table_stats_map),
+                from_prost_table_stats_map(local_sst.table_stats_map),
+                local_sst.created_at,
             )
         });
         synced_ssts.extend(ssts_iter);
@@ -1778,6 +1753,5 @@ fn collect_commit_epoch_info(
         change_log_delta: table_new_change_log,
         committed_epoch: epoch,
         tables_to_commit,
-        is_visible_table_committed_epoch: true,
     }
 }

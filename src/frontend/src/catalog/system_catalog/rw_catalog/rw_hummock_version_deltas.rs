@@ -27,8 +27,6 @@ struct RwHummockVersionDelta {
     #[primary_key]
     id: i64,
     prev_id: i64,
-    max_committed_epoch: i64,
-    safe_epoch: i64,
     trivial_move: bool,
     group_deltas: JsonbVal,
 }
@@ -41,8 +39,6 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockVersionDelta
         .map(|d| RwHummockVersionDelta {
             id: d.id.to_u64() as _,
             prev_id: d.prev_id.to_u64() as _,
-            max_committed_epoch: d.visible_table_committed_epoch() as _,
-            safe_epoch: d.visible_table_safe_epoch() as _,
             trivial_move: d.trivial_move,
             group_deltas: json!(d
                 .group_deltas

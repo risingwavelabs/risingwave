@@ -32,11 +32,7 @@ impl OpendalObjectStore {
         metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
         // Create obs backend builder.
-        let mut builder = Obs::default();
-
-        builder.bucket(&bucket);
-
-        builder.root(&root);
+        let mut builder = Obs::default().bucket(&bucket).root(&root);
 
         let endpoint = std::env::var("OBS_ENDPOINT")
             .unwrap_or_else(|_| panic!("OBS_ENDPOINT not found from environment variables"));
@@ -46,9 +42,10 @@ impl OpendalObjectStore {
             panic!("OBS_SECRET_ACCESS_KEY not found from environment variables")
         });
 
-        builder.endpoint(&endpoint);
-        builder.access_key_id(&access_key_id);
-        builder.secret_access_key(&secret_access_key);
+        builder = builder
+            .endpoint(&endpoint)
+            .access_key_id(&access_key_id)
+            .secret_access_key(&secret_access_key);
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())

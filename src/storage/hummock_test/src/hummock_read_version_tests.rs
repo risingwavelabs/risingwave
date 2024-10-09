@@ -49,7 +49,7 @@ async fn test_read_version_basic() {
 
     let mut epoch = test_epoch(1);
     let table_id = 0;
-    let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT));
+    let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
     let mut read_version = HummockReadVersion::new(
         TableId::from(table_id),
         TEST_LOCAL_INSTANCE_ID,
@@ -276,7 +276,7 @@ async fn test_read_filter_basic() {
 
     let epoch = test_epoch(1);
     let table_id = 0;
-    let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT));
+    let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
     let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
         TableId::from(table_id),
         TEST_LOCAL_INSTANCE_ID,
@@ -333,8 +333,8 @@ async fn test_read_filter_basic() {
             assert_eq!(1, hummock_read_snapshot.0.len());
             assert_eq!(0, hummock_read_snapshot.1.len());
             assert_eq!(
-                read_version.read().committed().max_committed_epoch(),
-                hummock_read_snapshot.2.max_committed_epoch()
+                read_version.read().committed().id,
+                hummock_read_snapshot.2.id,
             );
         }
     }

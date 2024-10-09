@@ -219,6 +219,7 @@ impl Encode {
     }
 }
 
+/// `FORMAT ... ENCODE ... [(a=b, ...)] [KEY ENCODE ...]`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ConnectorSchema {
@@ -716,6 +717,7 @@ impl fmt::Display for DeclareCursorStatement {
 pub struct FetchCursorStatement {
     pub cursor_name: ObjectName,
     pub count: u32,
+    pub with_properties: WithProperties,
 }
 
 impl ParseTo for FetchCursorStatement {
@@ -727,8 +729,13 @@ impl ParseTo for FetchCursorStatement {
         };
         p.expect_keyword(Keyword::FROM)?;
         impl_parse_to!(cursor_name: ObjectName, p);
+        impl_parse_to!(with_properties: WithProperties, p);
 
-        Ok(Self { cursor_name, count })
+        Ok(Self {
+            cursor_name,
+            count,
+            with_properties,
+        })
     }
 }
 

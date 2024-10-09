@@ -17,18 +17,18 @@ normal = ["workspace-hack"]
 ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
-arrow-array = { workspace = true }
-arrow-array-deltalake = { workspace = true }
-arrow-array-iceberg = { workspace = true }
-arrow-buffer = { workspace = true }
-arrow-buffer-deltalake = { workspace = true }
-arrow-buffer-iceberg = { workspace = true }
-arrow-cast = { workspace = true }
-arrow-cast-deltalake = { workspace = true }
-arrow-cast-iceberg = { workspace = true }
-arrow-schema = { workspace = true }
-arrow-schema-deltalake = { workspace = true }
-arrow-schema-iceberg = { workspace = true }
+arrow-48-array = { package = "arrow-array", version = "48" }
+arrow-48-buffer = { package = "arrow-buffer", version = "48" }
+arrow-48-cast = { package = "arrow-cast", version = "48" }
+arrow-48-schema = { package = "arrow-schema", version = "48" }
+arrow-52-array = { package = "arrow-array", version = "52" }
+arrow-52-buffer = { package = "arrow-buffer", version = "52" }
+arrow-52-cast = { package = "arrow-cast", version = "52" }
+arrow-52-schema = { package = "arrow-schema", version = "52" }
+arrow-53-array = { package = "arrow-array", version = "53" }
+arrow-53-buffer = { package = "arrow-buffer", version = "53" }
+arrow-53-cast = { package = "arrow-cast", version = "53" }
+arrow-53-schema = { package = "arrow-schema", version = "53" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -39,7 +39,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-chrono-tz = { version = "0.9", features = ["case-insensitive"] }
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 clap = { workspace = true }
 comfy-table = "7"
 crc32fast = "1"
@@ -97,7 +97,7 @@ rw_resource_util = { workspace = true }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
-serde_default = "0.1"
+serde_default = "0.2"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.7.1"
@@ -106,7 +106,7 @@ stacker = "0.1"
 static_assertions = "1"
 strum = "0.26"
 strum_macros = "0.26"
-sysinfo = { version = "0.30", default-features = false }
+sysinfo = { version = "0.31", default-features = false, features = ["system"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
@@ -136,7 +136,7 @@ tower-layer = "0.3.2"
 tower-service = "0.3.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.16", default-features = false }
+procfs = { version = "0.17", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]

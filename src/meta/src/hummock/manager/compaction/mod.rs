@@ -26,7 +26,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
@@ -52,7 +51,7 @@ use risingwave_hummock_sdk::table_stats::{
 use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
-    HummockVersionId,
+    HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
@@ -63,8 +62,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 };
 use risingwave_pb::hummock::{
     compact_task, CompactTaskAssignment, CompactionConfig, PbCompactStatus,
-    PbCompactTaskAssignment, StateTableInfoDelta, SubscribeCompactionEventRequest, TableOption,
-    TableSchema,
+    PbCompactTaskAssignment, SubscribeCompactionEventRequest, TableOption,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -92,7 +90,7 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
-use crate::manager::{MetadataManager, META_NODE_ID};
+use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
 pub mod compaction_group_manager;
@@ -189,38 +187,6 @@ impl<'a> HummockVersionTransaction<'a> {
         ));
 
         group_deltas.push(group_delta);
-        let new_visible_table_safe_epoch = std::cmp::max(
-            version_delta.latest_version().visible_table_safe_epoch(),
-            compact_task.watermark,
-        );
-        version_delta.set_safe_epoch(new_visible_table_safe_epoch);
-        if version_delta.latest_version().visible_table_safe_epoch() < new_visible_table_safe_epoch
-        {
-            version_delta.with_latest_version(|version, version_delta| {
-                for (table_id, info) in version.state_table_info.info() {
-                    let new_safe_epoch = min(new_visible_table_safe_epoch, info.committed_epoch);
-                    if new_safe_epoch > info.safe_epoch {
-                        if new_safe_epoch != version_delta.visible_table_safe_epoch() {
-                            warn!(
-                                new_safe_epoch,
-                                committed_epoch = info.committed_epoch,
-                                global_safe_epoch = new_visible_table_safe_epoch,
-                                table_id = table_id.table_id,
-                                "table has different safe epoch to global"
-                            );
-                        }
-                        version_delta.state_table_info_delta.insert(
-                            *table_id,
-                            StateTableInfoDelta {
-                                committed_epoch: info.committed_epoch,
-                                safe_epoch: new_safe_epoch,
-                                compaction_group_id: info.compaction_group_id,
-                            },
-                        );
-                    }
-                }
-            });
-        }
         version_delta.pre_apply();
     }
 }
@@ -667,16 +633,6 @@ impl HummockManager {
         let _timer = start_measure_real_process_timer!(self, "get_compact_tasks_impl");
 
         let start_time = Instant::now();
-        let max_committed_epoch = versioning.current_version.visible_table_committed_epoch();
-        let watermark = self
-            .context_info
-            .read()
-            .await
-            .pinned_snapshots
-            .values()
-            .map(|v| v.minimal_pinned_snapshot)
-            .fold(max_committed_epoch, std::cmp::min);
-
         let mut compaction_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
 
         let mut compact_task_assignment =
@@ -787,7 +743,6 @@ impl HummockManager {
                 let mut compact_task = CompactTask {
                     input_ssts: compact_task.input.input_levels,
                     splits: vec![KeyRange::inf()],
-                    watermark,
                     sorted_output_ssts: vec![],
                     task_id,
                     target_level: target_level_id,
@@ -1025,6 +980,7 @@ impl HummockManager {
                 task_status,
                 sorted_output_ssts: vec![],
                 table_stats_change: HashMap::default(),
+                object_timestamps: HashMap::default(),
             })
             .collect_vec();
         let rets = self.report_compact_tasks(tasks).await?;
@@ -1139,6 +1095,7 @@ impl HummockManager {
         task_status: TaskStatus,
         sorted_output_ssts: Vec<SstableInfo>,
         table_stats_change: Option<PbTableStatsMap>,
+        object_timestamps: HashMap<HummockSstableObjectId, u64>,
     ) -> Result<bool> {
         let rets = self
             .report_compact_tasks(vec![ReportTask {
@@ -1146,6 +1103,7 @@ impl HummockManager {
                 task_status,
                 sorted_output_ssts,
                 table_stats_change: table_stats_change.unwrap_or_default(),
+                object_timestamps,
             }])
             .await?;
         Ok(rets[0])
@@ -1235,10 +1193,19 @@ impl HummockManager {
                 .map(|level| level.level_idx)
                 .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status {
-                // if member_table_ids changes, the data of sstable may stale.
-                let is_expired =
-                    Self::is_compact_task_expired(&compact_task, version.latest_version());
-                if is_expired {
+                if let Err(e) = self
+                    .report_compaction_sanity_check(&task.object_timestamps)
+                    .await
+                {
+                    warn!(
+                        "failed to commit compaction task {} {}",
+                        compact_task.task_id,
+                        e.as_report()
+                    );
+                    compact_task.task_status = TaskStatus::RetentionTimeRejected;
+                    false
+                } else if Self::is_compact_task_expired(&compact_task, version.latest_version()) {
+                    // if member_table_ids changes, the data of sstable may stale.
                     compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                     false
                 } else {
@@ -1365,9 +1332,8 @@ impl HummockManager {
     ) -> Result<()> {
         self.on_current_version(|old_version| {
             tracing::info!(
-                "Trigger compaction for version {}, epoch {}, groups {:?}",
+                "Trigger compaction for version {}, groups {:?}",
                 old_version.id,
-                old_version.visible_table_committed_epoch(),
                 compaction_groups
             );
         })
@@ -1598,6 +1564,7 @@ impl HummockManager {
             task_status,
             sorted_output_ssts,
             table_stats_change: table_stats_change.unwrap_or_default(),
+            object_timestamps: HashMap::default(),
         }])
         .await?;
         Ok(())
@@ -1692,5 +1659,28 @@ impl CompactionState {
         } else {
             None
         }
+    }
+}
+
+impl Compaction {
+    pub fn get_compact_task_assignments_by_group_id(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Vec<CompactTaskAssignment> {
+        self.compact_task_assignment
+            .iter()
+            .filter_map(|(_, assignment)| {
+                if assignment.compact_task.as_ref().map_or(false, |task| {
+                    task.compaction_group_id == compaction_group_id
+                }) {
+                    Some(CompactTaskAssignment {
+                        compact_task: assignment.compact_task.clone(),
+                        context_id: assignment.context_id,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }

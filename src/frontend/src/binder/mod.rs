@@ -863,7 +863,7 @@ mod tests {
                             select_items: [
                                 AggCall(
                                     AggCall {
-                                        agg_kind: Builtin(
+                                        agg_type: Builtin(
                                             ApproxPercentile,
                                         ),
                                         return_type: Float64,
