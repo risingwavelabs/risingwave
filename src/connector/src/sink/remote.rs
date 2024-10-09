@@ -165,11 +165,11 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 }
 
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
-    if sink_name == OpenSearchJavaSink::SINK_NAME {
-        risingwave_common::license::Feature::OpenSearchSink
-            .check_available()
-            .map_err(|e| anyhow::anyhow!(e))?;
-    }
+    // if sink_name == OpenSearchJavaSink::SINK_NAME {
+    //     risingwave_common::license::Feature::OpenSearchSink
+    //         .check_available()
+    //         .map_err(|e| anyhow::anyhow!(e))?;
+    // }
     if is_remote_es_sink(sink_name)
         && param.downstream_pk.len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)

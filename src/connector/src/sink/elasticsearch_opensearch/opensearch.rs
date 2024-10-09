@@ -54,6 +54,9 @@ impl Sink for OpenSearchSink {
     const SINK_NAME: &'static str = OPENSEARCH_SINK;
 
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::OpenSearchSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
         self.config.validate_config(&self.schema)?;
         let client = self.config.build_client(Self::SINK_NAME)?;
         client.ping().await?;
