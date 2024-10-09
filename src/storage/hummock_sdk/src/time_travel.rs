@@ -45,7 +45,7 @@ pub fn refill_version(
     }) {
         refill_level(level, sst_id_to_info);
         level
-            .table_infos
+            .sstable_infos
             .retain(|t| t.table_ids.contains(&table_id));
     }
     version
@@ -57,7 +57,7 @@ pub fn refill_version(
 }
 
 fn refill_level(level: &mut Level, sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>) {
-    for s in &mut level.table_infos {
+    for s in &mut level.sstable_infos {
         refill_sstable_info(s, sst_id_to_info);
     }
 }

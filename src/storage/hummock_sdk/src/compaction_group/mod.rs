@@ -296,7 +296,7 @@ pub mod group_split {
                 &mut left_levels.l0,
                 right_sub_level.sub_level_id,
                 right_sub_level.level_type,
-                right_sub_level.table_infos,
+                right_sub_level.sstable_infos,
                 None,
             );
         }
@@ -319,11 +319,11 @@ pub mod group_split {
             .for_each(|sub_level| sub_level.vnode_partition_count = 0);
 
         for (idx, level) in right_levels.levels.into_iter().enumerate() {
-            if level.table_infos.is_empty() {
+            if level.sstable_infos.is_empty() {
                 continue;
             }
 
-            let insert_table_infos = level.table_infos;
+            let insert_table_infos = level.sstable_infos;
             left_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
                 .map(|sst| sst.sst_size)
@@ -334,20 +334,20 @@ pub mod group_split {
                 .sum::<u64>();
 
             left_levels.levels[idx]
-                .table_infos
+                .sstable_infos
                 .extend(insert_table_infos);
             left_levels.levels[idx]
-                .table_infos
+                .sstable_infos
                 .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
             assert!(
-                can_concat(&left_levels.levels[idx].table_infos),
+                can_concat(&left_levels.levels[idx].sstable_infos),
                 "{}",
                 format!(
-                    "left-group {} right-group {} left_levels.levels[{}].table_infos: {:?} level_idx {:?}",
+                    "left-group {} right-group {} left_levels.levels[{}].sstable_infos: {:?} level_idx {:?}",
                     left_levels.group_id,
                     right_levels.group_id,
                     idx,
-                    left_levels.levels[idx].table_infos,
+                    left_levels.levels[idx].sstable_infos,
                     left_levels.levels[idx].level_idx
                 )
             );
@@ -382,13 +382,13 @@ pub mod group_split {
         new_sst_id: &mut u64,
         split_key: Bytes,
     ) -> Vec<SstableInfo> {
-        if level.table_infos.is_empty() {
+        if level.sstable_infos.is_empty() {
             return vec![];
         }
 
         let mut insert_table_infos = vec![];
         if level.level_type == PbLevelType::Overlapping {
-            level.table_infos.retain_mut(|sst| {
+            level.sstable_infos.retain_mut(|sst| {
                 let sst_split_type = need_to_split(sst, split_key.clone());
                 match sst_split_type {
                     SstSplitType::Left => true,
@@ -418,25 +418,25 @@ pub mod group_split {
                 }
             });
         } else {
-            let pos = get_split_pos(&level.table_infos, split_key.clone());
-            if pos >= level.table_infos.len() {
+            let pos = get_split_pos(&level.sstable_infos, split_key.clone());
+            if pos >= level.sstable_infos.len() {
                 return insert_table_infos;
             }
 
-            let sst_split_type = need_to_split(&level.table_infos[pos], split_key.clone());
+            let sst_split_type = need_to_split(&level.sstable_infos[pos], split_key.clone());
             match sst_split_type {
                 SstSplitType::Left => {
-                    insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
-                    level.table_infos = level.table_infos[0..=pos].to_vec();
+                    insert_table_infos.extend_from_slice(&level.sstable_infos[pos + 1..]);
+                    level.sstable_infos = level.sstable_infos[0..=pos].to_vec();
                 }
                 SstSplitType::Right => {
                     assert_eq!(0, pos);
-                    insert_table_infos.extend_from_slice(&level.table_infos[pos..]); // the sst at pos has been split to the right
-                    level.table_infos.clear();
+                    insert_table_infos.extend_from_slice(&level.sstable_infos[pos..]); // the sst at pos has been split to the right
+                    level.sstable_infos.clear();
                 }
                 SstSplitType::Both => {
                     // split the sst
-                    let sst = level.table_infos[pos].clone();
+                    let sst = level.sstable_infos[pos].clone();
                     let sst_size = sst.sst_size;
                     let (left, right) = split_sst(
                         sst,
@@ -454,13 +454,13 @@ pub mod group_split {
                     let left_end = pos;
                     // the sst at pos has been split to both left and right
                     // the branched sst has been inserted to the `insert_table_infos`
-                    insert_table_infos.extend_from_slice(&level.table_infos[right_start..]);
-                    level.table_infos = level.table_infos[0..=left_end].to_vec();
+                    insert_table_infos.extend_from_slice(&level.sstable_infos[right_start..]);
+                    level.sstable_infos = level.sstable_infos[0..=left_end].to_vec();
                     if let Some(origin_sst) = left {
                         // replace the origin sst with the left part
-                        level.table_infos[left_end] = origin_sst;
+                        level.sstable_infos[left_end] = origin_sst;
                     } else {
-                        level.table_infos.pop();
+                        level.sstable_infos.pop();
                     }
                 }
             };

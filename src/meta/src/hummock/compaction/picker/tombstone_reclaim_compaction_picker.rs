@@ -57,7 +57,7 @@ impl TombstoneReclaimCompactionPicker {
 
         while state.last_level <= levels.levels.len() {
             let mut select_input_ssts = vec![];
-            for sst in &levels.levels[state.last_level - 1].table_infos {
+            for sst in &levels.levels[state.last_level - 1].sstable_infos {
                 let need_reclaim = (sst.range_tombstone_count * 100
                     >= sst.total_key_count * self.range_delete_ratio)
                     || (sst.stale_key_count * 100 >= sst.total_key_count * self.delete_ratio);
@@ -78,12 +78,12 @@ impl TombstoneReclaimCompactionPicker {
                     InputLevel {
                         level_idx: state.last_level as u32,
                         level_type: levels.levels[state.last_level - 1].level_type,
-                        table_infos: vec![],
+                        sstable_infos: vec![],
                     }
                 } else {
                     let target_table_infos = self.overlap_strategy.check_base_level_overlap(
                         &select_input_ssts,
-                        &levels.levels[state.last_level].table_infos,
+                        &levels.levels[state.last_level].sstable_infos,
                     );
                     let mut pending_compact = false;
                     for sst in &target_table_infos {
@@ -99,24 +99,24 @@ impl TombstoneReclaimCompactionPicker {
                     InputLevel {
                         level_idx: (state.last_level + 1) as u32,
                         level_type: levels.levels[state.last_level].level_type,
-                        table_infos: target_table_infos,
+                        sstable_infos: target_table_infos,
                     }
                 };
                 return Some(CompactionInput {
                     select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
                     target_input_size: target_level
-                        .table_infos
+                        .sstable_infos
                         .iter()
                         .map(|sst| sst.sst_size)
                         .sum(),
-                    total_file_count: (select_input_ssts.len() + target_level.table_infos.len())
+                    total_file_count: (select_input_ssts.len() + target_level.sstable_infos.len())
                         as u64,
                     target_level: target_level.level_idx as usize,
                     input_levels: vec![
                         InputLevel {
                             level_idx: state.last_level as u32,
                             level_type: levels.levels[state.last_level - 1].level_type,
-                            table_infos: select_input_ssts,
+                            sstable_infos: select_input_ssts,
                         },
                         target_level,
                     ],
@@ -168,25 +168,25 @@ pub mod tests {
         let mut sst = generate_table(3, 1, 201, 300, 1);
         sst.stale_key_count = 40;
         sst.total_key_count = 100;
-        levels.levels[1].table_infos.push(sst);
+        levels.levels[1].sstable_infos.push(sst);
 
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
         assert_eq!(2, ret.input_levels.len());
-        assert_eq!(3, ret.input_levels[0].table_infos[0].sst_id);
+        assert_eq!(3, ret.input_levels[0].sstable_infos[0].sst_id);
         let mut sst = generate_table(4, 1, 1, 100, 1);
         sst.stale_key_count = 30;
         sst.range_tombstone_count = 30;
         sst.total_key_count = 100;
-        levels.levels[0].table_infos.push(sst);
+        levels.levels[0].sstable_infos.push(sst);
         let picker = TombstoneReclaimCompactionPicker::new(strategy, 50, 10);
         let mut state = TombstoneReclaimPickerState::default();
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
         assert_eq!(2, ret.input_levels.len());
-        assert_eq!(4, ret.input_levels[0].table_infos[0].sst_id);
-        assert_eq!(1, ret.input_levels[1].table_infos[0].sst_id);
+        assert_eq!(4, ret.input_levels[0].sstable_infos[0].sst_id);
+        assert_eq!(1, ret.input_levels[1].sstable_infos[0].sst_id);
     }
 }

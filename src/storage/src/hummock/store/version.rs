@@ -600,14 +600,14 @@ impl HummockVersionReader {
         // the filter key needs to be encoded as well.
         assert!(committed_version.is_valid());
         for level in committed_version.levels(read_options.table_id) {
-            if level.table_infos.is_empty() {
+            if level.sstable_infos.is_empty() {
                 continue;
             }
 
             match level.level_type {
                 LevelType::Overlapping | LevelType::Unspecified => {
                     let sstable_infos = prune_overlapping_ssts(
-                        &level.table_infos,
+                        &level.sstable_infos,
                         read_options.table_id,
                         &single_table_key_range,
                     );
@@ -633,12 +633,12 @@ impl HummockVersionReader {
                 }
                 LevelType::Nonoverlapping => {
                     let mut table_info_idx =
-                        search_sst_idx(&level.table_infos, full_key.user_key.as_ref());
+                        search_sst_idx(&level.sstable_infos, full_key.user_key.as_ref());
                     if table_info_idx == 0 {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = level.table_infos[table_info_idx]
+                    let ord = level.sstable_infos[table_info_idx]
                         .key_range
                         .compare_right_with_user_key(full_key.user_key.as_ref());
                     // the case that the key falls into the gap between two ssts
@@ -650,7 +650,7 @@ impl HummockVersionReader {
                     local_stats.non_overlapping_get_count += 1;
                     if let Some((data, data_epoch)) = get_from_sstable_info(
                         self.sstable_store.clone(),
-                        &level.table_infos[table_info_idx],
+                        &level.sstable_infos[table_info_idx],
                         full_key.to_ref(),
                         &read_options,
                         dist_key_hash,
@@ -848,12 +848,13 @@ impl HummockVersionReader {
         let timer = Instant::now();
 
         for level in committed.levels(read_options.table_id) {
-            if level.table_infos.is_empty() {
+            if level.sstable_infos.is_empty() {
                 continue;
             }
 
             if level.level_type == LevelType::Nonoverlapping {
-                let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
+                let table_infos =
+                    prune_nonoverlapping_ssts(&level.sstable_infos, user_key_range_ref);
                 let sstables = table_infos
                     .filter(|sstable_info| {
                         sstable_info
@@ -903,7 +904,7 @@ impl HummockVersionReader {
                 }
             } else {
                 let table_infos = prune_overlapping_ssts(
-                    &level.table_infos,
+                    &level.sstable_infos,
                     read_options.table_id,
                     &table_key_range,
                 );

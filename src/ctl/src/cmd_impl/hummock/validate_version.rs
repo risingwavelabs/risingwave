@@ -101,7 +101,7 @@ async fn print_user_key_in_version(
     println!("print key {:?} in version {}", target_key, version.id);
     for cg in version.levels.values() {
         for level in cg.l0.sub_levels.iter().rev().chain(cg.levels.iter()) {
-            for sstable_info in &level.table_infos {
+            for sstable_info in &level.sstable_infos {
                 let key_range = &sstable_info.key_range;
                 let left_user_key = FullKey::decode(&key_range.left);
                 let right_user_key = FullKey::decode(&key_range.right);

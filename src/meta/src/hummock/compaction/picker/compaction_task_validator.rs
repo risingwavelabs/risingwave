@@ -155,7 +155,7 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
         let mut max_level_size = 0;
         for select_level in &input.input_levels {
             let level_select_size = select_level
-                .table_infos
+                .sstable_infos
                 .iter()
                 .map(|sst| sst.sst_size)
                 .sum::<u64>();

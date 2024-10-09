@@ -69,7 +69,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut dropped_table_ids = HashSet::new();
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
-            .table_infos
+            .sstable_infos
             .iter()
             .map(|table| {
                 for tid in &table.table_ids {
@@ -159,9 +159,9 @@ pub fn statistics_compact_task(task: &CompactTask) -> CompactTaskStatistics {
     let mut total_uncompressed_file_size = 0;
 
     for level in &task.input_ssts {
-        total_file_count += level.table_infos.len() as u64;
+        total_file_count += level.sstable_infos.len() as u64;
 
-        level.table_infos.iter().for_each(|sst| {
+        level.sstable_infos.iter().for_each(|sst| {
             total_file_size += sst.file_size;
             total_uncompressed_file_size += sst.uncompressed_file_size;
             total_key_count += sst.total_key_count;
@@ -206,7 +206,7 @@ pub fn estimate_memory_for_compact_task(
     for level in &task.input_ssts {
         if level.level_type == LevelType::Nonoverlapping {
             let mut cur_level_max_sst_meta_size = 0;
-            for sst in &level.table_infos {
+            for sst in &level.sstable_infos {
                 let meta_size = sst.file_size - sst.meta_offset;
                 task_max_sst_meta_ratio =
                     std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.file_size);
@@ -214,7 +214,7 @@ pub fn estimate_memory_for_compact_task(
             }
             result += max_input_stream_estimated_memory + cur_level_max_sst_meta_size;
         } else {
-            for sst in &level.table_infos {
+            for sst in &level.sstable_infos {
                 let meta_size = sst.file_size - sst.meta_offset;
                 result += max_input_stream_estimated_memory + meta_size;
                 task_max_sst_meta_ratio =

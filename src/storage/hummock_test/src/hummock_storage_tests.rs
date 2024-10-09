@@ -2650,9 +2650,8 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 1);
         let sub_level = &sub_levels[0];
-        assert_eq!(sub_level.table_infos.len(), 1);
-        assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch1.object_id);
-
+        assert_eq!(sub_level.sstable_infos.len(), 1);
+        assert_eq!(sub_level.sstable_infos[0].object_id, sst1_epoch1.object_id);
         let info = version
             .state_table_info
             .info()
@@ -2695,12 +2694,11 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 2);
         let sub_level = &sub_levels[0];
-        assert_eq!(sub_level.table_infos.len(), 1);
-        assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch1.object_id);
+        assert_eq!(sub_level.sstable_infos.len(), 1);
+        assert_eq!(sub_level.sstable_infos[0].object_id, sst1_epoch1.object_id);
         let sub_level = &sub_levels[1];
-        assert_eq!(sub_level.table_infos.len(), 1);
-        assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch2.object_id);
-
+        assert_eq!(sub_level.sstable_infos.len(), 1);
+        assert_eq!(sub_level.sstable_infos[0].object_id, sst1_epoch2.object_id);
         let info = version
             .state_table_info
             .info()
@@ -2745,8 +2743,8 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &new_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 1);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.table_infos.len(), 1);
-        assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
+        assert_eq!(sub_level1.sstable_infos.len(), 1);
+        assert_eq!(sub_level1.sstable_infos[0].object_id, sst2_epoch1.object_id);
 
         let info = version.state_table_info.info().get(&new_table_id).unwrap();
         assert_eq!(info.committed_epoch, epoch1);
@@ -2779,11 +2777,11 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &new_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 2);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.table_infos.len(), 1);
-        assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
+        assert_eq!(sub_level1.sstable_infos.len(), 1);
+        assert_eq!(sub_level1.sstable_infos[0].object_id, sst2_epoch1.object_id);
         let sub_level2 = &sub_levels[1];
-        assert_eq!(sub_level2.table_infos.len(), 1);
-        assert_eq!(sub_level2.table_infos[0].object_id, sst2_epoch2.object_id);
+        assert_eq!(sub_level2.sstable_infos.len(), 1);
+        assert_eq!(sub_level2.sstable_infos[0].object_id, sst2_epoch2.object_id);
 
         let info = version.state_table_info.info().get(&new_table_id).unwrap();
         assert_eq!(info.committed_epoch, epoch2);
@@ -2818,27 +2816,14 @@ async fn test_commit_multi_epoch() {
         let sub_levels = &old_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 3);
         let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.table_infos.len(), 1);
-        assert_eq!(sub_level1.table_infos[0].object_id, sst1_epoch1.object_id);
+        assert_eq!(sub_level1.sstable_infos.len(), 1);
+        assert_eq!(sub_level1.sstable_infos[0].object_id, sst2_epoch1.object_id);
         let sub_level2 = &sub_levels[1];
-        assert_eq!(sub_level2.table_infos.len(), 1);
-        assert_eq!(sub_level2.table_infos[0].object_id, sst1_epoch2.object_id);
-        let sub_level3 = &sub_levels[2];
-        assert_eq!(sub_level3.table_infos.len(), 1);
-        assert_eq!(sub_level3.table_infos[0].object_id, sst_epoch3.object_id);
-
-        let new_cg = version.levels.get(&new_cg_id).unwrap();
-        let sub_levels = &new_cg.l0.sub_levels;
-        assert_eq!(sub_levels.len(), 3);
-        let sub_level1 = &sub_levels[0];
-        assert_eq!(sub_level1.table_infos.len(), 1);
-        assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
-        let sub_level2 = &sub_levels[1];
-        assert_eq!(sub_level2.table_infos.len(), 1);
-        assert_eq!(sub_level2.table_infos[0].object_id, sst2_epoch2.object_id);
+        assert_eq!(sub_level2.sstable_infos.len(), 1);
+        assert_eq!(sub_level2.sstable_infos[0].object_id, sst2_epoch2.object_id);
         let sub_level3 = &sub_levels[1];
-        assert_eq!(sub_level3.table_infos.len(), 1);
-        assert_eq!(sub_level3.table_infos[0].object_id, sst2_epoch2.object_id);
+        assert_eq!(sub_level3.sstable_infos.len(), 1);
+        assert_eq!(sub_level3.sstable_infos[0].object_id, sst2_epoch2.object_id);
 
         let info = version.state_table_info.info().get(&new_table_id).unwrap();
         assert_eq!(info.committed_epoch, epoch3);

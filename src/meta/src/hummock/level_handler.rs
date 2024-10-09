@@ -65,18 +65,18 @@ impl LevelHandler {
 
     pub fn is_level_pending_compact(&self, level: &Level) -> bool {
         level
-            .table_infos
+            .sstable_infos
             .iter()
             .any(|table| self.compacting_files.contains_key(&table.sst_id))
     }
 
     pub fn is_level_all_pending_compact(&self, level: &Level) -> bool {
-        if level.table_infos.is_empty() {
+        if level.sstable_infos.is_empty() {
             return false;
         }
 
         level
-            .table_infos
+            .sstable_infos
             .iter()
             .all(|table| self.compacting_files.contains_key(&table.sst_id))
     }

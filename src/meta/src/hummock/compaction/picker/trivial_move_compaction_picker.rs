@@ -96,12 +96,12 @@ impl TrivialMovePicker {
                     InputLevel {
                         level_idx: self.level as u32,
                         level_type: LevelType::Nonoverlapping,
-                        table_infos: vec![trivial_move_sst],
+                        sstable_infos: vec![trivial_move_sst],
                     },
                     InputLevel {
                         level_idx: self.target_level as u32,
                         level_type: LevelType::Nonoverlapping,
-                        table_infos: vec![],
+                        sstable_infos: vec![],
                     },
                 ],
                 target_level: self.target_level,

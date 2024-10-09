@@ -473,10 +473,10 @@ impl DiagnoseCommand {
             .on_current_version(|version| {
                 for compaction_group in version.levels.values() {
                     let mut visit_level = |level: &Level| {
-                        sst_num += level.table_infos.len();
+                        sst_num += level.sstable_infos.len();
                         sst_total_file_size +=
-                            level.table_infos.iter().map(|t| t.sst_size).sum::<u64>();
-                        for sst in &level.table_infos {
+                            level.sstable_infos.iter().map(|t| t.sst_size).sum::<u64>();
+                        for sst in &level.sstable_infos {
                             if sst.total_key_count == 0 {
                                 continue;
                             }

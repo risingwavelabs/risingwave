@@ -59,7 +59,7 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            if level.table_infos.is_empty() {
+            if level.sstable_infos.is_empty() {
                 continue;
             }
 
@@ -70,7 +70,7 @@ impl TierCompactionPicker {
             let input_level = InputLevel {
                 level_idx: 0,
                 level_type: level.level_type,
-                table_infos: level.table_infos.clone(),
+                sstable_infos: level.sstable_infos.clone(),
             };
 
             let mut select_level_inputs = vec![input_level];
@@ -84,7 +84,7 @@ impl TierCompactionPicker {
             );
 
             let mut compaction_bytes = level.total_file_size;
-            let mut compact_file_count = level.table_infos.len() as u64;
+            let mut compact_file_count = level.sstable_infos.len() as u64;
             // Limit sstable file count to avoid using too much memory.
             let overlapping_max_compact_file_numer = self.config.level0_max_compact_file_number;
 
@@ -102,11 +102,11 @@ impl TierCompactionPicker {
                 }
 
                 compaction_bytes += other.total_file_size;
-                compact_file_count += other.table_infos.len() as u64;
+                compact_file_count += other.sstable_infos.len() as u64;
                 select_level_inputs.push(InputLevel {
                     level_idx: 0,
                     level_type: other.level_type,
-                    table_infos: other.table_infos.clone(),
+                    sstable_infos: other.sstable_infos.clone(),
                 });
             }
 
@@ -216,7 +216,7 @@ pub mod tests {
         assert_eq!(
             ret.input_levels
                 .iter()
-                .map(|i| i.table_infos.len())
+                .map(|i| i.sstable_infos.len())
                 .sum::<usize>(),
             7
         );

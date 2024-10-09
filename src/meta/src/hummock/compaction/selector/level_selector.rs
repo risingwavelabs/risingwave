@@ -209,7 +209,7 @@ impl DynamicLevelSelectorCore {
             .l0
             .sub_levels
             .iter()
-            .map(|level| level.table_infos.len())
+            .map(|level| level.sstable_infos.len())
             .sum::<usize>()
             - handlers[0].get_pending_file_count();
 
@@ -224,7 +224,7 @@ impl DynamicLevelSelectorCore {
                 .sub_levels
                 .iter()
                 .filter(|level| level.level_type == LevelType::Overlapping)
-                .map(|level| level.table_infos.len())
+                .map(|level| level.sstable_infos.len())
                 .sum::<usize>();
             if overlapping_file_count > 0 {
                 // FIXME: use overlapping idle file count
@@ -256,7 +256,7 @@ impl DynamicLevelSelectorCore {
                 .sum::<u64>()
                 .saturating_sub(handlers[0].get_pending_output_file_size(ctx.base_level as u32));
             let base_level_size = levels.get_level(ctx.base_level).total_file_size;
-            let base_level_sst_count = levels.get_level(ctx.base_level).table_infos.len() as u64;
+            let base_level_sst_count = levels.get_level(ctx.base_level).sstable_infos.len() as u64;
 
             // size limit
             let non_overlapping_size_score = total_size * SCORE_BASE
@@ -523,10 +523,10 @@ pub mod tests {
         assert_eq!(ctx.level_max_bytes[4], 1000);
 
         levels.levels[3]
-            .table_infos
+            .sstable_infos
             .append(&mut generate_tables(15..20, 2000..3000, 1, 400));
         levels.levels[3].total_file_size = levels.levels[3]
-            .table_infos
+            .sstable_infos
             .iter()
             .map(|sst| sst.sst_size)
             .sum::<u64>();
@@ -551,9 +551,9 @@ pub mod tests {
 
         levels.l0.sub_levels.clear();
         levels.l0.total_file_size = 0;
-        levels.levels[0].table_infos = generate_tables(26..32, 0..1000, 1, 100);
+        levels.levels[0].sstable_infos = generate_tables(26..32, 0..1000, 1, 100);
         levels.levels[0].total_file_size = levels.levels[0]
-            .table_infos
+            .sstable_infos
             .iter()
             .map(|sst| sst.sst_size)
             .sum::<u64>();
@@ -649,7 +649,7 @@ pub mod tests {
         levels_handlers[0].remove_task(1);
         levels_handlers[2].remove_task(1);
         levels.l0.sub_levels.clear();
-        levels.levels[1].table_infos = generate_tables(20..30, 0..1000, 3, 10);
+        levels.levels[1].sstable_infos = generate_tables(20..30, 0..1000, 3, 10);
         let compaction = selector
             .pick_compaction(
                 2,
@@ -671,7 +671,7 @@ pub mod tests {
         assert_eq!(compaction.input.target_level, 4);
         assert_eq!(
             compaction.input.input_levels[0]
-                .table_infos
+                .sstable_infos
                 .iter()
                 .map(|sst| sst.sst_id)
                 .collect_vec(),
@@ -679,7 +679,7 @@ pub mod tests {
         );
         assert_eq!(
             compaction.input.input_levels[1]
-                .table_infos
+                .sstable_infos
                 .iter()
                 .map(|sst| sst.sst_id)
                 .collect_vec(),

@@ -39,7 +39,7 @@ impl VnodeWatermarkCompactionPicker {
     ) -> Option<CompactionInput> {
         let level = levels.levels.last()?;
         let mut select_input_ssts = vec![];
-        for sst_info in &level.table_infos {
+        for sst_info in &level.sstable_infos {
             if !level_handlers[level.level_idx as usize].is_pending_compact(&sst_info.sst_id)
                 && should_delete_sst_by_watermark(sst_info, table_watermarks)
             {
@@ -56,12 +56,12 @@ impl VnodeWatermarkCompactionPicker {
                 InputLevel {
                     level_idx: level.level_idx,
                     level_type: level.level_type,
-                    table_infos: select_input_ssts,
+                    sstable_infos: select_input_ssts,
                 },
                 InputLevel {
                     level_idx: level.level_idx,
                     level_type: level.level_type,
-                    table_infos: vec![],
+                    sstable_infos: vec![],
                 },
             ],
             target_level: level.level_idx as usize,

@@ -413,13 +413,13 @@ impl CompactorRunner {
             compact_task_to_string(&task)
         );
         let left = Box::new(ConcatSstableIterator::new(
-            task.input_ssts[0].table_infos.clone(),
+            task.input_ssts[0].sstable_infos.clone(),
             context.sstable_store.clone(),
             task_progress.clone(),
             context.storage_opts.compactor_iter_max_io_retry_times,
         ));
         let right = Box::new(ConcatSstableIterator::new(
-            task.input_ssts[1].table_infos.clone(),
+            task.input_ssts[1].sstable_infos.clone(),
             context.sstable_store,
             task_progress.clone(),
             context.storage_opts.compactor_iter_max_io_retry_times,
