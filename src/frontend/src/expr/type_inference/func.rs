@@ -662,7 +662,7 @@ fn infer_type_for_special(
         }
         ExprType::VnodeUser => {
             ensure_arity!("rw_vnode", 2 <= | inputs |);
-            inputs[0].cast_explicit_mut(DataType::Int16)?;
+            inputs[0].cast_explicit_mut(DataType::Int32)?; // vnode count
             Ok(Some(VirtualNode::RW_TYPE))
         }
         ExprType::Greatest | ExprType::Least => {

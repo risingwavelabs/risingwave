@@ -1,7 +1,7 @@
-query error Function `rw_vnode` takes at least 2 arguments (0 given)
+query error takes at least 2 arguments \(0 given\)
 select rw_vnode();
 
-query error Function `rw_vnode` takes at least 2 arguments (1 given)
+query error takes at least 2 arguments \(1 given\)
 select rw_vnode(256);
 
 query I
@@ -14,8 +14,20 @@ select rw_vnode(4096, 114, 514);
 ----
 1377
 
-query error the first argument (vnode count) must not be NULL
+# VirtualNode::MAX_COUNT
+query I
+select rw_vnode(32768, 114, 514);
+----
+21857
+
+query error the first argument \(vnode count\) must not be NULL
 select rw_vnode(NULL, 114, 514);
+
+query error the first argument \(vnode count\) must be in range 1..=32768
+select rw_vnode(0, 114, 514);
+
+query error the first argument \(vnode count\) must be in range 1..=32768
+select rw_vnode(32769, 114, 514);
 
 statement ok
 create table vnodes (vnode int);
@@ -26,7 +38,7 @@ insert into vnodes values (256), (4096);
 statement ok
 flush;
 
-query error the first argument (vnode count) must be a constant
+query error the first argument \(vnode count\) must be a constant
 select rw_vnode(vnode, 114, 514) from vnodes;
 
 statement ok
