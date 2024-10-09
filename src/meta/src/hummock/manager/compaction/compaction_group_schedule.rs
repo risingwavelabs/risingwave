@@ -662,12 +662,12 @@ impl HummockManager {
             .await;
         match ret {
             Ok(split_result) => {
-                tracing::info!("move state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}", table_id, parent_group_id, split_result, self.env.opts.partition_vnode_count,);
+                tracing::info!("split state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}", table_id, parent_group_id, self.env.opts.partition_vnode_count, split_result);
             }
             Err(e) => {
                 tracing::info!(
                     error = %e.as_report(),
-                    "failed to move state table [{}] from group-{}",
+                    "failed to split state table [{}] from group-{}",
                     table_id,
                     parent_group_id,
                 )
