@@ -65,7 +65,7 @@ pub struct SessionConfig {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
-    #[parameter(default = false, rename = "rw_implicit_flush")]
+    #[parameter(default = false, alias = "rw_implicit_flush")]
     implicit_flush: bool,
 
     /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
@@ -96,12 +96,12 @@ pub struct SessionConfig {
     date_style: String,
 
     /// Force the use of lookup join instead of hash join when possible for local batch execution.
-    #[parameter(default = true, rename = "rw_batch_enable_lookup_join")]
+    #[parameter(default = true, alias = "rw_batch_enable_lookup_join")]
     batch_enable_lookup_join: bool,
 
     /// Enable usage of sortAgg instead of hash agg when order property is satisfied in batch
     /// execution
-    #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
+    #[parameter(default = true, alias = "rw_batch_enable_sort_agg")]
     batch_enable_sort_agg: bool,
 
     /// Enable distributed DML, so an insert, delete, and update statement can be executed in a distributed way (e.g. running in multiple compute nodes).
@@ -150,11 +150,11 @@ pub struct SessionConfig {
     streaming_parallelism: ConfigNonZeroU64,
 
     /// Enable delta join for streaming queries. Defaults to false.
-    #[parameter(default = false, rename = "rw_streaming_enable_delta_join")]
+    #[parameter(default = false, alias = "rw_streaming_enable_delta_join")]
     streaming_enable_delta_join: bool,
 
     /// Enable bushy join for streaming queries. Defaults to true.
-    #[parameter(default = true, rename = "rw_streaming_enable_bushy_join")]
+    #[parameter(default = true, alias = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to true.
@@ -169,32 +169,32 @@ pub struct SessionConfig {
     streaming_use_snapshot_backfill: bool,
 
     /// Allow `jsonb` in stream key
-    #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
+    #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
-    #[parameter(default = true, rename = "rw_enable_join_ordering")]
+    #[parameter(default = true, alias = "rw_enable_join_ordering")]
     enable_join_ordering: bool,
 
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
-    #[parameter(default = true, flags = "SETTER", rename = "rw_enable_two_phase_agg")]
+    #[parameter(default = true, flags = "SETTER", alias = "rw_enable_two_phase_agg")]
     enable_two_phase_agg: bool,
 
     /// Force two phase agg optimization whenever there's a choice between
     /// optimizations. Defaults to false.
     /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
-    #[parameter(default = false, flags = "SETTER", rename = "rw_force_two_phase_agg")]
+    #[parameter(default = false, flags = "SETTER", alias = "rw_force_two_phase_agg")]
     force_two_phase_agg: bool,
 
     /// Enable sharing of common sub-plans.
     /// This means that DAG structured query plans can be constructed,
-    #[parameter(default = true, rename = "rw_enable_share_plan")]
+    #[parameter(default = true, alias = "rw_enable_share_plan")]
     /// rather than only tree structured query plans.
     enable_share_plan: bool,
 
     /// Enable split distinct agg
-    #[parameter(default = false, rename = "rw_force_split_distinct_agg")]
+    #[parameter(default = false, alias = "rw_force_split_distinct_agg")]
     force_split_distinct_agg: bool,
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
@@ -276,7 +276,7 @@ pub struct SessionConfig {
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
     #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = OverWindowCachePolicy::default(), rename = "rw_streaming_over_window_cache_policy")]
+    #[parameter(default = OverWindowCachePolicy::default(), alias = "rw_streaming_over_window_cache_policy")]
     streaming_over_window_cache_policy: OverWindowCachePolicy,
 
     /// Run DDL statements in background
@@ -287,8 +287,8 @@ pub struct SessionConfig {
     ///
     /// When enabled, `CREATE SOURCE` will create a source streaming job, and `CREATE MATERIALIZED VIEWS` from the source
     /// will forward the data from the same source streaming job, and also backfill prior data from the external source.
-    #[parameter(default = false)]
-    rw_enable_shared_source: bool,
+    #[parameter(default = false, alias = "rw_enable_shared_source")]
+    enable_shared_source: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]

@@ -123,8 +123,6 @@ pub struct MetaMetrics {
     pub min_safepoint_version_id: IntGauge,
     /// Compaction groups that is in write stop state.
     pub write_stop_compaction_groups: IntGaugeVec,
-    /// The object id watermark used in last full GC.
-    pub full_gc_last_object_id_watermark: IntGauge,
     /// The number of attempts to trigger full GC.
     pub full_gc_trigger_count: IntGauge,
     /// The number of candidate object to delete after scanning object store.
@@ -174,7 +172,7 @@ pub struct MetaMetrics {
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
     pub compact_task_batch_count: HistogramVec,
-    pub move_state_table_count: IntCounterVec,
+    pub split_compaction_group_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
 
@@ -385,13 +383,6 @@ impl MetaMetrics {
             "storage_write_stop_compaction_groups",
             "compaction groups of write stop state",
             &["compaction_group_id"],
-            registry
-        )
-        .unwrap();
-
-        let full_gc_last_object_id_watermark = register_int_gauge_with_registry!(
-            "storage_full_gc_last_object_id_watermark",
-            "the object id watermark used in last full GC",
             registry
         )
         .unwrap();
@@ -703,9 +694,9 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let move_state_table_count = register_int_counter_vec_with_registry!(
-            "storage_move_state_table_count",
-            "Count of trigger move state table",
+        let split_compaction_group_count = register_int_counter_vec_with_registry!(
+            "storage_split_compaction_group_count",
+            "Count of trigger split compaction group",
             &["group"],
             registry
         )
@@ -802,7 +793,6 @@ impl MetaMetrics {
             min_pinned_version_id,
             min_safepoint_version_id,
             write_stop_compaction_groups,
-            full_gc_last_object_id_watermark,
             full_gc_trigger_count,
             full_gc_candidate_object_count,
             full_gc_selected_object_count,
@@ -825,7 +815,7 @@ impl MetaMetrics {
             compact_task_file_count,
             compact_task_batch_count,
             table_write_throughput,
-            move_state_table_count,
+            split_compaction_group_count,
             state_table_count,
             branched_sst_count,
             compaction_event_consumed_latency,

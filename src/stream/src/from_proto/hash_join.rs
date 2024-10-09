@@ -223,7 +223,9 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
             };
         }
         match self.join_type_proto {
-            JoinTypeProto::Unspecified => unreachable!(),
+            JoinTypeProto::AsofInner
+            | JoinTypeProto::AsofLeftOuter
+            | JoinTypeProto::Unspecified => unreachable!(),
             JoinTypeProto::Inner => build!(Inner),
             JoinTypeProto::LeftOuter => build!(LeftOuter),
             JoinTypeProto::RightOuter => build!(RightOuter),

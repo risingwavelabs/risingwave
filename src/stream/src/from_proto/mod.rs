@@ -67,6 +67,7 @@ use risingwave_storage::StateStore;
 use self::append_only_dedup::*;
 use self::approx_percentile::global::*;
 use self::approx_percentile::local::*;
+use self::asof_join::AsOfJoinExecutorBuilder;
 use self::barrier_recv::*;
 use self::batch_query::*;
 use self::cdc_filter::CdcFilterExecutorBuilder;
@@ -186,5 +187,6 @@ pub async fn create_executor(
         NodeBody::GlobalApproxPercentile => GlobalApproxPercentileExecutorBuilder,
         NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
         NodeBody::RowMerge => RowMergeExecutorBuilder,
+        NodeBody::AsOfJoin => AsOfJoinExecutorBuilder,
     }
 }

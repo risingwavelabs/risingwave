@@ -283,7 +283,8 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .start_full_gc(Duration::from_secs(req.sst_retention_time_sec), req.prefix)?;
+            .start_full_gc(Duration::from_secs(req.sst_retention_time_sec), req.prefix)
+            .await?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
@@ -381,8 +382,13 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let new_group_id = self
             .hummock_manager
-            .split_compaction_group(req.group_id, &req.table_ids, req.partition_vnode_count)
-            .await?;
+            .move_state_tables_to_dedicated_compaction_group(
+                req.group_id,
+                &req.table_ids,
+                req.partition_vnode_count,
+            )
+            .await?
+            .0;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
 
@@ -527,7 +533,6 @@ impl HummockManagerService for HummockServiceImpl {
             min_delta_log_num_for_hummock_version_checkpoint,
             min_sst_retention_time_sec,
             full_gc_interval_sec,
-            collect_gc_watermark_spin_interval_sec,
             periodic_compaction_interval_sec,
             periodic_space_reclaim_compaction_interval_sec,
             periodic_ttl_reclaim_compaction_interval_sec,
@@ -612,22 +617,6 @@ impl HummockManagerService for HummockServiceImpl {
 
         let response = Response::new(CancelCompactTaskResponse { ret });
         return Ok(response);
-    }
-
-    async fn list_change_log_epochs(
-        &self,
-        request: Request<ListChangeLogEpochsRequest>,
-    ) -> Result<Response<ListChangeLogEpochsResponse>, Status> {
-        let ListChangeLogEpochsRequest {
-            table_id,
-            min_epoch,
-            max_count,
-        } = request.into_inner();
-        let epochs = self
-            .hummock_manager
-            .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await;
-        Ok(Response::new(ListChangeLogEpochsResponse { epochs }))
     }
 
     async fn get_version_by_epoch(

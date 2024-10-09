@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
+use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
@@ -65,11 +65,11 @@ pub struct CommitEpochInfo {
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
     pub committed_epoch: u64,
     pub tables_to_commit: HashSet<TableId>,
-    pub is_visible_table_committed_epoch: bool,
 }
 
 impl HummockManager {
-    /// Caller should ensure `epoch` > `max_committed_epoch`
+    /// Caller should ensure `epoch` > `committed_epoch` of `tables_to_commit`
+    /// if tables are not newly added via `new_table_fragment_info`
     pub async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> Result<()> {
         let CommitEpochInfo {
             mut sstables,
@@ -79,7 +79,6 @@ impl HummockManager {
             change_log_delta,
             committed_epoch,
             tables_to_commit,
-            is_visible_table_committed_epoch,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
@@ -88,11 +87,12 @@ impl HummockManager {
             return Ok(());
         }
 
+        assert!(!tables_to_commit.is_empty());
+
         let versioning: &mut Versioning = &mut versioning_guard;
         self.commit_epoch_sanity_check(
             committed_epoch,
             &tables_to_commit,
-            is_visible_table_committed_epoch,
             &sstables,
             &sst_to_context,
             &versioning.current_version,
@@ -194,7 +194,6 @@ impl HummockManager {
         let time_travel_delta = version.pre_commit_epoch(
             committed_epoch,
             &tables_to_commit,
-            is_visible_table_committed_epoch,
             new_compaction_group,
             commit_sstables,
             &new_table_ids,
@@ -390,7 +389,8 @@ impl HummockManager {
                     })
                     .sum();
 
-                let branch_sst = split_sst(
+                // TODO(li0k): replace with `split_sst`
+                let branch_sst = split_sst_with_table_ids(
                     &mut sst.sst_info,
                     &mut new_sst_id,
                     origin_sst_size - new_sst_size,

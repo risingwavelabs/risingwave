@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
@@ -60,7 +59,7 @@ pub struct CreateStreamingJobContext {
     pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
 
     /// Internal tables in the streaming job.
-    pub internal_tables: HashMap<u32, Table>,
+    pub internal_tables: BTreeMap<u32, Table>,
 
     /// The locations of the actors to build in the streaming job.
     pub building_locations: Locations,
@@ -301,6 +300,12 @@ impl GlobalStreamManager {
                             tracing::debug!(
                                 "cancelling streaming job {table_id} by issue cancel command."
                             );
+
+                            if let MetadataManager::V2(mgr) = &self.metadata_manager {
+                                mgr.catalog_controller
+                                    .try_abort_creating_streaming_job(table_id.table_id as _, true)
+                                    .await?;
+                            }
 
                             self.barrier_scheduler
                                 .run_command(Command::CancelStreamingJob(table_fragments))
@@ -632,8 +637,18 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
-                if let MetadataManager::V1(mgr) = &self.metadata_manager {
-                    mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
+                match &self.metadata_manager {
+                    MetadataManager::V1(mgr) => {
+                        mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
+                    }
+                    MetadataManager::V2(mgr) => {
+                        mgr.catalog_controller
+                            .try_abort_creating_streaming_job(
+                                id.table_id as _,
+                                true,
+                            )
+                            .await?;
+                    }
                 }
 
                 self.barrier_scheduler
@@ -665,6 +680,8 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
+        let table_id = TableId::new(table_id);
+
         let worker_nodes = self
             .metadata_manager
             .list_active_streaming_compute_nodes()
@@ -683,8 +700,10 @@ impl GlobalStreamManager {
             .iter()
             .map(|w| w.parallelism as usize)
             .sum::<usize>();
-        // TODO(var-vnode): get correct max parallelism from catalogs.
-        let max_parallelism = VirtualNode::COUNT_FOR_COMPAT;
+        let max_parallelism = self
+            .metadata_manager
+            .get_job_max_parallelism(table_id)
+            .await?;
 
         match parallelism {
             TableParallelism::Adaptive => {
@@ -709,7 +728,7 @@ impl GlobalStreamManager {
             }
         }
 
-        let table_parallelism_assignment = HashMap::from([(TableId::new(table_id), parallelism)]);
+        let table_parallelism_assignment = HashMap::from([(table_id, parallelism)]);
 
         if deferred {
             tracing::debug!(
@@ -1098,6 +1117,7 @@ mod tests {
                 &locations.actor_locations,
                 Default::default(),
                 TableParallelism::Adaptive,
+                VirtualNode::COUNT_FOR_TEST,
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,

@@ -44,9 +44,6 @@ fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
 
 fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
     metrics
-        .max_committed_epoch
-        .set(current_version.max_committed_epoch_for_meta() as i64);
-    metrics
         .version_size
         .set(current_version.estimated_encode_len() as i64);
     metrics
@@ -97,13 +94,8 @@ impl<'a> HummockVersionTransaction<'a> {
         }
     }
 
-    pub(super) fn new_delta<'b>(
-        &'b mut self,
-        max_committed_epoch: Option<u64>,
-    ) -> SingleDeltaTransaction<'a, 'b> {
-        let delta = self
-            .latest_version()
-            .version_delta_after(max_committed_epoch);
+    pub(super) fn new_delta<'b>(&'b mut self) -> SingleDeltaTransaction<'a, 'b> {
+        let delta = self.latest_version().version_delta_after();
         SingleDeltaTransaction {
             version_txn: self,
             delta: Some(delta),
@@ -123,19 +115,13 @@ impl<'a> HummockVersionTransaction<'a> {
         &mut self,
         committed_epoch: HummockEpoch,
         tables_to_commit: &HashSet<TableId>,
-        is_visible_table_committed_epoch: bool,
         new_compaction_group: Option<(CompactionGroupId, CompactionConfig)>,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
         new_table_ids: &HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
     ) -> HummockVersionDelta {
-        let new_max_committed_epoch = if is_visible_table_committed_epoch {
-            Some(committed_epoch)
-        } else {
-            None
-        };
-        let mut new_version_delta = self.new_delta(new_max_committed_epoch);
+        let mut new_version_delta = self.new_delta();
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
@@ -155,19 +141,31 @@ impl<'a> HummockVersionTransaction<'a> {
                         as CompactionGroupId,
                     new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
                     table_ids: vec![],
-                    version: CompatibilityVersion::NoMemberTableIds as i32,
+                    version: CompatibilityVersion::SplitGroupByTableId as i32,
+                    split_key: None,
                 }));
             }
         }
 
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
+            let l0_sub_level_id = new_version_delta
+                .latest_version()
+                .levels
+                .get(&compaction_group_id)
+                .and_then(|levels| {
+                    levels
+                        .l0
+                        .sub_levels
+                        .last()
+                        .map(|level| level.sub_level_id + 1)
+                })
+                .unwrap_or(committed_epoch);
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
-            let l0_sub_level_id = committed_epoch;
             let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
                 0,
                 l0_sub_level_id,

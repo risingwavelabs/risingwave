@@ -85,7 +85,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
 
         if let Some(alias) = alias {
             alias_to_entry_name_branches.push(quote! {
-                #alias => #entry_name,
+                #alias => #entry_name.to_string(),
             })
         }
 
@@ -277,10 +277,11 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             }
 
             pub fn alias_to_entry_name(key_name: &str) -> String {
-                match key_name {
+                let key_name = key_name.to_ascii_lowercase();
+                match key_name.as_str() {
                     #(#alias_to_entry_name_branches)*
                     _ => key_name,
-                }.to_ascii_lowercase()
+                }
             }
 
             #(#struct_impl_get)*

@@ -222,9 +222,7 @@ pub async fn rpc_serve(
             let id = address_info.advertise_addr.clone();
             let conn = meta_store_sql.conn.clone();
             let election_client: ElectionClientRef = match conn.get_database_backend() {
-                DbBackend::Sqlite => Arc::new(DummyElectionClient::new(
-                    address_info.advertise_addr.clone(),
-                )),
+                DbBackend::Sqlite => Arc::new(DummyElectionClient::new(id)),
                 DbBackend::Postgres => {
                     Arc::new(SqlBackendElectionClient::new(id, PostgresDriver::new(conn)))
                 }
