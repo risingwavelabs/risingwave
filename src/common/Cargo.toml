@@ -53,7 +53,7 @@ fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { version = "0.6", default-features = false, features = ["std"] }
-hashbrown = "0.15"
+hashbrown = "0.14"
 hex = "0.4.3"
 http = "1"
 humantime = "2.1"

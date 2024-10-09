@@ -78,7 +78,10 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.12.0", features = ["tracing", "nightly"] }
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "f761d18", features = [
+    "tracing",
+    "nightly",
+] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -129,7 +132,11 @@ hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
     "cmake-build",
 ] }
-hashbrown = { version = "0.15", features = ["default-hasher", "inline-more", "nightly"] }
+hashbrown = { version = "0.14", features = [
+    "ahash",
+    "inline-more",
+    "nightly",
+] }
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.5.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.5" }
