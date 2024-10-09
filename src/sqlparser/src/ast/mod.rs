@@ -2183,15 +2183,7 @@ impl Display for IncludeOptionItem {
         if let Some(inner_field) = inner_field {
             write!(f, " '{}'", value::escape_single_quote_string(inner_field))?;
             if let Some(expected_type) = header_inner_expect_type {
-                write!(
-                    f,
-                    " {}",
-                    match expected_type {
-                        DataType::Varchar => "varchar",
-                        DataType::Bytea => "bytea",
-                        t => unreachable!("unparse header expected type: {t}"),
-                    }
-                )?;
+                write!(f, " {}", expected_type)?;
             }
         }
         if let Some(alias) = column_alias {
