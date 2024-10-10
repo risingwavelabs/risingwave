@@ -4875,9 +4875,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.11.5"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2de727a58f28ad9c5ff9952979d2392851b5917785ca657e07277890109cd3a0"
+checksum = "28843b2b5c41f80ef7111a1f32f85bee367ad5850bd74856cd43683d13a8ae3c"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -4893,9 +4893,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.9.5"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be6577040f1b773e4a606180638ec48f5528d3d843d73092c06b5a8876bc4576"
+checksum = "b32323a9267c2a0d9d3f63cf04b47131251948d5ed818e6bc6209958df9188e6"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -4913,9 +4913,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.9.5"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01dbfd6763227809019a1dc01c98b6a78949c63d3a204d0a6f8e0325f077ab5c"
+checksum = "fbbeee92227c2cb4f1f34a0603e7892d50fc5b5aad64f7475422cbf7e5ff8db5"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -4923,9 +4923,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.7.5"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02c59933e075daa88363e228475ce4fa9098689b9e13a26442666a3a3142da8d"
+checksum = "1a95d461a831def175ea35deebec580fa49d020386ca25bbfde8d321ff9cc3fa"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -4945,9 +4945,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.10.5"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6976958440e7fee57bd25f6c04df0759484c18a233f00740f6c2c5a47b939d90"
+checksum = "71aed691c83a3008de0bdcc2f36bad787a49e4b21b294378ec9a932e8f4f4e6b"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -4966,11 +4966,14 @@ dependencies = [
  "foyer-memory",
  "fs4",
  "futures",
+ "hashbrown 0.14.3",
  "itertools 0.13.0",
  "libc",
  "lz4",
  "madsim-tokio",
+ "ordered_hash_map",
  "parking_lot 0.12.1",
+ "paste",
  "pin-project",
  "rand",
  "serde",
@@ -8259,6 +8262,15 @@ checksum = "a4d6a8c22fc714f0c2373e6091bf6f5e9b37b1bc0b1184874b7e0a4e303d318f"
 dependencies = [
  "dlv-list",
  "hashbrown 0.14.3",
+]
+
+[[package]]
+name = "ordered_hash_map"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab0e5f22bf6dd04abd854a8874247813a8fa2c8c1260eba6fbb150270ce7c176"
+dependencies = [
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
