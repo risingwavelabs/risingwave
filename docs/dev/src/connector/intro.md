@@ -1,6 +1,7 @@
 # Develop Connectors
 
 This page describes the development workflow to develop connectors. For design docs, see
+
 - [Source](./source.md)
 
 RisingWave supports a lot of connectors (sources and sinks).
@@ -11,16 +12,21 @@ However, developing connectors is tricky because it involves external systems:
 - The test relies on the configuration of the setup. e.g., the test needs to know the port of your Kafka in order to
 - We need to do the setup for both CI and local development.
 
-Our solution is: we resort to RiseDev, our all-in-one development tool, to help manage external systems and solve these problems.
+Our solution is: we resort to RiseDev, our all-in-one development tool, to help manage external systems and solve these
+problems.
 
 Before going to the specific methods described in the sections below, the principles we should follow are:
-- *environment-independent*: It should easy to start cluster and run tests on your own machine, other developers' machines, and CI.
+
+- *environment-independent*: It should easy to start cluster and run tests on your own machine, other developers'
+  machines, and CI.
     * Don't use hard-coded configurations (e.g., `localhost:9092` for Kafka).
     * Don't write too many logic in `ci/scripts`. Let CI scripts be thin wrappers.
-- *self-contained* tests: It should be straightforward to run one test case, without worrying about where is the script to prepare the test.
+- *self-contained* tests: It should be straightforward to run one test case, without worrying about where is the script
+  to prepare the test.
     * Don't put setup logic, running logic and verification logic of a test in different places.
 
-Reference: for the full explanations of the difficulies and the design of our solution, see [here](https://github.com/risingwavelabs/risingwave/issues/12451#issuecomment-2051861048).
+Reference: for the full explanations of the difficulies and the design of our solution,
+see [here](https://github.com/risingwavelabs/risingwave/issues/12451#issuecomment-2051861048).
 
 The following sections first walk you through what is the development workflow for
 existing connectors, and finally explain how to extend the development framework to support a new connector.
@@ -29,18 +35,20 @@ existing connectors, and finally explain how to extend the development framework
 
 ## Set up the development environment
 
-RiseDev supports starting external connector systems (e.g., Kafka, MySQL) just like how it starts the RisingWave cluster, and other standard systems used as part of the RisingWave Cluster (e.g., MinIO, etcd, Grafana).
+RiseDev supports starting external connector systems (e.g., Kafka, MySQL) just like how it starts the RisingWave
+cluster, and other standard systems used as part of the RisingWave Cluster (e.g., MinIO, etcd, Grafana).
 
-You write the profile in `risedev.yml` (Or `risedev-profiles.user.yml` ), e.g., the following config includes Kafka and MySQL, which will be used to test sources.
+You write the profile in `risedev.yml` (Or `risedev-profiles.user.yml` ), e.g., the following config includes Kafka and
+MySQL, which will be used to test sources.
 
 ```yml
   my-cool-profile:
     steps:
       # RisingWave cluster
       - use: minio
-      - use: etcd
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -66,9 +74,12 @@ For all config options of supported systems, check the comments in `template` se
 
 ### Escape hatch: `user-managed` mode
 
-`user-managed` is a special config. When set to `true` , you will need to start the system by yourself. You may wonder why bother to add it to the RiseDev profile if you start it by yourself. In this case, the config will still be loaded by RiseDev, which will be useful in tests. See chapters below for more details.
+`user-managed` is a special config. When set to `true` , you will need to start the system by yourself. You may wonder
+why bother to add it to the RiseDev profile if you start it by yourself. In this case, the config will still be loaded
+by RiseDev, which will be useful in tests. See chapters below for more details.
 
-The `user-managed` mode can be used as a workaround to start a system that is not yet supported by RiseDev, or is buggy. It's also used to config the CI profile. (In CI, all services are pre-started by `ci/docker-compose.yml` )
+The `user-managed` mode can be used as a workaround to start a system that is not yet supported by RiseDev, or is buggy.
+It's also used to config the CI profile. (In CI, all services are pre-started by `ci/docker-compose.yml` )
 
 Example of the config:
 
@@ -82,18 +93,23 @@ Example of the config:
 ## End-to-end tests
 
 The e2e tests are written in `slt` files. There are 2 main points to note:
+
 1. Use `system ok` to run `bash` commands to interact with external systems.
    Use this to prepare the test data, and verify the results. The whole lifecycle of
    a test case should be written in the same `slt` file.
-2. Use `control substitution on` and then use environment variables to specify the config of the external systems, e.g., the port of Kafka.
+2. Use `control substitution on` and then use environment variables to specify the config of the external systems, e.g.,
+   the port of Kafka.
 
-Refer to the [sqllogictest-rs documentation](https://github.com/risinglightdb/sqllogictest-rs#extension-run-external-shell-commands) for the details of `system` and `substitution` .
+Refer to
+the [sqllogictest-rs documentation](https://github.com/risinglightdb/sqllogictest-rs#extension-run-external-shell-commands)
+for the details of `system` and `substitution` .
 
 ---
 
 Take Kafka as an example about how to the tests are written:
 
-When you use `risedev d` to start the external services, related environment variables for Kafka will be available when you run `risedev slt`:
+When you use `risedev d` to start the external services, related environment variables for Kafka will be available when
+you run `risedev slt`:
 
 ```sh
 RISEDEV_KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:9092"
@@ -129,16 +145,20 @@ create source s0 (v1 int, v2 varchar) with (
 
 See `src/risedevtool/src/risedev_env.rs` for variables supported for each service.
 
-> Note again: You need to use `risedev d` to start the cluster, and then use `risedev slt` to run the tests. It doesn't work if you start the cluster by yourself without telling RiseDev, or you use raw `sqllogictest` binary directly.
+> Note again: You need to use `risedev d` to start the cluster, and then use `risedev slt` to run the tests. It doesn't
+> work if you start the cluster by yourself without telling RiseDev, or you use raw `sqllogictest` binary directly.
 >
 > How it works: `risedev d` will write env vars to `.risingwave/config/risedev-env`,
 > and `risedev slt` will load env vars from this file.
 
 ### Tips for writing `system` commands
 
-Refer to the [sqllogictest-rs documentation](https://github.com/risinglightdb/sqllogictest-rs#extension-run-external-shell-commands) for the syntax.
+Refer to
+the [sqllogictest-rs documentation](https://github.com/risinglightdb/sqllogictest-rs#extension-run-external-shell-commands)
+for the syntax.
 
 For simple cases, you can directly write a bash command, e.g.,
+
 ```
 system ok
 mysql -e "
@@ -156,13 +176,23 @@ cat << EOF | rpk topic produce my_source -f "%p %v\n" -p 0
 EOF
 ```
 
-For more complex cases, you can write a test script, and invoke it in `slt`. Scripts can be written in any language you like, but kindly write a `README.md` to help other developers get started more easily.
+For more complex cases, you can write a test script, and invoke it in `slt`. Scripts can be written in any language you
+like, but kindly write a `README.md` to help other developers get started more easily.
+
 - For ad-hoc scripts (only used for one test), it's better to put next to the test file.
 
-  e.g., [`e2e_test/source_inline/kafka/consumer_group.mjs`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/source_inline/kafka/consumer_group.mjs), which is invoked by [`consumer_group.slt`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/source_inline/kafka/consumer_group.slt) next to it.
-- For general scripts that can be used under many situations, put it in `e2e_test/commands/`. This directory will be loaded in `PATH` by `risedev slt`, and thus function as kind of "built-in" commands.
+  e.g., [`e2e_test/source_inline/kafka/consumer_group.mjs`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/source_inline/kafka/consumer_group.mjs),
+  which is invoked
+  by [`consumer_group.slt`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/source_inline/kafka/consumer_group.slt)
+  next to it.
+- For general scripts that can be used under many situations, put it in `e2e_test/commands/`. This directory will be
+  loaded in `PATH` by `risedev slt`, and thus function as kind of "built-in" commands.
 
-  A common scenario is when a CLI tool does not accept envvars as arguments. In such cases, instead of manually specifying the arguments each time invoking it in `slt`, you can create a wrapper to handle this implicitly, making it more concise. [`e2e_test/commands/mysql`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/commands/mysql) is a good demonstration.
+  A common scenario is when a CLI tool does not accept envvars as arguments. In such cases, instead of manually
+  specifying the arguments each time invoking it in `slt`, you can create a wrapper to handle this implicitly, making it
+  more
+  concise. [`e2e_test/commands/mysql`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/commands/mysql)
+  is a good demonstration.
 
 ---
 Tips for debugging:
@@ -176,14 +206,16 @@ Tips for debugging:
     placeholder
     ```
 
-    Then running `risedev slt` will return error "result mismatch", and shows what's the output
-    of the `echo` command, i.e., the value of `PGPORT`.
+  Then running `risedev slt` will return error "result mismatch", and shows what's the output
+  of the `echo` command, i.e., the value of `PGPORT`.
 
-- Use `risedev show-risedev-env` to see the environment variables available for `risedev slt`, after you starting the cluster with `risedev d`.
+- Use `risedev show-risedev-env` to see the environment variables available for `risedev slt`, after you starting the
+  cluster with `risedev d`.
 
 ## Adding a new connector to the development framework
 
-Refer to [#16449](https://github.com/risingwavelabs/risingwave/pull/16449) ( `user-managed` only MySQL), and [#16514](https://github.com/risingwavelabs/risingwave/pull/16514) (Docker based MySQL) as examples.
+Refer to [#16449](https://github.com/risingwavelabs/risingwave/pull/16449) ( `user-managed` only MySQL),
+and [#16514](https://github.com/risingwavelabs/risingwave/pull/16514) (Docker based MySQL) as examples.
 
 1. Add a new service in `template` section of `risedev.yml`.
    And add corresponding config in `src/risedevtool/src/service_config.rs` .
