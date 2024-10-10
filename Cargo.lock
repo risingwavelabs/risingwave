@@ -4987,8 +4987,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.12.0"
-source = "git+https://github.com/foyer-rs/foyer?rev=b414bc5#b414bc55e08565b7607706d10d076e1fcb9b023e"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28843b2b5c41f80ef7111a1f32f85bee367ad5850bd74856cd43683d13a8ae3c"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5004,8 +5005,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.12.0"
-source = "git+https://github.com/foyer-rs/foyer?rev=b414bc5#b414bc55e08565b7607706d10d076e1fcb9b023e"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b32323a9267c2a0d9d3f63cf04b47131251948d5ed818e6bc6209958df9188e6"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5023,8 +5025,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.12.0"
-source = "git+https://github.com/foyer-rs/foyer?rev=b414bc5#b414bc55e08565b7607706d10d076e1fcb9b023e"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbbeee92227c2cb4f1f34a0603e7892d50fc5b5aad64f7475422cbf7e5ff8db5"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5032,8 +5035,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.12.0"
-source = "git+https://github.com/foyer-rs/foyer?rev=b414bc5#b414bc55e08565b7607706d10d076e1fcb9b023e"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a95d461a831def175ea35deebec580fa49d020386ca25bbfde8d321ff9cc3fa"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -5053,8 +5057,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.12.0"
-source = "git+https://github.com/foyer-rs/foyer?rev=b414bc5#b414bc55e08565b7607706d10d076e1fcb9b023e"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71aed691c83a3008de0bdcc2f36bad787a49e4b21b294378ec9a932e8f4f4e6b"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
