@@ -159,6 +159,7 @@ compactor_fast_max_compact_task_size = 2147483648
 compactor_iter_max_io_retry_times = 8
 table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
+compactor_max_overlap_sst_count = 64
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"

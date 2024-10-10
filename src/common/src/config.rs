@@ -804,6 +804,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
     pub compactor_concurrent_uploading_sst_count: Option<usize>,
 
+    #[serde(default = "default::storage::compactor_max_overlap_sst_count")]
+    pub compactor_max_overlap_sst_count: usize,
+
     /// Object storage configuration
     /// 1. General configuration
     /// 2. Some special configuration of Backend
@@ -1679,6 +1682,10 @@ pub mod default {
 
         pub fn compactor_concurrent_uploading_sst_count() -> Option<usize> {
             None
+        }
+
+        pub fn compactor_max_overlap_sst_count() -> usize {
+            64
         }
 
         pub fn table_info_statistic_history_times() -> usize {
