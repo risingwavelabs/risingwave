@@ -553,6 +553,11 @@ impl GlobalStreamManager {
                     )))?;
                 }
 
+                self.metadata_manager
+                    .catalog_controller
+                    .try_abort_creating_streaming_job(id.table_id as _, true)
+                    .await?;
+
                 self.barrier_scheduler
                     .run_command(Command::CancelStreamingJob(fragment))
                     .await?;
