@@ -531,7 +531,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
                 compute_count += 1;
                 let old_output = &row.as_inner()[input_schema_len..];
-                if !old_output.is_empty() && old_output == &output {
+                if !old_output.is_empty() && old_output == output {
                     same_result_count += 1;
                 }
 
