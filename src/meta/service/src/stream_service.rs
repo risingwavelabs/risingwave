@@ -123,6 +123,7 @@ impl StreamManagerService for StreamServiceImpl {
             }
         };
 
+        // TODO: check whether shared source is correct
         let mutation: ThrottleConfig = actor_to_apply
             .iter()
             .map(|(fragment_id, actors)| {

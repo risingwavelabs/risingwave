@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 use winnow::PResult;
 
 use crate::ast::{
-    AstString, AstVec, ConnectorSchema, Encode, Format, Ident, ObjectName, ParseTo, SqlOption,
-    Value,
+    display_separated, AstString, ConnectorSchema, Encode, Format, Ident, ObjectName, ParseTo,
+    SqlOption, Value,
 };
 use crate::keywords::Keyword;
 use crate::parser::{Parser, StrError};
@@ -425,7 +425,7 @@ impl fmt::Display for CsvInfo {
         if !self.has_header {
             v.push(format!(
                 "{}",
-                AstVec([Keyword::WITHOUT, Keyword::HEADER].to_vec())
+                display_separated(&[Keyword::WITHOUT, Keyword::HEADER], " ")
             ));
         }
         impl_fmt_display!(delimiter, v, self);
