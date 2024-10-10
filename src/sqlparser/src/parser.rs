@@ -2625,6 +2625,9 @@ impl Parser<'_> {
                 column_alias,
                 header_inner_expect_type,
             });
+
+            // tolerate previous bug #18800 of displaying with comma separation
+            let _ = self.consume_token(&Token::Comma);
         }
         Ok(options)
     }
