@@ -248,7 +248,8 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         let Some(scalar) = value else {
                             return Err(BindError(
-                                "postgres_query function does not accept null arguments".to_string(),
+                                "postgres_query function does not accept null arguments"
+                                    .to_string(),
                             )
                             .into());
                         };
