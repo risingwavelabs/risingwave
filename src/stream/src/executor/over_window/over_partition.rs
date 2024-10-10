@@ -239,11 +239,16 @@ pub(super) fn shrink_partition_cache(
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct OverPartitionStats {
+    // stats for range cache operations
     pub lookup_count: u64,
     pub left_miss_count: u64,
     pub right_miss_count: u64,
+
+    // stats for window function state computation
+    pub compute_count: u64,
+    pub same_result_count: u64,
 }
 
 /// [`AffectedRange`] represents a range of keys that are affected by a delta.
@@ -420,6 +425,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     )> {
         let input_schema_len = table.get_data_types().len() - calls.len();
         let mut part_changes = BTreeMap::new();
+        let mut compute_count = 0;
+        let mut same_result_count = 0;
 
         // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
         // into the cache.
@@ -521,6 +528,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                     .key_value()
                     .expect("cursor must be valid until `last_curr_key`");
                 let output = states.slide_no_evict_hint()?;
+
+                compute_count += 1;
+                let old_output = &row.as_inner()[input_schema_len..];
+                if !old_output.is_empty() && old_output == output {
+                    same_result_count += 1;
+                }
+
                 let new_row = OwnedRow::new(
                     row.as_inner()
                         .iter()
@@ -554,6 +568,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 key != last_curr_key
             } {}
         }
+
+        self.stats.compute_count += compute_count;
+        self.stats.same_result_count += same_result_count;
 
         Ok((part_changes, accessed_range))
     }
