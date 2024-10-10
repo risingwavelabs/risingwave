@@ -25,7 +25,7 @@ use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use thiserror_ext::AsReport;
 
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION, MetadataManager};
+use crate::manager::{NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION};
 use crate::model::StreamContext;
 use crate::rpc::ddl_controller::{
     fill_table_stream_graph_info, DdlController, DropMode, ReplaceTableInfo,
@@ -35,7 +35,7 @@ use crate::MetaResult;
 
 impl DdlController {
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
-    /// ([`MetadataManager::wait_streaming_job_finished`]).
+    /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
     pub async fn create_streaming_job_v2(
         &self,
         mut streaming_job: StreamingJob,
