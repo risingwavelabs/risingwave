@@ -18,7 +18,6 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
-use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
@@ -32,11 +31,9 @@ use serde_derive::Serialize;
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 use with_options::WithOptions;
 
-use crate::sink::batching_log_sink::BatchingLogSinkerOf;
 use crate::sink::catalog::SinkEncode;
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam, SinkWriter,
-};
+use crate::sink::file_sink::batching_log_sink::BatchingLogSinker;
+use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam};
 use crate::source::TryFromBTreeMap;
 use crate::with_options::WithOptions;
 
@@ -100,7 +97,7 @@ pub enum EngineType {
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = BatchingLogSinkerOf;
+    type LogSinker = BatchingLogSinker;
 
     const SINK_NAME: &'static str = S::SINK_NAME;
 
@@ -134,7 +131,7 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
             self.engine_type.clone(),
             self.batching_strategy.clone(),
         )?;
-        Ok(BatchingLogSinkerOf::new(writer))
+        Ok(BatchingLogSinker::new(writer))
     }
 }
 
@@ -174,7 +171,6 @@ pub struct OpenDalSinkWriter {
     operator: Operator,
     sink_writer: Option<FileWriterEnum>,
     write_path: String,
-    epoch: Option<u64>,
     executor_id: u64,
     encode_type: SinkEncode,
     engine_type: EngineType,
@@ -246,21 +242,21 @@ impl OpenDalSinkWriter {
         }
     }
 }
-#[async_trait]
-impl SinkWriter for OpenDalSinkWriter {
-    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
-        Ok(())
-    }
+// #[async_trait]
+// impl SinkWriter for OpenDalSinkWriter {
+//     async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
+//         Ok(())
+//     }
 
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.epoch = Some(epoch);
-        Ok(())
-    }
+//     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+//         self.epoch = Some(epoch);
+//         Ok(())
+//     }
 
-    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        Ok(())
-    }
-}
+//     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<Self::CommitMetadata> {
+//         Ok(())
+//     }
+// }
 
 impl OpenDalSinkWriter {
     pub fn new(
@@ -278,7 +274,6 @@ impl OpenDalSinkWriter {
             write_path: write_path.to_string(),
             operator,
             sink_writer: None,
-            epoch: None,
             executor_id,
 
             encode_type,
@@ -290,14 +285,14 @@ impl OpenDalSinkWriter {
         })
     }
 
-    pub fn partition_granularity(&self) -> String {
+    pub fn path_partition_prefix(&self) -> String {
         match self.created_time.duration_since(UNIX_EPOCH) {
             Ok(duration) => {
                 let datetime = Utc
                     .timestamp_opt(duration.as_secs() as i64, 0)
                     .single()
                     .expect("Failed to convert timestamp to DateTime<Utc>");
-                match self.batching_strategy.partition_granularity {
+                match self.batching_strategy.path_partition_prefix {
                     PartitionGranularity::None => "".to_string(),
                     PartitionGranularity::Day => datetime.format("%Y-%m-%d/").to_string(),
                     PartitionGranularity::Month => datetime.format("/%Y-%m/").to_string(),
@@ -415,7 +410,7 @@ impl OpenDalSinkWriter {
 
         // With batching in place, the file writing process is decoupled from checkpoints.
         // The current file naming convention is as follows:
-        // 1. A subdirectory is defined based on `partition_granularity` (e.g., by day、hour or month or none.).
+        // 1. A subdirectory is defined based on `path_partition_prefix` (e.g., by day、hour or month or none.).
         // 2. The file name includes the `executor_id` and the creation time in seconds since the UNIX epoch.
         // If the engine type is `Fs`, the path is automatically handled, and the filename does not include a path prefix.
         let object_name = match self.engine_type {
@@ -424,7 +419,7 @@ impl OpenDalSinkWriter {
             EngineType::Fs => {
                 format!(
                     "{}{}_{}.{}",
-                    self.partition_granularity(),
+                    self.path_partition_prefix(),
                     self.executor_id,
                     self.created_time
                         .duration_since(UNIX_EPOCH)
@@ -436,7 +431,7 @@ impl OpenDalSinkWriter {
             _ => format!(
                 "{}/{}{}_{}.{}",
                 self.write_path,
-                self.partition_granularity(),
+                self.path_partition_prefix(),
                 self.executor_id,
                 self.created_time
                     .duration_since(UNIX_EPOCH)
@@ -526,13 +521,13 @@ fn convert_rw_schema_to_arrow_schema(
 /// - `max_row_count`: Optional maximum number of rows to accumulate before writing.
 /// - `rollover_seconds`: Optional time interval (in seconds) to trigger a write,
 ///   regardless of the number of accumulated rows.
-/// - `partition_granularity`: Specifies how files are organized into directories
+/// - `path_partition_prefix`: Specifies how files are organized into directories
 ///   based on creation time (e.g., by day, month, or hour).
 #[derive(Deserialize, Debug, Clone)]
 pub struct BatchingStrategy {
     pub max_row_count: Option<usize>,
     pub rollover_seconds: Option<usize>,
-    pub partition_granularity: PartitionGranularity,
+    pub path_partition_prefix: PartitionGranularity,
 }
 
 /// `PartitionGranularity` defines the granularity of file partitions based on creation time.
@@ -561,12 +556,12 @@ pub struct FileSinkBatchingStrategyConfig {
     #[serde(default)]
     pub rollover_seconds: Option<usize>,
     #[serde(default)]
-    pub partition_granularity: Option<String>,
+    pub path_partition_prefix: Option<String>,
 }
 
 pub const DEFAULT_ROLLOVER_SECONDS: usize = 10;
 
-pub fn parse_partition_granularity(granularity: &str) -> PartitionGranularity {
+pub fn parse_path_partition_prefix(granularity: &str) -> PartitionGranularity {
     let granularity = granularity.trim().to_lowercase();
     if matches!(&granularity[..], "day" | "month" | "hour") {
         match granularity.as_str() {

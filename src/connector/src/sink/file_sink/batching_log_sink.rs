@@ -16,25 +16,24 @@ use async_trait::async_trait;
 
 use crate::sink::file_sink::opendal_sink::OpenDalSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
-use crate::sink::writer::SinkWriter;
 use crate::sink::{LogSinker, Result, SinkLogReader};
 
-/// `BatchingLogSinkerOf` is used for a commit-decoupled sink that supports cross-barrier batching.
+/// `BatchingLogSinker` is used for a commit-decoupled sink that supports cross-barrier batching.
 /// Currently, it is only used for file sinks, so it contains an `OpenDalSinkWriter`.
 /// When the file sink writer completes writing a file, it truncates the corresponding `chunk_id` in the log store.
-pub struct BatchingLogSinkerOf {
+pub struct BatchingLogSinker {
     writer: OpenDalSinkWriter,
 }
 
-impl BatchingLogSinkerOf {
+impl BatchingLogSinker {
     /// Create a log sinker with a file sink writer.
     pub fn new(writer: OpenDalSinkWriter) -> Self {
-        BatchingLogSinkerOf { writer }
+        BatchingLogSinker { writer }
     }
 }
 
 #[async_trait]
-impl LogSinker for BatchingLogSinkerOf {
+impl LogSinker for BatchingLogSinker {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         let mut sink_writer = self.writer;
         #[derive(Debug)]
@@ -65,7 +64,7 @@ impl LogSinker for BatchingLogSinkerOf {
             // begin_epoch when not previously began
             state = match state {
                 LogConsumerState::Uninitialized => {
-                    sink_writer.begin_epoch(epoch).await?;
+                    // sink_writer.begin_epoch(epoch).await?;
                     LogConsumerState::EpochBegun { curr_epoch: epoch }
                 }
                 LogConsumerState::EpochBegun { curr_epoch } => {
@@ -84,7 +83,7 @@ impl LogSinker for BatchingLogSinkerOf {
                         epoch,
                         prev_epoch
                     );
-                    sink_writer.begin_epoch(epoch).await?;
+                    // sink_writer.begin_epoch(epoch).await?;
                     LogConsumerState::EpochBegun { curr_epoch: epoch }
                 }
             };
@@ -127,7 +126,9 @@ impl LogSinker for BatchingLogSinkerOf {
 
                     state = LogConsumerState::BarrierReceived { prev_epoch }
                 }
-                LogStoreReadItem::UpdateVnodeBitmap(_vnode_bitmap) => {}
+                LogStoreReadItem::UpdateVnodeBitmap(_vnode_bitmap) => {
+                    unreachable!("Update vnode bitmap should have been handle earlier.")
+                }
             }
         }
     }
