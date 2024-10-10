@@ -22,7 +22,7 @@ CREATE TABLE test (
 
 system ok
 PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test psql -c "
-INSERT INTO test SELECT generate_series(1, 100), true, 1, 1, 1, 1.0, 1.0, 1.0, '2021-01-01', '00:00:00', '2021-01-01 00:00:00', '2021-01-01 00:00:00', 'text', 'varchar', '1 day', '{}', '\\x01';"
+INSERT INTO test SELECT generate_series(1, 100), true, 1, 1, 1, 1.0, 1.0, 1.0, '2021-01-01', '00:00:00', '2021-01-01 00:00:00', '2021-01-01 00:00:00', 'text', 'varchar', '1 day', '{}', '\\x01';
 "
 
 query II
