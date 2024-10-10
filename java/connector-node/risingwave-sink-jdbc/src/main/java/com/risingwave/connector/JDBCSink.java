@@ -40,6 +40,7 @@ public class JDBCSink implements SinkWriter {
 
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
     public static final String JDBC_DATA_TYPE_KEY = "DATA_TYPE";
+    public static final String JDBC_TYPE_NAME_KEY = "TYPE_NAME";
 
     private boolean updateFlag = false;
 
@@ -110,9 +111,14 @@ public class JDBCSink implements SinkWriter {
                     conn.getMetaData().getColumns(null, schemaName, tableName, null);
 
             while (columnResultSet.next()) {
-                columnTypeMap.put(
-                        columnResultSet.getString(JDBC_COLUMN_NAME_KEY),
-                        columnResultSet.getInt(JDBC_DATA_TYPE_KEY));
+                var typeName = columnResultSet.getString(JDBC_TYPE_NAME_KEY);
+                int dt = columnResultSet.getInt(JDBC_DATA_TYPE_KEY);
+                if (dt == Types.TIMESTAMP
+                        && (typeName.equalsIgnoreCase("timestamptz")
+                                || typeName.equalsIgnoreCase("timestamp with time zone"))) {
+                    dt = Types.TIMESTAMP_WITH_TIMEZONE;
+                }
+                columnTypeMap.put(columnResultSet.getString(JDBC_COLUMN_NAME_KEY), dt);
             }
         } catch (SQLException e) {
             throw Status.INTERNAL
