@@ -190,6 +190,8 @@ pub struct MetaOpts {
     pub full_gc_interval_sec: u64,
     /// Max number of object per full GC job can fetch.
     pub full_gc_object_limit: u64,
+    /// Max number of inflight time travel query.
+    pub max_inflight_time_travel_query: u64,
     /// Enable sanity check when SSTs are committed
     pub enable_committed_sst_sanity_check: bool,
     /// Schedule compaction for all compaction groups with this interval.
@@ -324,6 +326,7 @@ impl MetaOpts {
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
             full_gc_object_limit: 100_000,
+            max_inflight_time_travel_query: 1000,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
