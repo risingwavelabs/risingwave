@@ -21,7 +21,6 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use fixedbitset::FixedBitSet;
 use futures::StreamExt;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
@@ -30,20 +29,21 @@ use risingwave_common::catalog::Field;
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::TableId;
-use crate::error::{ErrorCode, Result};
-use crate::handler::declare_cursor::{
-    create_chunk_stream_for_cursor, create_stream_for_cursor_stmt,
+use crate::error::{ErrorCode, Result, RwError};
+use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
+use crate::handler::query::{
+    gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchQueryPlanResult,
 };
-use crate::handler::query::{gen_batch_plan_fragmenter, BatchQueryPlanResult};
 use crate::handler::util::{
-    convert_logstore_u64_to_unix_millis, gen_query_from_table_name, pg_value_format, to_pg_field,
-    DataChunkToRowSetAdapter, StaticSessionData,
+    convert_logstore_u64_to_unix_millis, gen_query_from_table_name_order_by, pg_value_format,
+    to_pg_field, DataChunkToRowSetAdapter, StaticSessionData,
 };
 use crate::handler::HandlerArgs;
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
@@ -51,7 +51,9 @@ use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
-use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog};
+use crate::{
+    Binder, OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog,
+};
 
 pub enum CursorDataChunkStream {
     LocalDataChunk(Option<LocalQueryStream>),
@@ -110,18 +112,18 @@ impl Cursor {
     pub async fn next(
         &mut self,
         count: u32,
-        handle_args: HandlerArgs,
+        handler_args: HandlerArgs,
         formats: &Vec<Format>,
         timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         match self {
             Cursor::Subscription(cursor) => cursor
-                .next(count, handle_args, formats, timeout_seconds)
+                .next(count, handler_args, formats, timeout_seconds)
                 .await
                 .inspect_err(|_| cursor.cursor_metrics.subscription_cursor_error_count.inc()),
             Cursor::Query(cursor) => {
                 cursor
-                    .next(count, formats, handle_args, timeout_seconds)
+                    .next(count, formats, handler_args, timeout_seconds)
                     .await
             }
         }
@@ -167,13 +169,13 @@ impl QueryCursor {
         &mut self,
         count: u32,
         formats: &Vec<Format>,
-        handle_args: HandlerArgs,
+        handler_args: HandlerArgs,
         timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         // `FETCH NEXT` is equivalent to `FETCH 1`.
         // min with 100 to avoid allocating too many memory at once.
         let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
-        let session = handle_args.session;
+        let session = handler_args.session;
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
         let mut cur = 0;
         let desc = self.fields.iter().map(to_pg_field).collect();
@@ -244,11 +246,11 @@ impl SubscriptionCursor {
         start_timestamp: Option<u64>,
         subscription: Arc<SubscriptionCatalog>,
         dependent_table_id: TableId,
-        handle_args: &HandlerArgs,
+        handler_args: &HandlerArgs,
         cursor_metrics: Arc<CursorMetrics>,
     ) -> Result<Self> {
         let (state, fields) = if let Some(start_timestamp) = start_timestamp {
-            let table_catalog = handle_args.session.get_table_by_id(&dependent_table_id)?;
+            let table_catalog = handler_args.session.get_table_by_id(&dependent_table_id)?;
             let fields = table_catalog
                 .columns
                 .iter()
@@ -269,8 +271,8 @@ impl SubscriptionCursor {
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
             let (chunk_stream, fields, init_query_timer) =
-                Self::initiate_query(None, &dependent_table_id, handle_args.clone()).await?;
-            let pinned_epoch = handle_args
+                Self::initiate_query(None, &dependent_table_id, handler_args.clone()).await?;
+            let pinned_epoch = handler_args
                 .session
                 .env
                 .hummock_snapshot_manager
@@ -312,7 +314,7 @@ impl SubscriptionCursor {
 
     async fn next_row(
         &mut self,
-        handle_args: &HandlerArgs,
+        handler_args: &HandlerArgs,
         formats: &Vec<Format>,
     ) -> Result<Option<Row>> {
         loop {
@@ -328,7 +330,7 @@ impl SubscriptionCursor {
                         *seek_timestamp,
                         &self.dependent_table_id,
                         *expected_timestamp,
-                        handle_args.clone(),
+                        handler_args.clone(),
                         &self.subscription,
                     ) {
                         Ok((Some(rw_timestamp), expected_timestamp)) => {
@@ -336,7 +338,7 @@ impl SubscriptionCursor {
                                 Self::initiate_query(
                                     Some(rw_timestamp),
                                     &self.dependent_table_id,
-                                    handle_args.clone(),
+                                    handler_args.clone(),
                                 )
                                 .await?;
                             Self::init_row_stream(
@@ -344,7 +346,7 @@ impl SubscriptionCursor {
                                 formats,
                                 &from_snapshot,
                                 &fields,
-                                handle_args.session.clone(),
+                                handler_args.session.clone(),
                             );
 
                             self.cursor_need_drop_time = Instant::now()
@@ -382,7 +384,7 @@ impl SubscriptionCursor {
                     init_query_timer,
                 } => {
                     let session_data = StaticSessionData {
-                        timezone: handle_args.session.config().timezone(),
+                        timezone: handler_args.session.config().timezone(),
                     };
                     let from_snapshot = *from_snapshot;
                     let rw_timestamp = *rw_timestamp;
@@ -442,7 +444,7 @@ impl SubscriptionCursor {
     pub async fn next(
         &mut self,
         count: u32,
-        handle_args: HandlerArgs,
+        handler_args: HandlerArgs,
         formats: &Vec<Format>,
         timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
@@ -454,7 +456,7 @@ impl SubscriptionCursor {
             .into());
         }
 
-        let session = &handle_args.session;
+        let session = &handler_args.session;
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
         let mut cur = 0;
         if let State::Fetch {
@@ -473,7 +475,7 @@ impl SubscriptionCursor {
         }
         while cur < count {
             let fetch_cursor_timer = Instant::now();
-            let row = self.next_row(&handle_args, formats).await?;
+            let row = self.next_row(&handler_args, formats).await?;
             self.cursor_metrics
                 .subscription_cursor_fetch_duration
                 .with_label_values(&[&self.subscription.name])
@@ -524,10 +526,10 @@ impl SubscriptionCursor {
         seek_timestamp: u64,
         table_id: &TableId,
         expected_timestamp: Option<u64>,
-        handle_args: HandlerArgs,
+        handler_args: HandlerArgs,
         dependent_subscription: &SubscriptionCatalog,
     ) -> Result<(Option<u64>, Option<u64>)> {
-        let session = handle_args.session;
+        let session = handler_args.session;
         // Test subscription existence
         session.get_subscription_by_schema_id_name(
             dependent_subscription.schema_id,
@@ -551,16 +553,50 @@ impl SubscriptionCursor {
         Ok((new_epochs.get(0).cloned(), new_epochs.get(1).cloned()))
     }
 
-    async fn initiate_query(
+    pub fn gen_batch_plan_result(&self, handler_args: HandlerArgs) -> Result<BatchQueryPlanResult> {
+        match self.state {
+            // Only used to return generated plans, so rw_timestamp are meaningless
+            State::InitLogStoreQuery { .. } => Self::init_batch_plan_for_subscription_cursor(
+                Some(0),
+                &self.dependent_table_id,
+                handler_args,
+            ),
+            State::Fetch {
+                from_snapshot,
+                rw_timestamp,
+                ..
+            } => {
+                if from_snapshot {
+                    Self::init_batch_plan_for_subscription_cursor(
+                        None,
+                        &self.dependent_table_id,
+                        handler_args,
+                    )
+                } else {
+                    Self::init_batch_plan_for_subscription_cursor(
+                        Some(rw_timestamp),
+                        &self.dependent_table_id,
+                        handler_args,
+                    )
+                }
+            }
+            State::Invalid => Err(ErrorCode::InternalError(
+                "Cursor is in invalid state. Please close and re-create the cursor.".to_string(),
+            )
+            .into()),
+        }
+    }
+
+    fn init_batch_plan_for_subscription_cursor(
         rw_timestamp: Option<u64>,
         dependent_table_id: &TableId,
-        handle_args: HandlerArgs,
-    ) -> Result<(CursorDataChunkStream, Vec<Field>, Instant)> {
-        let session = handle_args.clone().session;
+        handler_args: HandlerArgs,
+    ) -> Result<BatchQueryPlanResult> {
+        let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
-        let init_query_timer = Instant::now();
-        let (chunk_stream, fields) = if let Some(rw_timestamp) = rw_timestamp {
-            let context = OptimizerContext::from_handler_args(handle_args);
+        let pks = table_catalog.pk();
+        let context = OptimizerContext::from_handler_args(handler_args.clone());
+        if let Some(rw_timestamp) = rw_timestamp {
             let version_id = {
                 let version = session.env.hummock_snapshot_manager.acquire();
                 let version = version.version();
@@ -573,26 +609,58 @@ impl SubscriptionCursor {
                 }
                 version.id
             };
-            let plan_fragmenter_result = gen_batch_plan_fragmenter(
+            Self::create_batch_plan_for_cursor(
+                &table_catalog,
                 &session,
-                Self::create_batch_plan_for_cursor(
-                    &table_catalog,
-                    &session,
-                    context.into(),
-                    rw_timestamp,
-                    rw_timestamp,
-                    version_id,
-                )?,
-            )?;
-            create_chunk_stream_for_cursor(session, plan_fragmenter_result).await?
+                context.into(),
+                rw_timestamp,
+                rw_timestamp,
+                version_id,
+                pks,
+            )
         } else {
             let subscription_from_table_name =
                 ObjectName(vec![Ident::from(table_catalog.name.as_ref())]);
-            let query_stmt = Statement::Query(Box::new(gen_query_from_table_name(
+            let pk_names = pks
+                .iter()
+                .map(|f| {
+                    Ok::<String, RwError>(
+                        table_catalog
+                            .columns
+                            .get(f.column_index)
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "columns not find in table schema, index is {:?}",
+                                    f.column_index
+                                )
+                            })?
+                            .name()
+                            .to_string(),
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let query_stmt = Statement::Query(Box::new(gen_query_from_table_name_order_by(
                 subscription_from_table_name,
+                pk_names,
             )));
-            create_stream_for_cursor_stmt(handle_args, query_stmt).await?
-        };
+            gen_batch_plan_by_statement(&session, context.into(), query_stmt)
+        }
+    }
+
+    async fn initiate_query(
+        rw_timestamp: Option<u64>,
+        dependent_table_id: &TableId,
+        handler_args: HandlerArgs,
+    ) -> Result<(CursorDataChunkStream, Vec<Field>, Instant)> {
+        let init_query_timer = Instant::now();
+        let plan_result = Self::init_batch_plan_for_subscription_cursor(
+            rw_timestamp,
+            dependent_table_id,
+            handler_args.clone(),
+        )?;
+        let plan_fragmenter_result = gen_batch_plan_fragmenter(&handler_args.session, plan_result)?;
+        let (chunk_stream, fields) =
+            create_chunk_stream_for_cursor(handler_args.session, plan_fragmenter_result).await?;
         Ok((
             chunk_stream,
             Self::build_desc(fields, rw_timestamp.is_none()),
@@ -658,38 +726,54 @@ impl SubscriptionCursor {
         old_epoch: u64,
         new_epoch: u64,
         version_id: HummockVersionId,
+        pks: &[ColumnOrder],
     ) -> Result<BatchQueryPlanResult> {
-        let out_col_idx = table_catalog
+        // pk + all column without hidden
+        let output_col_idx = table_catalog
             .columns
             .iter()
             .enumerate()
-            .filter(|(_, v)| !v.is_hidden)
-            .map(|(i, _)| i)
+            .filter_map(|(index, v)| {
+                if !v.is_hidden || table_catalog.pk.iter().any(|pk| pk.column_index == index) {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let output_col_idx_with_out_hidden = output_col_idx
+            .iter()
+            .filter(|index| !table_catalog.columns[**index].is_hidden)
+            .cloned()
             .collect::<Vec<_>>();
         let core = generic::LogScan::new(
             table_catalog.name.clone(),
-            out_col_idx,
+            output_col_idx_with_out_hidden,
+            output_col_idx,
             Rc::new(table_catalog.table_desc()),
             context,
             old_epoch,
             new_epoch,
             version_id,
         );
+
         let batch_log_seq_scan = BatchLogSeqScan::new(core);
-        let schema = batch_log_seq_scan
-            .core()
-            .schema_without_table_name()
-            .clone();
-        let out_fields = FixedBitSet::from_iter(0..schema.len());
-        let out_names = batch_log_seq_scan.core().column_names();
+
+        let out_fields = batch_log_seq_scan.core().out_fields();
+        let out_names = batch_log_seq_scan.core().column_names_without_hidden();
+
+        // order by pk, so don't need to sort
+        let order = Order::new(pks.to_vec());
+
         // Here we just need a plan_root to call the method, only out_fields and out_names will be used
         let plan_root = PlanRoot::new_with_batch_plan(
             PlanRef::from(batch_log_seq_scan.clone()),
             RequiredDist::single(),
-            Order::default(),
+            order,
             out_fields,
             out_names,
         );
+        let schema = plan_root.schema().clone();
         let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
             QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
             QueryMode::Local => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
@@ -748,7 +832,7 @@ impl CursorManager {
         start_timestamp: Option<u64>,
         dependent_table_id: TableId,
         subscription: Arc<SubscriptionCatalog>,
-        handle_args: &HandlerArgs,
+        handler_args: &HandlerArgs,
     ) -> Result<()> {
         let create_cursor_timer = Instant::now();
         let subscription_name = subscription.name.clone();
@@ -757,7 +841,7 @@ impl CursorManager {
             start_timestamp,
             subscription,
             dependent_table_id,
-            handle_args,
+            handler_args,
             self.cursor_metrics.clone(),
         )
         .await?;
@@ -829,16 +913,16 @@ impl CursorManager {
         &self,
         cursor_name: String,
         count: u32,
-        handle_args: HandlerArgs,
+        handler_args: HandlerArgs,
         formats: &Vec<Format>,
         timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         if let Some(cursor) = self.cursor_map.lock().await.get_mut(&cursor_name) {
             cursor
-                .next(count, handle_args, formats, timeout_seconds)
+                .next(count, handler_args, formats, timeout_seconds)
                 .await
         } else {
-            Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
+            Err(ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name)).into())
         }
     }
 
@@ -846,7 +930,7 @@ impl CursorManager {
         if let Some(cursor) = self.cursor_map.lock().await.get_mut(&cursor_name) {
             Ok(cursor.get_fields())
         } else {
-            Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
+            Err(ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name)).into())
         }
     }
 
@@ -934,5 +1018,23 @@ impl CursorManager {
                 ),
             ],
         )
+    }
+
+    pub async fn gen_batch_plan_with_subscription_cursor(
+        &self,
+        cursor_name: ObjectName,
+        handler_args: HandlerArgs,
+    ) -> Result<BatchQueryPlanResult> {
+        let session = handler_args.session.clone();
+        let db_name = session.database();
+        let (_, cursor_name) = Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
+        match self.cursor_map.lock().await.get(&cursor_name).ok_or_else(|| {
+            ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name))
+        })? {
+            Cursor::Subscription(cursor) => {
+                cursor.gen_batch_plan_result(handler_args.clone())
+            },
+            Cursor::Query(_) => Err(ErrorCode::InternalError("The plan of the cursor is the same as the query statement of the as when it was created.".to_string()).into()),
+        }
     }
 }
