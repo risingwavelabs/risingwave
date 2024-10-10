@@ -58,7 +58,6 @@ pub enum NewTableFragmentInfo {
     },
 }
 
-#[derive(Default)]
 pub struct CommitEpochInfo {
     pub sstables: Vec<LocalSstableInfo>,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
