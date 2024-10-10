@@ -3986,7 +3986,7 @@ def section_iceberg_metrics(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Iceberg Sink Metrics",
+            "Iceberg Metrics",
             [
                 panels.timeseries_count(
                     "Write Qps Of Iceberg Writer",
@@ -4042,6 +4042,49 @@ def section_iceberg_metrics(outer_panels):
                         panels.target(
                             f"{metric('iceberg_partition_num')}",
                             "{{sink_id}} {{sink_name}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Iceberg Table Storage Size",
+                    "iceberg table storage size group by table",
+                    [
+                        panels.target(
+                            f"sum({metric('iceberg_storage_data_file_size')}) by (table)",
+                            "storage size @ {{table}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Iceberg Write Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('iceberg_write_bytes')}) by (sink_name)",
+                            "write @ {{sink_name}}",
+                        ),
+
+                        panels.target(
+                            f"sum({metric('iceberg_write_bytes')})",
+                            "total write",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Iceberg Read Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('iceberg_read_bytes')}) by (table_name)",
+                            "read @ {{table_name}}",
+                        ),
+
+                        panels.target(
+                            f"sum({metric('nimtable_read_bytes')})",
+                            "total read",
                         ),
                     ],
                 ),
