@@ -5,6 +5,7 @@ set -euo pipefail
 export RW_PREFIX=$PWD/.risingwave
 export PREFIX_BIN=$RW_PREFIX/bin
 export PREFIX_LOG=$RW_PREFIX/log
+export PREFIX_DATA=$RW_PREFIX/data
 export RW_SQLITE_DB=$PREFIX_DATA/metadata.db
 
 # NOTE(kwannoel): Compared to start_standalone below, we omitted the compactor-opts,
@@ -18,7 +19,7 @@ start_standalone_without_compactor() {
         --dashboard-host 127.0.0.1:5691 \
         --prometheus-host 127.0.0.1:1250 \
         --backend sqlite \
-        --sql-endpoint sqlite://${RW_SQLITE_DB}?mode=rwc \
+        --sql-endpoint sqlite://${RW_SQLITE_DB} \
         --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
         --data-directory hummock_001" \
      --compute-opts=" \
@@ -49,7 +50,7 @@ start_standalone() {
         --dashboard-host 127.0.0.1:5691 \
         --prometheus-host 127.0.0.1:1250 \
         --backend sqlite \
-        --sql-endpoint sqlite://${RW_SQLITE_DB}?mode=rwc \
+        --sql-endpoint sqlite://${RW_SQLITE_DB} \
         --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
         --data-directory hummock_001" \
      --compute-opts=" \

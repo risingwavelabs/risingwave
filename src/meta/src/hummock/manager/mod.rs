@@ -35,7 +35,7 @@ use risingwave_pb::hummock::{
     SubscribeCompactionEventRequest,
 };
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
 
 use crate::hummock::compaction::CompactStatus;
@@ -110,6 +110,7 @@ pub struct HummockManager {
     pub compaction_state: CompactionState,
     full_gc_state: FullGcState,
     now: Mutex<u64>,
+    inflight_time_travel_query: Semaphore,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -240,6 +241,7 @@ impl HummockManager {
         let version_archive_dir = version_archive_dir(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let full_gc_object_limit = env.opts.full_gc_object_limit;
+        let inflight_time_travel_query = env.opts.max_inflight_time_travel_query;
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -277,6 +279,7 @@ impl HummockManager {
             compaction_state: CompactionState::new(),
             full_gc_state: FullGcState::new(Some(full_gc_object_limit)),
             now: Mutex::new(0),
+            inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;

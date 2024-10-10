@@ -259,6 +259,12 @@ impl HummockManager {
         table_id: u32,
     ) -> Result<HummockVersion> {
         let sql_store = self.env.meta_store_ref();
+        let _permit = self.inflight_time_travel_query.try_acquire().map_err(|_| {
+            anyhow!(format!(
+                "too many inflight time travel queries, max_inflight_time_travel_query={}",
+                self.env.opts.max_inflight_time_travel_query
+            ))
+        })?;
         let epoch_to_version = hummock_epoch_to_version::Entity::find()
             .filter(
                 Condition::any()

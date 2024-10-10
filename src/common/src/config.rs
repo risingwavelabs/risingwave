@@ -195,6 +195,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_object_limit")]
     pub full_gc_object_limit: u64,
 
+    /// Max number of inflight time travel query.
+    #[serde(default = "default::meta::max_inflight_time_travel_query")]
+    pub max_inflight_time_travel_query: u64,
+
     /// Schedule compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
     pub periodic_compaction_interval_sec: u64,
@@ -1351,6 +1355,10 @@ pub mod default {
 
         pub fn full_gc_object_limit() -> u64 {
             100_000
+        }
+
+        pub fn max_inflight_time_travel_query() -> u64 {
+            1000
         }
 
         pub fn periodic_compaction_interval_sec() -> u64 {
