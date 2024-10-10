@@ -5,6 +5,7 @@ set -euo pipefail
 RW_PREFIX=$PWD/.risingwave
 PREFIX_BIN=$RW_PREFIX/bin
 PREFIX_LOG=$RW_PREFIX/log
+PREFIX_DATA=$RW_PREFIX/data
 RW_SQLITE_DB=$PREFIX_DATA/metadata.db
 
 start_standalone() {

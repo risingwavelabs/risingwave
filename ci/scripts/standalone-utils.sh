@@ -5,6 +5,7 @@ set -euo pipefail
 export RW_PREFIX=$PWD/.risingwave
 export PREFIX_BIN=$RW_PREFIX/bin
 export PREFIX_LOG=$RW_PREFIX/log
+export PREFIX_DATA=$RW_PREFIX/data
 export RW_SQLITE_DB=$PREFIX_DATA/metadata.db
 
 # NOTE(kwannoel): Compared to start_standalone below, we omitted the compactor-opts,
