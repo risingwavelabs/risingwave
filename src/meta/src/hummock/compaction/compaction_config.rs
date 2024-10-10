@@ -68,6 +68,9 @@ impl CompactionConfigBuilder {
                 sst_allowed_trivial_move_min_size: Some(
                     compaction_config::sst_allowed_trivial_move_min_size(),
                 ),
+                disable_auto_group_scheduling: Some(
+                    compaction_config::disable_auto_group_scheduling(),
+                ),
             },
         }
     }

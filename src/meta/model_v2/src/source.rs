@@ -109,3 +109,11 @@ impl From<PbSource> for ActiveModel {
         }
     }
 }
+
+impl Model {
+    pub fn is_shared(&self) -> bool {
+        self.source_info
+            .as_ref()
+            .is_some_and(|s| s.to_protobuf().is_shared())
+    }
+}

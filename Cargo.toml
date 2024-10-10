@@ -146,11 +146,11 @@ iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.g
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f8b7bff7bd7853be7733fc1db1203862878f92c1" }
 opendal = "0.49"
 # used only by arrow-udf-flight
-arrow-flight = "52"
-arrow-udf-js = "0.4"
-arrow-udf-wasm = { version = "0.3", features = ["build"] }
-arrow-udf-python = "0.3"
-arrow-udf-flight = "0.3"
+arrow-flight = "53"
+arrow-udf-js = "0.5"
+arrow-udf-wasm = { version = "0.4", features = ["build"] }
+arrow-udf-python = "0.4"
+arrow-udf-flight = "0.4"
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
