@@ -30,7 +30,7 @@ AzblobConfig:
     required: false
     default: Default::default
   - name: path_partition_prefix
-    field_type: String
+    field_type: PathPartitionPrefix
     required: false
     default: Default::default
   - name: r#type
@@ -251,7 +251,7 @@ FsConfig:
     required: false
     default: Default::default
   - name: path_partition_prefix
-    field_type: String
+    field_type: PathPartitionPrefix
     required: false
     default: Default::default
   - name: r#type
@@ -284,7 +284,7 @@ GcsConfig:
     required: false
     default: Default::default
   - name: path_partition_prefix
-    field_type: String
+    field_type: PathPartitionPrefix
     required: false
     default: Default::default
   - name: r#type
@@ -959,7 +959,7 @@ S3Config:
     required: false
     default: Default::default
   - name: path_partition_prefix
-    field_type: String
+    field_type: PathPartitionPrefix
     required: false
     default: Default::default
   - name: r#type
@@ -1102,7 +1102,7 @@ WebhdfsConfig:
     required: false
     default: Default::default
   - name: path_partition_prefix
-    field_type: String
+    field_type: PathPartitionPrefix
     required: false
     default: Default::default
   - name: r#type
