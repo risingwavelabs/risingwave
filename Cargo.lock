@@ -10797,7 +10797,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
- "typed-builder 0.18.2",
+ "typed-builder 0.20.0",
  "url",
  "urlencoding",
  "uuid",
