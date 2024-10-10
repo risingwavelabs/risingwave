@@ -261,108 +261,6 @@ impl HummockManager {
 
         Ok(())
     }
-
-    pub async fn try_split_compaction_group(
-        &self,
-        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-        checkpoint_secs: u64,
-        group: &TableGroupInfo,
-        created_tables: &HashSet<u32>,
-    ) {
-        // split high throughput table to dedicated compaction group
-        for (table_id, table_size) in &group.table_statistic {
-            self.try_move_table_to_dedicated_cg(
-                table_write_throughput,
-                table_id,
-                table_size,
-                !created_tables.contains(table_id),
-                checkpoint_secs,
-                group.group_id,
-                group.group_size,
-            )
-            .await;
-        }
-    }
-
-    pub async fn try_move_table_to_dedicated_cg(
-        &self,
-        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-        table_id: &u32,
-        table_size: &u64,
-        is_creating_table: bool,
-        checkpoint_secs: u64,
-        parent_group_id: u64,
-        group_size: u64,
-    ) {
-        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
-        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
-        let partition_vnode_count = self.env.opts.partition_vnode_count;
-        let window_size =
-            self.env.opts.table_info_statistic_history_times / (checkpoint_secs as usize);
-
-        let mut is_high_write_throughput = false;
-        let mut is_low_write_throughput = true;
-        if let Some(history) = table_write_throughput.get(table_id) {
-            if history.len() >= window_size {
-                is_high_write_throughput = history.iter().all(|throughput| {
-                    *throughput / checkpoint_secs > self.env.opts.table_write_throughput_threshold
-                });
-                is_low_write_throughput = history.iter().any(|throughput| {
-                    *throughput / checkpoint_secs < self.env.opts.min_table_split_write_throughput
-                });
-            }
-        }
-
-        let state_table_size = *table_size;
-
-        // 1. Avoid splitting a creating table
-        // 2. Avoid splitting a is_low_write_throughput creating table
-        // 3. Avoid splitting a non-high throughput medium-sized table
-        if is_creating_table
-            || (is_low_write_throughput)
-            || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
-        {
-            return;
-        }
-
-        // do not split a large table and a small table because it would increase IOPS
-        // of small table.
-        if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-            let rest_group_size = group_size - state_table_size;
-            if rest_group_size < state_table_size
-                && rest_group_size < self.env.opts.min_table_split_size
-            {
-                return;
-            }
-        }
-
-        let ret = self
-            .move_state_tables_to_dedicated_compaction_group(
-                parent_group_id,
-                &[*table_id],
-                partition_vnode_count,
-            )
-            .await;
-        match ret {
-            Ok((target_compaction_group_id, cg_id_to_table_ids)) => {
-                tracing::info!(
-                    "split state table [{}] success (source_group_id {} target_group_id {})  cg_id_to_table_ids {:?}",
-                    table_id,
-                    parent_group_id,
-                    target_compaction_group_id,
-                    cg_id_to_table_ids
-                );
-            }
-            Err(e) => {
-                tracing::info!(
-                    error = %e.as_report(),
-                    "failed to move state table [{}] from group-{}",
-                    table_id,
-                    parent_group_id,
-                )
-            }
-        }
-    }
 }
 
 impl HummockManager {
@@ -695,4 +593,340 @@ impl HummockManager {
 
         Ok((target_compaction_group_id, cg_id_to_table_ids))
     }
+}
+
+impl HummockManager {
+    pub async fn try_split_compaction_group(
+        &self,
+        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+        checkpoint_secs: u64,
+        group: &TableGroupInfo,
+    ) {
+        // split high throughput table to dedicated compaction group
+        for (table_id, table_size) in &group.table_statistic {
+            self.try_move_high_throughput_table_to_dedicated_cg(
+                table_write_throughput,
+                table_id,
+                table_size,
+                checkpoint_secs,
+                group.group_id,
+            )
+            .await;
+        }
+
+        // split the huge group to multiple groups
+        self.try_split_huge_compaction_group(group).await;
+    }
+
+    pub async fn try_move_high_throughput_table_to_dedicated_cg(
+        &self,
+        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+        table_id: &u32,
+        _table_size: &u64,
+        checkpoint_secs: u64,
+        parent_group_id: u64,
+    ) {
+        if !table_write_throughput.contains_key(table_id) {
+            return;
+        }
+
+        let window_size =
+            self.env.opts.split_group_statistic_window_times / (checkpoint_secs as usize);
+        let table_throughput = table_write_throughput.get(table_id).unwrap();
+        if table_throughput.len() < window_size {
+            return;
+        }
+
+        let is_high_write_throughput = is_table_high_write_throughput(
+            table_throughput,
+            checkpoint_secs,
+            window_size,
+            self.env.opts.table_high_write_throughput_threshold,
+            self.env.opts.table_statistic_high_write_throughput_ratio,
+        );
+
+        // do not split a table to dedicated compaction group if it is not high write throughput
+        if !is_high_write_throughput {
+            return;
+        }
+
+        let ret = self
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &[*table_id],
+                self.env.opts.partition_vnode_count,
+            )
+            .await;
+        match ret {
+            Ok(split_result) => {
+                tracing::info!("split state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}", table_id, parent_group_id, self.env.opts.partition_vnode_count, split_result);
+            }
+            Err(e) => {
+                tracing::info!(
+                    error = %e.as_report(),
+                    "failed to split state table [{}] from group-{}",
+                    table_id,
+                    parent_group_id,
+                )
+            }
+        }
+    }
+
+    pub async fn try_split_huge_compaction_group(&self, group: &TableGroupInfo) {
+        let compaction_group_config = {
+            let compaction_group_manager = self.compaction_group_manager.read().await;
+            compaction_group_manager
+                .try_get_compaction_group_config(group.group_id)
+                .unwrap()
+        };
+
+        let is_huge_hybrid_group: bool = group.group_size
+            > (compaction_group_config.max_estimated_group_size() as f64
+                * self.env.opts.compaction_group_size_threshold) as u64
+            && group.table_statistic.len() > 1; // avoid split single table group
+        if is_huge_hybrid_group {
+            assert!(group.table_statistic.keys().is_sorted());
+            let mut accumulated_size = 0;
+            let mut table_ids = Vec::default();
+            for (table_id, table_size) in &group.table_statistic {
+                accumulated_size += table_size;
+                table_ids.push(*table_id);
+                // split if the accumulated size is greater than half of the group size
+                // avoid split a small table to dedicated compaction group and trigger multiple merge
+                if accumulated_size * 2 > group.group_size {
+                    let ret = self
+                        .move_state_tables_to_dedicated_compaction_group(
+                            group.group_id,
+                            &table_ids,
+                            0,
+                        )
+                        .await;
+                    match ret {
+                        Ok(split_result) => {
+                            tracing::info!(
+                                "split_huge_compaction_group success {:?}",
+                                split_result
+                            );
+                            self.metrics
+                                .split_compaction_group_count
+                                .with_label_values(&[&group.group_id.to_string()])
+                                .inc();
+                            return;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e.as_report(),
+                                "failed to split_huge_compaction_group table {:?} from group-{}",
+                                table_ids,
+                                group.group_id
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn try_merge_compaction_group(
+        &self,
+        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+        group: &TableGroupInfo,
+        next_group: &TableGroupInfo,
+        checkpoint_secs: u64,
+        created_tables: &HashSet<u32>,
+    ) -> Result<()> {
+        // TODO: remove this check after refactor group id
+        if group.group_id == StaticCompactionGroupId::StateDefault as u64
+            && next_group.group_id == StaticCompactionGroupId::MaterializedView as u64
+        {
+            return Ok(());
+        }
+
+        if group.table_statistic.is_empty() || next_group.table_statistic.is_empty() {
+            return Err(Error::CompactionGroup(format!(
+                "group-{} or group-{} is empty",
+                group.group_id, next_group.group_id
+            )));
+        }
+
+        // do not merge the compaction group which is creating
+        if check_is_creating_compaction_group(group, created_tables) {
+            return Err(Error::CompactionGroup(format!(
+                "Not Merge creating group {} next_group {}",
+                group.group_id, next_group.group_id
+            )));
+        }
+
+        // do not merge high throughput group
+        let window_size =
+            self.env.opts.merge_group_statistic_window_times / (checkpoint_secs as usize);
+
+        // merge the group which is low write throughput
+        if !check_is_low_write_throughput_compaction_group(
+            table_write_throughput,
+            checkpoint_secs,
+            window_size,
+            self.env.opts.table_low_write_throughput_threshold,
+            group,
+            self.env.opts.table_statistic_low_write_throughput_ratio,
+        ) {
+            return Err(Error::CompactionGroup(format!(
+                "Not Merge high throughput group {} next_group {}",
+                group.group_id, next_group.group_id
+            )));
+        }
+
+        let compaction_group_config = {
+            let compaction_group_manager = self.compaction_group_manager.read().await;
+            compaction_group_manager
+                .try_get_compaction_group_config(group.group_id)
+                .unwrap()
+        };
+
+        let size_limit = (compaction_group_config.max_estimated_group_size() as f64
+            * self.env.opts.compaction_group_size_threshold) as u64;
+
+        if (group.group_size + next_group.group_size) > size_limit {
+            return Err(Error::CompactionGroup(format!(
+                "Not Merge huge group {} group_size {} next_group {} next_group_size {} size_limit {}",
+                group.group_id, group.group_size, next_group.group_id, next_group.group_size, size_limit
+            )));
+        }
+
+        if check_is_creating_compaction_group(next_group, created_tables) {
+            return Err(Error::CompactionGroup(format!(
+                "Not Merge creating group {} next group {}",
+                group.group_id, next_group.group_id
+            )));
+        }
+
+        if !check_is_low_write_throughput_compaction_group(
+            table_write_throughput,
+            checkpoint_secs,
+            window_size,
+            self.env.opts.table_low_write_throughput_threshold,
+            next_group,
+            self.env.opts.table_statistic_low_write_throughput_ratio,
+        ) {
+            return Err(Error::CompactionGroup(format!(
+                "Not Merge high throughput group {} next group {}",
+                group.group_id, next_group.group_id
+            )));
+        }
+
+        match self
+            .merge_compaction_group(group.group_id, next_group.group_id)
+            .await
+        {
+            Ok(()) => {
+                tracing::info!(
+                    "merge group-{} to group-{}",
+                    next_group.group_id,
+                    group.group_id,
+                );
+
+                self.metrics
+                    .merge_compaction_group_count
+                    .with_label_values(&[&group.group_id.to_string()])
+                    .inc();
+            }
+            Err(e) => {
+                tracing::info!(
+                    error = %e.as_report(),
+                    "failed to merge group-{} group-{}",
+                    next_group.group_id,
+                    group.group_id,
+                )
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub fn is_table_high_write_throughput(
+    table_throughput: &VecDeque<u64>,
+    checkpoint_secs: u64,
+    window_size: usize,
+    threshold: u64,
+    high_write_throughput_ratio: f64,
+) -> bool {
+    assert!(table_throughput.len() >= window_size);
+    let mut high_write_throughput_count = 0;
+    for throughput in table_throughput
+        .iter()
+        .skip(table_throughput.len().saturating_sub(window_size))
+    {
+        // only check the latest window_size
+        if *throughput / checkpoint_secs > threshold {
+            high_write_throughput_count += 1;
+        }
+    }
+
+    high_write_throughput_count as f64 > window_size as f64 * high_write_throughput_ratio
+}
+
+pub fn is_table_low_write_throughput(
+    table_throughput: &VecDeque<u64>,
+    checkpoint_secs: u64,
+    window_size: usize,
+    threshold: u64,
+    low_write_throughput_ratio: f64,
+) -> bool {
+    assert!(table_throughput.len() >= window_size);
+
+    let mut low_write_throughput_count = 0;
+    for throughput in table_throughput
+        .iter()
+        .skip(table_throughput.len().saturating_sub(window_size))
+    {
+        if *throughput / checkpoint_secs <= threshold {
+            low_write_throughput_count += 1;
+        }
+    }
+
+    low_write_throughput_count as f64 > window_size as f64 * low_write_throughput_ratio
+}
+
+fn check_is_low_write_throughput_compaction_group(
+    table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+    checkpoint_secs: u64,
+    window_size: usize,
+    threshold: u64,
+    group: &TableGroupInfo,
+    low_write_throughput_ratio: f64,
+) -> bool {
+    // check table exists
+    let live_table = group
+        .table_statistic
+        .keys()
+        .filter(|table_id| table_write_throughput.contains_key(table_id))
+        .filter(|table_id| table_write_throughput.get(table_id).unwrap().len() >= window_size)
+        .cloned()
+        .collect_vec();
+
+    if live_table.is_empty() {
+        return false;
+    }
+
+    live_table.into_iter().all(|table_id| {
+        let table_write_throughput = table_write_throughput.get(&table_id).unwrap();
+        is_table_low_write_throughput(
+            table_write_throughput,
+            checkpoint_secs,
+            window_size,
+            threshold,
+            low_write_throughput_ratio,
+        )
+    })
+}
+
+fn check_is_creating_compaction_group(
+    group: &TableGroupInfo,
+    created_tables: &HashSet<u32>,
+) -> bool {
+    group
+        .table_statistic
+        .keys()
+        .any(|table_id| !created_tables.contains(table_id))
 }

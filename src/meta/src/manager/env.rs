@@ -234,20 +234,15 @@ pub struct MetaOpts {
     /// Schedule `periodic_scheduling_compaction_group_interval_sec` for all compaction groups with this interval.
     pub periodic_scheduling_compaction_group_interval_sec: u64,
 
-    /// The size limit to split a large compaction group.
-    pub split_group_size_limit: u64,
-    /// The size limit to move a state-table to other group.
-    pub min_table_split_size: u64,
-
     /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
 
     pub partition_vnode_count: u32,
 
     /// threshold of high write throughput of state-table, unit: B/sec
-    pub table_write_throughput_threshold: u64,
+    pub table_high_write_throughput_threshold: u64,
     /// threshold of low write throughput of state-table, unit: B/sec
-    pub min_table_split_write_throughput: u64,
+    pub table_low_write_throughput_threshold: u64,
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_task_max_progress_interval_secs: u64,
@@ -278,6 +273,23 @@ pub struct MetaOpts {
     /// l0 multi level picker whether to check the overlap accuracy between sub levels
     pub enable_check_task_level_overlap: bool,
     pub enable_dropped_column_reclaim: bool,
+
+    /// Whether to split the compaction group when the size of the group exceeds the threshold.
+    pub compaction_group_size_threshold: f64,
+
+    /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
+    pub table_statistic_high_write_throughput_ratio: f64,
+
+    /// To merge the compaction group when the low throughput statistics of the group exceeds the threshold.
+    pub table_statistic_low_write_throughput_ratio: f64,
+
+    /// The window times of table statistic history for split compaction group.
+    pub split_group_statistic_window_times: usize,
+
+    /// The window times of table statistic history for merge compaction group.
+    pub merge_group_statistic_window_times: usize,
+
+    /// The configuration of the object store
     pub object_store_config: ObjectStoreConfig,
 
     /// The maximum number of trivial move tasks to be picked in a single loop
@@ -340,12 +352,10 @@ impl MetaOpts {
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
             periodic_scheduling_compaction_group_interval_sec: 60,
-            split_group_size_limit: 5 * 1024 * 1024 * 1024,
-            min_table_split_size: 2 * 1024 * 1024 * 1024,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
             compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,
-            table_write_throughput_threshold: 128 * 1024 * 1024,
-            min_table_split_write_throughput: 64 * 1024 * 1024,
+            table_high_write_throughput_threshold: 128 * 1024 * 1024,
+            table_low_write_throughput_threshold: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
@@ -368,6 +378,11 @@ impl MetaOpts {
             table_info_statistic_history_times: 240,
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
+            compaction_group_size_threshold: 0.9,
+            table_statistic_high_write_throughput_ratio: 0.5,
+            table_statistic_low_write_throughput_ratio: 0.7,
+            split_group_statistic_window_times: 240,
+            merge_group_statistic_window_times: 240,
             license_key_path: None,
         }
     }

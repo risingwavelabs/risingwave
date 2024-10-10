@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -464,22 +464,56 @@ impl HummockManager {
         let created_tables: HashSet<u32> = HashSet::from_iter(created_tables);
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
-        group_infos.sort_by_key(|group| group.group_size);
-        group_infos.reverse();
+        group_infos.sort_by_key(|group| {
+            let table_ids = group
+                .table_statistic
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            table_ids.iter().next().cloned()
+        });
 
+        let group_count = group_infos.len();
         for group in &group_infos {
             if group.table_statistic.len() == 1 {
                 // no need to handle the separate compaciton group
                 continue;
             }
 
-            self.try_split_compaction_group(
-                &table_write_throughput,
-                checkpoint_secs,
-                group,
-                &created_tables,
-            )
-            .await;
+            self.try_split_compaction_group(&table_write_throughput, checkpoint_secs, group)
+                .await;
+        }
+
+        if group_count < 2 {
+            return;
+        }
+
+        let mut left = 0;
+        let mut right = left + 1;
+
+        while left < right && right < group_count {
+            let group = &group_infos[left];
+            let next_group = &group_infos[right];
+            match self
+                .try_merge_compaction_group(
+                    &table_write_throughput,
+                    group,
+                    next_group,
+                    checkpoint_secs,
+                    &created_tables,
+                )
+                .await
+            {
+                Ok(_) => right += 1,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "Failed to merge compaction group",
+                    );
+                    left = right;
+                    right = left + 1;
+                }
+            }
         }
     }
 

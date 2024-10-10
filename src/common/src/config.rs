@@ -309,9 +309,11 @@ pub struct MetaConfig {
     pub periodic_scheduling_compaction_group_interval_sec: u64,
 
     #[serde(default = "default::meta::move_table_size_limit")]
+    #[deprecated]
     pub move_table_size_limit: u64,
 
     #[serde(default = "default::meta::split_group_size_limit")]
+    #[deprecated]
     pub split_group_size_limit: u64,
 
     #[serde(default = "default::meta::cut_table_size_limit")]
@@ -330,14 +332,19 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
 
-    /// The threshold of write throughput to trigger a group split. Increase this configuration value to avoid split too many groups with few data write.
-    #[serde(default = "default::meta::table_write_throughput_threshold")]
-    pub table_write_throughput_threshold: u64,
+    /// The threshold of write throughput to trigger a group split.
+    #[serde(
+        default = "default::meta::table_high_write_throughput_threshold",
+        alias = "table_write_throughput_threshold"
+    )]
+    pub table_high_write_throughput_threshold: u64,
 
-    #[serde(default = "default::meta::min_table_split_write_throughput")]
-    /// If the size of one table is smaller than `min_table_split_write_throughput`, we would not
-    /// split it to an single group.
-    pub min_table_split_write_throughput: u64,
+    #[serde(
+        default = "default::meta::table_low_write_throughput_threshold",
+        alias = "min_table_split_write_throughput"
+    )]
+    /// The threshold of write throughput to trigger a group merge.
+    pub table_low_write_throughput_threshold: u64,
 
     // If the compaction task does not report heartbeat beyond the
     // `compaction_task_max_heartbeat_interval_secs` interval, we will cancel the task
@@ -382,6 +389,26 @@ pub struct MetaConfig {
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
+
+    /// Whether to split the compaction group when the size of the group exceeds the threshold.
+    #[serde(default = "default::meta::compaction_group_size_threshold")]
+    pub compaction_group_size_threshold: f64,
+
+    /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
+    #[serde(default = "default::meta::table_statistic_high_write_throughput_ratio")]
+    pub table_statistic_high_write_throughput_ratio: f64,
+
+    /// To merge the compaction group when the low throughput statistics of the group exceeds the threshold.
+    #[serde(default = "default::meta::table_statistic_low_write_throughput_ratio")]
+    pub table_statistic_low_write_throughput_ratio: f64,
+
+    /// The window times of table statistic history for split compaction group.
+    #[serde(default = "default::meta::split_group_statistic_window_times")]
+    pub split_group_statistic_window_times: usize,
+
+    /// The window times of table statistic history for merge compaction group.
+    #[serde(default = "default::meta::merge_group_statistic_window_times")]
+    pub merge_group_statistic_window_times: usize,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -1426,10 +1453,12 @@ pub mod default {
             600
         }
 
+        // limit the size of state table to trigger split by high throughput
         pub fn move_table_size_limit() -> u64 {
-            10 * 1024 * 1024 * 1024 // 10GB
+            4 * 1024 * 1024 * 1024 // 4GB
         }
 
+        // limit the size of group to trigger split by group_size and avoid too many small groups
         pub fn split_group_size_limit() -> u64 {
             64 * 1024 * 1024 * 1024 // 64GB
         }
@@ -1438,11 +1467,11 @@ pub mod default {
             16
         }
 
-        pub fn table_write_throughput_threshold() -> u64 {
+        pub fn table_high_write_throughput_threshold() -> u64 {
             16 * 1024 * 1024 // 16MB
         }
 
-        pub fn min_table_split_write_throughput() -> u64 {
+        pub fn table_low_write_throughput_threshold() -> u64 {
             4 * 1024 * 1024 // 4MB
         }
 
@@ -1492,6 +1521,26 @@ pub mod default {
 
         pub fn enable_dropped_column_reclaim() -> bool {
             false
+        }
+
+        pub fn compaction_group_size_threshold() -> f64 {
+            0.9
+        }
+
+        pub fn table_statistic_high_write_throughput_ratio() -> f64 {
+            0.5
+        }
+
+        pub fn table_statistic_low_write_throughput_ratio() -> f64 {
+            0.7
+        }
+
+        pub fn split_group_statistic_window_times() -> usize {
+            60
+        }
+
+        pub fn merge_group_statistic_window_times() -> usize {
+            240
         }
     }
 
@@ -2661,6 +2710,8 @@ mod tests {
                 r#"
             [meta]
             periodic_split_compact_group_interval_sec = 1
+            table_write_throughput_threshold = 10
+            min_table_split_write_throughput = 5
             "#,
             )
             .unwrap();
@@ -2671,6 +2722,8 @@ mod tests {
                     .periodic_scheduling_compaction_group_interval_sec,
                 1
             );
+            assert_eq!(config.meta.table_high_write_throughput_threshold, 10);
+            assert_eq!(config.meta.table_low_write_throughput_threshold, 5);
         }
     }
 }
