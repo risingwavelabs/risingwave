@@ -25,7 +25,7 @@ use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
     AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnTimestamp,
-    AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName,
+    AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName, FormatType,
 };
 
 use crate::error::ConnectorResult;
@@ -39,44 +39,111 @@ use crate::source::{
 pub static COMMON_COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| HashSet::from(["partition", "offset"]));
 
-pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet<&'static str>>> =
-    LazyLock::new(|| {
-        HashMap::from([
-            (
-                KAFKA_CONNECTOR,
-                HashSet::from([
-                    "key",
-                    "timestamp",
-                    "partition",
-                    "offset",
-                    "header",
-                    "payload",
-                ]),
-            ),
-            (
-                PULSAR_CONNECTOR,
-                HashSet::from(["key", "partition", "offset", "payload"]),
-            ),
-            (
-                KINESIS_CONNECTOR,
-                HashSet::from(["key", "partition", "offset", "timestamp", "payload"]),
-            ),
-            (
-                OPENDAL_S3_CONNECTOR,
-                HashSet::from(["file", "offset", "payload"]),
-            ),
-            (GCS_CONNECTOR, HashSet::from(["file", "offset", "payload"])),
-            (
-                AZBLOB_CONNECTOR,
-                HashSet::from(["file", "offset", "payload"]),
-            ),
-            (
-                POSIX_FS_CONNECTOR,
-                HashSet::from(["file", "offset", "payload"]),
-            ),
-            // mongodb-cdc doesn't support cdc backfill table
-            (
-                MONGODB_CDC_CONNECTOR,
+static KAFKA_COMMON_ADDITIONAL_COLUMNS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    HashSet::from([
+        "key",
+        "timestamp",
+        "partition",
+        "offset",
+        "header",
+        "payload",
+    ])
+});
+static PULSAR_COMMON_ADDITIONAL_COLUMNS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| HashSet::from(["key", "partition", "offset", "payload"]));
+static KINESIS_COMMON_ADDITIONAL_COLUMNS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| HashSet::from(["key", "partition", "offset", "timestamp", "payload"]));
+static FS_COMMON_ADDITIONAL_COLUMNS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| HashSet::from(["file", "offset", "payload"]));
+
+pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<
+    HashMap<&'static str, HashMap<FormatType, HashSet<&'static str>>>,
+> = LazyLock::new(|| {
+    HashMap::from([
+        (
+            KAFKA_CONNECTOR,
+            HashMap::from([
+                (FormatType::Plain, KAFKA_COMMON_ADDITIONAL_COLUMNS.clone()),
+                (FormatType::Upsert, KAFKA_COMMON_ADDITIONAL_COLUMNS.clone()),
+                (FormatType::Maxwell, KAFKA_COMMON_ADDITIONAL_COLUMNS.clone()),
+                (
+                    // does not include `key` column because it is specified in the Debezium protocol
+                    FormatType::Debezium,
+                    HashSet::from(["timestamp", "partition", "offset", "header", "payload"]),
+                ),
+                (FormatType::Canal, KAFKA_COMMON_ADDITIONAL_COLUMNS.clone()),
+                (
+                    FormatType::DebeziumMongo,
+                    HashSet::from(["timestamp", "partition", "offset", "header", "payload"]),
+                ),
+            ]),
+        ),
+        (
+            PULSAR_CONNECTOR,
+            HashMap::from([
+                (FormatType::Plain, PULSAR_COMMON_ADDITIONAL_COLUMNS.clone()),
+                (FormatType::Upsert, PULSAR_COMMON_ADDITIONAL_COLUMNS.clone()),
+                (
+                    FormatType::Maxwell,
+                    PULSAR_COMMON_ADDITIONAL_COLUMNS.clone(),
+                ),
+                (
+                    // does not include `key` column because it is specified in the Debezium protocol
+                    FormatType::Debezium,
+                    HashSet::from(["partition", "offset", "payload"]),
+                ),
+                (FormatType::Canal, PULSAR_COMMON_ADDITIONAL_COLUMNS.clone()),
+                (
+                    FormatType::DebeziumMongo,
+                    HashSet::from(["partition", "offset", "payload"]),
+                ),
+            ]),
+        ),
+        (
+            KINESIS_CONNECTOR,
+            HashMap::from([
+                (FormatType::Plain, KINESIS_COMMON_ADDITIONAL_COLUMNS.clone()),
+                (
+                    FormatType::Upsert,
+                    KINESIS_COMMON_ADDITIONAL_COLUMNS.clone(),
+                ),
+                (
+                    FormatType::Maxwell,
+                    KINESIS_COMMON_ADDITIONAL_COLUMNS.clone(),
+                ),
+                (
+                    // does not include `key` column because it is specified in the Debezium protocol
+                    FormatType::Debezium,
+                    HashSet::from(["timestamp", "partition", "offset", "payload"]),
+                ),
+                (FormatType::Canal, KINESIS_COMMON_ADDITIONAL_COLUMNS.clone()),
+                (
+                    FormatType::DebeziumMongo,
+                    HashSet::from(["timestamp", "partition", "offset", "payload"]),
+                ),
+            ]),
+        ),
+        (
+            OPENDAL_S3_CONNECTOR,
+            HashMap::from([(FormatType::Plain, FS_COMMON_ADDITIONAL_COLUMNS.clone())]),
+        ),
+        (
+            GCS_CONNECTOR,
+            HashMap::from([(FormatType::Plain, FS_COMMON_ADDITIONAL_COLUMNS.clone())]),
+        ),
+        (
+            AZBLOB_CONNECTOR,
+            HashMap::from([(FormatType::Plain, FS_COMMON_ADDITIONAL_COLUMNS.clone())]),
+        ),
+        (
+            POSIX_FS_CONNECTOR,
+            HashMap::from([(FormatType::Plain, FS_COMMON_ADDITIONAL_COLUMNS.clone())]),
+        ),
+        // mongodb-cdc doesn't support cdc backfill table
+        (
+            MONGODB_CDC_CONNECTOR,
+            HashMap::from([(
+                FormatType::DebeziumMongo,
                 HashSet::from([
                     "timestamp",
                     "partition",
@@ -84,9 +151,10 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                     "database_name",
                     "collection_name",
                 ]),
-            ),
-        ])
-    });
+            )]),
+        ),
+    ])
+});
 
 // For CDC backfill table, the additional columns are added to the schema of `StreamCdcScan`
 pub static CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS: LazyLock<Option<HashSet<&'static str>>> =
@@ -99,14 +167,17 @@ pub static CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS: LazyLock<Option<HashSet<&'stat
         ]))
     });
 
-pub fn get_supported_additional_columns(
-    connector_name: &str,
+pub fn get_supported_additional_columns<'a>(
+    connector_name: &'a str,
+    format: &FormatType,
     is_cdc_backfill: bool,
-) -> Option<&HashSet<&'static str>> {
+) -> Option<&'a HashSet<&'static str>> {
     if is_cdc_backfill {
         CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS.as_ref()
     } else {
-        COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name)
+        COMPATIBLE_ADDITIONAL_COLUMNS
+            .get(connector_name)
+            .and_then(|map| map.get(format))
     }
 }
 
@@ -140,9 +211,10 @@ pub fn build_additional_column_desc(
     data_type: Option<&str>,
     reject_unknown_connector: bool,
     is_cdc_backfill_table: bool,
+    format_type: &FormatType,
 ) -> ConnectorResult<ColumnDesc> {
     let compatible_columns = match (
-        get_supported_additional_columns(connector_name, is_cdc_backfill_table),
+        get_supported_additional_columns(connector_name, format_type, is_cdc_backfill_table),
         reject_unknown_connector,
     ) {
         (Some(compat_cols), _) => compat_cols,
@@ -277,6 +349,7 @@ pub fn build_additional_column_desc(
 pub fn source_add_partition_offset_cols(
     columns: &[ColumnCatalog],
     connector_name: &str,
+    format_type: &FormatType,
 ) -> ([bool; 2], [ColumnDesc; 2]) {
     let mut columns_exist = [false; 2];
     let mut last_column_id = max_column_id(columns);
@@ -284,6 +357,7 @@ pub fn source_add_partition_offset_cols(
     let additional_columns: Vec<_> = {
         let compat_col_types = COMPATIBLE_ADDITIONAL_COLUMNS
             .get(connector_name)
+            .and_then(|format_col_mapping| format_col_mapping.get(format_type))
             .unwrap_or(&COMMON_COMPATIBLE_ADDITIONAL_COLUMNS);
         ["partition", "file", "offset"]
             .iter()
@@ -300,6 +374,7 @@ pub fn source_add_partition_offset_cols(
                             None,
                             false,
                             false,
+                            format_type,
                         )
                         .unwrap(),
                     )
