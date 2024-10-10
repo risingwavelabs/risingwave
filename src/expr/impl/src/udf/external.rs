@@ -18,6 +18,7 @@ use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use anyhow::bail;
+use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_udf_flight::Client;
 use futures_util::{StreamExt, TryStreamExt};
 use ginepro::{LoadBalancedChannel, ResolutionStrategy};
@@ -164,6 +165,9 @@ impl UdfImpl for ExternalFunction {
     }
 }
 
+// TODO(rc): allow changing this in configuration
+const MAX_DECODING_MESSAGE_SIZE: usize = 20 << 20; // 20MB
+
 /// Get or create a client for the given UDF service.
 ///
 /// There is a global cache for clients, so that we can reuse the same client for the same service.
@@ -186,7 +190,9 @@ fn get_or_create_flight_client(link: &str) -> Result<Arc<Client>> {
         let client = Arc::new(tokio::task::block_in_place(|| {
             RUNTIME.block_on(async {
                 let channel = connect_tonic(link).await?;
-                Ok(Client::new(channel).await?) as Result<_>
+                let client = FlightServiceClient::new(channel)
+                    .max_decoding_message_size(MAX_DECODING_MESSAGE_SIZE);
+                Ok(Client::with_flight_client(client).await?) as Result<_>
             })
         })?);
         clients.insert(link.to_owned(), Arc::downgrade(&client));
