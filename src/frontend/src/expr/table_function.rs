@@ -248,7 +248,7 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         let Some(scalar) = value else {
                             return Err(BindError(
-                                "table_scan function does not accept null arguments".to_string(),
+                                "postgres_query function does not accept null arguments".to_string(),
                             )
                             .into());
                         };
@@ -259,7 +259,7 @@ impl TableFunction {
                     }
                     None => {
                         return Err(BindError(
-                            "table_scan function only accepts constant arguments".to_string(),
+                            "postgres_query function only accepts constant arguments".to_string(),
                         )
                         .into());
                     }
