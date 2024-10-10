@@ -77,7 +77,7 @@ macro_rules! for_all_params {
         $macro! {
             // name                                     type                            default value                   mut?    doc
             { barrier_interval_ms,                      u32,                            Some(1000_u32),                 true,   "The interval of periodic barrier.", },
-            { checkpoint_frequency,                     u64,                            Some(1_u64),                    true,   "There will be a checkpoint for every n barriers.", },
+            { checkpoint_frequency,                     u64,                            Some(60_u64),                   true,   "There will be a checkpoint for every n barriers.", },
             { sstable_size_mb,                          u32,                            Some(256_u32),                  false,  "Target size of the Sstable.", },
             { parallel_compact_size_mb,                 u32,                            Some(512_u32),                  false,  "The size of parallel task for one compact/flush job.", },
             { block_size_kb,                            u32,                            Some(64_u32),                   false,  "Size of each block in bytes in SST.", },
