@@ -417,10 +417,12 @@ pub fn start(
                 periodic_scheduling_compaction_group_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_interval_sec,
-                split_group_size_limit: config.meta.split_group_size_limit,
-                min_table_split_size: config.meta.move_table_size_limit,
-                table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
-                min_table_split_write_throughput: config.meta.min_table_split_write_throughput,
+                table_high_write_throughput_threshold: config
+                    .meta
+                    .table_high_write_throughput_threshold,
+                table_low_write_throughput_threshold: config
+                    .meta
+                    .table_low_write_throughput_threshold,
                 partition_vnode_count: config.meta.partition_vnode_count,
                 compact_task_table_size_partition_threshold_low: config
                     .meta

@@ -1517,7 +1517,7 @@ impl HummockManager {
                         .table_vnode_partition
                         .insert(table_id, default_partition_count);
                 } else if (compact_table_size > compact_task_table_size_partition_threshold_low
-                    || (write_throughput > self.env.opts.table_write_throughput_threshold
+                    || (write_throughput > self.env.opts.table_high_write_throughput_threshold
                         && compact_table_size > compaction_config.target_file_size_base))
                     && hybrid_vnode_count > 0
                 {

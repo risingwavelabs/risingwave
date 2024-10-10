@@ -622,7 +622,7 @@ impl HummockManager {
         &self,
         table_write_throughput: &HashMap<u32, VecDeque<u64>>,
         table_id: &u32,
-        table_size: &u64,
+        _table_size: &u64,
         checkpoint_secs: u64,
         parent_group_id: u64,
     ) {
@@ -641,15 +641,12 @@ impl HummockManager {
             table_throughput,
             checkpoint_secs,
             window_size,
-            self.env.opts.table_write_throughput_threshold,
+            self.env.opts.table_high_write_throughput_threshold,
             self.env.opts.table_statistic_high_write_throughput_ratio,
         );
 
-        let state_table_size = *table_size;
-
-        // do not split a small table to dedicated compaction group
         // do not split a table to dedicated compaction group if it is not high write throughput
-        if state_table_size < self.env.opts.min_table_split_size || !is_high_write_throughput {
+        if !is_high_write_throughput {
             return;
         }
 
@@ -694,13 +691,9 @@ impl HummockManager {
             for (table_id, table_size) in &group.table_statistic {
                 accumulated_size += table_size;
                 table_ids.push(*table_id);
-                let rest_size = group.group_size - accumulated_size;
-
                 // split if the accumulated size is greater than half of the group size
                 // avoid split a small table to dedicated compaction group and trigger multiple merge
-                if accumulated_size * 2 > group.group_size
-                    && rest_size > self.env.opts.split_group_size_limit
-                {
+                if accumulated_size * 2 > group.group_size {
                     let ret = self
                         .move_state_tables_to_dedicated_compaction_group(
                             group.group_id,
@@ -773,7 +766,7 @@ impl HummockManager {
             table_write_throughput,
             checkpoint_secs,
             window_size,
-            self.env.opts.min_table_split_write_throughput,
+            self.env.opts.table_low_write_throughput_threshold,
             group,
             self.env.opts.table_statistic_low_write_throughput_ratio,
         ) {
@@ -783,10 +776,20 @@ impl HummockManager {
             )));
         }
 
-        if group.group_size > self.env.opts.split_group_size_limit {
+        let compaction_group_config = {
+            let compaction_group_manager = self.compaction_group_manager.read().await;
+            compaction_group_manager
+                .try_get_compaction_group_config(group.group_id)
+                .unwrap()
+        };
+
+        let size_limit = (compaction_group_config.max_estimated_group_size() as f64
+            * self.env.opts.compaction_group_size_threshold) as u64;
+
+        if (group.group_size + next_group.group_size) > size_limit {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge huge group {} group_size {} next_group {} next_group_size {}",
-                group.group_id, group.group_size, next_group.group_id, next_group.group_size
+                "Not Merge huge group {} group_size {} next_group {} next_group_size {} size_limit {}",
+                group.group_id, group.group_size, next_group.group_id, next_group.group_size, size_limit
             )));
         }
 
@@ -801,20 +804,13 @@ impl HummockManager {
             table_write_throughput,
             checkpoint_secs,
             window_size,
-            self.env.opts.min_table_split_write_throughput,
+            self.env.opts.table_low_write_throughput_threshold,
             next_group,
             self.env.opts.table_statistic_low_write_throughput_ratio,
         ) {
             return Err(Error::CompactionGroup(format!(
                 "Not Merge high throughput group {} next group {}",
                 group.group_id, next_group.group_id
-            )));
-        }
-
-        if next_group.group_size > self.env.opts.split_group_size_limit {
-            return Err(Error::CompactionGroup(format!(
-                "Not Merge huge group {} group_size {} next_group {} next_group_size {}",
-                group.group_id, group.group_size, next_group.group_id, next_group.group_size
             )));
         }
 
