@@ -1517,6 +1517,7 @@ impl HummockMetaClient for MetaClient {
         filtered_object_ids: Vec<HummockSstableObjectId>,
         total_object_count: u64,
         total_object_size: u64,
+        start_after: Option<String>,
         next_start_after: Option<String>,
     ) -> Result<()> {
         let req = ReportFullScanTaskRequest {
@@ -1524,6 +1525,7 @@ impl HummockMetaClient for MetaClient {
             total_object_count,
             total_object_size,
             next_start_after,
+            start_after,
         };
         self.inner.report_full_scan_task(req).await?;
         Ok(())
