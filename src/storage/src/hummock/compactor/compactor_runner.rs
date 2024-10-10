@@ -67,8 +67,6 @@ pub struct CompactorRunner {
     split_index: usize,
 }
 
-const MAX_OVERLAPPING_SST: usize = 64;
-
 impl CompactorRunner {
     pub fn new(
         split_index: usize,
@@ -194,15 +192,26 @@ impl CompactorRunner {
                     task_progress.clone(),
                     compactor_iter_max_io_retry_times,
                 ));
-            } else if tables.len() > MAX_OVERLAPPING_SST {
+            } else if tables.len()
+                > self
+                    .compactor
+                    .context
+                    .storage_opts
+                    .compactor_max_overlap_sst_count
+            {
                 let sst_groups = partition_overlapping_sstable_infos(tables);
                 tracing::warn!(
                     "COMPACT A LARGE OVERLAPPING LEVEL: try to partition {} ssts with {} groups",
                     level.table_infos.len(),
                     sst_groups.len()
                 );
-                for table_infos in sst_groups {
-                    assert!(can_concat(&table_infos));
+                for (idx, table_infos) in sst_groups.into_iter().enumerate() {
+                    assert!(
+                        can_concat(&table_infos),
+                        "sst_group idx {:?} table_infos: {:?}",
+                        id,
+                        table_infos
+                    );
                     table_iters.push(ConcatSstableIterator::new(
                         self.compact_task.existing_table_ids.clone(),
                         table_infos,
