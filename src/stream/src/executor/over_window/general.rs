@@ -56,7 +56,6 @@ struct ExecutorInner<S: StateStore> {
     order_key_data_types: Vec<DataType>,
     order_key_order_types: Vec<OrderType>,
     input_pk_indices: Vec<usize>,
-    input_schema_len: usize,
     state_key_to_table_sub_pk_proj: Vec<usize>,
 
     state_table: StateTable<S>,
@@ -174,7 +173,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 order_key_data_types,
                 order_key_order_types: args.order_key_order_types,
                 input_pk_indices: input_info.pk_indices,
-                input_schema_len: input_schema.len(),
                 state_key_to_table_sub_pk_proj,
                 state_table: args.state_table,
                 watermark_sequence: args.watermark_epoch,
