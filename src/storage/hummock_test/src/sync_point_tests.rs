@@ -49,11 +49,11 @@ use crate::test_utils::gen_key_from_bytes;
 #[cfg(feature = "sync_point")]
 #[serial]
 async fn test_syncpoints_sstable_object_id_manager() {
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_id) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     let sstable_object_id_manager =
         Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
@@ -115,11 +115,11 @@ async fn test_syncpoints_sstable_object_id_manager() {
 #[tokio::test]
 #[serial]
 async fn test_syncpoints_test_failpoints_fetch_ids() {
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_id) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     let sstable_object_id_manager =
         Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
@@ -246,7 +246,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
             hummock_manager_ref.clone(),
             cluster_ctl_ref,
             worker_id,
-        ),
+        )
+        .await,
         &hummock_manager_ref,
         &[existing_table_id],
     )

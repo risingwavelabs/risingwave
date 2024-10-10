@@ -57,7 +57,8 @@ async fn test_failpoints_state_store_read_upload() {
         hummock_options,
         sstable_store.clone(),
         meta_client.clone(),
-        get_notification_client_for_test(env, hummock_manager_ref, cluster_ctl_ref, worker_id),
+        get_notification_client_for_test(env, hummock_manager_ref, cluster_ctl_ref, worker_id)
+            .await,
     )
     .await
     .unwrap();
