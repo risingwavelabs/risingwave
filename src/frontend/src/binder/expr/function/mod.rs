@@ -328,7 +328,7 @@ impl Binder {
                     "`VARIADIC` is not allowed in table function call"
                 );
                 self.ensure_table_function_allowed()?;
-                return Ok(TableFunction::new_postgres_query(args)?.into());
+                return Ok(TableFunction::new_postgres_query(args).context("postgres_query error")?.into());
             }
             // UDTF
             if let Some(ref udf) = udf
