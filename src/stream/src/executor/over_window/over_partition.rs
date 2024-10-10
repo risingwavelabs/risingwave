@@ -19,16 +19,17 @@ use std::collections::{BTreeMap, VecDeque};
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
-use delta_btree_map::{Change, DeltaBTreeMap};
+use delta_btree_map::{Change, DeltaBTreeMap, PositionType};
 use educe::Educe;
 use futures_async_stream::for_await;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{Datum, Sentinelled};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_expr::window_function::{
-    RangeFrameBounds, RowsFrameBounds, StateKey, WindowFuncCall,
+    create_window_state, RangeFrameBounds, RowsFrameBounds, StateKey, WindowFuncCall, WindowStates,
 };
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -406,6 +407,157 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             .unwrap_or(false)
     }
 
+    /// Build changes for the partition, with the given `delta`. Necessary maintenance of the range
+    /// cache will be done during this process, like loading rows from the `table` into the cache.
+    pub async fn build_changes(
+        &mut self,
+        table: &StateTable<S>,
+        calls: &[WindowFuncCall],
+        mut delta: PartitionDelta,
+    ) -> StreamExecutorResult<(
+        BTreeMap<StateKey, Record<OwnedRow>>,
+        Option<RangeInclusive<StateKey>>,
+    )> {
+        let input_schema_len = table.get_data_types().len() - calls.len();
+        let mut part_changes = BTreeMap::new();
+
+        // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
+        // into the cache.
+        let (part_with_delta, affected_ranges) =
+            self.find_affected_ranges(table, &mut delta).await?;
+
+        let snapshot = part_with_delta.snapshot();
+        let delta = part_with_delta.delta();
+
+        // Generate delete changes first, because deletes are skipped during iteration over
+        // `part_with_delta` in the next step.
+        for (key, change) in delta {
+            if change.is_delete() {
+                part_changes.insert(
+                    key.as_normal_expect().clone(),
+                    Record::Delete {
+                        old_row: snapshot.get(key).unwrap().clone(),
+                    },
+                );
+            }
+        }
+
+        let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
+
+        for AffectedRange {
+            first_frame_start,
+            first_curr_key,
+            last_curr_key,
+            last_frame_end,
+        } in affected_ranges
+        {
+            assert!(first_frame_start <= first_curr_key);
+            assert!(first_curr_key <= last_curr_key);
+            assert!(last_curr_key <= last_frame_end);
+            assert!(first_frame_start.is_normal());
+            assert!(first_curr_key.is_normal());
+            assert!(last_curr_key.is_normal());
+            assert!(last_frame_end.is_normal());
+
+            if let Some(accessed_range) = accessed_range.as_mut() {
+                let min_start = first_frame_start
+                    .as_normal_expect()
+                    .min(accessed_range.start())
+                    .clone();
+                let max_end = last_frame_end
+                    .as_normal_expect()
+                    .max(accessed_range.end())
+                    .clone();
+                *accessed_range = min_start..=max_end;
+            } else {
+                accessed_range = Some(
+                    first_frame_start.as_normal_expect().clone()
+                        ..=last_frame_end.as_normal_expect().clone(),
+                );
+            }
+
+            let mut states =
+                WindowStates::new(calls.iter().map(create_window_state).try_collect()?);
+
+            // Populate window states with the affected range of rows.
+            {
+                let mut cursor = part_with_delta
+                    .find(first_frame_start)
+                    .expect("first frame start key must exist");
+                while {
+                    let (key, row) = cursor
+                        .key_value()
+                        .expect("cursor must be valid until `last_frame_end`");
+
+                    for (call, state) in calls.iter().zip_eq_fast(states.iter_mut()) {
+                        // TODO(rc): batch appending
+                        // TODO(rc): append not only the arguments but also the old output for optimization
+                        state.append(
+                            key.as_normal_expect().clone(),
+                            row.project(call.args.val_indices())
+                                .into_owned_row()
+                                .as_inner()
+                                .into(),
+                        );
+                    }
+                    cursor.move_next();
+
+                    key != last_frame_end
+                } {}
+            }
+
+            // Slide to the first affected key. We can safely pass in `first_curr_key` here
+            // because it definitely exists in the states by the definition of affected range.
+            states.just_slide_to(first_curr_key.as_normal_expect())?;
+            let mut curr_key_cursor = part_with_delta.find(first_curr_key).unwrap();
+            assert_eq!(
+                states.curr_key(),
+                curr_key_cursor.key().map(CacheKey::as_normal_expect)
+            );
+
+            // Slide and generate changes.
+            while {
+                let (key, row) = curr_key_cursor
+                    .key_value()
+                    .expect("cursor must be valid until `last_curr_key`");
+                let output = states.slide_no_evict_hint()?;
+                let new_row = OwnedRow::new(
+                    row.as_inner()
+                        .iter()
+                        .take(input_schema_len)
+                        .cloned()
+                        .chain(output)
+                        .collect(),
+                );
+
+                match curr_key_cursor.position() {
+                    PositionType::Ghost => unreachable!(),
+                    PositionType::Snapshot | PositionType::DeltaUpdate => {
+                        // update
+                        let old_row = snapshot.get(key).unwrap().clone();
+                        if old_row != new_row {
+                            part_changes.insert(
+                                key.as_normal_expect().clone(),
+                                Record::Update { old_row, new_row },
+                            );
+                        }
+                    }
+                    PositionType::DeltaInsert => {
+                        // insert
+                        part_changes
+                            .insert(key.as_normal_expect().clone(), Record::Insert { new_row });
+                    }
+                }
+
+                curr_key_cursor.move_next();
+
+                key != last_curr_key
+            } {}
+        }
+
+        Ok((part_changes, accessed_range))
+    }
+
     /// Write a change record to state table and cache.
     /// This function must be called after finding affected ranges, which means the change records
     /// should never exceed the cached range.
@@ -437,7 +589,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     /// Find all ranges in the partition that are affected by the given delta.
     /// The returned ranges are guaranteed to be sorted and non-overlapping. All keys in the ranges
     /// are guaranteed to be cached, which means they should be [`Sentinelled::Normal`]s.
-    pub async fn find_affected_ranges<'s, 'delta>(
+    async fn find_affected_ranges<'s, 'delta>(
         &'s mut self,
         table: &StateTable<S>,
         delta: &'delta mut PartitionDelta,
