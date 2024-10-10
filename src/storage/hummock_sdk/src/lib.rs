@@ -97,7 +97,7 @@ impl<'de> Deserialize<'de> for HummockVersionId {
 }
 
 impl HummockVersionId {
-    pub const MAX: Self = Self(u64::MAX);
+    pub const MAX: Self = Self(i64::MAX as _);
 
     pub const fn new(id: u64) -> Self {
         Self(id)
