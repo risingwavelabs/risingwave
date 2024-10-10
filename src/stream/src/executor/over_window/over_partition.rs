@@ -589,7 +589,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     /// Find all ranges in the partition that are affected by the given delta.
     /// The returned ranges are guaranteed to be sorted and non-overlapping. All keys in the ranges
     /// are guaranteed to be cached, which means they should be [`Sentinelled::Normal`]s.
-    pub async fn find_affected_ranges<'s, 'delta>(
+    async fn find_affected_ranges<'s, 'delta>(
         &'s mut self,
         table: &StateTable<S>,
         delta: &'delta mut PartitionDelta,
