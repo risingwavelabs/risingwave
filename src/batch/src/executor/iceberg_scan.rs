@@ -105,6 +105,7 @@ impl IcebergScanExecutor {
             .await?;
         let data_types = self.schema.data_types();
         let executor_schema_names = self.schema.names();
+        let table_name = table.identifier().name().to_string();
 
         let data_file_scan_tasks = mem::take(&mut self.data_file_scan_tasks);
 
@@ -125,15 +126,18 @@ impl IcebergScanExecutor {
 
         // Delete rows in the data file that need to be deleted by map
         let mut read_bytes = 0;
-        let _metrics_report_guard = scopeguard::guard(read_bytes, |read_bytes| {
-            self.metrics.as_ref().map(|metrics| {
-                metrics
-                    .iceberg_scan_metrics()
-                    .iceberg_read_bytes
-                    .with_guarded_label_values(&[table.identifier().name()])
-                    .inc_by(read_bytes as _);
-            });
-        });
+        let _metrics_report_guard = scopeguard::guard(
+            (read_bytes, table_name, self.metrics.clone()),
+            |(read_bytes, table_name, metrics)| {
+                if let Some(metrics) = metrics {
+                    metrics
+                        .iceberg_scan_metrics()
+                        .iceberg_read_bytes
+                        .with_guarded_label_values(&[&table_name])
+                        .inc_by(read_bytes as _);
+                }
+            },
+        );
 
         for data_file_scan_task in data_file_scan_tasks {
             let data_file_path = data_file_scan_task.data_file_path.clone();
