@@ -114,12 +114,12 @@ pub fn gen_default_addition_col_name(
     inner_field_name: Option<&str>,
     data_type: Option<&DataType>,
 ) -> String {
-    let legacy_dt_name = format!("{:?}", data_type).to_lowercase();
+    let legacy_dt_name = data_type.map(|dt| format!("{:?}", dt).to_lowercase());
     let col_name = [
         Some(connector_name),
         Some(additional_col_type),
         inner_field_name,
-        Some(&legacy_dt_name),
+        legacy_dt_name.as_deref(),
     ];
     col_name.iter().fold("_rw".to_string(), |name, ele| {
         if let Some(ele) = ele {
