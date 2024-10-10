@@ -2093,6 +2093,10 @@ pub mod default {
         pub fn sst_allowed_trivial_move_min_size() -> u64 {
             DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
         }
+
+        pub fn disable_auto_group_schedule() -> bool {
+            true
+        }
     }
 
     pub mod object_store_config {
