@@ -321,8 +321,8 @@ impl Binder {
                 self.ensure_table_function_allowed()?;
                 return Ok(TableFunction::new_file_scan(args)?.into());
             }
-            // `table_scan` table function
-            if func_name.eq_ignore_ascii_case("postgres_query") {
+            // `postgres_query` table function
+            if func_name.eq("postgres_query") {
                 reject_syntax!(
                     arg_list.variadic,
                     "`VARIADIC` is not allowed in table function call"

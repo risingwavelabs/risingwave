@@ -26,7 +26,7 @@ use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
-/// S3 file scan executor. Currently only support parquet file format.
+/// `PostgresQuery` executor. Runs a query against a Postgres database.
 pub struct PostgresQueryExecutor {
     schema: Schema,
     host: String,
@@ -73,9 +73,6 @@ fn postgres_cell_to_scalar_impl(
     i: usize,
     name: &str,
 ) -> Result<Datum, BatchError> {
-    // We observe several incompatibility issue in Debezium's Postgres connector. We summarize them here:
-    // Issue #1. The null of enum list is not supported in Debezium. An enum list contains `NULL` will fallback to `NULL`.
-    // Issue #2. In our parser, when there's inf, -inf, nan or invalid item in a list, the whole list will fallback null.
     let datum = match data_type {
         DataType::Boolean
         | DataType::Int16
@@ -89,6 +86,7 @@ fn postgres_cell_to_scalar_impl(
         | DataType::Timestamptz
         | DataType::Jsonb
         | DataType::Interval
+        | DataType::Varchar
         | DataType::Bytea => {
             // ScalarAdapter is also fine. But ScalarImpl is more efficient
             row.try_get::<_, Option<ScalarImpl>>(i)?

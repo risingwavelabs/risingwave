@@ -230,37 +230,29 @@ impl TableFunction {
     }
 
     pub fn new_postgres_query(args: Vec<ExprImpl>) -> RwResult<Self> {
+        let args = {
+            if args.len() != 6 {
+                return Err(BindError("postgres_query function only accepts 6 arguments: postgres_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, postgres_query varchar)".to_string()).into());
+            }
+            let mut cast_args = Vec::with_capacity(6);
+            for arg in args {
+                let arg = arg.cast_implicit(DataType::Varchar)?;
+                cast_args.push(arg);
+            }
+            cast_args
+        };
         let evaled_args = {
             let mut evaled_args: Vec<String> = Vec::with_capacity(6);
-            if args.len() != 6 {
-                return Err(BindError("table_scan function only accepts 6 arguments: postgres_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, postgres_query varchar)".to_string()).into());
-            }
             for arg in &args {
-                if arg.return_type() != DataType::Varchar {
-                    return Err(BindError(
-                        "table_scan function only accepts string arguments".to_string(),
-                    )
-                    .into());
-                }
                 match arg.try_fold_const() {
                     Some(Ok(value)) => {
-                        if value.is_none() {
+                        let Some(scalar) = value else {
                             return Err(BindError(
                                 "table_scan function does not accept null arguments".to_string(),
                             )
                             .into());
-                        }
-                        match value {
-                            Some(ScalarImpl::Utf8(s)) => {
-                                evaled_args.push(s.to_string());
-                            }
-                            _ => {
-                                return Err(BindError(
-                                    "table_scan function only accepts string arguments".to_string(),
-                                )
-                                .into())
-                            }
-                        }
+                        };
+                        evaled_args.push(scalar.into_utf8().into());
                     }
                     Some(Err(err)) => {
                         return Err(err);
@@ -328,7 +320,9 @@ impl TableFunction {
                             TokioPgType::TIME => DataType::Time,
                             TokioPgType::TIMESTAMP => DataType::Timestamp,
                             TokioPgType::TIMESTAMPTZ => DataType::Timestamptz,
-                            TokioPgType::TEXT => DataType::Varchar,
+                            TokioPgType::TEXT | TokioPgType::VARCHAR => DataType::Varchar,
+                            TokioPgType::INTERVAL => DataType::Interval,
+                            TokioPgType::JSONB => DataType::Jsonb,
                             TokioPgType::BYTEA => DataType::Bytea,
                             _ => {
                                 return Err(crate::error::ErrorCode::BindError(
