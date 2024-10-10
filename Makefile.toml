@@ -159,20 +159,45 @@ alias = "logs"
 
 [tasks.logs]
 category = "RiseDev - Start/Stop"
-description = "Open logs with VSCode or dump in console"
+description = "Open logs with Editor like VSCode and vim or dump in console"
 script = '''
 #!/usr/bin/env bash
 
-code "${PREFIX_LOG}" 2> /dev/null
-if [[ $? -eq 0 ]]; then
-  exit 0
+if [[ -n "$EDITOR" ]]; then
+    if which "$EDITOR" &> /dev/null; then
+        $EDITOR "${PREFIX_LOG}" 2> /dev/null
+        if [[ $? -eq 0 ]]; then
+            exit 0
+        fi
+    fi
 fi
-
+# first try to use VSCode as the editor
+if command -v code &> /dev/null; then
+    code "${PREFIX_LOG}" 2> /dev/null
+    if [[ $? -eq 0 ]]; then
+        exit 0
+    fi
+fi
+# Second try to use vim as the editor
+if command -v vim &> /dev/null; then
+    vim "${PREFIX_LOG}" 2> /dev/null
+    if [[ $? -eq 0 ]]; then
+        exit 0
+    fi
+fi
+# Then try to use vi as the editor
+if command -v vi &> /dev/null; then
+    vi "${PREFIX_LOG}" 2> /dev/null
+    if [[ $? -eq 0 ]]; then
+        exit 0
+    fi
+fi
+# If no editor is available or all attempts fail, dump log files
 for out_file in ${PREFIX_LOG}/*.log
 do
-  echo "~~~ Dump log file $out_file"
-  echo ""
-  cat "$out_file" | tail -n 300
+    echo "~~~ Dump log file $out_file"
+    echo ""
+    cat "$out_file" | tail -n 300
 done
 
 echo ""
