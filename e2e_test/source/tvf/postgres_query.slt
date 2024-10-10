@@ -1,18 +1,3 @@
-                            TokioPgType::BOOL => DataType::Boolean,
-                            TokioPgType::INT2 => DataType::Int16,
-                            TokioPgType::INT4 => DataType::Int32,
-                            TokioPgType::INT8 => DataType::Int64,
-                            TokioPgType::FLOAT4 => DataType::Float32,
-                            TokioPgType::FLOAT8 => DataType::Float64,
-                            TokioPgType::NUMERIC => DataType::Decimal,
-                            TokioPgType::DATE => DataType::Date,
-                            TokioPgType::TIME => DataType::Time,
-                            TokioPgType::TIMESTAMP => DataType::Timestamp,
-                            TokioPgType::TIMESTAMPTZ => DataType::Timestamptz,
-                            TokioPgType::TEXT | TokioPgType::VARCHAR => DataType::Varchar,
-                            TokioPgType::INTERVAL => DataType::Interval,
-                            TokioPgType::JSONB => DataType::Jsonb,
-                            TokioPgType::BYTEA => DataType::Bytea,
 system ok
 PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test psql -c "
 CREATE TABLE test (
