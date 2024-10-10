@@ -38,6 +38,8 @@ use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkForma
 use crate::source::TryFromBTreeMap;
 use crate::with_options::WithOptions;
 
+pub const DEFAULT_ROLLOVER_SECONDS: usize = 10;
+
 /// The `FileSink` struct represents a file sink that uses the `OpendalSinkBackend` trait for its backend implementation.
 ///
 /// # Type Parameters
@@ -395,7 +397,12 @@ impl OpenDalSinkWriter {
                     .timestamp_opt(duration.as_secs() as i64, 0)
                     .single()
                     .expect("Failed to convert timestamp to DateTime<Utc>");
-                match self.batching_strategy.path_partition_prefix {
+                let path_partition_prefix = self
+                    .batching_strategy
+                    .path_partition_prefix
+                    .as_ref()
+                    .unwrap_or(&PathPartitionPrefix::None);
+                match path_partition_prefix {
                     PathPartitionPrefix::None => "".to_string(),
                     PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
                     PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
@@ -535,11 +542,19 @@ fn convert_rw_schema_to_arrow_schema(
 ///   regardless of the number of accumulated rows.
 /// - `path_partition_prefix`: Specifies how files are organized into directories
 ///   based on creation time (e.g., by day, month, or hour).
-#[derive(Deserialize, Debug, Clone)]
+
+#[serde_as]
+#[derive(Default, Deserialize, Debug, Clone, WithOptions)]
 pub struct BatchingStrategy {
+    #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_row_count: Option<usize>,
+    #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub rollover_seconds: Option<usize>,
-    pub path_partition_prefix: PathPartitionPrefix,
+    #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub path_partition_prefix: Option<PathPartitionPrefix>,
 }
 
 /// `PathPartitionPrefix` defines the granularity of file partitions based on creation time.
@@ -561,19 +576,3 @@ pub enum PathPartitionPrefix {
     #[serde(alias = "hour")]
     Hour = 3,
 }
-
-#[serde_as]
-#[derive(Deserialize, Debug, Clone, WithOptions)]
-pub struct FileSinkBatchingStrategyConfig {
-    #[serde(default)]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub max_row_count: Option<usize>,
-    #[serde(default)]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub rollover_seconds: Option<usize>,
-    #[serde(default)]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub path_partition_prefix: Option<PathPartitionPrefix>,
-}
-
-pub const DEFAULT_ROLLOVER_SECONDS: usize = 10;

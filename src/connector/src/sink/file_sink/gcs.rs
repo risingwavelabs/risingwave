@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use super::opendal_sink::{BatchingStrategy, FileSink, FileSinkBatchingStrategyConfig};
+use super::opendal_sink::{BatchingStrategy, FileSink};
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
@@ -51,7 +51,7 @@ pub struct GcsConfig {
     pub common: GcsCommon,
 
     #[serde(flatten)]
-    pub batching_strategy: FileSinkBatchingStrategyConfig,
+    pub batching_strategy: BatchingStrategy,
 
     pub r#type: String, // accept "append-only"
 
@@ -121,10 +121,7 @@ impl OpendalSinkBackend for GcsSink {
         BatchingStrategy {
             max_row_count: properties.batching_strategy.max_row_count,
             rollover_seconds: properties.batching_strategy.rollover_seconds,
-            path_partition_prefix: properties
-                .batching_strategy
-                .path_partition_prefix
-                .unwrap_or_default(),
+            path_partition_prefix: properties.batching_strategy.path_partition_prefix,
         }
     }
 }
