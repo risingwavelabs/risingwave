@@ -1,0 +1,164 @@
+control substitution on
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_schema_change;
+    CREATE TABLE IF NOT EXISTS test_schema_change(
+        id int,
+        name varchar(255) DEFAULT 'default_name',
+        age int DEFAULT 18,
+        v1 real DEFAULT 1.1,
+        v2 double precision DEFAULT 2.2,
+        v3 numeric DEFAULT 3.3,
+        v4 boolean DEFAULT false,
+        v5 date DEFAULT '2020-01-01',
+        v6 time DEFAULT '12:34:56',
+        v7 timestamp DEFAULT '2020-01-01 12:34:56',
+        v8 timestamptz DEFAULT '2020-01-01 12:34:56+00',
+        v9 interval DEFAULT '1 day',
+        v10 jsonb DEFAULT '{}',
+        PRIMARY KEY (id)
+    );
+    INSERT INTO test_schema_change(id,name,age) VALUES (1, 'name1', 20), (2, 'name2', 21), (3, 'name3', 22);
+    "
+
+statement ok
+create source pg_source with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'pg_slot',
+ auto.schema.change = 'true'
+);
+
+statement ok
+create table rw_test_schema_change (*) from pg_source table 'public.test_schema_change';
+
+
+# Name, Type, Is Hidden, Description
+query TTTT
+describe rw_test_schema_change;
+----
+id integer false NULL
+name character varying false NULL
+age integer false NULL
+v1 real false NULL
+v2 double precision false NULL
+v3 numeric false NULL
+v4 boolean false NULL
+v5 date false NULL
+v6 time without time zone false NULL
+v7 timestamp without time zone false NULL
+v8 timestamp with time zone false NULL
+v9 interval false NULL
+v10 jsonb false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_test_schema_change NULL NULL
+
+sleep 2s
+
+query TTTTTTTTTTTTT
+SELECT * from rw_test_schema_change order by id;
+----
+1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
+2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
+3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
+
+sleep 3s
+
+system ok
+psql -c "
+    BEGIN;
+    ALTER TABLE test_schema_change ADD COLUMN v11 varchar DEFAULT 'hello';
+    ALTER TABLE test_schema_change ADD COLUMN v12 decimal DEFAULT '1.2345';
+    COMMIT;
+    INSERT INTO test_schema_change (id,name,age) values (11,'aaa', 11);
+"
+
+sleep 3s
+
+# Name, Type, Is Hidden, Description
+query TTTT
+describe rw_test_schema_change;
+----
+id integer false NULL
+name character varying false NULL
+age integer false NULL
+v1 real false NULL
+v2 double precision false NULL
+v3 numeric false NULL
+v4 boolean false NULL
+v5 date false NULL
+v6 time without time zone false NULL
+v7 timestamp without time zone false NULL
+v8 timestamp with time zone false NULL
+v9 interval false NULL
+v10 jsonb false NULL
+v11 character varying false NULL
+v12 numeric false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_test_schema_change NULL NULL
+
+
+query TTTTTTTTTTTTTTT
+SELECT * from rw_test_schema_change order by id;
+----
+1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+11 aaa 11 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+
+
+system ok
+psql -c "
+    ALTER TABLE test_schema_change DROP COLUMN v1;
+    ALTER TABLE test_schema_change DROP COLUMN v2;
+"
+
+system ok
+psql -c "
+    INSERT INTO test_schema_change (id,name,age) values (12,'bbb', 12);
+"
+
+sleep 3s
+
+
+# Name, Type, Is Hidden, Description
+query TTTT
+describe rw_test_schema_change;
+----
+id integer false NULL
+name character varying false NULL
+age integer false NULL
+v3 numeric false NULL
+v4 boolean false NULL
+v5 date false NULL
+v6 time without time zone false NULL
+v7 timestamp without time zone false NULL
+v8 timestamp with time zone false NULL
+v9 interval false NULL
+v10 jsonb false NULL
+v11 character varying false NULL
+v12 numeric false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_test_schema_change NULL NULL
+
+
+query TTTTTTTTTTTTTTT
+SELECT * from rw_test_schema_change order by id;
+----
+1 name1 20 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+2 name2 21 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+3 name3 22 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+11 aaa 11 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+12 bbb 12 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+
+
+statement ok
+drop source pg_source cascade;

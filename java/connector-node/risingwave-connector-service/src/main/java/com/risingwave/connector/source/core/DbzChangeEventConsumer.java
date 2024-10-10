@@ -213,7 +213,7 @@ public class DbzChangeEventConsumer
                                         .setSourceTsMs(sourceTsMs)
                                         .build();
                         LOG.debug(
-                                "offset => {}, key => {}, payload => {}",
+                                "[schema] offset => {}, key => {}, payload => {}",
                                 message.getOffset(),
                                 message.getKey(),
                                 message.getPayload());
@@ -269,7 +269,7 @@ public class DbzChangeEventConsumer
                                         .setSourceTsMs(sourceTsMs)
                                         .build();
                         LOG.debug(
-                                "offset => {}, key => {}, payload => {}",
+                                "[data] offset => {}, key => {}, payload => {}",
                                 message.getOffset(),
                                 message.getKey(),
                                 message.getPayload());

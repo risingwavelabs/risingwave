@@ -23,6 +23,9 @@ under the License.
         "http://www.puppycrawl.com/dtds/suppressions_1_1.dtd">
 
 <suppressions>
+    <!-- exclude patched class -->
+    <suppress files="src/main/java/io/debezium/connector/postgresql/PostgresConnectorConfig.java"
+              checks=".*"/>
     <!-- target directory is not relevant for checkstyle -->
     <suppress
             files="[\\/]target[\\/]"
