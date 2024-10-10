@@ -106,7 +106,7 @@ async fn run_compact(
     let mut error_count = 0;
 
     loop {
-        if pending_commit_num < compact_frequency
+        if pending_commit_num >= compact_frequency
             && Instant::now().duration_since(prev_compact_success_time)
                 > min_compact_gap_duration_sec
         {

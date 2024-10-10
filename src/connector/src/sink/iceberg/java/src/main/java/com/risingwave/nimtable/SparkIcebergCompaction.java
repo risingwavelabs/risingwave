@@ -16,12 +16,13 @@ public class SparkIcebergCompaction {
                 .config("spark.sql.catalog.nimtable.type", "hadoop")
                 .config("spark.sql.catalog.nimtable.warehouse", warehousePath)
                 .getOrCreate();
-//        long count = session.sql("create table nimtable.db.table (id int, name string)").count();
-        // session.sql("insert into nimtable.db.table values (1, 'aaa'), (2, 'bbb')").count();
-        // session.sql("insert into nimtable.db.table values (3, 'ccc'), (4, 'ddd')").count();
-        // System.out.println(session.sql("select * from nimtable.db.table").javaRDD().collect());
-        session.sql(String.format("CALL nimtable.system.rewrite_data_files(table => '%s.%s', options => map('rewrite-all', 'true'))", database, table)).count();
-        System.out.println(String.format("compaction success: %s/%s/%s", warehousePath, database, table));
-        // System.out.println(session.sql("select * from nimtable.db.table").javaRDD().collect());
+        List<Row> rows = session.sql(String.format("CALL nimtable.system.rewrite_data_files(table => '%s.%s', options => map('rewrite-all', 'true'))", database, table)).collectAsList();
+        System.out.printf("compaction success: %s/%s/%s, output: %s%n", warehousePath, database, table, rows);
+        try {
+            List<Row> expireSnapshotOutputRows = session.sql(String.format("CALL nimtable.system.expire_snapshots(table => '%s.%s')", database, table)).collectAsList();
+            System.out.printf("expire_snapshots success: %s/%s/%s, output: %s%n", warehousePath, database, table, expireSnapshotOutputRows);
+        } catch (Throwable e) {
+            System.err.printf("failed to run expire snapshot: %s%n", e);
+        }
     }
 }
