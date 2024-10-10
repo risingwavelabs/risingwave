@@ -655,16 +655,24 @@ pub fn handle_addition_columns(
     while let Some(item) = additional_columns.pop() {
         check_additional_column_compatibility(&item, source_schema)?;
 
-        let data_type_name: Option<String> = item
+        let data_type = item
             .header_inner_expect_type
-            .map(|dt| format!("{:?}", dt).to_lowercase());
+            .map(|dt| bind_data_type(&dt))
+            .transpose()?;
+        if let Some(dt) = &data_type
+            && !matches!(dt, DataType::Bytea | DataType::Varchar)
+        {
+            return Err(
+                ErrorCode::BindError(format!("invalid additional column data type: {dt}")).into(),
+            );
+        }
         let col = build_additional_column_desc(
             latest_col_id.next(),
             connector_name.as_str(),
             item.column_type.real_value().as_str(),
             item.column_alias.map(|alias| alias.real_value()),
             item.inner_field.as_deref(),
-            data_type_name.as_deref(),
+            data_type.as_ref(),
             true,
             is_cdc_backfill_table,
         )?;

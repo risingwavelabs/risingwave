@@ -2634,21 +2634,14 @@ impl Parser<'_> {
                 self.next_token();
                 column_inner_field = Some(inner_field);
 
-                if let Token::Word(w) = self.peek_token().token {
-                    match w.keyword {
-                        Keyword::BYTEA => {
-                            header_inner_expect_type = Some(DataType::Bytea);
-                            self.next_token();
-                        }
-                        Keyword::VARCHAR => {
-                            header_inner_expect_type = Some(DataType::Varchar);
-                            self.next_token();
-                        }
-                        _ => {
-                            // default to bytea
-                            header_inner_expect_type = Some(DataType::Bytea);
-                        }
+                match self.parse_data_type() {
+                    Ok(dt) => {
+                        header_inner_expect_type = Some(dt);
                     }
+                    Err(winnow::error::ErrMode::Backtrack(_)) => {
+                        // no-op
+                    }
+                    Err(err) => return Err(err),
                 }
             }
 
