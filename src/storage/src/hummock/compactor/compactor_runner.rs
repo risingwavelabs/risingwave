@@ -209,7 +209,7 @@ impl CompactorRunner {
                     assert!(
                         can_concat(&table_infos),
                         "sst_group idx {:?} table_infos: {:?}",
-                        id,
+                        idx,
                         table_infos
                     );
                     table_iters.push(ConcatSstableIterator::new(
