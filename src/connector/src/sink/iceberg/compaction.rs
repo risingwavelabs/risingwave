@@ -60,21 +60,14 @@ impl NimtableCompactionConfig {
             compact_frequency: var("NIMTABLE_COMPACTION_FREQUENCY")
                 .map_err(|_| anyhow!("NIMTABLE_COMPACTION_FREQUENCY not set in env var"))?
                 .parse::<usize>()
-                .map_err(|e| {
-                    anyhow!("invalid NIMTABLE_COMPACTION_FREQUENCY: {:?}", e.as_report())
-                })?,
+                .context("invalid NIMTABLE_COMPACTION_FREQUENCY")?,
             min_compact_gap_duration_sec: Duration::from_secs(
                 var("NIMTABLE_MIN_COMPACTION_GAP_DURATION_SEC")
                     .map_err(|_| {
                         anyhow!("NIMTABLE_MIN_COMPACTION_GAP_DURATION_SEC not set in env var")
                     })?
                     .parse::<u64>()
-                    .map_err(|e| {
-                        anyhow!(
-                            "invalid NIMTABLE_MIN_COMPACTION_GAP_DURATION_SEC: {:?}",
-                            e.as_report()
-                        )
-                    })?,
+                    .context("invalid NIMTABLE_MIN_COMPACTION_GAP_DURATION_SEC")?,
             ),
         })
     }
