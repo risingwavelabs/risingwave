@@ -2095,7 +2095,7 @@ pub mod default {
         }
 
         pub fn disable_auto_group_schedule() -> bool {
-            true
+            false
         }
     }
 
