@@ -78,7 +78,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "f761d18", features = [
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "b414bc5", features = [
     "tracing",
     "nightly",
 ] }
