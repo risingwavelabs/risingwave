@@ -91,6 +91,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
