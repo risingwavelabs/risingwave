@@ -23,7 +23,8 @@ use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
-use risingwave_meta::manager::{ConnectionId, MetadataManager};
+use risingwave_meta::manager::MetadataManager;
+use risingwave_meta_model_v2::ConnectionId;
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
 use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
@@ -86,18 +87,11 @@ impl CloudService for CloudServiceImpl {
                 ))
             })?;
 
-            let connection = match &self.metadata_manager {
-                MetadataManager::V1(mgr) => {
-                    mgr.catalog_manager
-                        .get_connection_by_id(connection_id)
-                        .await
-                }
-                MetadataManager::V2(mgr) => {
-                    mgr.catalog_controller
-                        .get_connection_by_id(connection_id as _)
-                        .await
-                }
-            };
+            let connection = self
+                .metadata_manager
+                .catalog_controller
+                .get_connection_by_id(connection_id)
+                .await;
 
             if let Err(e) = connection {
                 return Ok(new_rwc_validate_fail_response(

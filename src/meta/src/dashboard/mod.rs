@@ -55,9 +55,9 @@ pub(super) mod handlers {
     use axum::Json;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::bail;
     use risingwave_common::catalog::TableId;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
+    use risingwave_meta_model_v2::WorkerId;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{PbDatabase, PbSchema, Sink, Source, Subscription, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
@@ -76,8 +76,6 @@ pub(super) mod handlers {
     use thiserror_ext::AsReport;
 
     use super::*;
-    use crate::manager::WorkerId;
-    use crate::model::MetadataModel;
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
@@ -123,14 +121,11 @@ pub(super) mod handlers {
         metadata_manager: &MetadataManager,
         table_type: TableType,
     ) -> Result<Json<Vec<Table>>> {
-        let tables = match metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_tables_by_type(table_type).await,
-            MetadataManager::V2(mgr) => mgr
-                .catalog_controller
-                .list_tables_by_type(table_type.into())
-                .await
-                .map_err(err)?,
-        };
+        let tables = metadata_manager
+            .catalog_controller
+            .list_tables_by_type(table_type.into())
+            .await
+            .map_err(err)?;
 
         Ok(Json(tables))
     }
@@ -152,14 +147,12 @@ pub(super) mod handlers {
     pub async fn list_subscription(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<Subscription>>> {
-        let subscriptions = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_subscriptions().await,
-            MetadataManager::V2(mgr) => mgr
-                .catalog_controller
-                .list_subscriptions()
-                .await
-                .map_err(err)?,
-        };
+        let subscriptions = srv
+            .metadata_manager
+            .catalog_controller
+            .list_subscriptions()
+            .await
+            .map_err(err)?;
 
         Ok(Json(subscriptions))
     }
@@ -177,19 +170,23 @@ pub(super) mod handlers {
     }
 
     pub async fn list_sinks(Extension(srv): Extension<Service>) -> Result<Json<Vec<Sink>>> {
-        let sinks = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_sinks().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_sinks().await.map_err(err)?,
-        };
+        let sinks = srv
+            .metadata_manager
+            .catalog_controller
+            .list_sinks()
+            .await
+            .map_err(err)?;
 
         Ok(Json(sinks))
     }
 
     pub async fn list_views(Extension(srv): Extension<Service>) -> Result<Json<Vec<View>>> {
-        let views = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_views().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_views().await.map_err(err)?,
-        };
+        let views = srv
+            .metadata_manager
+            .catalog_controller
+            .list_views()
+            .await
+            .map_err(err)?;
 
         Ok(Json(views))
     }
@@ -197,24 +194,15 @@ pub(super) mod handlers {
     pub async fn list_fragments(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbTableFragments>>> {
-        let table_fragments = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr
-                .fragment_manager
-                .get_fragment_read_guard()
-                .await
-                .table_fragments()
-                .values()
-                .map(|tf| tf.to_protobuf())
-                .collect_vec(),
-            MetadataManager::V2(mgr) => mgr
-                .catalog_controller
-                .table_fragments()
-                .await
-                .map_err(err)?
-                .values()
-                .cloned()
-                .collect_vec(),
-        };
+        let table_fragments = srv
+            .metadata_manager
+            .catalog_controller
+            .table_fragments()
+            .await
+            .map_err(err)?
+            .values()
+            .cloned()
+            .collect_vec();
 
         Ok(Json(table_fragments))
     }
@@ -229,53 +217,29 @@ pub(super) mod handlers {
     pub async fn get_fragment_vertex_to_relation_id_map(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<FragmentVertexToRelationMap>> {
-        let map = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let core = mgr.fragment_manager.get_fragment_read_guard().await;
-                let table_fragments = core.table_fragments();
-                let mut in_map = HashMap::new();
-                let mut out_map = HashMap::new();
-                for (relation_id, tf) in table_fragments {
-                    for (fragment_id, fragment) in &tf.fragments {
-                        if (fragment.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
-                            || (fragment.fragment_type_mask
-                                & FragmentTypeFlag::SnapshotBackfillStreamScan as u32)
-                                != 0
-                        {
-                            in_map.insert(*fragment_id, relation_id.table_id);
-                        }
-                        if (fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0 {
-                            out_map.insert(*fragment_id, relation_id.table_id);
-                        }
-                    }
+        let table_fragments = srv
+            .metadata_manager
+            .catalog_controller
+            .table_fragments()
+            .await
+            .map_err(err)?;
+        let mut in_map = HashMap::new();
+        let mut out_map = HashMap::new();
+        for (relation_id, tf) in table_fragments {
+            for (fragment_id, fragment) in &tf.fragments {
+                if (fragment.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
+                    || (fragment.fragment_type_mask
+                        & FragmentTypeFlag::SnapshotBackfillStreamScan as u32)
+                        != 0
+                {
+                    in_map.insert(*fragment_id, relation_id as u32);
                 }
-                FragmentVertexToRelationMap { in_map, out_map }
-            }
-            MetadataManager::V2(mgr) => {
-                let table_fragments = mgr
-                    .catalog_controller
-                    .table_fragments()
-                    .await
-                    .map_err(err)?;
-                let mut in_map = HashMap::new();
-                let mut out_map = HashMap::new();
-                for (relation_id, tf) in table_fragments {
-                    for (fragment_id, fragment) in &tf.fragments {
-                        if (fragment.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
-                            || (fragment.fragment_type_mask
-                                & FragmentTypeFlag::SnapshotBackfillStreamScan as u32)
-                                != 0
-                        {
-                            in_map.insert(*fragment_id, relation_id as u32);
-                        }
-                        if (fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0 {
-                            out_map.insert(*fragment_id, relation_id as u32);
-                        }
-                    }
+                if (fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0 {
+                    out_map.insert(*fragment_id, relation_id as u32);
                 }
-                FragmentVertexToRelationMap { in_map, out_map }
             }
-        };
+        }
+        let map = FragmentVertexToRelationMap { in_map, out_map };
         Ok(Json(map))
     }
 
@@ -283,49 +247,26 @@ pub(super) mod handlers {
     pub async fn get_relation_id_infos(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<RelationIdInfos>> {
-        let map = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let core = mgr.fragment_manager.get_fragment_read_guard().await;
-                let table_fragments = core.table_fragments();
-                let mut map = HashMap::new();
-                for (id, tf) in table_fragments {
-                    let mut fragment_id_to_actor_ids = HashMap::new();
-                    for (fragment_id, fragment) in &tf.fragments {
-                        let actor_ids = fragment.actors.iter().map(|a| a.actor_id).collect_vec();
-                        fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
-                    }
-                    map.insert(
-                        id.table_id,
-                        FragmentIdToActorIdMap {
-                            map: fragment_id_to_actor_ids,
-                        },
-                    );
-                }
-                map
+        let table_fragments = srv
+            .metadata_manager
+            .catalog_controller
+            .table_fragments()
+            .await
+            .map_err(err)?;
+        let mut map = HashMap::new();
+        for (id, tf) in table_fragments {
+            let mut fragment_id_to_actor_ids = HashMap::new();
+            for (fragment_id, fragment) in &tf.fragments {
+                let actor_ids = fragment.actors.iter().map(|a| a.actor_id).collect_vec();
+                fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
             }
-            MetadataManager::V2(mgr) => {
-                let table_fragments = mgr
-                    .catalog_controller
-                    .table_fragments()
-                    .await
-                    .map_err(err)?;
-                let mut map = HashMap::new();
-                for (id, tf) in table_fragments {
-                    let mut fragment_id_to_actor_ids = HashMap::new();
-                    for (fragment_id, fragment) in &tf.fragments {
-                        let actor_ids = fragment.actors.iter().map(|a| a.actor_id).collect_vec();
-                        fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
-                    }
-                    map.insert(
-                        id as u32,
-                        FragmentIdToActorIdMap {
-                            map: fragment_id_to_actor_ids,
-                        },
-                    );
-                }
-                map
-            }
-        };
+            map.insert(
+                id as u32,
+                FragmentIdToActorIdMap {
+                    map: fragment_id_to_actor_ids,
+                },
+            );
+        }
         let relation_id_infos = RelationIdInfos { map };
 
         Ok(Json(relation_id_infos))
@@ -335,42 +276,22 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
         Path(job_id): Path<u32>,
     ) -> Result<Json<PbTableFragments>> {
-        let table_fragments = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                if let Some(tf) = mgr
-                    .fragment_manager
-                    .get_fragment_read_guard()
-                    .await
-                    .table_fragments()
-                    .get(&TableId::new(job_id))
-                {
-                    tf.to_protobuf()
-                } else {
-                    bail!("job_id {} not found", job_id)
-                }
-            }
-            MetadataManager::V2(mgr) => {
-                let mut table_fragments = mgr
-                    .catalog_controller
-                    .table_fragments()
-                    .await
-                    .map_err(err)?;
-                if let Some(tf) = table_fragments.remove(&(job_id as i32)) {
-                    tf
-                } else {
-                    bail!("job_id {} not found", job_id)
-                }
-            }
-        };
-
-        Ok(Json(table_fragments))
+        let table_id = TableId::new(job_id);
+        let table_fragments = srv
+            .metadata_manager
+            .get_job_fragments_by_id(&table_id)
+            .await
+            .map_err(err)?;
+        Ok(Json(table_fragments.to_protobuf()))
     }
 
     pub async fn list_users(Extension(srv): Extension<Service>) -> Result<Json<Vec<PbUserInfo>>> {
-        let users = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_users().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_users().await.map_err(err)?,
-        };
+        let users = srv
+            .metadata_manager
+            .catalog_controller
+            .list_users()
+            .await
+            .map_err(err)?;
 
         Ok(Json(users))
     }
@@ -378,21 +299,23 @@ pub(super) mod handlers {
     pub async fn list_databases(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbDatabase>>> {
-        let databases = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_databases().await,
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller.list_databases().await.map_err(err)?
-            }
-        };
+        let databases = srv
+            .metadata_manager
+            .catalog_controller
+            .list_databases()
+            .await
+            .map_err(err)?;
 
         Ok(Json(databases))
     }
 
     pub async fn list_schemas(Extension(srv): Extension<Service>) -> Result<Json<Vec<PbSchema>>> {
-        let schemas = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_schemas().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_schemas().await.map_err(err)?,
-        };
+        let schemas = srv
+            .metadata_manager
+            .catalog_controller
+            .list_schemas()
+            .await
+            .map_err(err)?;
 
         Ok(Json(schemas))
     }
@@ -400,14 +323,12 @@ pub(super) mod handlers {
     pub async fn list_object_dependencies(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbObjectDependencies>>> {
-        let object_dependencies = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_object_dependencies().await,
-            MetadataManager::V2(mgr) => mgr
-                .catalog_controller
-                .list_object_dependencies()
-                .await
-                .map_err(err)?,
-        };
+        let object_dependencies = srv
+            .metadata_manager
+            .catalog_controller
+            .list_object_dependencies()
+            .await
+            .map_err(err)?;
 
         Ok(Json(object_dependencies))
     }

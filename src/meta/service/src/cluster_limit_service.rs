@@ -17,8 +17,9 @@ use std::collections::HashMap;
 use risingwave_common::util::cluster_limit::{
     ActorCountPerParallelism, ClusterLimit, WorkerActorCount,
 };
-use risingwave_meta::manager::{MetaSrvEnv, MetadataManager, WorkerId};
+use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
 use risingwave_meta::MetaResult;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitService;
@@ -50,9 +51,9 @@ impl ClusterLimitServiceImpl {
             .list_worker_node(Some(WorkerType::ComputeNode), Some(State::Running))
             .await?
             .into_iter()
-            .map(|e| (e.id, e.parallelism()))
+            .map(|e| (e.id as _, e.parallelism()))
             .collect();
-        let worker_actor_count: HashMap<WorkerId, WorkerActorCount> = self
+        let worker_actor_count: HashMap<u32, WorkerActorCount> = self
             .metadata_manager
             .worker_actor_count()
             .await?
@@ -62,7 +63,7 @@ impl ClusterLimitServiceImpl {
                     .get(&worker_id)
                     .map(|parallelism| {
                         (
-                            worker_id,
+                            worker_id as _,
                             WorkerActorCount {
                                 actor_count,
                                 parallelism: *parallelism,

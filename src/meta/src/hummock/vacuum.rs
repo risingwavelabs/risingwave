@@ -239,11 +239,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_vacuum() {
-        let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-        let context_id = worker_node.id;
+        let (env, hummock_manager, _cluster_manager, worker_id) = setup_compute_env(80).await;
+        let context_id = worker_id as _;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager.clone(),
-            worker_node.id,
+            context_id,
         ));
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         let backup_manager =

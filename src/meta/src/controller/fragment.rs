@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::{VnodeCountCompat, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
@@ -35,7 +36,9 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
-use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+use risingwave_pb::meta::table_fragments::fragment::{
+    FragmentDistributionType, PbFragmentDistributionType,
+};
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbTableFragments,
@@ -57,12 +60,34 @@ use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
-use crate::manager::{
-    ActorInfos, FragmentParallelismInfo, InflightFragmentInfo, LocalNotification,
-};
+use crate::manager::LocalNotification;
 use crate::model::{TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
+
+#[derive(Clone, Debug)]
+pub struct InflightFragmentInfo {
+    pub actors: HashMap<ActorId, WorkerNodeId>,
+    pub state_table_ids: HashSet<TableId>,
+    pub is_injectable: bool,
+}
+
+pub struct ActorInfos {
+    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+}
+
+impl ActorInfos {
+    pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
+        Self { fragment_infos }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FragmentParallelismInfo {
+    pub distribution_type: FragmentDistributionType,
+    pub actor_count: usize,
+    pub vnode_count: usize,
+}
 
 impl CatalogControllerInner {
     /// List all fragment vnode mapping info for all CREATED streaming jobs.
@@ -927,16 +952,10 @@ impl CatalogController {
 
         for (actor_id, worker_id, fragment_id, type_mask, state_table_ids) in actor_info {
             let state_table_ids = state_table_ids.into_inner();
-            match fragment_infos.entry(fragment_id as crate::model::FragmentId) {
+            match fragment_infos.entry(fragment_id) {
                 Entry::Occupied(mut entry) => {
                     let info: &mut InflightFragmentInfo = entry.get_mut();
-                    debug_assert_eq!(
-                        info.state_table_ids,
-                        state_table_ids
-                            .into_iter()
-                            .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
-                            .collect()
-                    );
+                    debug_assert_eq!(info.state_table_ids, state_table_ids.into_iter().collect());
                     assert!(info.actors.insert(actor_id as _, worker_id as _).is_none());
                     assert_eq!(
                         info.is_injectable,
@@ -944,10 +963,7 @@ impl CatalogController {
                     );
                 }
                 Entry::Vacant(entry) => {
-                    let state_table_ids = state_table_ids
-                        .into_iter()
-                        .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
-                        .collect();
+                    let state_table_ids = state_table_ids.into_iter().collect();
                     entry.insert(InflightFragmentInfo {
                         actors: HashMap::from_iter([(actor_id as _, worker_id as _)]),
                         state_table_ids,

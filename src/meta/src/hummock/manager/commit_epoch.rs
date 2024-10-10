@@ -233,9 +233,7 @@ impl HummockManager {
             );
             table_metrics.inc_write_throughput(stats_value as u64);
         }
-        if versioning.time_travel_toggle_check
-            && let Some(sql_store) = self.sql_store()
-        {
+        if versioning.time_travel_toggle_check {
             let mut time_travel_version = None;
             if versioning.time_travel_snapshot_interval_counter
                 >= self.env.opts.hummock_time_travel_snapshot_interval
@@ -256,7 +254,7 @@ impl HummockManager {
             let time_travel_tables_to_commit = table_compaction_group_mapping
                 .iter()
                 .filter(|(table_id, _)| tables_to_commit.contains(table_id));
-            let mut txn = sql_store.conn.begin().await?;
+            let mut txn = self.env.meta_store_ref().conn.begin().await?;
             let version_snapshot_sst_ids = self
                 .write_time_travel_metadata(
                     &txn,

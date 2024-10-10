@@ -122,7 +122,7 @@ impl HummockManager {
         for context_id in context_ids {
             if let Some(worker_node) = self
                 .metadata_manager()
-                .get_worker_by_id(*context_id)
+                .get_worker_by_id(*context_id as _)
                 .await?
             {
                 workers.insert(*context_id, worker_node);

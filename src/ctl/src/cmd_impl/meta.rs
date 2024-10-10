@@ -15,7 +15,6 @@
 mod backup_meta;
 mod cluster_info;
 mod connection;
-mod migration;
 mod pause_resume;
 mod reschedule;
 mod serving;
@@ -23,7 +22,6 @@ mod serving;
 pub use backup_meta::*;
 pub use cluster_info::*;
 pub use connection::*;
-pub use migration::*;
 pub use pause_resume::*;
 pub use reschedule::*;
 pub use serving::*;

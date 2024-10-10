@@ -26,7 +26,7 @@ use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait, Tr
 use tokio::sync::Mutex;
 
 use crate::hummock::error::Result;
-use crate::manager::{IdCategory, MetaSrvEnv};
+use crate::manager::MetaSrvEnv;
 
 static SEQ_INIT: LazyLock<HashMap<String, i64>> = LazyLock::new(|| {
     maplit::hashmap! {
@@ -93,39 +93,15 @@ impl SequenceGenerator {
 }
 
 pub async fn next_compaction_task_id(env: &MetaSrvEnv) -> Result<u64> {
-    match env.hummock_seq.clone() {
-        None => env
-            .id_gen_manager()
-            .as_kv()
-            .generate::<{ IdCategory::HummockCompactionTask }>()
-            .await
-            .map_err(Into::into),
-        Some(seq) => seq.next_interval(COMPACTION_TASK_ID, 1).await,
-    }
+    env.hummock_seq.next_interval(COMPACTION_TASK_ID, 1).await
 }
 
 pub async fn next_meta_backup_id(env: &MetaSrvEnv) -> Result<u64> {
-    match env.hummock_seq.clone() {
-        None => env
-            .id_gen_manager()
-            .as_kv()
-            .generate::<{ IdCategory::Backup }>()
-            .await
-            .map_err(Into::into),
-        Some(seq) => seq.next_interval(META_BACKUP_ID, 1).await,
-    }
+    env.hummock_seq.next_interval(META_BACKUP_ID, 1).await
 }
 
 pub async fn next_compaction_group_id(env: &MetaSrvEnv) -> Result<u64> {
-    match env.hummock_seq.clone() {
-        None => env
-            .id_gen_manager()
-            .as_kv()
-            .generate::<{ IdCategory::CompactionGroup }>()
-            .await
-            .map_err(Into::into),
-        Some(seq) => seq.next_interval(COMPACTION_GROUP_ID, 1).await,
-    }
+    env.hummock_seq.next_interval(COMPACTION_GROUP_ID, 1).await
 }
 
 pub async fn next_sstable_object_id(
@@ -135,15 +111,7 @@ pub async fn next_sstable_object_id(
     let num: u32 = num
         .try_into()
         .unwrap_or_else(|_| panic!("fail to convert {num} into u32"));
-    match env.hummock_seq.clone() {
-        None => env
-            .id_gen_manager()
-            .as_kv()
-            .generate_interval::<{ IdCategory::HummockSstableId }>(num as u64)
-            .await
-            .map_err(Into::into),
-        Some(seq) => seq.next_interval(SSTABLE_OBJECT_ID, num).await,
-    }
+    env.hummock_seq.next_interval(SSTABLE_OBJECT_ID, num).await
 }
 
 #[cfg(test)]
