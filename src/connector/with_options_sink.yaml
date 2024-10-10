@@ -22,14 +22,17 @@ AzblobConfig:
     field_type: String
     required: true
   - name: max_row_count
-    field_type: String
+    field_type: usize
     required: false
+    default: Default::default
   - name: rollover_seconds
+    field_type: usize
+    required: false
+    default: Default::default
+  - name: path_partition_prefix
     field_type: String
     required: false
-  - name: partition_granularity
-    field_type: String
-    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -240,14 +243,17 @@ FsConfig:
     comments: The directory where the sink file is located.
     required: true
   - name: max_row_count
-    field_type: String
+    field_type: usize
     required: false
+    default: Default::default
   - name: rollover_seconds
+    field_type: usize
+    required: false
+    default: Default::default
+  - name: path_partition_prefix
     field_type: String
     required: false
-  - name: partition_granularity
-    field_type: String
-    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -270,14 +276,17 @@ GcsConfig:
     comments: The directory where the sink file is located
     required: true
   - name: max_row_count
-    field_type: String
+    field_type: usize
     required: false
+    default: Default::default
   - name: rollover_seconds
+    field_type: usize
+    required: false
+    default: Default::default
+  - name: path_partition_prefix
     field_type: String
     required: false
-  - name: partition_granularity
-    field_type: String
-    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -942,14 +951,17 @@ S3Config:
     required: false
     default: Default::default
   - name: max_row_count
-    field_type: String
+    field_type: usize
     required: false
+    default: Default::default
   - name: rollover_seconds
+    field_type: usize
+    required: false
+    default: Default::default
+  - name: path_partition_prefix
     field_type: String
     required: false
-  - name: partition_granularity
-    field_type: String
-    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -1082,14 +1094,17 @@ WebhdfsConfig:
     comments: The directory where the sink file is located.
     required: true
   - name: max_row_count
-    field_type: String
+    field_type: usize
     required: false
+    default: Default::default
   - name: rollover_seconds
+    field_type: usize
+    required: false
+    default: Default::default
+  - name: path_partition_prefix
     field_type: String
     required: false
-  - name: partition_granularity
-    field_type: String
-    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true

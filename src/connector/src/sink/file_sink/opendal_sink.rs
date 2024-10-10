@@ -28,6 +28,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_derive::Serialize;
+use serde_with::{serde_as, DisplayFromStr};
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 use with_options::WithOptions;
 
@@ -193,17 +194,24 @@ pub struct OpenDalSinkWriter {
 enum FileWriterEnum {
     ParquetFileWriter(AsyncArrowWriter<Compat<FuturesAsyncWriter>>),
 }
+
+/// Method for writing files into file system.
+///
+/// # Write Chunk Methods
+/// - `write_batch_and_try_finish`: Writes a stream chunk to the sink and tries to close the writer according to the batching strategy.
+///
+/// # Close Writer Methods
+/// - `try_finish`: Attempts to complete the file write using the writer's internal batching strategy.
+/// - `should_finish`: Force close writer regardless of whether it trigger batching strategy.
+///
+/// # Batching Condition Methods
+/// - `try_finish_write_via_batched_rows`: Checks if writing can be completed based on the number of batched rows.
+/// - `try_finish_write_via_rollover_interval`: Checks if writing can be completed based on the rollover time interval.
 impl OpenDalSinkWriter {
-    // Writes a stream chunk to the sink and tries to close the writer
-    /// according to the batching strategy.
-    ///
     /// This method writes a chunk and attempts to complete the file write
     /// based on the writer's internal batching strategy. If the write is
     /// successful, it returns the last `chunk_id` that was written;
     /// otherwise, it returns None.
-    ///
-    ///
-    /// This method is currently intended for use by the file sink's writer.
     pub async fn write_batch_and_try_finish(
         &mut self,
         chunk: StreamChunk,
@@ -241,70 +249,7 @@ impl OpenDalSinkWriter {
             false => Ok(None),
         }
     }
-}
-// #[async_trait]
-// impl SinkWriter for OpenDalSinkWriter {
-//     async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
-//         Ok(())
-//     }
 
-//     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-//         self.epoch = Some(epoch);
-//         Ok(())
-//     }
-
-//     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-//         Ok(())
-//     }
-// }
-
-impl OpenDalSinkWriter {
-    pub fn new(
-        operator: Operator,
-        write_path: &str,
-        rw_schema: Schema,
-        executor_id: u64,
-        encode_type: SinkEncode,
-        engine_type: EngineType,
-        batching_strategy: BatchingStrategy,
-    ) -> Result<Self> {
-        let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
-        Ok(Self {
-            schema: Arc::new(arrow_schema),
-            write_path: write_path.to_string(),
-            operator,
-            sink_writer: None,
-            executor_id,
-
-            encode_type,
-            engine_type,
-            batching_strategy,
-            current_bached_row_num: 0,
-            created_time: SystemTime::now(),
-            written_chunk_id: None,
-        })
-    }
-
-    pub fn path_partition_prefix(&self) -> String {
-        match self.created_time.duration_since(UNIX_EPOCH) {
-            Ok(duration) => {
-                let datetime = Utc
-                    .timestamp_opt(duration.as_secs() as i64, 0)
-                    .single()
-                    .expect("Failed to convert timestamp to DateTime<Utc>");
-                match self.batching_strategy.path_partition_prefix {
-                    PartitionGranularity::None => "".to_string(),
-                    PartitionGranularity::Day => datetime.format("%Y-%m-%d/").to_string(),
-                    PartitionGranularity::Month => datetime.format("/%Y-%m/").to_string(),
-                    PartitionGranularity::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
-                }
-            }
-            Err(_) => "Invalid time".to_string(),
-        }
-    }
-
-    /// Attempts to finalize the writing process based on a specified rollover interval.
-    ///
     /// This asynchronous function checks if the duration since the writer was
     /// created exceeds the configured rollover interval (`rollover_seconds`).
     /// If the duration condition is met and a sink writer is available, it
@@ -349,9 +294,6 @@ impl OpenDalSinkWriter {
         Ok(false)
     }
 
-    /// Attempts to finalize the writing process if the current number of
-    /// batched rows has reached the specified threshold.
-    ///
     /// This asynchronous function checks if the number of rows accumulated
     /// (`current_bached_row_num`) meets or exceeds the maximum row count
     /// defined in the `batching_strategy`. If the threshold is met, it
@@ -392,6 +334,77 @@ impl OpenDalSinkWriter {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    pub async fn should_finish(&mut self) -> Result<Option<usize>> {
+        if let Some(sink_writer) = self.sink_writer.take() {
+            match sink_writer {
+                FileWriterEnum::ParquetFileWriter(w) => {
+                    if w.bytes_written() > 0 {
+                        let metadata = w.close().await?;
+                        tracing::info!(
+                            "Writer {:?}_{:?} force finish write file, metadata: {:?}",
+                            self.created_time
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_secs(),
+                            self.executor_id,
+                            metadata
+                        );
+                        return Ok(self.written_chunk_id);
+                    }
+                }
+            };
+        }
+
+        Ok(None)
+    }
+}
+
+/// Init methods.
+impl OpenDalSinkWriter {
+    pub fn new(
+        operator: Operator,
+        write_path: &str,
+        rw_schema: Schema,
+        executor_id: u64,
+        encode_type: SinkEncode,
+        engine_type: EngineType,
+        batching_strategy: BatchingStrategy,
+    ) -> Result<Self> {
+        let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
+        Ok(Self {
+            schema: Arc::new(arrow_schema),
+            write_path: write_path.to_string(),
+            operator,
+            sink_writer: None,
+            executor_id,
+
+            encode_type,
+            engine_type,
+            batching_strategy,
+            current_bached_row_num: 0,
+            created_time: SystemTime::now(),
+            written_chunk_id: None,
+        })
+    }
+
+    pub fn path_partition_prefix(&self) -> String {
+        match self.created_time.duration_since(UNIX_EPOCH) {
+            Ok(duration) => {
+                let datetime = Utc
+                    .timestamp_opt(duration.as_secs() as i64, 0)
+                    .single()
+                    .expect("Failed to convert timestamp to DateTime<Utc>");
+                match self.batching_strategy.path_partition_prefix {
+                    PartitionGranularity::None => "".to_string(),
+                    PartitionGranularity::Day => datetime.format("%Y-%m-%d/").to_string(),
+                    PartitionGranularity::Month => datetime.format("/%Y-%m/").to_string(),
+                    PartitionGranularity::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
+                }
+            }
+            Err(_) => "Invalid time".to_string(),
+        }
     }
 
     fn duration_seconds_since_writer_created(&self) -> usize {
@@ -549,13 +562,17 @@ pub enum PartitionGranularity {
     Hour = 3,
 }
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct FileSinkBatchingStrategyConfig {
     #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_row_count: Option<usize>,
     #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub rollover_seconds: Option<usize>,
     #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub path_partition_prefix: Option<String>,
 }
 

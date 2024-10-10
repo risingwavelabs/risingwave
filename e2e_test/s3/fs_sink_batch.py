@@ -39,8 +39,8 @@ def do_test(config, file_num, item_num_per_file, prefix):
         s3.path = 'test_sink/',
         s3.file_type = 'parquet',
         type = 'append-only',
-        rollover_seconds = '5',
-        max_row_count = '5',
+        rollover_seconds = 5,
+        max_row_count = 5,
         force_append_only='true'
     ) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');''')
 

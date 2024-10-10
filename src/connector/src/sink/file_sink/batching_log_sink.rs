@@ -53,7 +53,15 @@ impl LogSinker for BatchingLogSinker {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
             if let LogStoreReadItem::UpdateVnodeBitmap(_) = &item {
                 match &state {
-                    LogConsumerState::BarrierReceived { .. } => {}
+                    LogConsumerState::BarrierReceived { .. } => {
+                        // we need to force to finish the batch here. Otherwise, there can be data loss because actor can be dropped and rebuilt during scaling.
+                        if let Some(committed_chunk_id) = sink_writer.should_finish().await? {
+                            log_reader.truncate(TruncateOffset::Chunk {
+                                epoch: (epoch),
+                                chunk_id: (committed_chunk_id),
+                            })?
+                        };
+                    }
                     _ => unreachable!(
                         "update vnode bitmap can be accepted only right after \
                     barrier, but current state is {:?}",
