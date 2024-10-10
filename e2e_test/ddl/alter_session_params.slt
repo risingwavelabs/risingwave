@@ -1,3 +1,28 @@
+# Test aliases
+# RW_ prefix are aliases to the one without prefix. <https://github.com/risingwavelabs/risingwave/pull/18769>
+query T
+show STREAMING_ENABLE_DELTA_JOIN;
+----
+false
+
+statement ok
+set STREAMING_ENABLE_DELTA_JOIN to true;
+
+query T
+show STREAMING_ENABLE_DELTA_JOIN;
+----
+true
+
+query T
+show RW_STREAMING_ENABLE_DELTA_JOIN;
+----
+true
+
+statement ok
+set STREAMING_ENABLE_DELTA_JOIN to false;
+
+# Test aliases done
+
 statement ok
 set RW_STREAMING_ENABLE_DELTA_JOIN to true;
 
@@ -16,6 +41,7 @@ set RW_STREAMING_ENABLE_DELTA_JOIN to false;
 statement ok
 alter system set rw_streaming_enable_delta_join to true;
 
+# Alter system won't change the current session's params.
 query T
 show RW_STREAMING_ENABLE_DELTA_JOIN;
 ----

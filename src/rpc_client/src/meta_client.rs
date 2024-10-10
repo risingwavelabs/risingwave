@@ -72,7 +72,6 @@ use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
-use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -107,8 +106,8 @@ use tonic::{Code, Request, Streaming};
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactionEventItem, HummockMetaClient};
+use crate::meta_rpc_client_method_impl;
 use crate::tracing::{Channel, TracingInjectedChannelExt};
-use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
 type ConnectionId = u32;
 type DatabaseId = u32;
@@ -353,14 +352,8 @@ impl MetaClient {
     }
 
     /// Send heartbeat signal to meta service.
-    pub async fn send_heartbeat(&self, node_id: u32, info: Vec<extra_info::Info>) -> Result<()> {
-        let request = HeartbeatRequest {
-            node_id,
-            info: info
-                .into_iter()
-                .map(|info| ExtraInfo { info: Some(info) })
-                .collect(),
-        };
+    pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
+        let request = HeartbeatRequest { node_id };
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status {
             if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
@@ -705,21 +698,6 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn list_change_log_epochs(
-        &self,
-        table_id: u32,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Result<Vec<u64>> {
-        let request = ListChangeLogEpochsRequest {
-            table_id,
-            min_epoch,
-            max_count,
-        };
-        let resp = self.inner.list_change_log_epochs(request).await?;
-        Ok(resp.epochs)
-    }
-
     pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<WaitVersion> {
         let request = DropIndexRequest {
             index_id: index_id.index_id,
@@ -882,12 +860,9 @@ impl MetaClient {
     }
 
     /// Starts a heartbeat worker.
-    ///
-    /// When sending heartbeat RPC, it also carries extra info from `extra_info_sources`.
     pub fn start_heartbeat_loop(
         meta_client: MetaClient,
         min_interval: Duration,
-        extra_info_sources: Vec<ExtraInfoSourceRef>,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
@@ -903,19 +878,11 @@ impl MetaClient {
                     // Wait for interval
                     _ = min_interval_ticker.tick() => {},
                 }
-                let mut extra_info = Vec::with_capacity(extra_info_sources.len());
-                for extra_info_source in &extra_info_sources {
-                    if let Some(info) = extra_info_source.get_extra_info().await {
-                        // None means the info is not available at the moment, and won't be sent to
-                        // meta.
-                        extra_info.push(info);
-                    }
-                }
                 tracing::debug!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
                     min_interval * 3,
-                    meta_client.send_heartbeat(meta_client.worker_id(), extra_info),
+                    meta_client.send_heartbeat(meta_client.worker_id()),
                 )
                 .await
                 {
@@ -1550,6 +1517,7 @@ impl HummockMetaClient for MetaClient {
         filtered_object_ids: Vec<HummockSstableObjectId>,
         total_object_count: u64,
         total_object_size: u64,
+        start_after: Option<String>,
         next_start_after: Option<String>,
     ) -> Result<()> {
         let req = ReportFullScanTaskRequest {
@@ -1557,6 +1525,7 @@ impl HummockMetaClient for MetaClient {
             total_object_count,
             total_object_size,
             next_start_after,
+            start_after,
         };
         self.inner.report_full_scan_task(req).await?;
         Ok(())
@@ -2137,7 +2106,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
-            ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
             ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
             ,{ hummock_client, merge_compaction_group, MergeCompactionGroupRequest, MergeCompactionGroupResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }

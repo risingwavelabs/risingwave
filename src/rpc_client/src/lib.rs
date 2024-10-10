@@ -44,7 +44,6 @@ use moka::future::Cache;
 use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::{WorkerNode, WorkerType};
-use risingwave_pb::meta::heartbeat_request::extra_info;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
@@ -165,15 +164,6 @@ where
         self.clients.invalidate_all()
     }
 }
-
-/// `ExtraInfoSource` is used by heartbeat worker to pull extra info that needs to be piggybacked.
-#[async_trait::async_trait]
-pub trait ExtraInfoSource: Send + Sync {
-    /// None means the info is not available at the moment.
-    async fn get_extra_info(&self) -> Option<extra_info::Info>;
-}
-
-pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
 
 #[macro_export]
 macro_rules! stream_rpc_client_method_impl {

@@ -228,6 +228,9 @@ pub async fn handle_alter_source_with_sr(
         )
         .into());
     };
+    if source.info.is_shared() {
+        bail_not_implemented!(issue = 16003, "alter shared source");
+    }
 
     check_format_encode(&source, &connector_schema)?;
 

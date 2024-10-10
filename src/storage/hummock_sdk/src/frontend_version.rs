@@ -18,7 +18,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{
-    PbEpochNewChangeLog, PbHummockVersion, PbHummockVersionDelta, PbTableChangeLog,
+    PbEpochNewChangeLog, PbHummockVersion, PbHummockVersionDelta, PbSstableInfo, PbTableChangeLog,
     StateTableInfoDelta,
 };
 
@@ -162,8 +162,9 @@ impl FrontendHummockVersionDelta {
                             truncate_epoch: change_log_delta.truncate_epoch,
                             new_log: change_log_delta.new_log.as_ref().map(|new_log| {
                                 EpochNewChangeLogCommon {
-                                    new_value: vec![],
-                                    old_value: vec![],
+                                    // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
+                                    new_value: vec![(); new_log.new_value.len()],
+                                    old_value: vec![(); new_log.old_value.len()],
                                     epochs: new_log.epochs.clone(),
                                 }
                             }),
@@ -196,8 +197,9 @@ impl FrontendHummockVersionDelta {
                         table_id.table_id,
                         PbChangeLogDelta {
                             new_log: delta.new_log.as_ref().map(|new_log| PbEpochNewChangeLog {
-                                old_value: vec![],
-                                new_value: vec![],
+                                // Here we need to determine if value is null but don't care what the value is, so we fill him in using `PbSstableInfo::default()`
+                                old_value: vec![PbSstableInfo::default(); new_log.old_value.len()],
+                                new_value: vec![PbSstableInfo::default(); new_log.new_value.len()],
                                 epochs: new_log.epochs.clone(),
                             }),
                             truncate_epoch: delta.truncate_epoch,
@@ -237,8 +239,9 @@ impl FrontendHummockVersionDelta {
                             truncate_epoch: change_log_delta.truncate_epoch,
                             new_log: change_log_delta.new_log.as_ref().map(|new_log| {
                                 EpochNewChangeLogCommon {
-                                    new_value: vec![],
-                                    old_value: vec![],
+                                    // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
+                                    new_value: vec![(); new_log.new_value.len()],
+                                    old_value: vec![(); new_log.old_value.len()],
                                     epochs: new_log.epochs.clone(),
                                 }
                             }),

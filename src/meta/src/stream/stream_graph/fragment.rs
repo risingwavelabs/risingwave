@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
@@ -424,8 +424,8 @@ impl StreamFragmentGraph {
     }
 
     /// Retrieve the internal tables map of the whole graph.
-    pub fn internal_tables(&self) -> HashMap<u32, Table> {
-        let mut tables = HashMap::new();
+    pub fn internal_tables(&self) -> BTreeMap<u32, Table> {
+        let mut tables = BTreeMap::new();
         for fragment in self.fragments.values() {
             for table in fragment.extract_internal_tables() {
                 let table_id = table.id;

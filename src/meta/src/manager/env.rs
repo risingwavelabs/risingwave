@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use risingwave_common::config::{
@@ -189,8 +190,8 @@ pub struct MetaOpts {
     pub full_gc_interval_sec: u64,
     /// Max number of object per full GC job can fetch.
     pub full_gc_object_limit: u64,
-    /// The spin interval when collecting global GC watermark in hummock
-    pub collect_gc_watermark_spin_interval_sec: u64,
+    /// Max number of inflight time travel query.
+    pub max_inflight_time_travel_query: u64,
     /// Enable sanity check when SSTs are committed
     pub enable_committed_sst_sanity_check: bool,
     /// Schedule compaction for all compaction groups with this interval.
@@ -298,6 +299,8 @@ pub struct MetaOpts {
     // Cluster limits
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
     pub actor_cnt_per_worker_parallelism_soft_limit: usize,
+
+    pub license_key_path: Option<PathBuf>,
 }
 
 impl MetaOpts {
@@ -323,7 +326,7 @@ impl MetaOpts {
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
             full_gc_object_limit: 100_000,
-            collect_gc_watermark_spin_interval_sec: 5,
+            max_inflight_time_travel_query: 1000,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
@@ -365,6 +368,7 @@ impl MetaOpts {
             table_info_statistic_history_times: 240,
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
+            license_key_path: None,
         }
     }
 }
@@ -526,6 +530,7 @@ impl MetaSrvEnv {
                 }
             }
         };
+
         Ok(env)
     }
 
