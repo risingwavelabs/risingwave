@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::ops::Deref;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
@@ -22,6 +23,8 @@ use std::time::{Duration, Instant};
 use anyhow::anyhow;
 use bytes::Bytes;
 use either::Either;
+use futures::StreamExt;
+use iceberg::spec::ManifestList;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
@@ -67,6 +70,8 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
+use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -107,7 +112,10 @@ use crate::handler::variable::infer_show_variable;
 use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
+use crate::monitor::{
+    CursorMetrics, FrontendMetrics, IcebergStatMetrics, GLOBAL_FRONTEND_METRICS,
+    GLOBAL_ICEBERG_STAT_METRICS,
+};
 use crate::observer::FrontendObserverNode;
 use crate::rpc::FrontendServiceImpl;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
@@ -421,6 +429,7 @@ impl FrontendEnv {
         ));
 
         let sessions = sessions_map.clone();
+        let iceberg_stat_metrics = Arc::new(GLOBAL_ICEBERG_STAT_METRICS.clone());
         // Idle transaction background monitor
         let join_handle = tokio::spawn(async move {
             let mut check_idle_txn_interval =
@@ -432,6 +441,19 @@ impl FrontendEnv {
                 sessions.read().values().for_each(|session| {
                     let _ = session.check_idle_in_transaction_timeout();
                 })
+            }
+        });
+        join_handles.push(join_handle);
+
+        let catalog_reader_for_report = catalog_reader.clone();
+        let join_handle = tokio::spawn(async move {
+            loop {
+                if let Err(err) =
+                    report_iceberg_metrics(&catalog_reader_for_report, &iceberg_stat_metrics).await
+                {
+                    tracing::error!("Failed to report iceberg metrics {:?}", err);
+                }
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
         join_handles.push(join_handle);
@@ -1652,4 +1674,74 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
         )]),
         _ => Ok(vec![]),
     }
+}
+
+async fn report_iceberg_metrics(
+    catalog_reader: &CatalogReader,
+    metrics: &Arc<IcebergStatMetrics>,
+) -> Result<()> {
+    let iceberg_sources = {
+        let catalog_reader = catalog_reader.read_guard();
+        let databases = catalog_reader.iter_databases();
+
+        let mut iceberg_sources = vec![];
+        for database in databases {
+            let database_name = database.name.clone();
+            let schemas = catalog_reader.iter_schemas(&database_name)?;
+            for schema in schemas {
+                for source in schema.iter_source() {
+                    if source.with_properties.is_iceberg_connector() {
+                        iceberg_sources.push((
+                            database.clone(),
+                            schema.name.clone(),
+                            source.deref().clone(),
+                        ))
+                    }
+                }
+            }
+        }
+
+        iceberg_sources
+    };
+
+    for (database, schema_name, source) in iceberg_sources {
+        let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
+        if let ConnectorProperties::Iceberg(iceberg_properties) = config {
+            use iceberg::table::Table;
+            let table: Table = iceberg_properties.load_table_v2().await?;
+            let mut data_files_size = 0;
+            if let Some(snapshot) = table.metadata().current_snapshot() {
+                let manifest_list: ManifestList = snapshot
+                    .load_manifest_list(table.file_io(), table.metadata())
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                for entry in manifest_list.entries() {
+                    let manifest = entry
+                        .load_manifest(table.file_io())
+                        .await
+                        .map_err(|e| anyhow!(e))?;
+                    let mut manifest_entries_stream =
+                        futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
+
+                    while let Some(manifest_entry) = manifest_entries_stream.next().await {
+                        let file = manifest_entry.data_file();
+                        data_files_size += file.file_size_in_bytes();
+                    }
+                }
+            }
+
+            metrics
+                .iceberg_storage_data_file_size
+                .with_guarded_label_values(&[
+                    &database.name,
+                    &schema_name,
+                    table.identifier().name(),
+                ])
+                .set(data_files_size as _);
+        } else {
+            unreachable!()
+        }
+    }
+
+    Ok(())
 }
