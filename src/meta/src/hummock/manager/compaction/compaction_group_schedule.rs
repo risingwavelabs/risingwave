@@ -278,7 +278,7 @@ impl HummockManager {
 
         if compaction_group_config
             .compaction_config
-            .disable_auto_group_schedule
+            .disable_auto_group_scheduling
             .unwrap_or(false)
         {
             return;

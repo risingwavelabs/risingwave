@@ -67,7 +67,7 @@ pub fn build_compaction_config_vec(
     compress_algorithm: Option<CompressionAlgorithm>,
     max_l0_compact_level: Option<u32>,
     sst_allowed_trivial_move_min_size: Option<u64>,
-    disable_auto_group_schedule: Option<bool>,
+    disable_auto_group_scheduling: Option<bool>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -124,8 +124,8 @@ pub fn build_compaction_config_vec(
     if let Some(c) = sst_allowed_trivial_move_min_size {
         configs.push(MutableConfig::SstAllowedTrivialMoveMinSize(c))
     }
-    if let Some(c) = disable_auto_group_schedule {
-        configs.push(MutableConfig::DisableAutoGroupSchedule(c))
+    if let Some(c) = disable_auto_group_scheduling {
+        configs.push(MutableConfig::DisableAutoGroupScheduling(c))
     }
 
     configs

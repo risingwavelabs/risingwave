@@ -2094,7 +2094,7 @@ pub mod default {
             DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
         }
 
-        pub fn disable_auto_group_schedule() -> bool {
+        pub fn disable_auto_group_scheduling() -> bool {
             false
         }
     }

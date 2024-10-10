@@ -598,8 +598,8 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::SplitWeightByVnode(c) => {
                 target.split_weight_by_vnode = *c;
             }
-            MutableConfig::DisableAutoGroupSchedule(c) => {
-                target.disable_auto_group_schedule = Some(*c);
+            MutableConfig::DisableAutoGroupScheduling(c) => {
+                target.disable_auto_group_scheduling = Some(*c);
             }
         }
     }

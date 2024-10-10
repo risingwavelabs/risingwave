@@ -677,7 +677,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 max_l0_compact_level_count = 18;
       uint64 sst_allowed_trivial_move_min_size = 19;
       uint32 split_weight_by_vnode = 20;
-      bool disable_auto_group_schedule = 21;
+      bool disable_auto_group_scheduling = 21;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -877,7 +877,7 @@ message CompactionConfig {
   optional uint64 sst_allowed_trivial_move_min_size = 22;
 
   // The limitation of auto group scheduling
-  optional bool disable_auto_group_schedule = 23;
+  optional bool disable_auto_group_scheduling = 23;
 }
 
 message TableStats {
