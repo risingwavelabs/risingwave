@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::pin::pin;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -22,6 +23,7 @@ use aws_sdk_emrserverless::types::{JobDriver, JobRunState};
 use aws_sdk_emrserverless::Client;
 use aws_types::region::Region;
 use futures::future::select;
+use itertools::Itertools;
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::sleep;
@@ -79,15 +81,15 @@ impl NimtableCompactionConfig {
 }
 
 async fn run_compact(
-    warehouse_path: String,
     database: String,
     table: String,
+    catalog_config: HashMap<String, String>,
     mut commit_rx: mpsc::UnboundedReceiver<()>,
 ) {
     let config = match NimtableCompactionConfig::from_env() {
         Ok(config) => config,
         Err(e) => {
-            error!(warehouse_path, database, table, e = ?e.as_report(), "failed to start compact worker");
+            error!(database, table, e = ?e.as_report(), "failed to start compact worker");
             return;
         }
     };
@@ -112,7 +114,7 @@ async fn run_compact(
         {
             let compact_start_time = Instant::now();
             if let Err(e) = client
-                .compact(warehouse_path.clone(), database.clone(), table.clone())
+                .compact(database.clone(), table.clone(), &catalog_config)
                 .await
             {
                 let backoff_duration = error_backoff.next().expect("should exist");
@@ -121,11 +123,11 @@ async fn run_compact(
                     err = ?e.as_report(),
                     ?backoff_duration,
                     error_count,
-                    warehouse_path, database, table, "failed to compact"
+                    database, table, "failed to compact"
                 );
                 sleep(backoff_duration).await;
             } else {
-                info!(warehouse_path, database, table, elapsed = ?compact_start_time.elapsed(),  "compact success");
+                info!(database, table, elapsed = ?compact_start_time.elapsed(),  "compact success");
                 pending_commit_num = 0;
                 error_backoff = new_backoff();
                 error_count = 0;
@@ -138,9 +140,6 @@ async fn run_compact(
             break;
         }
     }
-
-    let _ = commit_rx.recv().await;
-    let _ = client.compact(warehouse_path, database, table).await;
 }
 
 pub fn spawn_compaction_client(
@@ -157,17 +156,21 @@ pub fn spawn_compaction_client(
     let (finish_tx, finish_rx) = oneshot::channel();
 
     let _join_handle = tokio::spawn(async move {
+        let catalog_config = HashMap::from_iter([
+            ("type".to_string(), "hadoop".to_string()),
+            ("warehouse".to_string(), warehouse_path),
+        ]);
         select(
             finish_rx,
             pin!(run_compact(
-                warehouse_path.clone(),
                 database.clone(),
                 table.clone(),
-                commit_rx
+                catalog_config,
+                commit_rx,
             )),
         )
         .await;
-        warn!(warehouse_path, database, table, "compact worker exits");
+        warn!(database, table, "compact worker exits");
     });
     Ok((commit_tx, finish_tx))
 }
@@ -255,9 +258,9 @@ impl NimtableCompactionClient {
 
     pub async fn compact(
         &self,
-        warehouse: String,
         db: String,
         table: String,
+        catalog_config: &HashMap<String, String>,
     ) -> anyhow::Result<()> {
         let start_result = self
             .client
@@ -274,9 +277,16 @@ impl NimtableCompactionClient {
             .job_driver(JobDriver::SparkSubmit(
                 SparkSubmitBuilder::default()
                     .entry_point(self.config.entrypoint.clone())
-                    .entry_point_arguments(warehouse)
                     .entry_point_arguments(db)
                     .entry_point_arguments(table)
+                    .spark_submit_parameters(
+                        catalog_config
+                            .iter()
+                            .map(|(key, value)| {
+                                format!("--conf spark.sql.catalog.nimtable.{}={}", key, value)
+                            })
+                            .join(" "),
+                    )
                     .build()
                     .unwrap(),
             ))
@@ -299,7 +309,14 @@ async fn trigger_compaction() {
     let config = NimtableCompactionConfig::from_env().unwrap();
     let client = NimtableCompactionClient::new(config).await;
     let result = client
-        .compact(warehouse.to_owned(), db.to_owned(), table.to_owned())
+        .compact(
+            db.to_owned(),
+            table.to_owned(),
+            &HashMap::from_iter([
+                ("type".to_string(), "hadoop".to_string()),
+                ("warehouse".to_string(), warehouse.to_string()),
+            ]),
+        )
         .await;
 
     info!(?result, "job result");
