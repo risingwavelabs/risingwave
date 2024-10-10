@@ -134,9 +134,7 @@ impl LogSinker for BatchingLogSinker {
 
                     state = LogConsumerState::BarrierReceived { prev_epoch }
                 }
-                LogStoreReadItem::UpdateVnodeBitmap(_vnode_bitmap) => {
-                    unreachable!("Update vnode bitmap should have been handle earlier.")
-                }
+                LogStoreReadItem::UpdateVnodeBitmap(_vnode_bitmap) => {}
             }
         }
     }

@@ -22,9 +22,7 @@ use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::opendal_sink::{BatchingStrategy, FileSink, FileSinkBatchingStrategyConfig};
-use crate::sink::file_sink::opendal_sink::{
-    parse_path_partition_prefix, OpendalSinkBackend, PartitionGranularity,
-};
+use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -135,18 +133,13 @@ impl OpendalSinkBackend for AzblobSink {
     }
 
     fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy {
-        let path_partition_prefix = if let Some(path_partition_prefix) =
-            properties.batching_strategy.path_partition_prefix
-        {
-            parse_path_partition_prefix(&path_partition_prefix)
-        } else {
-            PartitionGranularity::None
-        };
-
         BatchingStrategy {
             max_row_count: properties.batching_strategy.max_row_count,
             rollover_seconds: properties.batching_strategy.rollover_seconds,
-            path_partition_prefix,
+            path_partition_prefix: properties
+                .batching_strategy
+                .path_partition_prefix
+                .unwrap_or_default(),
         }
     }
 }

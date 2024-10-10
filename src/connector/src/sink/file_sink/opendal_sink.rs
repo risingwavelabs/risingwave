@@ -27,8 +27,8 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
-use serde_derive::Serialize;
 use serde_with::{serde_as, DisplayFromStr};
+use strum_macros::{Display, EnumString};
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 use with_options::WithOptions;
 
@@ -145,7 +145,6 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
         let mut batching_strategy = S::get_batching_strategy(config.clone());
-
         // If no batching strategy is defined, the default batching strategy will be used, which writes a file every 10 seconds.
         if batching_strategy.max_row_count.is_none() && batching_strategy.rollover_seconds.is_none()
         {
@@ -397,10 +396,10 @@ impl OpenDalSinkWriter {
                     .single()
                     .expect("Failed to convert timestamp to DateTime<Utc>");
                 match self.batching_strategy.path_partition_prefix {
-                    PartitionGranularity::None => "".to_string(),
-                    PartitionGranularity::Day => datetime.format("%Y-%m-%d/").to_string(),
-                    PartitionGranularity::Month => datetime.format("/%Y-%m/").to_string(),
-                    PartitionGranularity::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
+                    PathPartitionPrefix::None => "".to_string(),
+                    PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
+                    PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
+                    PathPartitionPrefix::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
                 }
             }
             Err(_) => "Invalid time".to_string(),
@@ -540,18 +539,19 @@ fn convert_rw_schema_to_arrow_schema(
 pub struct BatchingStrategy {
     pub max_row_count: Option<usize>,
     pub rollover_seconds: Option<usize>,
-    pub path_partition_prefix: PartitionGranularity,
+    pub path_partition_prefix: PathPartitionPrefix,
 }
 
-/// `PartitionGranularity` defines the granularity of file partitions based on creation time.
+/// `PathPartitionPrefix` defines the granularity of file partitions based on creation time.
 ///
 /// Each variant specifies how files are organized into directories:
 /// - `None`: No partitioning.
 /// - `Day`: Files are written in a directory for each day.
 /// - `Month`: Files are written in a directory for each month.
 /// - `Hour`: Files are written in a directory for each hour.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub enum PartitionGranularity {
+#[derive(Default, Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
+#[strum(serialize_all = "snake_case")]
+pub enum PathPartitionPrefix {
     #[default]
     None = 0,
     #[serde(alias = "day")]
@@ -573,21 +573,7 @@ pub struct FileSinkBatchingStrategyConfig {
     pub rollover_seconds: Option<usize>,
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    pub path_partition_prefix: Option<String>,
+    pub path_partition_prefix: Option<PathPartitionPrefix>,
 }
 
 pub const DEFAULT_ROLLOVER_SECONDS: usize = 10;
-
-pub fn parse_path_partition_prefix(granularity: &str) -> PartitionGranularity {
-    let granularity = granularity.trim().to_lowercase();
-    if matches!(&granularity[..], "day" | "month" | "hour") {
-        match granularity.as_str() {
-            "day" => PartitionGranularity::Day,
-            "month" => PartitionGranularity::Month,
-            "hour" => PartitionGranularity::Hour,
-            _ => PartitionGranularity::None,
-        }
-    } else {
-        PartitionGranularity::None
-    }
-}
