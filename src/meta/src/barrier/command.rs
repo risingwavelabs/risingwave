@@ -44,7 +44,7 @@ use super::info::{CommandFragmentChanges, InflightGraphInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::manager::{DdlType, StreamingJob};
+use crate::manager::{DdlType, MetadataManager, StreamingJob};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;

@@ -932,7 +932,6 @@ impl ClusterControllerInner {
 }
 
 #[cfg(test)]
-#[cfg(not(madsim))]
 mod tests {
     use super::*;
 
@@ -947,7 +946,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cluster_controller() -> MetaResult<()> {
-        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
+        let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
         let parallelism_num = 4_usize;
@@ -1036,7 +1035,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_schedulability() -> MetaResult<()> {
-        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
+        let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
         let host = HostAddress {

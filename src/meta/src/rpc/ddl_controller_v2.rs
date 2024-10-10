@@ -25,7 +25,7 @@ use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use thiserror_ext::AsReport;
 
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION, MetadataManager};
 use crate::model::StreamContext;
 use crate::rpc::ddl_controller::{
     fill_table_stream_graph_info, DdlController, DropMode, ReplaceTableInfo,

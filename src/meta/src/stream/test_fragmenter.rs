@@ -438,9 +438,8 @@ fn make_cluster_info() -> StreamingClusterInfo {
 }
 
 #[tokio::test]
-#[cfg(not(madsim))]
 async fn test_graph_builder() -> MetaResult<()> {
-    let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
+    let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 

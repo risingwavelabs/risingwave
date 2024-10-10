@@ -942,12 +942,12 @@ async fn test_hummock_compaction_task_heartbeat() {
 
     use crate::hummock::HummockManager;
 
-    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_env, hummock_manager, _cluster_manager, worker_id) = setup_compute_env(80).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
-    let context_id = worker_node.id;
+    let context_id = worker_id as _;
     let sst_num = 2;
 
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
@@ -1065,13 +1065,19 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     use risingwave_pb::hummock::CompactTaskProgress;
 
     use crate::hummock::HummockManager;
-    let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_env, hummock_manager, cluster_ctl, worker_id) = setup_compute_env(80).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
-    let context_id = worker_node.id;
+    let context_id = worker_id as _;
     let sst_num = 2;
+
+    let worker_node = cluster_ctl
+        .get_worker_by_id(worker_id)
+        .await
+        .unwrap()
+        .unwrap();
 
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id);
@@ -1136,8 +1142,8 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     compactor_manager.update_task_heartbeats(&vec![req.clone()]);
 
     // Removing the node from cluster will invalidate context id.
-    cluster_manager
-        .delete_worker_node(worker_node.host.unwrap())
+    cluster_ctl
+        .delete_worker(worker_node.host.unwrap())
         .await
         .unwrap();
     hummock_manager

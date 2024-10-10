@@ -63,6 +63,7 @@ use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::log::warn;
@@ -423,7 +424,7 @@ impl DdlController {
             .await
     }
 
-    /// Shared source is handled in [`Self::create_streaming_job`]
+    /// Shared source is handled in [`Self::create_streaming_job_v2`]
     async fn create_source_without_streaming_job(
         &self,
         source: Source,
@@ -573,7 +574,7 @@ impl DdlController {
             .create_subscription(&subscription)
             .await
             .inspect_err(|e| {
-                tracing::debug!(?e, "cancel create subscription");
+                tracing::debug!(error = %e.as_report(), "cancel create subscription");
             })?;
 
         let version = self

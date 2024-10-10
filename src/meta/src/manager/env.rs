@@ -464,20 +464,6 @@ impl MetaSrvEnv {
         Self::for_test_opts(MetaOpts::test(false)).await
     }
 
-    // Instance for test with sql meta store.
-    #[cfg(not(madsim))]
-    pub async fn for_test_with_sql_meta_store() -> Self {
-        Self::new(
-            MetaOpts::test(false),
-            risingwave_common::system_param::system_params_for_test(),
-            Default::default(),
-            SqlMetaStore::for_test().await,
-        )
-        .await
-        .unwrap()
-    }
-
-    #[cfg(not(madsim))]
     pub async fn for_test_opts(opts: MetaOpts) -> Self {
         Self::new(
             opts,
