@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::LazyCell;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -145,6 +146,14 @@ impl<'a> HummockVersionTransaction<'a> {
             }
         }
 
+        let max_epoch_to_commit = LazyCell::new(|| {
+            tables_to_commit
+                .values()
+                .cloned()
+                .max()
+                .expect("non empty tables_to_commit")
+        });
+
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
             let l0_sub_level_id = new_version_delta
@@ -158,13 +167,7 @@ impl<'a> HummockVersionTransaction<'a> {
                         .last()
                         .map(|level| level.sub_level_id + 1)
                 })
-                .unwrap_or_else(|| {
-                    tables_to_commit
-                        .values()
-                        .cloned()
-                        .max()
-                        .expect("non empty tables_to_commit")
-                });
+                .unwrap_or_else(|| *max_epoch_to_commit);
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)

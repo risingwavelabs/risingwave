@@ -14,7 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::future::pending;
+use std::future::{pending, Future};
 use std::mem::{replace, take};
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,6 +54,7 @@ use crate::barrier::creating_job::CreatingStreamingJobControl;
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
+use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
 use crate::error::MetaErrorInner;
 use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
@@ -445,7 +446,7 @@ impl CheckpointControl {
         };
         if !is_err {
             // continue to finish the pending collected barrier.
-            while let Some(task) = self.next_complete_barrier_task() {
+            while let Some(task) = self.next_complete_barrier_task(None) {
                 if let Err(e) = self.context.clone().complete_barrier(task).await {
                     error!(
                         err = ?e.as_report(),
@@ -514,7 +515,6 @@ enum CompletingCommand {
         command_ctx: Option<Arc<CommandContext>>,
         table_ids_to_finish: HashSet<TableId>,
         creating_job_epochs: Vec<(TableId, u64)>,
-        require_next_checkpoint: bool,
 
         // The join handle of a spawned task that completes the barrier.
         // The return value indicate whether there is some create streaming job command
@@ -816,14 +816,9 @@ impl GlobalBarrierManager {
                         }
                     }
                 }
-                complete_result = self.checkpoint_control.next_completed_barrier() => {
+                complete_result = self.checkpoint_control.next_completed_barrier(&mut self.scheduled_barriers) => {
                     match complete_result {
                         Ok(output) => {
-                            // If there are remaining commands (that requires checkpoint to finish), we force
-                            // the next barrier to be a checkpoint.
-                            if output.require_next_checkpoint {
-                                self.scheduled_barriers.force_checkpoint_in_next_barrier();
-                            }
                             self.control_stream_manager.remove_partial_graph(
                                 output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
                             );
@@ -1107,7 +1102,6 @@ struct CompleteBarrierTask {
     command_context: Option<(Arc<CommandContext>, HistogramTimer)>,
     table_ids_to_finish: HashSet<TableId>,
     creating_job_epochs: Vec<(TableId, u64)>,
-    require_next_checkpoint: bool,
 }
 
 impl GlobalBarrierManagerContext {
@@ -1245,7 +1239,6 @@ impl GlobalBarrierManagerContext {
 }
 
 struct BarrierCompleteOutput {
-    require_next_checkpoint: bool,
     table_ids_to_finish: HashSet<TableId>,
 }
 
@@ -1275,7 +1268,10 @@ impl CheckpointControl {
             .collect()
     }
 
-    fn next_complete_barrier_task(&mut self) -> Option<CompleteBarrierTask> {
+    fn next_complete_barrier_task(
+        &mut self,
+        mut scheduled_barriers: Option<&mut ScheduledBarriers>,
+    ) -> Option<CompleteBarrierTask> {
         let mut task = None;
         while let Some((_, EpochNode { state, .. })) = self.command_ctx_queue.first_key_value()
             && !state.is_inflight()
@@ -1292,6 +1288,15 @@ impl CheckpointControl {
                     node.notifiers.into_iter().for_each(|notifier| {
                         notifier.notify_collected();
                     });
+                    if let Some(scheduled_barriers) = &mut scheduled_barriers
+                        && self.create_mview_tracker.has_pending_finished_jobs()
+                        && self
+                            .command_ctx_queue
+                            .values()
+                            .all(|node| !node.command_ctx.kind.is_checkpoint())
+                    {
+                        scheduled_barriers.force_checkpoint_in_next_barrier();
+                    }
                     continue;
                 }
                 let commit_info = collect_commit_epoch_info(
@@ -1311,14 +1316,6 @@ impl CheckpointControl {
                         table_id
                     })
                     .collect();
-                let require_next_checkpoint =
-                    if self.create_mview_tracker.has_pending_finished_jobs() {
-                        self.command_ctx_queue
-                            .values()
-                            .all(|node| !node.command_ctx.kind.is_checkpoint())
-                    } else {
-                        false
-                    };
                 task = Some(CompleteBarrierTask {
                     commit_info,
                     finished_jobs,
@@ -1326,7 +1323,6 @@ impl CheckpointControl {
                     command_context: Some((node.command_ctx, node.enqueue_time)),
                     table_ids_to_finish,
                     creating_job_epochs: vec![],
-                    require_next_checkpoint,
                 });
                 break;
             }
@@ -1365,11 +1361,14 @@ impl CheckpointControl {
         task
     }
 
-    pub(super) async fn next_completed_barrier(&mut self) -> MetaResult<BarrierCompleteOutput> {
+    pub(super) fn next_completed_barrier<'a>(
+        &'a mut self,
+        scheduled_barriers: &mut ScheduledBarriers,
+    ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
         // If there is no completing barrier, try to start completing the earliest barrier if
         // it has been collected.
         if let CompletingCommand::None = &self.completing_command {
-            if let Some(task) = self.next_complete_barrier_task() {
+            if let Some(task) = self.next_complete_barrier_task(Some(scheduled_barriers)) {
                 {
                     let command_ctx = task
                         .command_context
@@ -1377,26 +1376,28 @@ impl CheckpointControl {
                         .map(|(command_ctx, _)| command_ctx.clone());
                     let table_ids_to_finish = task.table_ids_to_finish.clone();
                     let creating_job_epochs = task.creating_job_epochs.clone();
-                    let require_next_checkpoint = task.require_next_checkpoint;
                     let join_handle = tokio::spawn(self.context.clone().complete_barrier(task));
                     self.completing_command = CompletingCommand::GlobalStreamingGraph {
                         command_ctx,
                         join_handle,
                         table_ids_to_finish,
                         creating_job_epochs,
-                        require_next_checkpoint,
                     };
                 }
             }
         }
 
+        self.next_completed_barrier_inner()
+    }
+
+    async fn next_completed_barrier_inner(&mut self) -> MetaResult<BarrierCompleteOutput> {
         let CompletingCommand::GlobalStreamingGraph { join_handle, .. } =
             &mut self.completing_command
         else {
             return pending().await;
         };
 
-        let (table_ids_to_finish, creating_job_epochs, require_next_checkpoint) = {
+        let (table_ids_to_finish, creating_job_epochs) = {
             {
                 let join_result: MetaResult<_> = try {
                     join_handle
@@ -1417,9 +1418,8 @@ impl CheckpointControl {
                 must_match!(completed_command, CompletingCommand::GlobalStreamingGraph {
                     table_ids_to_finish,
                     creating_job_epochs,
-                    require_next_checkpoint,
                     ..
-                } => (table_ids_to_finish, creating_job_epochs, require_next_checkpoint))
+                } => (table_ids_to_finish, creating_job_epochs))
             }
         };
 
@@ -1462,7 +1462,6 @@ impl CheckpointControl {
             }
 
             Ok(BarrierCompleteOutput {
-                require_next_checkpoint,
                 table_ids_to_finish,
             })
         }
