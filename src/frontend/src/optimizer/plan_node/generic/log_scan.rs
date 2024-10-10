@@ -34,10 +34,10 @@ const OP_TYPE: DataType = DataType::Varchar;
 #[educe(PartialEq, Eq, Hash)]
 pub struct LogScan {
     pub table_name: String,
-    /// Include `output_col_idx` and `op_column`
+    /// Include `output_col_idx_with_out_hidden` and `op_column`
+    pub output_col_idx_with_out_hidden: Vec<usize>,
+    /// Include `output_col_idx_with_out_hidden` and `op_column` and hidden pk
     pub output_col_idx: Vec<usize>,
-    /// The field is in `output_col_idx`, but it's hidden, like `_row_id`
-    pub hidden_col_idx: Vec<usize>,
     /// Descriptor of the table
     pub table_desc: Rc<TableDesc>,
     /// Help `RowSeqLogScan` executor use a better chunk size
@@ -87,9 +87,8 @@ impl LogScan {
 
     pub(crate) fn column_names_without_hidden(&self) -> Vec<String> {
         let mut out_column_names: Vec<_> = self
-            .output_col_idx
+            .output_col_idx_with_out_hidden
             .iter()
-            .filter(|&i| !self.hidden_col_idx.contains(i))
             .map(|&i| self.table_desc.columns[i].name.clone())
             .collect();
         out_column_names.push(OP_NAME.to_string());
@@ -113,8 +112,8 @@ impl LogScan {
     /// Create a logical scan node for log table scan
     pub(crate) fn new(
         table_name: String,
+        output_col_idx_with_out_hidden: Vec<usize>,
         output_col_idx: Vec<usize>,
-        hidden_col_idx: Vec<usize>,
         table_desc: Rc<TableDesc>,
         ctx: OptimizerContextRef,
         old_epoch: u64,
@@ -123,8 +122,8 @@ impl LogScan {
     ) -> Self {
         Self {
             table_name,
+            output_col_idx_with_out_hidden,
             output_col_idx,
-            hidden_col_idx,
             table_desc,
             chunk_size: None,
             ctx,
@@ -168,10 +167,10 @@ impl LogScan {
             .iter()
             .enumerate()
             .filter_map(|(index, idx)| {
-                if self.hidden_col_idx.contains(idx) {
-                    None
-                } else {
+                if self.output_col_idx_with_out_hidden.contains(idx) {
                     Some(index)
+                } else {
+                    None
                 }
             })
             .collect_vec();
