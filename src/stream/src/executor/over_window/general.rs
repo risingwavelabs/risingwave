@@ -533,6 +533,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
                     for (call, state) in this.calls.iter().zip_eq_fast(states.iter_mut()) {
                         // TODO(rc): batch appending
+                        // TODO(rc): append not only the arguments but also the old output for optimization
                         state.append(
                             key.as_normal_expect().clone(),
                             row.project(call.args.val_indices())
@@ -547,11 +548,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 } {}
             }
 
-            // Slide to the first affected key. We can safely compare to `Some(first_curr_key)` here
-            // because it must exist in the states, by the definition of affected range.
-            while states.curr_key() != Some(first_curr_key.as_normal_expect()) {
-                states.just_slide()?;
-            }
+            // Slide to the first affected key. We can safely pass in `first_curr_key` here
+            // because it definitely exists in the states by the definition of affected range.
+            states.just_slide_to(first_curr_key.as_normal_expect())?;
             let mut curr_key_cursor = part_with_delta.find(first_curr_key).unwrap();
             assert_eq!(
                 states.curr_key(),
