@@ -321,6 +321,7 @@ pub struct SinkMetrics {
     pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
     pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
     pub iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
+    pub iceberg_write_bytes: LabelGuardedIntCounterVec<3>,
 }
 
 impl SinkMetrics {
@@ -430,6 +431,14 @@ impl SinkMetrics {
         )
         .unwrap();
 
+        let iceberg_write_bytes = register_guarded_int_counter_vec_with_registry!(
+            "iceberg_write_bytes",
+            "The write bytes of iceberg writer",
+            &["actor_id", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             sink_commit_duration,
             connector_sink_rows_received,
@@ -444,6 +453,7 @@ impl SinkMetrics {
             iceberg_rolling_unflushed_data_file,
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
+            iceberg_write_bytes,
         }
     }
 }
