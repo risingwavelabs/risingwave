@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 
@@ -86,7 +89,12 @@ impl BarrierManagerState {
     pub fn apply_command(
         &mut self,
         command: &Command,
-    ) -> (InflightGraphInfo, InflightSubscriptionInfo) {
+    ) -> (
+        InflightGraphInfo,
+        InflightSubscriptionInfo,
+        HashSet<TableId>,
+        HashSet<TableId>,
+    ) {
         // update the fragment_infos outside pre_apply
         let fragment_changes = if let Command::CreateStreamingJob {
             job_type: CreateStreamingJobType::SnapshotBackfill(_),
@@ -108,8 +116,19 @@ impl BarrierManagerState {
         if let Some(fragment_changes) = fragment_changes {
             self.inflight_graph_info.post_apply(&fragment_changes);
         }
+
+        let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();
+        let mut jobs_to_wait = HashSet::new();
+        if let Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) = command {
+            for (table_id, (_, graph_info)) in jobs_to_merge {
+                jobs_to_wait.insert(*table_id);
+                table_ids_to_commit.extend(graph_info.existing_table_ids());
+                self.inflight_graph_info.extend(graph_info.clone());
+            }
+        }
+
         self.inflight_subscription_info.post_apply(command);
 
-        (info, subscription_info)
+        (info, subscription_info, table_ids_to_commit, jobs_to_wait)
     }
 }
