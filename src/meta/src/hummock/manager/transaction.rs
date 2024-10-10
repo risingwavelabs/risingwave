@@ -17,7 +17,6 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -159,7 +158,13 @@ impl<'a> HummockVersionTransaction<'a> {
                         .last()
                         .map(|level| level.sub_level_id + 1)
                 })
-                .unwrap_or(Epoch::now().0);
+                .unwrap_or_else(|| {
+                    tables_to_commit
+                        .values()
+                        .cloned()
+                        .max()
+                        .expect("non empty tables_to_commit")
+                });
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
