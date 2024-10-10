@@ -113,6 +113,8 @@ public class JDBCSink implements SinkWriter {
             while (columnResultSet.next()) {
                 var typeName = columnResultSet.getString(JDBC_TYPE_NAME_KEY);
                 int dt = columnResultSet.getInt(JDBC_DATA_TYPE_KEY);
+                // NOTE: Workaround a known issue of pgjdbc
+                // See also https://github.com/pgjdbc/pgjdbc/issues/1766
                 if (dt == Types.TIMESTAMP
                         && (typeName.equalsIgnoreCase("timestamptz")
                                 || typeName.equalsIgnoreCase("timestamp with time zone"))) {
