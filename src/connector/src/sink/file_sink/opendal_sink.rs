@@ -28,6 +28,7 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
+use serde_derive::Serialize;
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 use with_options::WithOptions;
 
@@ -146,10 +147,11 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
         let mut batching_strategy = S::get_batching_strategy(config.clone());
+
         // If no batching strategy is defined, the default batching strategy will be used, which writes a file every 10 seconds.
         if batching_strategy.max_row_count.is_none() && batching_strategy.rollover_seconds.is_none()
         {
-            batching_strategy.rollover_seconds = Some(10);
+            batching_strategy.rollover_seconds = Some(DEFAULT_ROLLOVER_SECONDS);
         }
         let engine_type = S::get_engine_type();
         Ok(Self {
@@ -167,7 +169,6 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
     }
 }
 
-impl<S: OpendalSinkBackend> FileSink<S> {}
 pub struct OpenDalSinkWriter {
     schema: SchemaRef,
     operator: Operator,
@@ -541,23 +542,29 @@ pub struct BatchingStrategy {
 /// - `Day`: Files are written in a directory for each day.
 /// - `Month`: Files are written in a directory for each month.
 /// - `Hour`: Files are written in a directory for each hour.
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub enum PartitionGranularity {
-    None,
-    Day,
-    Month,
-    Hour,
+    #[default]
+    None = 0,
+    #[serde(alias = "day")]
+    Day = 1,
+    #[serde(alias = "month")]
+    Month = 2,
+    #[serde(alias = "hour")]
+    Hour = 3,
 }
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct FileSinkBatchingStrategyConfig {
-    #[serde(rename = "max_row_count")]
-    pub max_row_count: Option<String>,
-    #[serde(rename = "rollover_seconds")]
-    pub rollover_seconds: Option<String>,
-    #[serde(rename = "partition_granularity")]
+    #[serde(default)]
+    pub max_row_count: Option<usize>,
+    #[serde(default)]
+    pub rollover_seconds: Option<usize>,
+    #[serde(default)]
     pub partition_granularity: Option<String>,
 }
+
+pub const DEFAULT_ROLLOVER_SECONDS: usize = 10;
 
 pub fn parse_partition_granularity(granularity: &str) -> PartitionGranularity {
     let granularity = granularity.trim().to_lowercase();

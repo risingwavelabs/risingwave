@@ -127,21 +127,9 @@ impl OpendalSinkBackend for GcsSink {
         } else {
             PartitionGranularity::None
         };
-        let max_row_count: Option<usize> =
-            if let Some(s) = properties.batching_strategy.max_row_count {
-                s.parse().ok()
-            } else {
-                None
-            };
-        let rollover_seconds: Option<usize> =
-            if let Some(s) = properties.batching_strategy.rollover_seconds {
-                s.parse().ok()
-            } else {
-                None
-            };
         BatchingStrategy {
-            max_row_count,
-            rollover_seconds,
+            max_row_count: properties.batching_strategy.max_row_count,
+            rollover_seconds: properties.batching_strategy.rollover_seconds,
             partition_granularity,
         }
     }
