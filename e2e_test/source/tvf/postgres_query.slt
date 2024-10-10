@@ -1,19 +1,55 @@
+                            TokioPgType::BOOL => DataType::Boolean,
+                            TokioPgType::INT2 => DataType::Int16,
+                            TokioPgType::INT4 => DataType::Int32,
+                            TokioPgType::INT8 => DataType::Int64,
+                            TokioPgType::FLOAT4 => DataType::Float32,
+                            TokioPgType::FLOAT8 => DataType::Float64,
+                            TokioPgType::NUMERIC => DataType::Decimal,
+                            TokioPgType::DATE => DataType::Date,
+                            TokioPgType::TIME => DataType::Time,
+                            TokioPgType::TIMESTAMP => DataType::Timestamp,
+                            TokioPgType::TIMESTAMPTZ => DataType::Timestamptz,
+                            TokioPgType::TEXT | TokioPgType::VARCHAR => DataType::Varchar,
+                            TokioPgType::INTERVAL => DataType::Interval,
+                            TokioPgType::JSONB => DataType::Jsonb,
+                            TokioPgType::BYTEA => DataType::Bytea,
 system ok
-PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test psql -c "CREATE TABLE test (id bigint primary key, x int);"
+PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test psql -c "
+CREATE TABLE test (
+    id bigint primary key,
+    v1 bool,
+    v2 smallint,
+    v3 integer,
+    v4 bigint,
+    v5 real,
+    v6 double precision,
+    v7 numeric,
+    v8 date,
+    v9 time,
+    v10 timestamp,
+    v11 timestamptz,
+    v12 text,
+    v13 varchar,
+    v14 interval,
+    v15 jsonb,
+    v16 bytea
+);"
 
 system ok
-PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test psql -c "INSERT INTO test select id, id::int from generate_series(1, 100) as t(id);"
+PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test psql -c "
+INSERT INTO test SELECT generate_series(1, 100), true, 1, 1, 1, 1.0, 1.0, 1.0, '2021-01-01', '00:00:00', '2021-01-01 00:00:00', '2021-01-01 00:00:00', 'text', 'varchar', '1 day', '{}', '\\x01';"
+"
 
 query II
 select * from postgres_query('db', '5432', 'postgres', 'postgres', 'cdc_test', 'select * from test where id > 90;');
 ----
-91 91
-92 92
-93 93
-94 94
-95 95
-96 96
-97 97
-98 98
-99 99
-100 100
+91 t   1  1  1  1  1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 00:00:00+00:00 text varchar 1 day {}  \x5c783031
+92 t   1  1  1  1  1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 00:00:00+00:00 text varchar 1 day {}  \x5c783031
+93 t   1  1  1  1  1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 00:00:00+00:00 text varchar 1 day {}  \x5c783031
+94 t   1  1  1  1  1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 00:00:00+00:00 text varchar 1 day {}  \x5c783031
+95 t   1  1  1  1  1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 00:00:00+00:00 text varchar 1 day {}  \x5c783031
+96 t   1  1  1  1  1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 00:00:00+00:00 text varchar 1 day {}  \x5c783031
+97 t   1  1  1  1  1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 00:00:00+00:00 text varchar 1 day {}  \x5c783031
+98 t   1  1  1  1  1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 00:00:00+00:00 text varchar 1 day {}  \x5c783031
+99 t   1  1  1  1  1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 00:00:00+00:00 text varchar 1 day {}  \x5c783031
+100 t   1  1  1  1  1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 00:00:00+00:00 text varchar 1 day {}  \x5c783031
