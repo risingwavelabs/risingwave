@@ -260,7 +260,7 @@ use_opendal = true
 
 [system]
 barrier_interval_ms = 1000
-checkpoint_frequency = 1
+checkpoint_frequency = 60
 sstable_size_mb = 256
 parallel_compact_size_mb = 512
 block_size_kb = 64
