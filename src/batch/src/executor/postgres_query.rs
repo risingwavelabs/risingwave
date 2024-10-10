@@ -146,7 +146,7 @@ impl PostgresQueryExecutor {
         });
 
         // TODO(kwannoel): Use pagination using CURSOR.
-        let rows = client.query(&self.query, &[]).await?;
+        let rows = client.query(&self.query, &[]).await.context("postgres_query received error from remote server")?;
         let mut builder = DataChunkBuilder::new(self.schema.data_types(), 1024);
         tracing::debug!("postgres_query_executor: query executed, start deserializing rows");
         // deserialize the rows
