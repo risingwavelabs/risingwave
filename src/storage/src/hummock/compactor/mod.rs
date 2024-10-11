@@ -571,6 +571,7 @@ pub fn start_compactor(
                             }
                             ResponseEvent::FullScanTask(full_scan_task) => {
                                 executor.spawn(async move {
+                                    let start_after = full_scan_task.start_after.clone();
                                     match Vacuum::handle_full_scan_task(
                                         full_scan_task,
                                         context.sstable_store.clone(),
@@ -582,6 +583,7 @@ pub fn start_compactor(
                                                 object_ids,
                                                 total_object_count,
                                                 total_object_size,
+                                                start_after,
                                                 next_start_after,
                                                 meta_client,
                                             )
@@ -786,6 +788,7 @@ pub fn start_shared_compactor(
                                     }
                                 }
                                 dispatch_compaction_task_request::Task::FullScanTask(full_scan_task) => {
+                                    let start_after = full_scan_task.start_after.clone();
                                     match Vacuum::handle_full_scan_task(full_scan_task, context.sstable_store.clone())
                                         .await
                                     {
@@ -795,6 +798,7 @@ pub fn start_shared_compactor(
                                                 total_object_count,
                                                 total_object_size,
                                                 next_start_after,
+                                                start_after,
                                             };
                                             match cloned_grpc_proxy_client
                                                 .report_full_scan_task(report_full_scan_task_request)

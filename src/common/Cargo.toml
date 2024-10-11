@@ -21,10 +21,6 @@ arrow-48-array = { package = "arrow-array", version = "48" }
 arrow-48-buffer = { package = "arrow-buffer", version = "48" }
 arrow-48-cast = { package = "arrow-cast", version = "48" }
 arrow-48-schema = { package = "arrow-schema", version = "48" }
-arrow-52-array = { package = "arrow-array", version = "52" }
-arrow-52-buffer = { package = "arrow-buffer", version = "52" }
-arrow-52-cast = { package = "arrow-cast", version = "52" }
-arrow-52-schema = { package = "arrow-schema", version = "52" }
 arrow-53-array = { package = "arrow-array", version = "53" }
 arrow-53-buffer = { package = "arrow-buffer", version = "53" }
 arrow-53-cast = { package = "arrow-cast", version = "53" }
@@ -136,7 +132,7 @@ tower-layer = "0.3.2"
 tower-service = "0.3.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.16", default-features = false }
+procfs = { version = "0.17", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
