@@ -18,7 +18,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::{DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker};
+use foyer::{
+    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -643,27 +645,32 @@ impl StateStoreImpl {
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
-                .storage();
+                .storage(Engine::Large);
 
             if !opts.meta_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_device_config(
-                        DirectFsDeviceOptionsBuilder::new(&opts.meta_file_cache_dir)
+                    .with_device_options(
+                        DirectFsDeviceOptions::new(&opts.meta_file_cache_dir)
                             .with_capacity(opts.meta_file_cache_capacity_mb * MB)
-                            .with_file_size(opts.meta_file_cache_file_capacity_mb * MB)
-                            .build(),
-                    )
-                    .with_indexer_shards(opts.meta_file_cache_indexer_shards)
-                    .with_flushers(opts.meta_file_cache_flushers)
-                    .with_reclaimers(opts.meta_file_cache_reclaimers)
-                    .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
-                    .with_clean_region_threshold(
-                        opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
+                            .with_file_size(opts.meta_file_cache_file_capacity_mb * MB),
                     )
                     .with_recover_mode(opts.meta_file_cache_recover_mode)
-                    .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
                     .with_compression(opts.meta_file_cache_compression)
-                    .with_runtime_config(opts.meta_file_cache_runtime_config.clone());
+                    .with_runtime_options(opts.meta_file_cache_runtime_config.clone())
+                    .with_large_object_disk_cache_options(
+                        LargeEngineOptions::new()
+                            .with_indexer_shards(opts.meta_file_cache_indexer_shards)
+                            .with_flushers(opts.meta_file_cache_flushers)
+                            .with_reclaimers(opts.meta_file_cache_reclaimers)
+                            .with_buffer_pool_size(
+                                opts.meta_file_cache_flush_buffer_threshold_mb * MB,
+                            ) // 128 MiB
+                            .with_clean_region_threshold(
+                                opts.meta_file_cache_reclaimers
+                                    + opts.meta_file_cache_reclaimers / 2,
+                            )
+                            .with_recover_concurrency(opts.meta_file_cache_recover_concurrency),
+                    );
                 if opts.meta_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
                         opts.meta_file_cache_insert_rate_limit_mb * MB,
@@ -688,27 +695,32 @@ impl StateStoreImpl {
                     // FIXME(MrCroxx): Calculate block weight more accurately.
                     u64::BITS as usize * 2 / 8 + value.raw().len()
                 })
-                .storage();
+                .storage(Engine::Large);
 
             if !opts.data_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_device_config(
-                        DirectFsDeviceOptionsBuilder::new(&opts.data_file_cache_dir)
+                    .with_device_options(
+                        DirectFsDeviceOptions::new(&opts.data_file_cache_dir)
                             .with_capacity(opts.data_file_cache_capacity_mb * MB)
-                            .with_file_size(opts.data_file_cache_file_capacity_mb * MB)
-                            .build(),
-                    )
-                    .with_indexer_shards(opts.data_file_cache_indexer_shards)
-                    .with_flushers(opts.data_file_cache_flushers)
-                    .with_reclaimers(opts.data_file_cache_reclaimers)
-                    .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
-                    .with_clean_region_threshold(
-                        opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
+                            .with_file_size(opts.data_file_cache_file_capacity_mb * MB),
                     )
                     .with_recover_mode(opts.data_file_cache_recover_mode)
-                    .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
                     .with_compression(opts.data_file_cache_compression)
-                    .with_runtime_config(opts.data_file_cache_runtime_config.clone());
+                    .with_runtime_options(opts.data_file_cache_runtime_config.clone())
+                    .with_large_object_disk_cache_options(
+                        LargeEngineOptions::new()
+                            .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                            .with_flushers(opts.data_file_cache_flushers)
+                            .with_reclaimers(opts.data_file_cache_reclaimers)
+                            .with_buffer_pool_size(
+                                opts.data_file_cache_flush_buffer_threshold_mb * MB,
+                            ) // 128 MiB
+                            .with_clean_region_threshold(
+                                opts.data_file_cache_reclaimers
+                                    + opts.data_file_cache_reclaimers / 2,
+                            )
+                            .with_recover_concurrency(opts.data_file_cache_recover_concurrency),
+                    );
                 if opts.data_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
                         opts.data_file_cache_insert_rate_limit_mb * MB,
