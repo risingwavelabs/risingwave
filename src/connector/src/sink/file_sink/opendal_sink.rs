@@ -244,13 +244,12 @@ impl OpenDalSinkWriter {
                     if w.bytes_written() > 0 {
                         let metadata = w.close().await?;
                         tracing::info!(
-                            "The duration {:?}s of writing to this file has exceeded the rollover_interval, writer {:?}_{:?}finish write file, metadata: {:?}",
-                            self.duration_seconds_since_writer_created(),
-                            self.created_time
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Time went backwards")
-                            .as_secs(),
+                            "writer {:?}_{:?}finish write file, metadata: {:?}",
                             self.executor_id,
+                            self.created_time
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_secs(),
                             metadata
                         );
                         return Ok(true);
@@ -282,6 +281,7 @@ impl OpenDalSinkWriter {
     /// closes the current writer (e.g., a Parquet file writer) if any bytes
     /// have been written. The function logs the completion message and
     /// increments the writer index for subsequent writes.
+    ///
     ///
     /// Returns:
     /// - `Ok(true)` if the write was finalized successfully due to the
@@ -373,7 +373,8 @@ impl OpenDalSinkWriter {
                 let datetime = Utc
                     .timestamp_opt(duration.as_secs() as i64, 0)
                     .single()
-                    .expect("Failed to convert timestamp to DateTime<Utc>");
+                    .expect("Failed to convert timestamp to DateTime<Utc>")
+                    .with_timezone(&Utc);
                 let path_partition_prefix = self
                     .batching_strategy
                     .path_partition_prefix

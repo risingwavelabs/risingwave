@@ -56,6 +56,9 @@ impl LogSinker for BatchingLogSinker {
                     LogConsumerState::BarrierReceived { .. } => {
                         // we need to force to finish the batch here. Otherwise, there can be data loss because actor can be dropped and rebuilt during scaling.
                         if let Some(committed_chunk_id) = sink_writer.should_finish().await? {
+                            // When the chunk we need to truncate encounters an epoch increase, we need to truncate the barrier first.
+                            log_reader.truncate(TruncateOffset::Barrier { epoch: (epoch) })?;
+
                             log_reader.truncate(TruncateOffset::Chunk {
                                 epoch: (epoch),
                                 chunk_id: (committed_chunk_id),
@@ -105,6 +108,9 @@ impl LogSinker for BatchingLogSinker {
                         // The file has been successfully written and is now visible to downstream consumers.
                         // Truncate the file to remove the specified `chunk_id` and any preceding content.
                         Ok(Some(chunk_id)) => {
+                            // When the chunk we need to truncate encounters an epoch increase, we need to truncate the barrier first.
+                            log_reader.truncate(TruncateOffset::Barrier { epoch: (epoch) })?;
+
                             log_reader.truncate(TruncateOffset::Chunk {
                                 epoch: (epoch),
                                 chunk_id: (chunk_id),
