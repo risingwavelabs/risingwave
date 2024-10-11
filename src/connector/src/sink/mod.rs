@@ -21,7 +21,7 @@ pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
-pub mod elasticsearch;
+pub mod elasticsearch_opensearch;
 pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
@@ -113,8 +113,10 @@ macro_rules! for_all_sinks {
                 { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
-                { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
-                { Opensearch, $crate::sink::remote::OpenSearchSink },
+                // { ElasticSearchJava, $crate::sink::remote::ElasticSearchJavaSink },
+                // { OpensearchJava, $crate::sink::remote::OpenSearchJavaSink },
+                { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
+                { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
@@ -794,6 +796,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error("ElasticSearch/OpenSearch error: {0}")]
+    ElasticSearchOpenSearch(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("File error: {0}")]
@@ -905,5 +913,17 @@ impl From<RedisError> for SinkError {
 impl From<tiberius::error::Error> for SinkError {
     fn from(err: tiberius::error::Error) -> Self {
         SinkError::SqlServer(anyhow!(err))
+    }
+}
+
+impl From<::elasticsearch::Error> for SinkError {
+    fn from(err: ::elasticsearch::Error) -> Self {
+        SinkError::ElasticSearchOpenSearch(anyhow!(err))
+    }
+}
+
+impl From<::opensearch::Error> for SinkError {
+    fn from(err: ::opensearch::Error) -> Self {
+        SinkError::ElasticSearchOpenSearch(anyhow!(err))
     }
 }

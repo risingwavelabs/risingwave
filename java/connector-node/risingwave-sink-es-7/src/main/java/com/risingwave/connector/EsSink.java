@@ -152,12 +152,12 @@ public class EsSink extends SinkWriterBase {
         this.config = config;
         this.requestTracker = new RequestTracker();
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
-        if (config.getConnector().equals("elasticsearch")) {
+        if (config.getConnector().equals("elasticsearch_v1")) {
             ElasticRestHighLevelClientAdapter client =
                     new ElasticRestHighLevelClientAdapter(host, config);
             this.bulkProcessor =
                     new ElasticBulkProcessorAdapter(this.requestTracker, client, config);
-        } else if (config.getConnector().equals("opensearch")) {
+        } else if (config.getConnector().equals("opensearch_v1")) {
             OpensearchRestHighLevelClientAdapter client =
                     new OpensearchRestHighLevelClientAdapter(host, config);
             this.bulkProcessor =

@@ -195,7 +195,7 @@ pub struct MetaNodeOpts {
 
     /// The path of the license key file to be watched and hot-reloaded.
     #[clap(long, env = "RW_LICENSE_KEY_PATH")]
-    pub license_key_file: Option<PathBuf>,
+    pub license_key_path: Option<PathBuf>,
 
     /// 128-bit AES key for secret store in HEX format.
     #[educe(Debug(ignore))] // TODO: use newtype to redact debug impl
@@ -396,6 +396,7 @@ pub fn start(
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
                 full_gc_interval_sec: config.meta.full_gc_interval_sec,
                 full_gc_object_limit: config.meta.full_gc_object_limit,
+                max_inflight_time_travel_query: config.meta.max_inflight_time_travel_query,
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
@@ -470,7 +471,7 @@ pub fn start(
                     .meta
                     .developer
                     .actor_cnt_per_worker_parallelism_soft_limit,
-                license_key_path: opts.license_key_file,
+                license_key_path: opts.license_key_path,
             },
             config.system.into_init_system_params(),
             Default::default(),
