@@ -408,28 +408,21 @@ impl Cluster {
 
         // FIXME: some tests like integration tests will run concurrently,
         // resulting in connecting to the same sqlite file if they're using the same seed.
-        let file_path = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
-            format!(
-                "{}/stest-{}-{}.sqlite",
-                sqlite_data_dir.display(),
-                handle.seed(),
-                Uuid::new_v4()
-            )
-        } else {
-            format!("./stest-{}-{}.sqlite", handle.seed(), Uuid::new_v4())
-        };
-        if std::fs::exists(&file_path).unwrap() {
-            panic!(
-                "sqlite file already exists and used by other cluster: {}",
-                file_path
-            )
-        }
-        let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path);
+        let file_path = format!("stest-{}-{}::memory:", handle.seed(), Uuid::new_v4());
+
+        let sql_endpoint = format!("sqlite://{}?mode=rwc&cache=shared", file_path);
         let sql_conn = Box::new(sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap());
         __CLUSTER_SQLITE_CONNECTION
             .with(|conn| {
                 conn.set(sql_conn).unwrap();
             });
+
+        if std::fs::exists(&file_path).unwrap() {
+            panic!(
+                "there shouldn't be any file at the path: {}, it is an in-memory sqlite instance",
+                file_path
+            )
+        }
 
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
 
