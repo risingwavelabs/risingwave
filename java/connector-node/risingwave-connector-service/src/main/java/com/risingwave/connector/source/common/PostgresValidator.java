@@ -187,10 +187,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 var name = res.getString(1);
                 pkFields.add(name);
             }
-
-            if (!isPrimaryKeyMatch(tableSchema, pkFields)) {
-                throw ValidatorUtils.invalidArgument("Primary key mismatch");
-            }
+            primaryKeyCheck(tableSchema, pkFields);
         }
 
         // Check whether source schema match table schema on upstream
@@ -227,17 +224,24 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    private boolean isPrimaryKeyMatch(TableSchema sourceSchema, Set<String> pkFields) {
+    private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields)
+            throws RuntimeException {
         if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
-            return false;
+            throw ValidatorUtils.invalidArgument(
+                    "Primary key mismatch: the SQL schema defines "
+                            + sourceSchema.getPrimaryKeys().size()
+                            + " primary key columns, but the source table in Postgres has "
+                            + pkFields.size()
+                            + " columns.");
         }
-        // postgres column name is case-sensitive
         for (var colName : sourceSchema.getPrimaryKeys()) {
             if (!pkFields.contains(colName)) {
-                return false;
+                throw ValidatorUtils.invalidArgument(
+                        "Primary key mismatch: The primary key list of the source table in Postgres does not contain '"
+                                + colName
+                                + "'.\nHint: If your primary key contains uppercase letters, please ensure that the primary key in the DML of RisingWave uses the same uppercase format and is wrapped with double quotes (\"\").");
             }
         }
-        return true;
     }
 
     private void validatePrivileges() throws SQLException {
