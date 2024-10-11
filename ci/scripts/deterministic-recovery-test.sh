@@ -65,6 +65,14 @@ MADSIM_TEST_SEED=1728614854424821921 ./risingwave_simulation \
 ${EXTRA_ARGS:-} \
 ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/recovery-ddl-921.log && rm $LOGDIR/recovery-ddl-921.log
 
+echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, kafka source,sink MADSIM_TEST_SEED=1728613365415315667"
+MADSIM_TEST_SEED=1728613365415315667 ./risingwave_simulation \
+--kill \
+--kill-rate=${KILL_RATE} \
+--kafka-datadir=./scripts/source/test_data \
+${EXTRA_ARGS:-} \
+./e2e_test/source/basic/kafka\*.slt 2> $LOGDIR/recovery-source-667.log && rm $LOGDIR/recovery-source-667.log
+
 echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, background_ddl"
 seq "$TEST_NUM" | parallel './risingwave_simulation \
 --kill \
