@@ -660,8 +660,12 @@ fn infer_type_for_special(
                 .into()),
             }
         }
-        ExprType::Vnode => {
-            ensure_arity!("vnode", 1 <= | inputs |);
+        // internal use only
+        ExprType::Vnode => Ok(Some(VirtualNode::RW_TYPE)),
+        // user-facing `rw_vnode`
+        ExprType::VnodeUser => {
+            ensure_arity!("rw_vnode", 2 <= | inputs |);
+            inputs[0].cast_explicit_mut(DataType::Int32)?; // vnode count
             Ok(Some(VirtualNode::RW_TYPE))
         }
         ExprType::Greatest | ExprType::Least => {

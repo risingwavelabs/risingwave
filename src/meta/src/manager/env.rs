@@ -21,6 +21,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::{bail, system_param};
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
@@ -421,6 +422,19 @@ impl MetaSrvEnv {
             opts.event_log_enabled,
             opts.event_log_channel_max_size,
         ));
+
+        // When license key path is specified, license key from system parameters can be easily
+        // overwritten. So we simply reject this case.
+        if opts.license_key_path.is_some()
+            && init_system_params.license_key
+                != system_param::default::license_key_opt().map(Into::into)
+        {
+            bail!(
+                "argument `--license-key-path` (or env var `RW_LICENSE_KEY_PATH`) and \
+                 system parameter `license_key` (or env var `RW_LICENSE_KEY`) may not \
+                 be set at the same time"
+            );
+        }
 
         let env = match &meta_store_impl {
             MetaStoreImpl::Kv(meta_store) => {

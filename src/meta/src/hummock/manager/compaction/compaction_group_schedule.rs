@@ -36,6 +36,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::{commit_multi_var, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
+use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 
 impl HummockManager {
@@ -552,7 +553,15 @@ impl HummockManager {
         table_write_throughput: &HashMap<u32, VecDeque<u64>>,
         checkpoint_secs: u64,
         group: &TableGroupInfo,
+        compaction_group_config: CompactionGroup,
     ) {
+        if compaction_group_config
+            .compaction_config
+            .disable_auto_group_scheduling
+            .unwrap_or(false)
+        {
+            return;
+        }
         // split high throughput table to dedicated compaction group
         for (table_id, table_size) in &group.table_statistic {
             self.try_move_high_throughput_table_to_dedicated_cg(
@@ -566,7 +575,8 @@ impl HummockManager {
         }
 
         // split the huge group to multiple groups
-        self.try_split_huge_compaction_group(group).await;
+        self.try_split_huge_compaction_group(group, compaction_group_config)
+            .await;
     }
 
     pub async fn try_move_high_throughput_table_to_dedicated_cg(
@@ -623,14 +633,11 @@ impl HummockManager {
         }
     }
 
-    pub async fn try_split_huge_compaction_group(&self, group: &TableGroupInfo) {
-        let compaction_group_config = {
-            let compaction_group_manager = self.compaction_group_manager.read().await;
-            compaction_group_manager
-                .try_get_compaction_group_config(group.group_id)
-                .unwrap()
-        };
-
+    pub async fn try_split_huge_compaction_group(
+        &self,
+        group: &TableGroupInfo,
+        compaction_group_config: CompactionGroup,
+    ) {
         let is_huge_hybrid_group: bool = group.group_size
             > (compaction_group_config.max_estimated_group_size() as f64
                 * self.env.opts.compaction_group_size_threshold) as u64
@@ -682,7 +689,9 @@ impl HummockManager {
         &self,
         table_write_throughput: &HashMap<u32, VecDeque<u64>>,
         group: &TableGroupInfo,
+        group_config: CompactionGroup,
         next_group: &TableGroupInfo,
+        _next_group_config: CompactionGroup,
         checkpoint_secs: u64,
         created_tables: &HashSet<u32>,
     ) -> Result<()> {
@@ -727,14 +736,7 @@ impl HummockManager {
             )));
         }
 
-        let compaction_group_config = {
-            let compaction_group_manager = self.compaction_group_manager.read().await;
-            compaction_group_manager
-                .try_get_compaction_group_config(group.group_id)
-                .unwrap()
-        };
-
-        let size_limit = (compaction_group_config.max_estimated_group_size() as f64
+        let size_limit = (group_config.max_estimated_group_size() as f64
             * self.env.opts.compaction_group_size_threshold) as u64;
 
         if (group.group_size + next_group.group_size) > size_limit {

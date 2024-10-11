@@ -481,8 +481,20 @@ impl HummockManager {
                 continue;
             }
 
-            self.try_split_compaction_group(&table_write_throughput, checkpoint_secs, group)
-                .await;
+            let compaction_group_config = {
+                let compaction_group_manager = self.compaction_group_manager.read().await;
+                compaction_group_manager
+                    .try_get_compaction_group_config(group.group_id)
+                    .unwrap()
+            };
+
+            self.try_split_compaction_group(
+                &table_write_throughput,
+                checkpoint_secs,
+                group,
+                compaction_group_config,
+            )
+            .await;
         }
 
         if group_count < 2 {
@@ -495,11 +507,28 @@ impl HummockManager {
         while left < right && right < group_count {
             let group = &group_infos[left];
             let next_group = &group_infos[right];
+
+            let group_config = {
+                let compaction_group_manager = self.compaction_group_manager.read().await;
+                compaction_group_manager
+                    .try_get_compaction_group_config(group.group_id)
+                    .unwrap()
+            };
+
+            let next_group_config = {
+                let compaction_group_manager = self.compaction_group_manager.read().await;
+                compaction_group_manager
+                    .try_get_compaction_group_config(next_group.group_id)
+                    .unwrap()
+            };
+
             match self
                 .try_merge_compaction_group(
                     &table_write_throughput,
                     group,
+                    group_config,
                     next_group,
+                    next_group_config,
                     checkpoint_secs,
                     &created_tables,
                 )
