@@ -63,11 +63,11 @@ macro_rules! impl_fmt_display {
     }};
     ($field:ident => [$($arr:tt)+], $v:ident, $self:ident) => {
         if $self.$field {
-            $v.push(format!("{}", AstVec([$($arr)+].to_vec())));
+            $v.push(format!("{}", display_separated(&[$($arr)+], " ")));
         }
     };
     ([$($arr:tt)+], $v:ident) => {
-        $v.push(format!("{}", AstVec([$($arr)+].to_vec())));
+        $v.push(format!("{}", display_separated(&[$($arr)+], " ")));
     };
 }
 
@@ -499,6 +499,9 @@ impl fmt::Display for CreateSourceStatement {
             v.push(items);
         }
 
+        for item in &self.include_column_options {
+            v.push(format!("{}", item));
+        }
         impl_fmt_display!(with_properties, v, self);
         impl_fmt_display!(source_schema, v, self);
         v.iter().join(" ").fmt(f)
@@ -894,16 +897,6 @@ impl fmt::Display for CreateSecretStatement {
             impl_fmt_display!(credential, v, self);
         }
         v.iter().join(" ").fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct AstVec<T>(pub Vec<T>);
-
-impl<T: fmt::Display> fmt::Display for AstVec<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.iter().join(" ").fmt(f)
     }
 }
 
