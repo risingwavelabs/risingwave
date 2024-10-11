@@ -354,6 +354,7 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 # If we can merge in: https://github.com/madsim-rs/sqlx/pull/2,
 # we can change it to patch madsim version instead.
 sqlx = { git = "https://github.com/kwannoel/sqlx.git", rev = "ddf222f56cf99f865231a5383053645c6ea05ba3" }
+madsim = { git = "https://github.com/madsim-rs/madsim.git", rev = "f0ffd24864245aea236833f1ff3638f75bd51700" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }

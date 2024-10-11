@@ -6986,8 +6986,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f88753ddf8d3cd43b9cf71a93626dd9aad3c24086a04420beb31922e1f856d02"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=f0ffd24864245aea236833f1ff3638f75bd51700#f0ffd24864245aea236833f1ff3638f75bd51700"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7055,8 +7054,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=f0ffd24864245aea236833f1ff3638f75bd51700#f0ffd24864245aea236833f1ff3638f75bd51700"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -9503,7 +9501,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
