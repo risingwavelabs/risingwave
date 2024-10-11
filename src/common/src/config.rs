@@ -810,6 +810,9 @@ pub struct StorageConfig {
     /// 3. Retry and timeout configuration
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
+
+    #[serde(default = "default::storage::time_travel_version_cache_capacity")]
+    pub time_travel_version_cache_capacity: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -1691,6 +1694,10 @@ pub mod default {
 
         pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize {
             64
+        }
+
+        pub fn time_travel_version_cache_capacity() -> u64 {
+            32
         }
     }
 

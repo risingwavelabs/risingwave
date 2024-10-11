@@ -139,6 +139,7 @@ pub struct StorageOpts {
     pub compactor_concurrent_uploading_sst_count: Option<usize>,
 
     pub object_store_config: ObjectStoreConfig,
+    pub time_travel_version_cache_capacity: u64,
 }
 
 impl Default for StorageOpts {
@@ -241,6 +242,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_concurrent_uploading_sst_count: c
                 .storage
                 .compactor_concurrent_uploading_sst_count,
+            time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
         }
     }
 }
