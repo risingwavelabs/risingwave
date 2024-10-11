@@ -41,7 +41,6 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::{InputLevel, Level, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -1192,20 +1191,15 @@ impl HummockManager {
                     compact_status.report_compact_task(&compact_task);
                 }
                 None => {
+                    // When the group_id is not found in the compaction_statuses, it means the group has been removed.
+                    // The task is invalid and should be canceled.
+                    // e.g.
+                    // 1. The group is removed by the user unregistering the tables
+                    // 2. The group is removed by the group scheduling algorithm
                     compact_task.task_status = TaskStatus::InvalidGroupCanceled;
                 }
             }
 
-            let input_sst_ids: HashSet<u64> = compact_task
-                .input_ssts
-                .iter()
-                .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
-                .collect();
-            let input_level_ids: Vec<u32> = compact_task
-                .input_ssts
-                .iter()
-                .map(|level| level.level_idx)
-                .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status {
                 if let Err(e) = self
                     .report_compaction_sanity_check(&task.object_timestamps)
@@ -1219,25 +1213,11 @@ impl HummockManager {
                     compact_task.task_status = TaskStatus::RetentionTimeRejected;
                     false
                 } else if Self::is_compact_task_expired(&compact_task, version.latest_version()) {
-                    // if member_table_ids changes, the data of sstable may stale.
+                    // if group changes, the data of sstable may stale.
                     compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                     false
                 } else {
-                    let group = version
-                        .latest_version()
-                        .levels
-                        .get(&compact_task.compaction_group_id)
-                        .unwrap();
-                    let input_exist =
-                        group.check_deleted_sst_exist(&input_level_ids, input_sst_ids);
-                    if !input_exist {
-                        compact_task.task_status = TaskStatus::InvalidGroupCanceled;
-                        warn!(
-                            "The task may be expired because of group split, task:\n {:?}",
-                            compact_task_to_string(&compact_task)
-                        );
-                    }
-                    input_exist
+                    true
                 }
             } else {
                 false
