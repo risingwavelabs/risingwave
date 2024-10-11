@@ -135,10 +135,47 @@ async fn run_compact(
     }
 }
 
+fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, String>> {
+    match config.common.catalog_type.as_deref() {
+        Some("storage") | None => Ok(HashMap::from_iter([
+            ("type".to_string(), "hadoop".to_string()),
+            (
+                "warehouse".to_string(),
+                config.common.warehouse_path.clone(),
+            ),
+        ])),
+        Some("jdbc") => Ok(HashMap::from_iter(
+            [
+                ("type".to_string(), "jdbc".to_string()),
+                (
+                    "warehouse".to_string(),
+                    config.common.warehouse_path.clone(),
+                ),
+                (
+                    "uri".to_string(),
+                    config
+                        .common
+                        .catalog_uri
+                        .clone()
+                        .ok_or_else(|| anyhow!("uri unspecified for jdbc catalog"))?,
+                ),
+            ]
+            .into_iter()
+            .chain(
+                config
+                    .java_catalog_props
+                    .iter()
+                    .filter(|(key, _)| key.starts_with("jdbc."))
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            ),
+        )),
+        Some(other) => Err(anyhow!("unsupported catalog type {} in compaction", other)),
+    }
+}
+
 pub fn spawn_compaction_client(
     config: &IcebergConfig,
 ) -> anyhow::Result<(mpsc::UnboundedSender<()>, oneshot::Sender<()>)> {
-    let warehouse_path = config.common.warehouse_path.clone();
     let database = config
         .common
         .database_name
@@ -148,11 +185,9 @@ pub fn spawn_compaction_client(
     let (commit_tx, commit_rx) = mpsc::unbounded_channel();
     let (finish_tx, finish_rx) = oneshot::channel();
 
+    let catalog_config = get_catalog_config(config)?;
+
     let _join_handle = tokio::spawn(async move {
-        let catalog_config = HashMap::from_iter([
-            ("type".to_string(), "hadoop".to_string()),
-            ("warehouse".to_string(), warehouse_path),
-        ]);
         select(
             finish_rx,
             pin!(run_compact(
