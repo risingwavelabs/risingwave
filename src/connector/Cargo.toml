@@ -190,11 +190,12 @@ expect-test = "1"
 fs-err = "2"
 paste = "1"
 pretty_assertions = "1"
+proc-macro2 = "1.0"
 quote = "1"
 rand = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
-syn = { version = "1", features = ["full"] }
+syn = { version = "2", features = ["full"] }
 tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"

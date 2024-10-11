@@ -248,6 +248,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         _filtered_object_ids: Vec<HummockSstableObjectId>,
         _total_object_count: u64,
         _total_object_size: u64,
+        _start_after: Option<String>,
         _next_start_after: Option<String>,
     ) -> Result<()> {
         unimplemented!()
@@ -346,6 +347,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                         task_status,
                         sorted_output_ssts,
                         table_stats_change,
+                        object_timestamps,
                     }) = item.event.unwrap()
                     {
                         if let Err(e) = hummock_manager_compact
@@ -357,6 +359,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                                     .map(SstableInfo::from)
                                     .collect_vec(),
                                 Some(table_stats_change),
+                                object_timestamps,
                             )
                             .await
                         {

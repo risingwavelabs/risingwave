@@ -85,6 +85,7 @@ pub async fn handle_alter_parallelism(
                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
                 sink.id.sink_id()
             }
+            // TODO: support alter parallelism for shared source
             _ => bail!(
                 "invalid statement type for alter parallelism: {:?}",
                 stmt_type

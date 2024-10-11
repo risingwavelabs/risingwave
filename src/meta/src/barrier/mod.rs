@@ -848,9 +848,11 @@ impl GlobalBarrierManager {
                                 assert_matches!(output.command_ctx.kind, BarrierKind::Barrier);
                                 self.scheduled_barriers.force_checkpoint_in_next_barrier();
                             }
-                            self.control_stream_manager.remove_partial_graph(
-                                output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
-                            );
+                            if !output.table_ids_to_finish.is_empty() {
+                                self.control_stream_manager.remove_partial_graph(
+                                    output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
+                                );
+                            }
                         }
                         Ok(None) => {}
                         Err(e) => {
@@ -1623,13 +1625,13 @@ fn collect_resp_info(
     let mut old_value_ssts = Vec::with_capacity(resps.len());
 
     for resp in resps {
-        let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
-            let sst_info = grouped.sst.expect("field not None");
+        let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
+            let sst_info = local_sst.sst.expect("field not None");
             sst_to_worker.insert(sst_info.object_id, resp.worker_id);
             LocalSstableInfo::new(
                 sst_info.into(),
-                from_prost_table_stats_map(grouped.table_stats_map),
-                grouped.created_at,
+                from_prost_table_stats_map(local_sst.table_stats_map),
+                local_sst.created_at,
             )
         });
         synced_ssts.extend(ssts_iter);

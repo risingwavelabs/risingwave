@@ -80,7 +80,7 @@ xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.16", default-features = false }
+procfs = { version = "0.17", default-features = false }
 libc = "0.2"
 nix = { version = "0.29", features = ["fs", "mman"] }
 
