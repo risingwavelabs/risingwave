@@ -1350,7 +1350,7 @@ pub mod default {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            3600
+            3600 * 3
         }
 
         pub fn full_gc_interval_sec() -> u64 {
