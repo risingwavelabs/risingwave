@@ -271,10 +271,22 @@ pub fn start(
             },
             MetaBackend::Sqlite => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "sqlite://{}?mode=rwc",
+                    "sqlite://{}{}",
                     opts.sql_endpoint
+                        .as_ref()
                         .expect("sql endpoint is required")
+                        .expose_secret(),
+                    if opts
+                        .sql_endpoint
+                        .as_ref()
+                        .unwrap()
                         .expose_secret()
+                        .contains("mode=memory")
+                    {
+                        ""
+                    } else {
+                        "?mode=rwc"
+                    }
                 ),
             },
             MetaBackend::Postgres => MetaStoreBackend::Sql {

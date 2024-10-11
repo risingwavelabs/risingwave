@@ -182,7 +182,9 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     };
     if !meta_backend_is_set {
         if opts.in_memory {
-            meta_opts.backend = Some(MetaBackend::Mem);
+            meta_opts.backend = Some(MetaBackend::Sqlite);
+            meta_opts.sql_endpoint =
+                Some("meta_backend?mode=memory&cache=shared".to_owned().into());
         } else {
             meta_opts.backend = Some(MetaBackend::Sqlite);
             let meta_store_dir = format!("{}/meta_store", &store_directory);

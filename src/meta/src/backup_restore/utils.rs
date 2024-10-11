@@ -66,7 +66,7 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
             endpoint: opts.sql_endpoint,
         },
         MetaBackend::Sqlite => MetaStoreBackend::Sql {
-            endpoint: format!("sqlite://{}?mode=rwc", opts.sql_endpoint),
+            endpoint: format!("sqlite://{}", opts.sql_endpoint),
         },
         MetaBackend::Postgres => MetaStoreBackend::Sql {
             endpoint: format!(
