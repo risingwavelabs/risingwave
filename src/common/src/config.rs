@@ -1347,11 +1347,11 @@ pub mod default {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            86400
+            3600
         }
 
         pub fn full_gc_interval_sec() -> u64 {
-            86400
+            600
         }
 
         pub fn full_gc_object_limit() -> u64 {
