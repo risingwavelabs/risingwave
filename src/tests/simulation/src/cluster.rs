@@ -410,7 +410,7 @@ impl Cluster {
         // resulting in connecting to the same sqlite file if they're using the same seed.
         // let file_path = format!("stest-{}-{}", handle.seed(), Uuid::new_v4());
 
-        let sql_endpoint = format!("sqlite::memory:&cache=shared");
+        let sql_endpoint = format!("sqlite://:memory:&cache=shared");
         let sql_conn = Box::new(sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap());
         __CLUSTER_SQLITE_CONNECTION
             .with(|conn| {
