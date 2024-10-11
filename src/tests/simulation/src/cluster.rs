@@ -408,9 +408,9 @@ impl Cluster {
 
         // FIXME: some tests like integration tests will run concurrently,
         // resulting in connecting to the same sqlite file if they're using the same seed.
-        let file_path = format!("stest-{}-{}", handle.seed(), Uuid::new_v4());
+        // let file_path = format!("stest-{}-{}", handle.seed(), Uuid::new_v4());
 
-        let sql_endpoint = format!("sqlite://{}?mode=memory&cache=shared", file_path);
+        let sql_endpoint = format!("sqlite::memory:&cache=shared");
         let sql_conn = Box::new(sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap());
         __CLUSTER_SQLITE_CONNECTION
             .with(|conn| {
@@ -441,10 +441,14 @@ impl Cluster {
                 .unwrap();
 
             // Test that it's not created on disk.
-            if std::fs::exists(&file_path).unwrap() {
+            if std::fs::exists(&"sqlite::memory:").unwrap() {
                 panic!(
-                    "there shouldn't be any file at the path: {}, it is an in-memory sqlite instance",
-                    file_path
+                    "there shouldn't be any file at the path, it is an in-memory sqlite instance",
+                )
+            }
+            if std::fs::exists(&"sqlite::memory:&cache=shared").unwrap() {
+                panic!(
+                    "there shouldn't be any file at the path, it is an in-memory sqlite instance",
                 )
             }
         }
