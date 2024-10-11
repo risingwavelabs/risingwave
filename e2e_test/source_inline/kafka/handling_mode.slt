@@ -1,9 +1,24 @@
+control substitution on
+
+system ok
+rpk topic delete json_timestamptz_handling_mode || true
+
+system ok
+rpk topic create json_timestamptz_handling_mode -p 1
+
+system ok
+cat <<EOF | rpk topic produce json_timestamptz_handling_mode -f "%v\n"
+{"case":"0 number small","payloade2e_test/source_inline/kafka/handling_mode.slt":{"after":{"case":"0 number small","at":100},"op":"r"}}
+{"case":"1 number recent","payload":{"after":{"case":"1 number recent","at":1712800800123456},"op":"r"}}
+{"case":"2 string utc","payload":{"after":{"case":"2 string utc","at":"2024-04-11T02:00:00.654321Z"},"op":"r"}}
+{"case":"3 string naive","payload":{"after":{"case":"3 string naive","at":"2024-04-11 02:00:00.234321"},"op":"r"}}
+EOF
+
 statement error unrecognized
 create table t (
   payload struct<after struct<"case" varchar, at timestamptz>>)
 with (
-  connector = 'kafka',
-  properties.bootstrap.server='message_queue:29092',
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
   topic = 'json_timestamptz_handling_mode')
 format plain encode json (timestamptz.handling.mode = 'mili');
 
@@ -13,8 +28,7 @@ create table plain_guess (
   "case" varchar,
   payload struct<after struct<"case" varchar, at timestamptz>>)
 with (
-  connector = 'kafka',
-  properties.bootstrap.server='message_queue:29092',
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
   topic = 'json_timestamptz_handling_mode')
 format plain encode json (timestamptz.handling.mod = 'mili');
 
@@ -23,8 +37,7 @@ create table plain_milli (
   "case" varchar,
   payload struct<after struct<"case" varchar, at timestamptz>>)
 with (
-  connector = 'kafka',
-  properties.bootstrap.server='message_queue:29092',
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
   topic = 'json_timestamptz_handling_mode')
 format plain encode json (timestamptz.handling.mode = 'milli');
 
@@ -33,8 +46,7 @@ create table plain_micro (
   "case" varchar,
   payload struct<after struct<"case" varchar, at timestamptz>>)
 with (
-  connector = 'kafka',
-  properties.bootstrap.server='message_queue:29092',
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
   topic = 'json_timestamptz_handling_mode')
 format plain encode json (timestamptz.handling.mode = 'micro');
 
@@ -43,8 +55,7 @@ create table plain_utc (
   "case" varchar,
   payload struct<after struct<"case" varchar, at timestamptz>>)
 with (
-  connector = 'kafka',
-  properties.bootstrap.server='message_queue:29092',
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
   topic = 'json_timestamptz_handling_mode')
 format plain encode json (timestamptz.handling.mode = 'utc_string');
 
@@ -53,8 +64,7 @@ create table plain_naive (
   "case" varchar,
   payload struct<after struct<"case" varchar, at timestamptz>>)
 with (
-  connector = 'kafka',
-  properties.bootstrap.server='message_queue:29092',
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
   topic = 'json_timestamptz_handling_mode')
 format plain encode json (timestamptz.handling.mode = 'utc_without_suffix');
 
@@ -62,8 +72,7 @@ statement ok
 create table debezium_milli (
   "case" varchar, at timestamptz, primary key("case"))
 with (
-  connector = 'kafka',
-  properties.bootstrap.server='message_queue:29092',
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
   topic = 'json_timestamptz_handling_mode')
 format debezium encode json (timestamptz.handling.mode = 'milli');
 

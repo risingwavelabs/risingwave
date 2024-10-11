@@ -4,16 +4,16 @@
 set -e
 
 SCRIPT_PATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
-cd "$SCRIPT_PATH/.." || exit 1
-# cwd is /scripts
+# SCRIPT_PATH is e2e_test/source_legacy/kafka/script/
+# cwd is e2e_test/source_legacy/kafka/
 
 echo "$SCRIPT_PATH"
 
-source ../.risingwave/config/risedev-env
+source ../../../.risingwave/config/risedev-env
 
 if [ "$1" == "compress" ]; then
   echo "Compress test_data/ into test_data.zip"
-  cd ./source
+  cd ./script
   zip_file=test_data.zip
   if [ -f "$zip_file" ]; then
     rm "$zip_file"
@@ -23,7 +23,7 @@ if [ "$1" == "compress" ]; then
 fi
 
 echo "--- Extract data for Kafka"
-cd ./source/
+cd ./script/
 mkdir -p ./test_data/ch_benchmark/
 unzip -o test_data.zip -d .
 cd ..

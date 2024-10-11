@@ -148,13 +148,13 @@ echo "--- Kill cluster"
 risedev ci-kill
 export RISINGWAVE_CI=true
 
-echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
+echo "--- e2e, ci-kafka, legacy kafka tests"
 export RUST_MIN_STACK=4194304
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-kafka
-./scripts/source/prepare_ci_kafka.sh
-risedev slt './e2e_test/source/basic/*.slt'
-risedev slt './e2e_test/source/basic/old_row_format_syntax/*.slt'
+./e2e_test/source_legacy/kafka/script/prepare_ci_kafka.sh
+risedev slt './e2e_test/source_legacy/kafka/*.slt'
+risedev slt './e2e_test/source_legacy/kafka/old_row_format_syntax/*.slt'
 
 echo "--- Run CH-benCHmark"
 risedev slt './e2e_test/ch_benchmark/batch/ch_benchmark.slt'

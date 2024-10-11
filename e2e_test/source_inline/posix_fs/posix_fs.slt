@@ -10,7 +10,7 @@ CREATE TABLE diamonds (
 ) WITH (
     connector = 'posix_fs',
     match_pattern = 'data*.csv',
-    posix_fs.root = 'e2e_test/source/opendal/data',
+    posix_fs.root = 'e2e_test/source_inline/posix_fs/data',
 ) FORMAT PLAIN ENCODE CSV ( without_header = 'false', delimiter = ',');
 
 sleep 10s
