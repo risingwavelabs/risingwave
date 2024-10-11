@@ -127,6 +127,11 @@ impl SourceReader {
                 prop.subscription_client().await?,
                 vec![],
             )),
+            ConnectorProperties::Nats(prop) => Some(WaitCheckpointTask::AckNatsJetStream(
+                prop.common.build_context().await?,
+                vec![],
+                prop.nats_properties_consumer.get_ack_policy()?,
+            )),
             _ => None,
         })
     }

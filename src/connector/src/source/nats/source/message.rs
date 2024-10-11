@@ -22,6 +22,12 @@ pub struct NatsMessage {
     pub split_id: SplitId,
     pub sequence_number: String,
     pub payload: Vec<u8>,
+    pub reply_subject: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct NatsJetStreamMeta {
+    pub reply_subject: Option<String>,
 }
 
 impl From<NatsMessage> for SourceMessage {
@@ -30,9 +36,12 @@ impl From<NatsMessage> for SourceMessage {
             key: None,
             payload: Some(message.payload),
             // For nats jetstream, use sequence id as offset
+            // DEPRECATED: no longer use sequence id as offset, let nats broker handle failover
             offset: message.sequence_number,
             split_id: message.split_id,
-            meta: SourceMeta::Empty,
+            meta: SourceMeta::NatsJetStream(NatsJetStreamMeta {
+                reply_subject: message.reply_subject,
+            }),
         }
     }
 }
@@ -43,6 +52,10 @@ impl NatsMessage {
             split_id,
             sequence_number: message.info().unwrap().stream_sequence.to_string(),
             payload: message.message.payload.to_vec(),
+            reply_subject: message
+                .message
+                .reply
+                .map(|subject| subject.as_str().to_string()),
         }
     }
 }

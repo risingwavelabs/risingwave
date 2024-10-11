@@ -21,6 +21,7 @@ use crate::parser::AccessError;
 use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
 use crate::schema::InvalidOptionError;
 use crate::sink::SinkError;
+use crate::source::nats::NatsJetStreamError;
 
 def_anyhow_newtype! {
     pub ConnectorError,
@@ -61,6 +62,8 @@ def_anyhow_newtype! {
     async_nats::jetstream::consumer::pull::MessagesError => "Nats error",
     async_nats::jetstream::context::CreateStreamError => "Nats error",
     async_nats::jetstream::stream::ConsumerError => "Nats error",
+    NatsJetStreamError => "Nats error",
+
     icelake::Error => "Iceberg error",
     iceberg::Error => "IcebergV2 error",
     redis::RedisError => "Redis error",

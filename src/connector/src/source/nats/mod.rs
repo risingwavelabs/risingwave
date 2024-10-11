@@ -23,27 +23,40 @@ use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, ReplayPolicy};
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+use strum_macros::Display;
+use thiserror::Error;
 use with_options::WithOptions;
 
 use crate::connector_common::NatsCommon;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::nats::enumerator::NatsSplitEnumerator;
+pub use crate::source::nats::source::NatsJetStreamMeta;
 use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::source::SourceProperties;
 use crate::{
     deserialize_optional_string_seq_from_string, deserialize_optional_u64_seq_from_string,
 };
 
+#[derive(Debug, Clone, Error, Display)]
+pub enum NatsJetStreamError {
+    InvalidAckPolicy(String),
+    InvalidReplayPolicy(String),
+}
+
 pub const NATS_CONNECTOR: &str = "nats";
 
 pub struct AckPolicyWrapper;
 
 impl AckPolicyWrapper {
-    pub fn parse_str(s: &str) -> Result<AckPolicy, String> {
+    pub fn parse_str(s: &str) -> Result<AckPolicy, NatsJetStreamError> {
         match s {
             "none" => Ok(AckPolicy::None),
             "all" => Ok(AckPolicy::All),
             "explicit" => Ok(AckPolicy::Explicit),
-            _ => Err(format!("Invalid AckPolicy '{}'", s)),
+            _ => Err(NatsJetStreamError::InvalidAckPolicy(format!(
+                "Invalid AckPolicy '{}', expect `none`, `all`, and `explicit`",
+                s
+            ))),
         }
     }
 }
@@ -51,11 +64,14 @@ impl AckPolicyWrapper {
 pub struct ReplayPolicyWrapper;
 
 impl ReplayPolicyWrapper {
-    pub fn parse_str(s: &str) -> Result<ReplayPolicy, String> {
+    pub fn parse_str(s: &str) -> Result<ReplayPolicy, NatsJetStreamError> {
         match s {
             "instant" => Ok(ReplayPolicy::Instant),
             "original" => Ok(ReplayPolicy::Original),
-            _ => Err(format!("Invalid ReplayPolicy '{}'", s)),
+            _ => Err(NatsJetStreamError::InvalidReplayPolicy(format!(
+                "Invalid ReplayPolicy '{}', expect `instant` and `original`",
+                s
+            ))),
         }
     }
 }
@@ -255,6 +271,13 @@ impl NatsPropertiesConsumer {
         }
         if let Some(v) = &self.backoff {
             c.backoff = v.iter().map(|&x| Duration::from_secs(x)).collect()
+        }
+    }
+
+    pub fn get_ack_policy(&self) -> ConnectorResult<AckPolicy> {
+        match &self.ack_policy {
+            Some(policy) => Ok(AckPolicyWrapper::parse_str(policy).map_err(ConnectorError::from)?),
+            None => Ok(AckPolicy::None),
         }
     }
 }

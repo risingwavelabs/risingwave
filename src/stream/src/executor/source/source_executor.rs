@@ -752,12 +752,14 @@ struct WaitCheckpointTaskBuilder {
 
 impl WaitCheckpointTaskBuilder {
     fn update_task_on_chunk(&mut self, offset_col: ArrayRef) {
-        #[expect(clippy::single_match)]
         match &mut self.building_task {
             WaitCheckpointTask::AckPubsubMessage(_, arrays) => {
                 arrays.push(offset_col);
             }
-            _ => {}
+            WaitCheckpointTask::AckNatsJetStream(_, arrays, _) => {
+                arrays.push(offset_col);
+            }
+            WaitCheckpointTask::CommitCdcOffset(_) => {}
         }
     }
 
