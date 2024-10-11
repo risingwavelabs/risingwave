@@ -57,6 +57,14 @@ fi
 
 echo "--- EXTRA_ARGS: ${EXTRA_ARGS}"
 
+echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, ddl MADSIM_TEST_SEED=1728614854424821921"
+MADSIM_TEST_SEED=1728614854424821921 ./risingwave_simulation \
+--kill \
+--kill-rate=${KILL_RATE} \
+--background-ddl-rate=${BACKGROUND_DDL_RATE} \
+${EXTRA_ARGS:-} \
+./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/recovery-ddl-921.log && rm $LOGDIR/recovery-ddl-921.log
+
 echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, background_ddl"
 seq "$TEST_NUM" | parallel './risingwave_simulation \
 --kill \
