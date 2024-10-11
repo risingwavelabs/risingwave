@@ -464,6 +464,7 @@ impl HummockManager {
         let created_tables: HashSet<u32> = HashSet::from_iter(created_tables);
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
+        // sort by first table id for deterministic merge order
         group_infos.sort_by_key(|group| {
             let table_ids = group
                 .table_statistic
@@ -506,7 +507,7 @@ impl HummockManager {
             {
                 Ok(_) => right += 1,
                 Err(e) => {
-                    tracing::warn!(
+                    tracing::debug!(
                         error = %e.as_report(),
                         "Failed to merge compaction group",
                     );
@@ -520,7 +521,7 @@ impl HummockManager {
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
         for cg_id in self.compaction_group_ids().await {
             if let Err(e) = self.compaction_state.try_sched_compaction(cg_id, task_type) {
-                tracing::warn!(
+                tracing::error!(
                     error = %e.as_report(),
                     "Failed to schedule {:?} compaction for compaction group {}",
                     task_type,
