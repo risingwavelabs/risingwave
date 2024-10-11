@@ -1084,9 +1084,9 @@ dependencies = [
 
 [[package]]
 name = "async-nats"
-version = "0.35.0"
+version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5e47d2f7305524258908449aff6c86db36697a9b4219bfb1777e0ca1945358d"
+checksum = "fd3bdd6ea595b2ea504500a3566071beb81125fc15d40a6f6bffa43575f64152"
 dependencies = [
  "base64 0.22.0",
  "bytes",
@@ -1110,6 +1110,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-rustls 0.26.0",
+ "tokio-util",
  "tracing",
  "tryhard",
  "url",
@@ -4875,9 +4876,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.11.5"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2de727a58f28ad9c5ff9952979d2392851b5917785ca657e07277890109cd3a0"
+checksum = "3ffa01d910407917a7c268fddf2be41163028693556b833a55f59351deffa011"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -4893,9 +4894,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.9.5"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be6577040f1b773e4a606180638ec48f5528d3d843d73092c06b5a8876bc4576"
+checksum = "797addbeabe5c42db9615e4d350a9b9d1597bebc07eefbd032d0e173430c8868"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -4913,9 +4914,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.9.5"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01dbfd6763227809019a1dc01c98b6a78949c63d3a204d0a6f8e0325f077ab5c"
+checksum = "b4ee0c1f19c7736f34e37e7cd4c1d5ceef3a32e24dbb14fcf2fcc836ce1cbfc4"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -4923,9 +4924,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.7.5"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02c59933e075daa88363e228475ce4fa9098689b9e13a26442666a3a3142da8d"
+checksum = "5b46b30275039721c05b390d4df00eff88814b1877ee06d56b61a859a5cf9577"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -4945,9 +4946,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.10.5"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6976958440e7fee57bd25f6c04df0759484c18a233f00740f6c2c5a47b939d90"
+checksum = "038ecf3211a5f984d534a5654a41613be7334fe8f5aab529708866da2de62d82"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -4966,11 +4967,14 @@ dependencies = [
  "foyer-memory",
  "fs4",
  "futures",
+ "hashbrown 0.14.3",
  "itertools 0.13.0",
  "libc",
  "lz4",
  "madsim-tokio",
+ "ordered_hash_map",
  "parking_lot 0.12.1",
+ "paste",
  "pin-project",
  "rand",
  "serde",
@@ -6986,8 +6990,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f88753ddf8d3cd43b9cf71a93626dd9aad3c24086a04420beb31922e1f856d02"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=f0ffd24864245aea236833f1ff3638f75bd51700#f0ffd24864245aea236833f1ff3638f75bd51700"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7055,8 +7058,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=f0ffd24864245aea236833f1ff3638f75bd51700#f0ffd24864245aea236833f1ff3638f75bd51700"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -8259,6 +8261,15 @@ checksum = "a4d6a8c22fc714f0c2373e6091bf6f5e9b37b1bc0b1184874b7e0a4e303d318f"
 dependencies = [
  "dlv-list",
  "hashbrown 0.14.3",
+]
+
+[[package]]
+name = "ordered_hash_map"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab0e5f22bf6dd04abd854a8874247813a8fa2c8c1260eba6fbb150270ce7c176"
+dependencies = [
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -9503,7 +9514,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -10235,6 +10246,7 @@ dependencies = [
  "thiserror-ext",
  "tikv-jemallocator",
  "tokio-metrics",
+ "tokio-postgres",
  "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tokio-util",
  "tracing",
@@ -11117,6 +11129,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "thiserror-ext",
+ "tokio-postgres",
  "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tracing",
  "uuid",
@@ -12114,9 +12127,9 @@ dependencies = [
 
 [[package]]
 name = "rust_decimal"
-version = "1.35.0"
+version = "1.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1790d1c4c0ca81211399e0e0af16333276f375209e71a37b67698a373db5b47a"
+checksum = "b082d80e3e3cc52b2ed634388d436fe1f4de6af5786cc2de9ba9737527bdf555"
 dependencies = [
  "arrayvec",
  "borsh",
