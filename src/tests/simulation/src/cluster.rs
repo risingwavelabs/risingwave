@@ -425,6 +425,12 @@ impl Cluster {
                 .await
                 .unwrap();
 
+            let mut conn2 = sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap();
+            sqlx::query("CREATE TABLE IF NOT EXISTS test2 (id INTEGER PRIMARY KEY, name TEXT)")
+                .execute(&mut conn)
+                .await
+                .unwrap();
+
             // Test that if we drop this connection,
             // and recreate the sqlite instance we can still connect to it.
             drop(conn);
