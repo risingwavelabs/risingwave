@@ -109,6 +109,7 @@ impl DeltaLakeCommon {
                 }
                 storage_options.insert(AWS_ALLOW_HTTP.to_string(), "true".to_string());
                 storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_string(), "true".to_string());
+                deltalake::aws::register_handlers(None);
                 deltalake::open_table_with_storage_options(s3_path.clone(), storage_options).await?
             }
             DeltaTableUrl::Local(local_path) => deltalake::open_table(local_path).await?,
@@ -122,6 +123,7 @@ impl DeltaLakeCommon {
                         ))
                     })?,
                 );
+                deltalake::gcp::register_handlers(None);
                 deltalake::open_table_with_storage_options(gcs_path.clone(), storage_options)
                     .await?
             }
