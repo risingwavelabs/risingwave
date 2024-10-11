@@ -464,7 +464,7 @@ mod test {
                             dangerous_max_idle_secs: None,
                             connector_rpc_endpoint: None,
                             license_key: None,
-                            license_key_file: None,
+                            license_key_path: None,
                             temp_secret_file_dir: "./meta/secrets/",
                         },
                     ),

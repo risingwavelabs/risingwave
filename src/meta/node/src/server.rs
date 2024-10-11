@@ -579,7 +579,10 @@ pub async fn start_service_as_election_leader(
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());
-    let system_params_srv = SystemParamsServiceImpl::new(env.system_params_manager_impl_ref());
+    let system_params_srv = SystemParamsServiceImpl::new(
+        env.system_params_manager_impl_ref(),
+        env.opts.license_key_path.is_some(),
+    );
     let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());

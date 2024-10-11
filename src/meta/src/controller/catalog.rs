@@ -52,7 +52,7 @@ use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbRelation, PbRelationGro
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::sea_query::{Expr, SimpleExpr};
+use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
@@ -623,10 +623,21 @@ impl CatalogController {
     pub async fn clean_dirty_subscription(&self) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        let _res = Subscription::delete_many()
+
+        Object::delete_many()
             .filter(
-                subscription::Column::SubscriptionState
-                    .eq(Into::<i32>::into(SubscriptionState::Init)),
+                object::Column::ObjType.eq(ObjectType::Subscription).and(
+                    object::Column::Oid.not_in_subquery(
+                        Query::select()
+                            .column(subscription::Column::SubscriptionId)
+                            .from(Subscription)
+                            .and_where(
+                                subscription::Column::SubscriptionState
+                                    .eq(SubscriptionState::Created as i32),
+                            )
+                            .take(),
+                    ),
+                ),
             )
             .exec(&txn)
             .await?;

@@ -121,6 +121,7 @@ impl Vacuum {
         filtered_object_ids: Vec<u64>,
         unfiltered_count: u64,
         unfiltered_size: u64,
+        start_after: Option<String>,
         next_start_after: Option<String>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> bool {
@@ -128,6 +129,7 @@ impl Vacuum {
             filtered_object_ids_len = filtered_object_ids.len(),
             unfiltered_count,
             unfiltered_size,
+            start_after,
             next_start_after,
             "try to report full scan task"
         );
@@ -136,6 +138,7 @@ impl Vacuum {
                 filtered_object_ids,
                 unfiltered_count,
                 unfiltered_size,
+                start_after,
                 next_start_after,
             )
             .await

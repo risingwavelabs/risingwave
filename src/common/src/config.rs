@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeConfig, S3FifoConfig};
+use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -803,6 +803,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
     pub compactor_concurrent_uploading_sst_count: Option<usize>,
 
+    #[serde(default = "default::storage::compactor_max_overlap_sst_count")]
+    pub compactor_max_overlap_sst_count: usize,
+
     /// Object storage configuration
     /// 1. General configuration
     /// 2. Some special configuration of Backend
@@ -896,7 +899,7 @@ pub struct FileCacheConfig {
     pub recover_mode: RecoverMode,
 
     #[serde(default = "default::file_cache::runtime_config")]
-    pub runtime_config: RuntimeConfig,
+    pub runtime_config: RuntimeOptions,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1680,6 +1683,10 @@ pub mod default {
             None
         }
 
+        pub fn compactor_max_overlap_sst_count() -> usize {
+            64
+        }
+
         pub fn table_info_statistic_history_times() -> usize {
             240
         }
@@ -1716,7 +1723,7 @@ pub mod default {
     }
 
     pub mod file_cache {
-        use foyer::{Compression, RecoverMode, RuntimeConfig, TokioRuntimeConfig};
+        use foyer::{Compression, RecoverMode, RuntimeOptions, TokioRuntimeOptions};
 
         pub fn dir() -> String {
             "".to_string()
@@ -1762,8 +1769,8 @@ pub mod default {
             RecoverMode::None
         }
 
-        pub fn runtime_config() -> RuntimeConfig {
-            RuntimeConfig::Unified(TokioRuntimeConfig::default())
+        pub fn runtime_config() -> RuntimeOptions {
+            RuntimeOptions::Unified(TokioRuntimeOptions::default())
         }
     }
 
@@ -2091,6 +2098,10 @@ pub mod default {
 
         pub fn sst_allowed_trivial_move_min_size() -> u64 {
             DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
+        }
+
+        pub fn disable_auto_group_scheduling() -> bool {
+            false
         }
     }
 

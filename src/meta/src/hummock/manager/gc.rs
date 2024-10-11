@@ -296,6 +296,32 @@ impl HummockManager {
             .map(|m| m.seq.try_into().unwrap());
         Ok(now)
     }
+
+    pub fn update_paged_metrics(
+        &self,
+        start_after: Option<String>,
+        next_start_after: Option<String>,
+        total_object_count_in_page: u64,
+        total_object_size_in_page: u64,
+    ) {
+        let mut paged_metrics = self.paged_metrics.lock();
+        paged_metrics.total_object_size.update(
+            start_after.clone(),
+            next_start_after.clone(),
+            total_object_size_in_page,
+        );
+        paged_metrics.total_object_count.update(
+            start_after,
+            next_start_after,
+            total_object_count_in_page,
+        );
+        if let Some(total_object_size) = paged_metrics.total_object_size.take() {
+            self.metrics.total_object_size.set(total_object_size as _);
+        }
+        if let Some(total_object_count) = paged_metrics.total_object_count.take() {
+            self.metrics.total_object_count.set(total_object_count as _);
+        }
+    }
 }
 
 pub struct FullGcState {
@@ -320,6 +346,84 @@ impl FullGcState {
     }
 }
 
+pub struct PagedMetrics {
+    total_object_count: PagedMetric,
+    total_object_size: PagedMetric,
+}
+
+impl PagedMetrics {
+    pub fn new() -> Self {
+        Self {
+            total_object_count: PagedMetric::new(),
+            total_object_size: PagedMetric::new(),
+        }
+    }
+}
+
+/// The metrics should be accumulated on a per-page basis and then finalized at the end.
+pub struct PagedMetric {
+    /// identifier of a page
+    expect_start_key: Option<String>,
+    /// accumulated metric value of pages seen so far
+    running_value: u64,
+    /// final metric value
+    sealed_value: Option<u64>,
+}
+
+impl PagedMetric {
+    fn new() -> Self {
+        Self {
+            expect_start_key: None,
+            running_value: 0,
+            sealed_value: None,
+        }
+    }
+
+    fn update(
+        &mut self,
+        current_start_key: Option<String>,
+        next_start_key: Option<String>,
+        value: u64,
+    ) {
+        // Encounter an update without pagination, replace current state.
+        if current_start_key.is_none() && next_start_key.is_none() {
+            self.running_value = value;
+            self.seal();
+            return;
+        }
+        // Encounter an update from unexpected page, reset current state.
+        if current_start_key != self.expect_start_key {
+            self.reset();
+            return;
+        }
+        self.running_value += value;
+        // There are more pages to add.
+        if next_start_key.is_some() {
+            self.expect_start_key = next_start_key;
+            return;
+        }
+        // This is the last page, seal the metric value.
+        self.seal();
+    }
+
+    fn seal(&mut self) {
+        self.sealed_value = Some(self.running_value);
+        self.reset();
+    }
+
+    fn reset(&mut self) {
+        self.running_value = 0;
+        self.expect_start_key = None;
+    }
+
+    fn take(&mut self) -> Option<u64> {
+        if self.sealed_value.is_some() {
+            self.reset();
+        }
+        self.sealed_value.take()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -329,7 +433,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_rpc_client::HummockMetaClient;
 
-    use super::ResponseEvent;
+    use super::{PagedMetric, ResponseEvent};
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::hummock::MockHummockMetaClient;
 
@@ -421,5 +525,36 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn test_paged_metric() {
+        let mut metric = PagedMetric::new();
+        fn assert_empty_state(metric: &mut PagedMetric) {
+            assert_eq!(metric.running_value, 0);
+            assert!(metric.expect_start_key.is_none());
+        }
+        assert!(metric.sealed_value.is_none());
+        assert_empty_state(&mut metric);
+
+        metric.update(None, None, 100);
+        assert_eq!(metric.take().unwrap(), 100);
+        assert!(metric.take().is_none());
+        assert_empty_state(&mut metric);
+
+        // "start" is not a legal identifier for the first page
+        metric.update(Some("start".into()), Some("end".into()), 100);
+        assert!(metric.take().is_none());
+        assert_empty_state(&mut metric);
+
+        metric.update(None, Some("middle".into()), 100);
+        assert!(metric.take().is_none());
+        assert_eq!(metric.running_value, 100);
+        assert_eq!(metric.expect_start_key, Some("middle".into()));
+
+        metric.update(Some("middle".into()), None, 50);
+        assert_eq!(metric.take().unwrap(), 150);
+        assert!(metric.take().is_none());
+        assert_empty_state(&mut metric);
     }
 }

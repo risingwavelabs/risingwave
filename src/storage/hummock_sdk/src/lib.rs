@@ -312,6 +312,31 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     true
 }
 
+pub fn full_key_can_concat(ssts: &[SstableInfo]) -> bool {
+    let len = ssts.len();
+    for i in 1..len {
+        let sst_1 = &ssts[i - 1];
+        let sst_2 = &ssts[i];
+
+        if sst_1.key_range.right_exclusive {
+            if sst_1
+                .key_range
+                .compare_right_with(&sst_2.key_range.left)
+                .is_gt()
+            {
+                return false;
+            }
+        } else if sst_1
+            .key_range
+            .compare_right_with(&sst_2.key_range.left)
+            .is_ge()
+        {
+            return false;
+        }
+    }
+    true
+}
+
 const CHECKPOINT_DIR: &str = "checkpoint";
 const CHECKPOINT_NAME: &str = "0";
 const ARCHIVE_DIR: &str = "archive";
