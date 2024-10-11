@@ -417,11 +417,30 @@ impl Cluster {
                 conn.set(sql_conn).unwrap();
             });
 
-        if std::fs::exists(&file_path).unwrap() {
-            panic!(
-                "there shouldn't be any file at the path: {}, it is an in-memory sqlite instance",
-                file_path
-            )
+        {
+            // Test that the same sqlite instance can be accessed outside.
+            let mut conn = sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap();
+            sqlx::query("CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, name TEXT)")
+                .execute(&mut conn)
+                .await
+                .unwrap();
+
+            // Test that if we drop this connection,
+            // and recreate the sqlite instance we can still connect to it.
+            drop(conn);
+            let mut conn = sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap();
+            sqlx::query("SELECT * FROM test")
+                .fetch_all(&mut conn)
+                .await
+                .unwrap();
+
+            // Test that it's not created on disk.
+            if std::fs::exists(&file_path).unwrap() {
+                panic!(
+                    "there shouldn't be any file at the path: {}, it is an in-memory sqlite instance",
+                    file_path
+                )
+            }
         }
 
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
