@@ -569,6 +569,9 @@ pub struct BatchConfig {
     /// Enable the spill out to disk feature for batch queries.
     #[serde(default = "default::batch::enable_spill")]
     pub enable_spill: bool,
+
+    #[serde(default = "default::batch::iceberg_storage_metrics_report_interval_seconds")]
+    pub iceberg_storage_metrics_report_interval_seconds: u64,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1993,6 +1996,10 @@ pub mod default {
             .into_iter()
             .map(str::to_string)
             .collect()
+        }
+
+        pub fn iceberg_storage_metrics_report_interval_seconds() -> u64 {
+            60 * 10 // 10min
         }
     }
 

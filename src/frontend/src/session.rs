@@ -454,7 +454,10 @@ impl FrontendEnv {
                 {
                     tracing::error!(err = %err.as_report(), "Failed to report iceberg metrics");
                 }
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                tokio::time::sleep(Duration::from_secs(
+                    config.batch.iceberg_storage_metrics_report_interval_seconds,
+                ))
+                .await;
             }
         });
         join_handles.push(join_handle);
