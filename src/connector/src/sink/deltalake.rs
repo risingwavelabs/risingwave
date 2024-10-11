@@ -578,8 +578,18 @@ mod test {
         let path = dir.path().to_str().unwrap();
         CreateBuilder::new()
             .with_location(path)
-            .with_column("id", SchemaDataType::integer(), false, Default::default())
-            .with_column("name", SchemaDataType::string(), false, Default::default())
+            .with_column(
+                "id",
+                SchemaDataType::Primitive(deltalake::kernel::PrimitiveType::Integer),
+                false,
+                Default::default(),
+            )
+            .with_column(
+                "name",
+                SchemaDataType::Primitive(deltalake::kernel::PrimitiveType::String),
+                false,
+                Default::default(),
+            )
             .await
             .unwrap();
 
