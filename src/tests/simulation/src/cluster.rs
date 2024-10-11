@@ -14,6 +14,7 @@
 
 #![cfg_attr(not(madsim), allow(unused_imports))]
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
@@ -37,6 +38,8 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
+use sqlx;
+use sqlx::Connection;
 #[cfg(not(madsim))]
 use tokio::runtime::Handle;
 use uuid::Uuid;
@@ -329,6 +332,10 @@ pub struct Cluster {
     pub(crate) ctl: NodeHandle,
 }
 
+thread_local! {
+    static __CLUSTER_SQLITE_CONNECTION: OnceCell<Box<sqlx::SqliteConnection>> = OnceCell::new();
+}
+
 impl Cluster {
     /// Start a RisingWave cluster for testing.
     ///
@@ -418,6 +425,12 @@ impl Cluster {
             )
         }
         let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path);
+        let sql_conn = Box::new(sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap());
+        __CLUSTER_SQLITE_CONNECTION
+            .with(|conn| {
+                conn.set(sql_conn).unwrap();
+            });
+
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
 
         // FIXME(kwannoel):
@@ -883,33 +896,6 @@ impl Cluster {
         for node in nodes.iter().chain(metas.iter()) {
             if !self.handle.is_exit(node) {
                 panic!("failed to graceful shutdown {node} in {waiting_time:?}");
-            }
-        }
-    }
-}
-
-#[cfg_or_panic(madsim)]
-impl Drop for Cluster {
-    fn drop(&mut self) {
-        // FIXME: remove it when deprecate the on-disk version.
-        let default_path = PathBuf::from(".");
-        let sqlite_data_dir = self
-            .config
-            .sqlite_data_dir
-            .as_ref()
-            .unwrap_or_else(|| &default_path);
-        for entry in std::fs::read_dir(sqlite_data_dir).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .starts_with(&format!("stest-{}-", self.handle.seed()))
-            {
-                std::fs::remove_file(path).unwrap();
-                break;
             }
         }
     }

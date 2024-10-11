@@ -11685,6 +11685,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "sqllogictest",
+ "sqlx",
  "tempfile",
  "tikv-jemallocator",
  "tokio-postgres",
