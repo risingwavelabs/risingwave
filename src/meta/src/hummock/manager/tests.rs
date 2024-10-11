@@ -1973,12 +1973,12 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: gen_sstable_info(10, vec![100, 101], test_epoch(20)),
+        sst_info: gen_sstable_info(1, vec![100, 101], test_epoch(20)),
         table_stats: Default::default(),
         created_at: u64::MAX,
     };
     let sst_2 = LocalSstableInfo {
-        sst_info: gen_sstable_info(11, vec![101], test_epoch(20)),
+        sst_info: gen_sstable_info(2, vec![101], test_epoch(20)),
         table_stats: Default::default(),
         created_at: u64::MAX,
     };
@@ -2005,16 +2005,17 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         .unwrap();
 
     let version_1 = hummock_manager.get_current_version().await;
-    assert!(!hummock_manager
+    let ret = hummock_manager
         .report_compact_task(
             compaction_task.task_id,
             TaskStatus::Success,
             vec![],
             None,
-            HashMap::default()
+            HashMap::default(),
         )
         .await
-        .unwrap());
+        .unwrap();
+    assert!(ret);
     let version_2 = hummock_manager.get_current_version().await;
     assert_eq!(
         version_1, version_2,

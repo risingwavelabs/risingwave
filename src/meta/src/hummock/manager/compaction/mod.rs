@@ -41,13 +41,14 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::level::{InputLevel, Level, Levels};
+use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, IntraLevelDelta};
+use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
     HummockSstableObjectId, HummockVersionId,
@@ -1066,42 +1067,6 @@ impl HummockManager {
             .await
     }
 
-    pub(super) fn is_compact_task_expired(
-        compact_task: &CompactTask,
-        hummock_version: &HummockVersion,
-    ) -> bool {
-        if let Some(group) = hummock_version
-            .levels
-            .get(&compact_task.compaction_group_id)
-        {
-            for input_level in &compact_task.input_ssts {
-                let input_level: &InputLevel = input_level;
-                let mut sst_ids: HashSet<_> = input_level
-                    .table_infos
-                    .iter()
-                    .map(|sst| sst.sst_id)
-                    .collect();
-                fn filter_ssts(levels: &Level, sst_ids: &mut HashSet<u64>) {
-                    for sst in &levels.table_infos {
-                        sst_ids.remove(&sst.sst_id);
-                    }
-                }
-                if input_level.level_idx == 0 {
-                    for level in &group.level0().sub_levels {
-                        filter_ssts(level, &mut sst_ids);
-                    }
-                } else {
-                    filter_ssts(group.get_level(input_level.level_idx as _), &mut sst_ids);
-                }
-                if !sst_ids.is_empty() {
-                    warn!(stale_sst_id = ?sst_ids, ?compact_task, "compact task expired");
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     pub async fn report_compact_task(
         &self,
         task_id: u64,
@@ -1200,6 +1165,17 @@ impl HummockManager {
                 }
             }
 
+            let input_sst_ids: HashSet<u64> = compact_task
+                .input_ssts
+                .iter()
+                .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
+                .collect();
+            let input_level_ids: Vec<u32> = compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.level_idx)
+                .collect();
+
             let is_success = if let TaskStatus::Success = compact_task.task_status {
                 if let Err(e) = self
                     .report_compaction_sanity_check(&task.object_timestamps)
@@ -1212,12 +1188,22 @@ impl HummockManager {
                     );
                     compact_task.task_status = TaskStatus::RetentionTimeRejected;
                     false
-                } else if Self::is_compact_task_expired(&compact_task, version.latest_version()) {
-                    // if group changes, the data of sstable may stale.
-                    compact_task.task_status = TaskStatus::InputOutdatedCanceled;
-                    false
                 } else {
-                    true
+                    let group = version
+                        .latest_version()
+                        .levels
+                        .get(&compact_task.compaction_group_id)
+                        .unwrap();
+                    let input_exist =
+                        group.check_input_sst_id_exist(&input_level_ids, input_sst_ids);
+
+                    if !input_exist {
+                        // if group changes, the data of sstable may stale.
+                        compact_task.task_status = TaskStatus::InputOutdatedCanceled;
+                        false
+                    } else {
+                        true
+                    }
                 }
             } else {
                 false
