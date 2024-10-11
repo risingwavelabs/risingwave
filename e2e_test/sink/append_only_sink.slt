@@ -48,7 +48,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: Sink error
   2: config error
-  3: File sink cannot set sink_decouple to false.
+  3: File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.
 
 
 statement ok

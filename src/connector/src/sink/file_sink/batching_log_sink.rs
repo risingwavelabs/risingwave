@@ -72,7 +72,6 @@ impl LogSinker for BatchingLogSinker {
             // begin_epoch when not previously began
             state = match state {
                 LogConsumerState::Uninitialized => {
-                    // sink_writer.begin_epoch(epoch).await?;
                     LogConsumerState::EpochBegun { curr_epoch: epoch }
                 }
                 LogConsumerState::EpochBegun { curr_epoch } => {
@@ -91,7 +90,6 @@ impl LogSinker for BatchingLogSinker {
                         epoch,
                         prev_epoch
                     );
-                    // sink_writer.begin_epoch(epoch).await?;
                     LogConsumerState::EpochBegun { curr_epoch: epoch }
                 }
             };

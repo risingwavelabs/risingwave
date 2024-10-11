@@ -260,9 +260,9 @@ impl StreamSink {
             }
         };
         // For file sink, it must have sink_decouple turned on.
-        if !sink_decouple && sink.is_fs_sink() {
+        if !sink_decouple && sink.is_file_sink() {
             return Err(
-                SinkError::Config(anyhow!("File sink cannot set sink_decouple to false.")).into(),
+                SinkError::Config(anyhow!("File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
             );
         }
         let log_store_type = if sink_decouple {

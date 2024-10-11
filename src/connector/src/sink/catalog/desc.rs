@@ -146,7 +146,7 @@ impl SinkDesc {
         }
     }
 
-    pub fn is_fs_sink(&self) -> bool {
+    pub fn is_file_sink(&self) -> bool {
         self.properties
             .get(CONNECTOR_TYPE_KEY)
             .map(|s| {

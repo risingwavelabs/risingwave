@@ -236,6 +236,31 @@ impl OpenDalSinkWriter {
         }
     }
 
+    /// Close current writer, finish writing a file.
+    pub async fn commit(&mut self) -> Result<bool> {
+        if let Some(sink_writer) = self.sink_writer.take() {
+            match sink_writer {
+                FileWriterEnum::ParquetFileWriter(w) => {
+                    if w.bytes_written() > 0 {
+                        let metadata = w.close().await?;
+                        tracing::info!(
+                            "The duration {:?}s of writing to this file has exceeded the rollover_interval, writer {:?}_{:?}finish write file, metadata: {:?}",
+                            self.duration_seconds_since_writer_created(),
+                            self.created_time
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Time went backwards")
+                            .as_secs(),
+                            self.executor_id,
+                            metadata
+                        );
+                        return Ok(true);
+                    }
+                }
+            };
+        }
+        Ok(false)
+    }
+
     /// Attempts to complete the file write using the writer's internal batching strategy.
     ///
     /// If the write is completed, returns the last `chunk_id` that was written;
@@ -270,26 +295,9 @@ impl OpenDalSinkWriter {
                 .clone()
                 .rollover_seconds
                 .unwrap_or(usize::MAX)
-            && let Some(sink_writer) = self.sink_writer.take()
+            && self.commit().await?
         {
-            match sink_writer {
-                FileWriterEnum::ParquetFileWriter(w) => {
-                    if w.bytes_written() > 0 {
-                        let metadata = w.close().await?;
-                        tracing::info!(
-                            "The duration {:?}s of writing to this file has exceeded the rollover_interval, writer {:?}_{:?}finish write file, metadata: {:?}",
-                            self.duration_seconds_since_writer_created(),
-                            self.created_time
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Time went backwards")
-                            .as_secs(),
-                            self.executor_id,
-                            metadata
-                        );
-                        return Ok(true);
-                    }
-                }
-            };
+            return Ok(true);
         }
 
         Ok(false)
@@ -313,49 +321,18 @@ impl OpenDalSinkWriter {
                 .clone()
                 .max_row_count
                 .unwrap_or(usize::MAX)
-            && let Some(sink_writer) = self.sink_writer.take()
+            && self.commit().await?
         {
-            match sink_writer {
-                FileWriterEnum::ParquetFileWriter(w) => {
-                    let metadata = w.close().await?;
-                    tracing::info!(
-                                "The number of written rows {} has reached the preset max_row_count, writer {:?}_{:?} finish write file, metadata: {:?}",
-                                self.current_bached_row_num,
-                                self.created_time
-                                .duration_since(UNIX_EPOCH)
-                                .expect("Time went backwards")
-                                .as_secs(),
-                                self.executor_id,
-                                metadata
-                            );
-                    self.current_bached_row_num = 0;
-                }
-            };
-
+            self.current_bached_row_num = 0;
             return Ok(true);
         }
+
         Ok(false)
     }
 
     pub async fn should_finish(&mut self) -> Result<Option<usize>> {
-        if let Some(sink_writer) = self.sink_writer.take() {
-            match sink_writer {
-                FileWriterEnum::ParquetFileWriter(w) => {
-                    if w.bytes_written() > 0 {
-                        let metadata = w.close().await?;
-                        tracing::info!(
-                            "Writer {:?}_{:?} force finish write file, metadata: {:?}",
-                            self.created_time
-                                .duration_since(UNIX_EPOCH)
-                                .expect("Time went backwards")
-                                .as_secs(),
-                            self.executor_id,
-                            metadata
-                        );
-                        return Ok(self.written_chunk_id);
-                    }
-                }
-            };
+        if self.commit().await? {
+            return Ok(self.written_chunk_id);
         }
 
         Ok(None)
