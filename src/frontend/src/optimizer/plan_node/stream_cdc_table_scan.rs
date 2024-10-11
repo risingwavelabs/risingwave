@@ -266,7 +266,9 @@ impl StreamCdcTableScan {
         })
     }
 
+    // The filter node receive input chunks in `(payload, _rw_offset, _rw_table_name)` schema
     pub fn build_cdc_filter_expr(cdc_table_name: &str) -> ExprImpl {
+        // filter by the `_rw_table_name` column
         FunctionCall::new(
             ExprType::Equal,
             vec![
