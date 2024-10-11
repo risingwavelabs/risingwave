@@ -82,6 +82,7 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -451,7 +452,7 @@ impl FrontendEnv {
                 if let Err(err) =
                     report_iceberg_metrics(&catalog_reader_for_report, &iceberg_stat_metrics).await
                 {
-                    tracing::error!("Failed to report iceberg metrics {:?}", err);
+                    tracing::error!(err = %err.as_report(), "Failed to report iceberg metrics");
                 }
                 tokio::time::sleep(Duration::from_secs(10)).await;
             }
