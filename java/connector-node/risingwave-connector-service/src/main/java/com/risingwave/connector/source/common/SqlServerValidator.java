@@ -177,11 +177,9 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                 var name = res.getString(1);
                 pkFields.add(name);
             }
-
-            if (!isPrimaryKeyMatch(tableSchema, pkFields)) {
-                throw ValidatorUtils.invalidArgument("Primary key mismatch");
-            }
+            primaryKeyCheck(tableSchema, pkFields);
         }
+
         // Check whether the db is case-sensitive
         boolean isCaseSensitive = false;
         try (var stmt =
@@ -266,16 +264,24 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
         }
     }
 
-    public static boolean isPrimaryKeyMatch(TableSchema sourceSchema, Set<String> pkFields) {
+    private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields)
+            throws RuntimeException {
         if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
-            return false;
+            throw ValidatorUtils.invalidArgument(
+                    "Primary key mismatch: the SQL schema defines "
+                            + sourceSchema.getPrimaryKeys().size()
+                            + " primary key columns, but the source table in SQL Server has "
+                            + pkFields.size()
+                            + " columns.");
         }
         for (var colName : sourceSchema.getPrimaryKeys()) {
             if (!pkFields.contains(colName)) {
-                return false;
+                throw ValidatorUtils.invalidArgument(
+                        "Primary key mismatch: The primary key list of the source table in SQL Server does not contain '"
+                                + colName
+                                + "'.\nHint: If your primary key contains uppercase letters, please ensure that the primary key in the DML of RisingWave uses the same uppercase format and is wrapped with double quotes (\"\").");
             }
         }
-        return true;
     }
 
     private boolean isDataTypeCompatible(String ssDataType, Data.DataType.TypeName typeName) {
