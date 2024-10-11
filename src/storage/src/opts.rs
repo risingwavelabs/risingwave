@@ -94,7 +94,7 @@ pub struct StorageOpts {
     pub data_file_cache_indexer_shards: usize,
     pub data_file_cache_compression: foyer::Compression,
     pub data_file_cache_flush_buffer_threshold_mb: usize,
-    pub data_file_cache_runtime_config: foyer::RuntimeConfig,
+    pub data_file_cache_runtime_config: foyer::RuntimeOptions,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
@@ -115,7 +115,7 @@ pub struct StorageOpts {
     pub meta_file_cache_indexer_shards: usize,
     pub meta_file_cache_compression: foyer::Compression,
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
-    pub meta_file_cache_runtime_config: foyer::RuntimeConfig,
+    pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
 
     /// The storage url for storing backups.
     pub backup_storage_url: String,
