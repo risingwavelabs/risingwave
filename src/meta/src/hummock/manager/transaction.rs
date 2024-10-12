@@ -156,7 +156,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .group_deltas;
             let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
                 0,
-                0,
+                0, // l0_sub_level_id will be generated during apply_version_delta
                 vec![], // default
                 inserted_table_infos,
                 0, // default
