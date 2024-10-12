@@ -813,6 +813,9 @@ pub struct StorageConfig {
     /// 3. Retry and timeout configuration
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
+
+    #[serde(default = "default::storage::time_travel_version_cache_capacity")]
+    pub time_travel_version_cache_capacity: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -1350,11 +1353,11 @@ pub mod default {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            86400
+            3600 * 3
         }
 
         pub fn full_gc_interval_sec() -> u64 {
-            86400
+            600
         }
 
         pub fn full_gc_object_limit() -> u64 {
@@ -1698,6 +1701,10 @@ pub mod default {
 
         pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize {
             64
+        }
+
+        pub fn time_travel_version_cache_capacity() -> u64 {
+            32
         }
     }
 
