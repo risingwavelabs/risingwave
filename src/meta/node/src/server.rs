@@ -436,15 +436,24 @@ pub async fn start_service_as_election_leader(
     }
 
     let metadata_manager = match env.meta_store() {
-        MetaStoreImpl::Kv(_) => MetadataManager::new_v1(
-            Arc::new(
-                ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
+        MetaStoreImpl::Kv(_) => {
+            let catalog_mgr = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
+            let all_streaming_jobs = catalog_mgr.list_stream_job_ids().await.unwrap();
+            let fragment_mgr = Arc::new(
+                FragmentManager::new_v2(env.clone(), all_streaming_jobs)
                     .await
                     .unwrap(),
-            ),
-            Arc::new(CatalogManager::new(env.clone()).await.unwrap()),
-            Arc::new(FragmentManager::new(env.clone()).await.unwrap()),
-        ),
+            );
+            MetadataManager::new_v1(
+                Arc::new(
+                    ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
+                        .await
+                        .unwrap(),
+                ),
+                catalog_mgr,
+                fragment_mgr,
+            )
+        }
         MetaStoreImpl::Sql(_) => {
             let cluster_controller = Arc::new(
                 ClusterController::new(env.clone(), max_cluster_heartbeat_interval)
