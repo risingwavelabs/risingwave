@@ -17,10 +17,10 @@ normal = ["workspace-hack"]
 ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
-arrow-48-array = { package = "arrow-array", version = "48" }
-arrow-48-buffer = { package = "arrow-buffer", version = "48" }
-arrow-48-cast = { package = "arrow-cast", version = "48" }
-arrow-48-schema = { package = "arrow-schema", version = "48" }
+arrow-52-array = { package = "arrow-array", version = "52" }
+arrow-52-buffer = { package = "arrow-buffer", version = "52" }
+arrow-52-cast = { package = "arrow-cast", version = "52" }
+arrow-52-schema = { package = "arrow-schema", version = "52" }
 arrow-53-array = { package = "arrow-array", version = "53" }
 arrow-53-buffer = { package = "arrow-buffer", version = "53" }
 arrow-53-cast = { package = "arrow-cast", version = "53" }
@@ -65,7 +65,7 @@ number_prefix = "0.4.0"
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 parking_lot = { workspace = true }
-parse-display = "0.9"
+parse-display = "0.10"
 paste = "1"
 pin-project-lite = "0.2"
 postgres-types = { version = "0.2.6", features = [
@@ -102,7 +102,7 @@ stacker = "0.1"
 static_assertions = "1"
 strum = "0.26"
 strum_macros = "0.26"
-sysinfo = { version = "0.31", default-features = false, features = ["system"] }
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }

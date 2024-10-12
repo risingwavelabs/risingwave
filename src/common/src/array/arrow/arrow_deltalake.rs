@@ -23,7 +23,7 @@ use std::sync::Arc;
 use arrow_array::ArrayRef;
 use num_traits::abs;
 
-pub use super::arrow_48::{
+pub use super::arrow_52::{
     arrow_array, arrow_buffer, arrow_cast, arrow_schema, FromArrow, ToArrow,
 };
 use crate::array::{Array, ArrayError, DataChunk, Decimal, DecimalArray};
