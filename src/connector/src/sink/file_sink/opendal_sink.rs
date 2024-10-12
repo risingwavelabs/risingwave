@@ -41,14 +41,19 @@ use crate::sink::encoder::{
     TimestamptzHandlingMode,
 };
 use crate::sink::file_sink::batching_log_sink::BatchingLogSinker;
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam,
-};
+use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam};
 use crate::source::TryFromBTreeMap;
 use crate::with_options::WithOptions;
 
 pub const DEFAULT_ROLLOVER_SECONDS: usize = 10;
+pub const DEFAULT_MAX_ROW_COUNR: usize = 10240;
 
+pub fn default_rollover_seconds() -> usize {
+    DEFAULT_ROLLOVER_SECONDS
+}
+pub fn default_max_row_count() -> usize {
+    DEFAULT_MAX_ROW_COUNR
+}
 /// The `FileSink` struct represents a file sink that uses the `OpendalSinkBackend` trait for its backend implementation.
 ///
 /// # Type Parameters
@@ -162,12 +167,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let config = S::from_btreemap(param.properties)?;
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
-        let mut batching_strategy = S::get_batching_strategy(config.clone());
-        // If no batching strategy is defined, the default batching strategy will be used, which writes a file every 10 seconds.
-        if batching_strategy.max_row_count.is_none() && batching_strategy.rollover_seconds.is_none()
-        {
-            batching_strategy.rollover_seconds = Some(DEFAULT_ROLLOVER_SECONDS);
-        }
+        let batching_strategy = S::get_batching_strategy(config.clone());
         let engine_type = S::get_engine_type();
 
         Ok(Self {
@@ -313,11 +313,7 @@ impl OpenDalSinkWriter {
     ///   no action was taken.
     async fn try_finish_write_via_rollover_interval(&mut self) -> Result<bool> {
         if self.duration_seconds_since_writer_created()
-            >= self
-                .batching_strategy
-                .clone()
-                .rollover_seconds
-                .unwrap_or(usize::MAX)
+            >= self.batching_strategy.clone().rollover_seconds
             && self.commit().await?
         {
             return Ok(true);
@@ -338,12 +334,7 @@ impl OpenDalSinkWriter {
     /// - `Ok(false)` if the threshold has not been met, indicating that
     ///   no action was taken.
     async fn try_finish_write_via_batched_rows(&mut self) -> Result<bool> {
-        if self.current_bached_row_num
-            >= self
-                .batching_strategy
-                .clone()
-                .max_row_count
-                .unwrap_or(usize::MAX)
+        if self.current_bached_row_num >= self.batching_strategy.clone().max_row_count
             && self.commit().await?
         {
             self.current_bached_row_num = 0;
@@ -579,12 +570,12 @@ fn convert_rw_schema_to_arrow_schema(
 #[serde_as]
 #[derive(Default, Deserialize, Debug, Clone, WithOptions)]
 pub struct BatchingStrategy {
-    #[serde(default)]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub max_row_count: Option<usize>,
-    #[serde(default)]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub rollover_seconds: Option<usize>,
+    #[serde(default = "default_max_row_count")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub max_row_count: usize,
+    #[serde(default = "default_rollover_seconds")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub rollover_seconds: usize,
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub path_partition_prefix: Option<PathPartitionPrefix>,
