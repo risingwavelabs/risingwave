@@ -22,10 +22,32 @@ impl MigrationTrait for Migration {
             .await?;
 
         manager
+            .exec_stmt(
+                UpdateStatement::new()
+                    .table(Table::Table)
+                    .values([(Table::VnodeCount, Expr::value(1))])
+                    .and_where(Expr::col(Table::DistributionKey).eq(Expr::value("[]")))
+                    .and_where(Expr::col(Table::DistKeyInPk).eq(Expr::value("[]")))
+                    .and_where(Expr::col(Table::VnodeColIndex).is_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
             .alter_table(
                 MigrationTable::alter()
                     .table(Fragment::Table)
                     .add_column(col!(Fragment::VnodeCount))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .exec_stmt(
+                UpdateStatement::new()
+                    .table(Fragment::Table)
+                    .values([(Fragment::VnodeCount, Expr::value(1))])
+                    .and_where(Expr::col(Fragment::DistributionType).eq(Expr::value("SINGLE")))
                     .to_owned(),
             )
             .await?;
@@ -74,12 +96,16 @@ impl MigrationTrait for Migration {
 enum Fragment {
     Table,
     VnodeCount,
+    DistributionType,
 }
 
 #[derive(DeriveIden)]
 enum Table {
     Table,
     VnodeCount,
+    DistributionKey,
+    DistKeyInPk,
+    VnodeColIndex,
 }
 
 #[derive(DeriveIden)]
