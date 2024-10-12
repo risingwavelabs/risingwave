@@ -15,7 +15,7 @@
 #![cfg(test)]
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -1760,6 +1760,29 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
     let task2 = hummock_manager
         .get_compact_task(left_compaction_group_id, &mut default_compaction_selector())
         .await
+        .unwrap();
+
+    // sst is pending by the task
+    assert!(task2.is_none());
+    let ret = hummock_manager
+        .report_compact_task(
+            task.task_id,
+            TaskStatus::Success,
+            vec![],
+            None,
+            HashMap::default(),
+        )
+        .await
+        .unwrap();
+    assert!(ret);
+
+    let current_version_2 = hummock_manager.get_current_version().await;
+    // The compaction task is cancelled or failed.
+    assert_eq!(current_version_2, current_version);
+
+    let task2 = hummock_manager
+        .get_compact_task(left_compaction_group_id, &mut default_compaction_selector())
+        .await
         .unwrap()
         .unwrap();
 
@@ -1784,18 +1807,9 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .await
         .unwrap();
     assert!(ret);
-    let ret = hummock_manager
-        .report_compact_task(
-            task.task_id,
-            TaskStatus::Success,
-            vec![],
-            None,
-            HashMap::default(),
-        )
-        .await
-        .unwrap();
-    // the task has been canceled
-    assert!(!ret);
+
+    let current_version_3 = hummock_manager.get_current_version().await;
+    assert_ne!(current_version_3, current_version_2);
 }
 
 async fn get_manual_compact_task(
@@ -2005,16 +2019,17 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         .unwrap();
 
     let version_1 = hummock_manager.get_current_version().await;
-    assert!(!hummock_manager
+    let ret = hummock_manager
         .report_compact_task(
             compaction_task.task_id,
             TaskStatus::Success,
             vec![],
             None,
-            HashMap::default()
+            HashMap::default(),
         )
         .await
-        .unwrap());
+        .unwrap();
+    assert!(ret);
     let version_2 = hummock_manager.get_current_version().await;
     assert_eq!(
         version_1, version_2,
@@ -2414,4 +2429,166 @@ async fn test_unregister_moved_table() {
             .collect_vec(),
         vec![100]
     );
+}
+
+#[tokio::test]
+async fn test_merge_compaction_group_task_expired() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_node.id,
+    ));
+    let original_groups = hummock_manager
+        .get_current_version()
+        .await
+        .levels
+        .keys()
+        .cloned()
+        .sorted()
+        .collect_vec();
+    assert_eq!(original_groups, vec![2, 3]);
+
+    hummock_manager
+        .register_table_ids_for_test(&[(100, 2), (101, 2)])
+        .await
+        .unwrap();
+    let sst_1 = LocalSstableInfo {
+        sst_info: gen_sstable_info(1, vec![100], test_epoch(20)),
+        table_stats: Default::default(),
+        created_at: u64::MAX,
+    };
+
+    let sst_2 = LocalSstableInfo {
+        sst_info: gen_sstable_info(2, vec![100, 101], test_epoch(20)),
+        table_stats: Default::default(),
+        created_at: u64::MAX,
+    };
+    let mut sst_3 = sst_2.clone();
+    let mut sst_4 = sst_1.clone();
+    sst_3.sst_info.sst_id = 3;
+    sst_3.sst_info.object_id = 3;
+    sst_4.sst_info.sst_id = 4;
+    sst_4.sst_info.object_id = 4;
+    hummock_meta_client
+        .commit_epoch(
+            30,
+            SyncResult {
+                uncommitted_ssts: vec![sst_1, sst_2, sst_3, sst_4],
+                ..Default::default()
+            },
+            false,
+        )
+        .await
+        .unwrap();
+
+    // Now group 2 has member tables [100,101,102], so split [100, 101] can succeed even though
+    // there is no data of 102.
+    hummock_manager
+        .register_table_ids_for_test(&[(102, 2)])
+        .await
+        .unwrap();
+    let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
+    let task = hummock_manager
+        .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+        .await
+        .unwrap()
+        .unwrap();
+
+    hummock_manager
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
+        .await
+        .unwrap();
+
+    let current_version = hummock_manager.get_current_version().await;
+    let left_compaction_group_id =
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
+    let right_compaction_group_id =
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
+    assert_eq!(current_version.levels.len(), 3);
+    assert_eq!(
+        current_version
+            .state_table_info
+            .compaction_group_member_table_ids(right_compaction_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .sorted()
+            .collect_vec(),
+        vec![101, 102]
+    );
+    assert_eq!(
+        current_version
+            .state_table_info
+            .compaction_group_member_table_ids(left_compaction_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
+        vec![100]
+    );
+
+    let task2 = hummock_manager
+        .get_compact_task(left_compaction_group_id, &mut default_compaction_selector())
+        .await
+        .unwrap();
+
+    // sst is pending by the task
+    assert!(task2.is_none());
+    let ret = hummock_manager
+        .report_compact_task(
+            task.task_id,
+            TaskStatus::Success,
+            vec![],
+            None,
+            HashMap::default(),
+        )
+        .await
+        .unwrap();
+    assert!(ret);
+
+    let current_version_2 = hummock_manager.get_current_version().await;
+    // The compaction task is cancelled or failed.
+    assert_eq!(current_version_2, current_version);
+
+    let task2 = hummock_manager
+        .get_compact_task(
+            right_compaction_group_id,
+            &mut default_compaction_selector(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    hummock_manager
+        .merge_compaction_group(left_compaction_group_id, right_compaction_group_id)
+        .await
+        .unwrap();
+
+    let report_sst_id = 100;
+    let ret = hummock_manager
+        .report_compact_task(
+            task2.task_id,
+            TaskStatus::Success,
+            vec![SstableInfo {
+                object_id: report_sst_id,
+                sst_id: report_sst_id,
+                key_range: KeyRange::default(),
+                table_ids: vec![100],
+                min_epoch: 20,
+                max_epoch: 20,
+                file_size: 100,
+                sst_size: 100,
+                ..Default::default()
+            }],
+            None,
+            HashMap::default(),
+        )
+        .await
+        .unwrap();
+    assert!(ret);
+
+    let current_version_3 = hummock_manager.get_current_version().await;
+    let sst_ids = current_version_3
+        .get_sst_ids_by_group_id(left_compaction_group_id)
+        .collect::<HashSet<_>>();
+    // task 2 report failed due to the compaction group is merged
+    assert!(!sst_ids.contains(&report_sst_id));
 }

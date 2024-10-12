@@ -1016,7 +1016,7 @@ impl Levels {
             ..
         } = summary;
 
-        if !self.check_deleted_sst_exist(&delete_sst_levels, delete_sst_ids_set.clone()) {
+        if !self.check_input_sst_ids_exist(&delete_sst_levels, delete_sst_ids_set.clone()) {
             warn!(
                 "This VersionDelta may be committed by an expired compact task. Please check it. \n
                     delete_sst_levels: {:?}\n,
@@ -1106,7 +1106,7 @@ impl Levels {
         }
     }
 
-    pub fn check_deleted_sst_exist(
+    pub fn check_input_sst_ids_exist(
         &self,
         delete_sst_levels: &[u32],
         mut delete_sst_ids_set: HashSet<u64>,
