@@ -930,6 +930,13 @@ mod tests {
         ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
             Ok(Response::new(WaitEpochCommitResponse::default()))
         }
+
+        async fn get_min_uncommitted_sst_id(
+            &self,
+            _request: Request<GetMinUncommittedSstIdRequest>,
+        ) -> Result<Response<GetMinUncommittedSstIdResponse>, Status> {
+            Ok(Response::new(GetMinUncommittedSstIdResponse::default()))
+        }
     }
 
     struct MockServices {
