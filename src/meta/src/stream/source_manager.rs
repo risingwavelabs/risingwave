@@ -56,10 +56,11 @@ pub struct SourceManager {
     pub paused: Mutex<()>,
     barrier_scheduler: BarrierScheduler,
     core: Mutex<SourceManagerCore>,
-    metrics: Arc<MetaMetrics>,
+    pub metrics: Arc<MetaMetrics>,
 }
 
 const MAX_FAIL_CNT: u32 = 10;
+const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct SharedSplitMap {
     splits: Option<BTreeMap<SplitId, SplitImpl>>,
@@ -94,6 +95,56 @@ fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorPro
     let mut properties = ConnectorProperties::extract(options_with_secret, true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
+}
+
+/// Used to create a new `ConnectorSourceWorkerHandle` for a new source.
+///
+/// It will call `ConnectorSourceWorker::tick()` to fetch split metadata once before returning.
+pub async fn create_source_worker_handle(
+    source: &Source,
+    metrics: Arc<MetaMetrics>,
+) -> MetaResult<ConnectorSourceWorkerHandle> {
+    tracing::info!("spawning new watcher for source {}", source.id);
+
+    let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+    let current_splits_ref = splits.clone();
+
+    let connector_properties = extract_prop_from_new_source(source)?;
+    let enable_scale_in = connector_properties.enable_split_scale_in();
+    let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+    let handle = dispatch_source_prop!(connector_properties, prop, {
+        let mut worker = ConnectorSourceWorker::create(
+            source,
+            *prop,
+            DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
+            current_splits_ref.clone(),
+            metrics,
+        )
+        .await?;
+
+        // if fail to fetch meta info, will refuse to create source
+
+        // todo: make the timeout configurable, longer than `properties.sync.call.timeout`
+        // in kafka
+        tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
+            .await
+            .ok()
+            .with_context(|| {
+                format!(
+                    "failed to fetch meta info for source {}, timeout {:?}",
+                    source.id, DEFAULT_SOURCE_TICK_TIMEOUT
+                )
+            })??;
+
+        tokio::spawn(async move { worker.run(sync_call_rx).await })
+    });
+
+    Ok(ConnectorSourceWorkerHandle {
+        handle,
+        sync_call_tx,
+        splits,
+        enable_scale_in,
+    })
 }
 
 const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
@@ -208,7 +259,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
 }
 
 /// Handle for a running [`ConnectorSourceWorker`].
-struct ConnectorSourceWorkerHandle {
+pub struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
@@ -626,7 +677,6 @@ fn align_backfill_splits(
 
 impl SourceManager {
     const DEFAULT_SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
-    const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
     pub async fn new(
         barrier_scheduler: BarrierScheduler,
@@ -949,20 +999,32 @@ impl SourceManager {
         Ok(assigned)
     }
 
-    /// register connector worker for source.
+    /// create and register connector worker for source.
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         let mut core = self.core.lock().await;
-        if core
-            .managed_sources
-            .contains_key(&(source.get_id() as SourceId))
-        {
-            tracing::warn!("source {} already registered", source.get_id());
-        } else {
-            Self::create_source_worker(source, &mut core.managed_sources, self.metrics.clone())
+        if let Entry::Vacant(e) = core.managed_sources.entry(source.get_id() as _) {
+            let handle = create_source_worker_handle(source, self.metrics.clone())
                 .await
                 .context("failed to create source worker")?;
+            e.insert(handle);
+        } else {
+            tracing::warn!("source {} already registered", source.get_id());
         }
         Ok(())
+    }
+
+    /// register connector worker for source.
+    pub async fn register_source_with_handle(
+        &self,
+        source_id: SourceId,
+        handle: ConnectorSourceWorkerHandle,
+    ) {
+        let mut core = self.core.lock().await;
+        if let Entry::Vacant(e) = core.managed_sources.entry(source_id) {
+            e.insert(handle);
+        } else {
+            tracing::warn!("source {} already registered", source_id);
+        }
     }
 
     /// Unregister connector worker for source.
@@ -1029,64 +1091,6 @@ impl SourceManager {
                 enable_scale_in,
             },
         );
-        Ok(())
-    }
-
-    /// Used when registering new sources (`Self::register_source`).
-    ///
-    /// It will call `ConnectorSourceWorker::tick()` to fetch split metadata once before returning.
-    async fn create_source_worker(
-        source: &Source,
-        managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
-        metrics: Arc<MetaMetrics>,
-    ) -> MetaResult<()> {
-        tracing::info!("spawning new watcher for source {}", source.id);
-
-        let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
-        let current_splits_ref = splits.clone();
-        let source_id = source.id;
-
-        let connector_properties = extract_prop_from_new_source(source)?;
-        let enable_scale_in = connector_properties.enable_split_scale_in();
-        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
-        let handle = dispatch_source_prop!(connector_properties, prop, {
-            let mut worker = ConnectorSourceWorker::create(
-                source,
-                *prop,
-                DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
-                current_splits_ref.clone(),
-                metrics,
-            )
-            .await?;
-
-            // if fail to fetch meta info, will refuse to create source
-
-            // todo: make the timeout configurable, longer than `properties.sync.call.timeout`
-            // in kafka
-            tokio::time::timeout(Self::DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
-                .await
-                .ok()
-                .with_context(|| {
-                    format!(
-                        "failed to fetch meta info for source {}, timeout {:?}",
-                        source.id,
-                        Self::DEFAULT_SOURCE_TICK_TIMEOUT
-                    )
-                })??;
-
-            tokio::spawn(async move { worker.run(sync_call_rx).await })
-        });
-
-        managed_sources.insert(
-            source_id as SourceId,
-            ConnectorSourceWorkerHandle {
-                handle,
-                sync_call_tx,
-                splits,
-                enable_scale_in,
-            },
-        );
-
         Ok(())
     }
 

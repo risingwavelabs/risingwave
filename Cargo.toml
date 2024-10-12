@@ -154,9 +154,10 @@ arrow-udf-flight = "0.4"
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
-deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd4640490202ffe98adbd13b09cef8e007b", features = [
-    "s3-no-concurrent-write",
+deltalake = { version = "0.20.1", features = [
+    "s3",
     "gcs",
+    "datafusion",
 ] }
 itertools = "0.13.0"
 jsonbb = "0.1.4"

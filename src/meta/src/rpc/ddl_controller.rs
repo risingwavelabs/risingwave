@@ -78,9 +78,9 @@ use crate::manager::{
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
-    ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
-    CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
-    ReplaceTableContext, SourceManagerRef, StreamFragmentGraph,
+    create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
+    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
+    GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -429,10 +429,19 @@ impl DdlController {
         &self,
         source: Source,
     ) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
-            .catalog_controller
-            .create_source(source, Some(self.source_manager.clone()))
+        let handle = create_source_worker_handle(&source, self.source_manager.metrics.clone())
             .await
+            .context("failed to create source worker")?;
+
+        let (source_id, version) = self
+            .metadata_manager
+            .catalog_controller
+            .create_source(source)
+            .await?;
+        self.source_manager
+            .register_source_with_handle(source_id, handle)
+            .await;
+        Ok(version)
     }
 
     async fn drop_source(
