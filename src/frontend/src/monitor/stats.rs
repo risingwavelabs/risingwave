@@ -23,9 +23,8 @@ use prometheus::{
     register_histogram_with_registry, register_int_counter_with_registry,
     register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, Registry,
 };
-use risingwave_common::metrics::{LabelGuardedIntGaugeVec, TrAdderGauge};
+use risingwave_common::metrics::TrAdderGauge;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_common::register_guarded_int_gauge_vec_with_registry;
 use tokio::task::JoinHandle;
 
 use crate::session::SessionMapRef;
@@ -256,30 +255,6 @@ impl Drop for CursorMetricsCollector {
     fn drop(&mut self) {
         if let Some(shutdown_tx) = mem::take(&mut self.shutdown_tx) {
             shutdown_tx.send(()).ok();
-        }
-    }
-}
-
-pub static GLOBAL_ICEBERG_STAT_METRICS: LazyLock<IcebergStatMetrics> =
-    LazyLock::new(|| IcebergStatMetrics::new(&GLOBAL_METRICS_REGISTRY));
-
-#[derive(Clone)]
-pub struct IcebergStatMetrics {
-    pub iceberg_storage_data_file_size: LabelGuardedIntGaugeVec<3>,
-}
-
-impl IcebergStatMetrics {
-    pub fn new(registry: &Registry) -> Self {
-        let iceberg_storage_data_file_size = register_guarded_int_gauge_vec_with_registry!(
-            "iceberg_storage_data_file_size",
-            "Total size of iceberg storage data file",
-            &["database", "schema", "table"],
-            registry
-        )
-        .unwrap();
-
-        Self {
-            iceberg_storage_data_file_size,
         }
     }
 }
