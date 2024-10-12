@@ -18,6 +18,7 @@ use std::mem::take;
 use std::sync::Arc;
 
 use risingwave_common::hash::ActorId;
+use risingwave_common::must_match;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -147,11 +148,18 @@ impl CreatingStreamingJobStatus {
     pub(super) fn update_progress(
         &mut self,
         create_mview_progress: impl IntoIterator<Item = &CreateMviewProgress>,
-    ) {
+    ) -> Option<(Vec<CreatingJobInjectBarrierInfo>, &InflightGraphInfo)> {
         match self {
             Self::ConsumingSnapshot {
                 create_mview_tracker,
                 ref version_stats,
+                prev_epoch_fake_physical_time,
+                pending_commands,
+                ref graph_info,
+                pending_non_checkpoint_barriers,
+                ref backfill_epoch,
+                initial_barrier_info,
+                ref snapshot_backfill_actors,
                 ..
             } => {
                 create_mview_tracker.update_tracking_jobs(
@@ -159,47 +167,21 @@ impl CreatingStreamingJobStatus {
                     create_mview_progress,
                     version_stats,
                 );
-            }
-            CreatingStreamingJobStatus::ConsumingLogStore {
-                log_store_progress_tracker,
-                ..
-            } => {
-                log_store_progress_tracker.update(create_mview_progress);
-            }
-            CreatingStreamingJobStatus::Finishing(_) => {}
-        }
-    }
+                if create_mview_tracker.has_pending_finished_jobs() {
+                    let (new_actors, mutation) = match initial_barrier_info.take() {
+                        Some((new_actors, mutation)) => (Some(new_actors), Some(mutation)),
+                        None => (None, None),
+                    };
+                    assert!(initial_barrier_info.is_none());
+                    pending_non_checkpoint_barriers.push(*backfill_epoch);
 
-    /// return
-    /// - Some(vec[(`curr_epoch`, `prev_epoch`, `barrier_kind`)]) of barriers to newly inject
-    pub(super) fn may_inject_fake_barrier(
-        &mut self,
-        is_checkpoint: bool,
-    ) -> Option<Vec<CreatingJobInjectBarrierInfo>> {
-        if let CreatingStreamingJobStatus::ConsumingSnapshot {
-            prev_epoch_fake_physical_time,
-            pending_commands,
-            create_mview_tracker,
-            ref graph_info,
-            pending_non_checkpoint_barriers,
-            ref backfill_epoch,
-            initial_barrier_info,
-            ref snapshot_backfill_actors,
-            ..
-        } = self
-        {
-            if create_mview_tracker.has_pending_finished_jobs() {
-                assert!(initial_barrier_info.is_none());
-                pending_non_checkpoint_barriers.push(*backfill_epoch);
-
-                let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
-                let barriers_to_inject: Vec<_> =
-                    [CreatingJobInjectBarrierInfo {
+                    let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
+                    let barriers_to_inject: Vec<_> = [CreatingJobInjectBarrierInfo {
                         curr_epoch: TracedEpoch::new(Epoch(*backfill_epoch)),
                         prev_epoch: TracedEpoch::new(prev_epoch),
                         kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
-                        new_actors: None,
-                        mutation: None,
+                        new_actors,
+                        mutation,
                     }]
                     .into_iter()
                     .chain(pending_commands.drain(..).map(|command_ctx| {
@@ -213,15 +195,39 @@ impl CreatingStreamingJobStatus {
                     }))
                     .collect();
 
-                *self = CreatingStreamingJobStatus::ConsumingLogStore {
-                    graph_info: graph_info.clone(),
-                    log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                        snapshot_backfill_actors.iter().cloned(),
-                        barriers_to_inject.len(),
-                    ),
-                };
-                Some(barriers_to_inject)
-            } else {
+                    *self = CreatingStreamingJobStatus::ConsumingLogStore {
+                        graph_info: graph_info.clone(),
+                        log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
+                            snapshot_backfill_actors.iter().cloned(),
+                            barriers_to_inject.len(),
+                        ),
+                    };
+                    let graph_info = must_match!(self,
+                        CreatingStreamingJobStatus::ConsumingLogStore {graph_info, ..} => graph_info);
+                    Some((barriers_to_inject, graph_info))
+                } else {
+                    None
+                }
+            }
+            CreatingStreamingJobStatus::ConsumingLogStore {
+                log_store_progress_tracker,
+                ..
+            } => {
+                log_store_progress_tracker.update(create_mview_progress);
+                None
+            }
+            CreatingStreamingJobStatus::Finishing(_) => None,
+        }
+    }
+
+    pub(super) fn new_fake_barrier(
+        prev_epoch_fake_physical_time: &mut u64,
+        pending_non_checkpoint_barriers: &mut Vec<u64>,
+        initial_barrier_info: &mut Option<(HashMap<WorkerId, Vec<StreamActor>>, Mutation)>,
+        is_checkpoint: bool,
+    ) -> CreatingJobInjectBarrierInfo {
+        {
+            {
                 let prev_epoch =
                     TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
                 *prev_epoch_fake_physical_time += 1;
@@ -239,16 +245,14 @@ impl CreatingStreamingJobStatus {
                     } else {
                         Default::default()
                     };
-                Some(vec![CreatingJobInjectBarrierInfo {
+                CreatingJobInjectBarrierInfo {
                     curr_epoch,
                     prev_epoch,
                     kind,
                     new_actors,
                     mutation,
-                }])
+                }
             }
-        } else {
-            None
         }
     }
 }

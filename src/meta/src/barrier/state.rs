@@ -86,6 +86,8 @@ impl BarrierManagerState {
 
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
+    ///
+    /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`)
     pub fn apply_command(
         &mut self,
         command: &Command,
