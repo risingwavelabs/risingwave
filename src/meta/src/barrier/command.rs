@@ -22,7 +22,6 @@ use risingwave_common::hash::ActorMapping;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
-use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
@@ -442,6 +441,8 @@ pub struct CommandContext {
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
 
+    pub table_ids_to_commit: HashSet<TableId>,
+
     pub current_paused_reason: Option<PausedReason>,
 
     pub command: Command,
@@ -470,12 +471,12 @@ impl std::fmt::Debug for CommandContext {
 }
 
 impl CommandContext {
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         node_map: HashMap<WorkerId, PbWorkerNode>,
         subscription_info: InflightSubscriptionInfo,
         prev_epoch: TracedEpoch,
         curr_epoch: TracedEpoch,
+        table_ids_to_commit: HashSet<TableId>,
         current_paused_reason: Option<PausedReason>,
         command: Command,
         kind: BarrierKind,
@@ -487,6 +488,7 @@ impl CommandContext {
             subscription_info,
             prev_epoch,
             curr_epoch,
+            table_ids_to_commit,
             current_paused_reason,
             command,
             kind,
@@ -945,7 +947,13 @@ impl Command {
 }
 
 impl CommandContext {
-    pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
+    pub async fn wait_epoch_commit(&self) -> MetaResult<()> {
+        let table_id = self.table_ids_to_commit.iter().next().cloned();
+        // try wait epoch on an existing random table id
+        let Some(table_id) = table_id else {
+            // no need to wait epoch when there is no table id
+            return Ok(());
+        };
         let futures = self.node_map.values().map(|worker_node| async {
             let client = self
                 .barrier_manager_context
@@ -953,7 +961,10 @@ impl CommandContext {
                 .stream_client_pool()
                 .get(worker_node)
                 .await?;
-            let request = WaitEpochCommitRequest { epoch };
+            let request = WaitEpochCommitRequest {
+                epoch: self.prev_epoch.value().0,
+                table_id: table_id.table_id,
+            };
             client.wait_epoch_commit(request).await
         });
 
@@ -976,7 +987,7 @@ impl CommandContext {
                     // storage version with this epoch is synced to all compute nodes before the
                     // execution of the next command of `Update`, as some newly created operators
                     // may immediately initialize their states on that barrier.
-                    self.wait_epoch_commit(self.prev_epoch.value().0).await?;
+                    self.wait_epoch_commit().await?;
                 }
             }
 
@@ -1020,50 +1031,40 @@ impl CommandContext {
                     .unregister_table_ids(table_fragments.all_table_ids().map(TableId::new))
                     .await?;
 
-                match &self.barrier_manager_context.metadata_manager {
-                    MetadataManager::V1(mgr) => {
-                        // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
-                        // We need to cleanup the table state. So we can do it here.
-                        // The logic is the same as above, for hummock_manager.unregister_table_ids.
-                        if let Err(e) = mgr
-                            .catalog_manager
-                            .cancel_create_materialized_view_procedure(
-                                table_fragments.table_id().table_id,
-                                table_fragments.internal_table_ids(),
-                            )
-                            .await
-                        {
-                            let table_id = table_fragments.table_id().table_id;
-                            tracing::warn!(
-                                table_id,
-                                error = %e.as_report(),
-                                "cancel_create_table_procedure failed for CancelStreamingJob",
-                            );
-                            // If failed, check that table is not in meta store.
-                            // If any table is, just panic, let meta do bootstrap recovery.
-                            // Otherwise our persisted state is dirty.
-                            let mut table_ids = table_fragments.internal_table_ids();
-                            table_ids.push(table_id);
-                            mgr.catalog_manager.assert_tables_deleted(table_ids).await;
-                        }
+                if let MetadataManager::V1(mgr) = &self.barrier_manager_context.metadata_manager {
+                    // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
+                    // We need to cleanup the table state. So we can do it here.
+                    // The logic is the same as above, for hummock_manager.unregister_table_ids.
+                    if let Err(e) = mgr
+                        .catalog_manager
+                        .cancel_create_materialized_view_procedure(
+                            table_fragments.table_id().table_id,
+                            table_fragments.internal_table_ids(),
+                        )
+                        .await
+                    {
+                        let table_id = table_fragments.table_id().table_id;
+                        tracing::warn!(
+                            table_id,
+                            error = %e.as_report(),
+                            "cancel_create_table_procedure failed for CancelStreamingJob",
+                        );
+                        // If failed, check that table is not in meta store.
+                        // If any table is, just panic, let meta do bootstrap recovery.
+                        // Otherwise our persisted state is dirty.
+                        let mut table_ids = table_fragments.internal_table_ids();
+                        table_ids.push(table_id);
+                        mgr.catalog_manager.assert_tables_deleted(table_ids).await;
+                    }
 
-                        // We need to drop table fragments here,
-                        // since this is not done in stream manager (foreground ddl)
-                        // OR barrier manager (background ddl)
-                        mgr.fragment_manager
-                            .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
-                                table_fragments.table_id(),
-                            )))
-                            .await?;
-                    }
-                    MetadataManager::V2(mgr) => {
-                        mgr.catalog_controller
-                            .try_abort_creating_streaming_job(
-                                table_fragments.table_id().table_id as _,
-                                true,
-                            )
-                            .await?;
-                    }
+                    // We need to drop table fragments here,
+                    // since this is not done in stream manager (foreground ddl)
+                    // OR barrier manager (background ddl)
+                    mgr.fragment_manager
+                        .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
+                            table_fragments.table_id(),
+                        )))
+                        .await?;
                 }
             }
 

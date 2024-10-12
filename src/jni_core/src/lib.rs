@@ -319,9 +319,10 @@ impl<'a> Deref for JavaBindingIterator<'a> {
 }
 
 #[no_mangle]
-extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(_env: EnvParam<'_>) -> jint {
-    // TODO(var-vnode): use vnode count from config
-    VirtualNode::COUNT as jint
+extern "system" fn Java_com_risingwave_java_binding_Binding_defaultVnodeCount(
+    _env: EnvParam<'_>,
+) -> jint {
+    VirtualNode::COUNT_FOR_COMPAT as jint
 }
 
 #[cfg_or_panic(not(madsim))]

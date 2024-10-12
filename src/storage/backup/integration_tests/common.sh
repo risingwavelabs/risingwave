@@ -141,6 +141,12 @@ function execute_sql() {
   echo "${sql}" | psql -h localhost -p 4566 -d dev -U root 2>&1
 }
 
+function execute_sql_t() {
+  local sql
+  sql=$1
+  echo "${sql}" | psql -h localhost -p 4566 -d dev -U root -t 2>&1
+}
+
 function execute_sql_and_expect() {
   local sql
   sql=$1
@@ -155,36 +161,17 @@ function execute_sql_and_expect() {
   [ -n "${result}" ]
 }
 
-function get_max_committed_epoch() {
-  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose 2>&1 | grep committed_epoch | sed -n 's/^.*committed_epoch: \(.*\),/\1/p')
-  # always take the smallest one
-  echo "${mce}"|sort -n |head -n 1
-}
-
-function get_safe_epoch() {
-  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose 2>&1 | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
-  # always take the largest one
-  echo "${safe_epoch}"|sort -n -r |head -n 1
-}
-
 function get_total_sst_count() {
   ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
   find "hummock-minio/hummock001" -name "*.data" |wc -l
 }
 
-function get_max_committed_epoch_in_backup() {
-  sed_str="s/.*\"state_table_info\":{\"[[:digit:]]*\":{\"committedEpoch\":\"\([[:digit:]]*\)\",\"safeEpoch\":\"\([[:digit:]]*\)\".*/\1/p"
-  ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
-  cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
-}
-
-function get_safe_epoch_in_backup() {
-  sed_str="s/.*\"state_table_info\":{\"[[:digit:]]*\":{\"committedEpoch\":\"\([[:digit:]]*\)\",\"safeEpoch\":\"\([[:digit:]]*\)\".*/\2/p"
-  ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
-  cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
-}
-
-function get_min_pinned_snapshot() {
-  s=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-pinned-snapshots 2>&1 | grep "min_pinned_snapshot" | sed -n 's/.*min_pinned_snapshot \(.*\)/\1/p' | sort -n | head -1)
-  echo "${s}"
+function get_table_committed_epoch_in_meta_snapshot() {
+    sql="select id from rw_tables;"
+    table_id=$(execute_sql_t "${sql}")
+    table_id="${table_id#"${table_id%%[![:space:]]*}"}"
+    table_id="${table_id%"${table_id##*[![:space:]]}"}"
+    sql="select state_table_info->'${table_id}'->>'committedEpoch' from rw_meta_snapshot;"
+    query_result=$(execute_sql_t "${sql}")
+    echo ${query_result}
 }

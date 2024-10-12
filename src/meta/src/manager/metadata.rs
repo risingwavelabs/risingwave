@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::pin::pin;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::future::{select, Either};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_meta_model_v2::{ObjectId, SourceId};
@@ -31,6 +31,7 @@ use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
 use tracing::warn;
 
+use super::FragmentParallelismInfo;
 use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
@@ -436,15 +437,12 @@ impl MetadataManager {
     pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> MetaResult<HashMap<FragmentId, usize>> {
+    ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         match self {
             MetadataManager::V1(mgr) => Ok(mgr
                 .fragment_manager
                 .running_fragment_parallelisms(id_filter)
-                .await
-                .into_iter()
-                .map(|(k, v)| (k as FragmentId, v))
-                .collect()),
+                .await),
             MetadataManager::V2(mgr) => {
                 let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
                 Ok(mgr
@@ -890,6 +888,24 @@ impl MetadataManager {
             MetadataManager::V1(mgr) => mgr.catalog_manager.get_mv_depended_subscriptions().await,
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller.get_mv_depended_subscriptions().await
+            }
+        }
+    }
+
+    pub async fn get_job_max_parallelism(&self, table_id: TableId) -> MetaResult<usize> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                let fragments = mgr.fragment_manager.get_fragment_read_guard().await;
+                Ok(fragments
+                    .table_fragments()
+                    .get(&table_id)
+                    .map(|tf| tf.max_parallelism)
+                    .with_context(|| format!("job {table_id} not found"))?)
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_max_parallelism_by_id(table_id.table_id as _)
+                    .await
             }
         }
     }

@@ -94,9 +94,7 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election::etcd::EtcdElectionClient;
-use crate::rpc::election::sql::{
-    MySqlDriver, PostgresDriver, SqlBackendElectionClient, SqliteDriver,
-};
+use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };
@@ -223,9 +221,7 @@ pub async fn rpc_serve(
             let id = address_info.advertise_addr.clone();
             let conn = meta_store_sql.conn.clone();
             let election_client: ElectionClientRef = match conn.get_database_backend() {
-                DbBackend::Sqlite => {
-                    Arc::new(SqlBackendElectionClient::new(id, SqliteDriver::new(conn)))
-                }
+                DbBackend::Sqlite => Arc::new(DummyElectionClient::new(id)),
                 DbBackend::Postgres => {
                     Arc::new(SqlBackendElectionClient::new(id, PostgresDriver::new(conn)))
                 }
@@ -402,6 +398,7 @@ pub async fn start_service_as_election_leader(
         meta_store_impl,
     )
     .await?;
+    let _ = env.may_start_watch_license_key_file()?;
     let system_params_reader = env.system_params_reader().await;
 
     let data_directory = system_params_reader.data_directory();
@@ -647,7 +644,10 @@ pub async fn start_service_as_election_leader(
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());
-    let system_params_srv = SystemParamsServiceImpl::new(env.system_params_manager_impl_ref());
+    let system_params_srv = SystemParamsServiceImpl::new(
+        env.system_params_manager_impl_ref(),
+        env.opts.license_key_path.is_some(),
+    );
     let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());

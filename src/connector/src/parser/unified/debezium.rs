@@ -18,12 +18,8 @@ use risingwave_common::types::{
     DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
     ToOwnedDatum,
 };
-use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector_codec::decoder::AccessExt;
-use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
-use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::additional_column::ColumnType;
-use risingwave_pb::plan_common::DefaultColumnDesc;
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
@@ -31,7 +27,9 @@ use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaCh
 use crate::parser::schema_change::TableChangeType;
 use crate::parser::TransactionControl;
 use crate::source::cdc::build_cdc_table_id;
-use crate::source::cdc::external::mysql::{mysql_type_to_rw_type, type_name_to_mysql_type};
+use crate::source::cdc::external::mysql::{
+    mysql_type_to_rw_type, timestamp_val_to_timestamptz, type_name_to_mysql_type,
+};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
 // Example of Debezium JSON value:
@@ -228,7 +226,20 @@ pub fn parse_schema_change(
                     // handle default value expression, currently we only support constant expression
                     let column_desc = match col.access_object_field("defaultValueExpression") {
                         Some(default_val_expr_str) if !default_val_expr_str.is_jsonb_null() => {
-                            let value_text = default_val_expr_str.as_string().unwrap();
+                            let mut value_text = default_val_expr_str.as_string().unwrap();
+                            // mysql timestamp is mapped to timestamptz, we use UTC timezone to
+                            // interpret its value
+                            if data_type == DataType::Timestamptz
+                                && matches!(*connector_props, ConnectorProperties::MysqlCdc(_))
+                            {
+                                value_text = timestamp_val_to_timestamptz(value_text.as_str()).map_err(|err| {
+                                    tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
+                                    AccessError::TypeError {
+                                        expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
+                                        got: data_type.to_string(),
+                                        value: value_text,
+                                    }})?;
+                            }
                             let snapshot_value: Datum = Some(
                                 ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
                                     |err| {
@@ -240,20 +251,11 @@ pub fn parse_schema_change(
                                     }},
                                 )?,
                             );
-                            // equivalent to `Literal::to_expr_proto`
-                            let default_val_expr_node = ExprNode {
-                                function_type: ExprType::Unspecified as i32,
-                                return_type: Some(data_type.to_protobuf()),
-                                rex_node: Some(RexNode::Constant(snapshot_value.to_protobuf())),
-                            };
                             ColumnDesc::named_with_default_value(
                                 name,
                                 ColumnId::placeholder(),
                                 data_type,
-                                DefaultColumnDesc {
-                                    expr: Some(default_val_expr_node),
-                                    snapshot_value: Some(snapshot_value.to_protobuf()),
-                                },
+                                snapshot_value,
                             )
                         }
                         _ => ColumnDesc::named(name, ColumnId::placeholder(), data_type),

@@ -883,6 +883,7 @@ mod logical_topn;
 mod logical_union;
 mod logical_update;
 mod logical_values;
+mod stream_asof_join;
 mod stream_changelog;
 mod stream_dedup;
 mod stream_delta_join;
@@ -898,6 +899,7 @@ mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
+mod stream_join_common;
 mod stream_local_approx_percentile;
 mod stream_materialize;
 mod stream_now;
@@ -920,9 +922,11 @@ mod stream_watermark_filter;
 mod batch_file_scan;
 mod batch_iceberg_scan;
 mod batch_kafka_scan;
+mod batch_postgres_query;
 mod derive;
 mod logical_file_scan;
 mod logical_iceberg_scan;
+mod logical_postgres_query;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
@@ -947,6 +951,7 @@ pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_over_window::BatchOverWindow;
+pub use batch_postgres_query::BatchPostgresQuery;
 pub use batch_project::BatchProject;
 pub use batch_project_set::BatchProjectSet;
 pub use batch_seq_scan::BatchSeqScan;
@@ -982,6 +987,7 @@ pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
 pub use logical_over_window::LogicalOverWindow;
+pub use logical_postgres_query::LogicalPostgresQuery;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_recursive_union::LogicalRecursiveUnion;
@@ -994,6 +1000,7 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use stream_asof_join::StreamAsOfJoin;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_changelog::StreamChangeLog;
 pub use stream_dedup::StreamDedup;
@@ -1010,6 +1017,7 @@ pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
+use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
@@ -1091,6 +1099,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, CteRef }
             , { Logical, ChangeLog }
             , { Logical, FileScan }
+            , { Logical, PostgresQuery }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1122,6 +1131,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
             , { Batch, FileScan }
+            , { Batch, PostgresQuery }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1159,6 +1169,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, GlobalApproxPercentile }
             , { Stream, LocalApproxPercentile }
             , { Stream, RowMerge }
+            , { Stream, AsOfJoin }
         }
     };
 }
@@ -1202,6 +1213,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, CteRef }
             , { Logical, ChangeLog }
             , { Logical, FileScan }
+            , { Logical, PostgresQuery }
         }
     };
 }
@@ -1242,6 +1254,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
             , { Batch, FileScan }
+            , { Batch, PostgresQuery }
         }
     };
 }
@@ -1288,6 +1301,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, GlobalApproxPercentile }
             , { Stream, LocalApproxPercentile }
             , { Stream, RowMerge }
+            , { Stream, AsOfJoin }
         }
     };
 }

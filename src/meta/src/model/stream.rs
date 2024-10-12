@@ -17,7 +17,7 @@ use std::ops::AddAssign;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::hash::{VirtualNode, WorkerSlotId};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -115,6 +115,18 @@ pub struct TableFragments {
 
     /// The parallelism assigned to this table fragments
     pub assigned_parallelism: TableParallelism,
+
+    /// The max parallelism specified when the streaming job was created, i.e., expected vnode count.
+    ///
+    /// The reason for persisting this value is mainly to check if a parallelism change (via `ALTER
+    /// .. SET PARALLELISM`) is valid, so that the behavior can be consistent with the creation of
+    /// the streaming job.
+    ///
+    /// Note that the actual vnode count, denoted by `vnode_count` in `fragments`, may be different
+    /// from this value (see `StreamFragmentGraph.max_parallelism` for more details.). As a result,
+    /// checking the parallelism change with this value can be inaccurate in some cases. However,
+    /// when generating resizing plans, we still take the `vnode_count` of each fragment into account.
+    pub max_parallelism: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -167,6 +179,7 @@ impl MetadataModel for TableFragments {
             parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_string(),
             backfill_done: true,
+            max_parallelism: Some(self.max_parallelism as _),
         }
     }
 
@@ -187,6 +200,9 @@ impl MetadataModel for TableFragments {
             actor_splits: build_actor_split_impls(&prost.actor_splits),
             ctx,
             assigned_parallelism: prost.parallelism.unwrap_or(default_parallelism).into(),
+            max_parallelism: prost
+                .max_parallelism
+                .map_or(VirtualNode::COUNT_FOR_COMPAT, |v| v as _),
         }
     }
 
@@ -204,6 +220,7 @@ impl TableFragments {
             &BTreeMap::new(),
             StreamContext::default(),
             TableParallelism::Adaptive,
+            VirtualNode::COUNT_FOR_TEST,
         )
     }
 
@@ -215,6 +232,7 @@ impl TableFragments {
         actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
         ctx: StreamContext,
         table_parallelism: TableParallelism,
+        max_parallelism: usize,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
@@ -237,6 +255,7 @@ impl TableFragments {
             actor_splits: HashMap::default(),
             ctx,
             assigned_parallelism: table_parallelism,
+            max_parallelism,
         }
     }
 

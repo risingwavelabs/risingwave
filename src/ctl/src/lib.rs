@@ -27,9 +27,7 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::Compressi
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
-use crate::cmd_impl::hummock::{
-    build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
-};
+use crate::cmd_impl::hummock::{build_compaction_config_vec, list_pinned_versions};
 use crate::cmd_impl::meta::EtcdBackend;
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
@@ -223,8 +221,6 @@ enum HummockCommands {
     },
     /// List pinned versions of each worker.
     ListPinnedVersions {},
-    /// List pinned snapshots of each worker.
-    ListPinnedSnapshots {},
     /// List all compaction groups.
     ListCompactionGroup,
     /// Update compaction config for compaction groups.
@@ -269,6 +265,8 @@ enum HummockCommands {
         max_l0_compact_level: Option<u32>,
         #[clap(long)]
         sst_allowed_trivial_move_min_size: Option<u64>,
+        #[clap(long)]
+        disable_auto_group_scheduling: Option<bool>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -654,9 +652,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::ListPinnedVersions {}) => {
             list_pinned_versions(context).await?
         }
-        Commands::Hummock(HummockCommands::ListPinnedSnapshots {}) => {
-            list_pinned_snapshots(context).await?
-        }
         Commands::Hummock(HummockCommands::ListCompactionGroup) => {
             cmd_impl::hummock::list_compaction_group(context).await?
         }
@@ -681,6 +676,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             compression_algorithm,
             max_l0_compact_level,
             sst_allowed_trivial_move_min_size,
+            disable_auto_group_scheduling,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -712,6 +708,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     },
                     max_l0_compact_level,
                     sst_allowed_trivial_move_min_size,
+                    disable_auto_group_scheduling,
                 ),
             )
             .await?

@@ -123,8 +123,6 @@ pub struct MetaMetrics {
     pub min_safepoint_version_id: IntGauge,
     /// Compaction groups that is in write stop state.
     pub write_stop_compaction_groups: IntGaugeVec,
-    /// The object id watermark used in last full GC.
-    pub full_gc_last_object_id_watermark: IntGauge,
     /// The number of attempts to trigger full GC.
     pub full_gc_trigger_count: IntGauge,
     /// The number of candidate object to delete after scanning object store.
@@ -143,6 +141,8 @@ pub struct MetaMetrics {
     pub old_version_object_count: IntGauge,
     /// Total size of objects that is still referenced by non-current versions.
     pub old_version_object_size: IntGauge,
+    /// Total number of objects that is referenced by time travel.
+    pub time_travel_object_count: IntGauge,
     /// Total number of objects that is referenced by current version.
     pub current_version_object_count: IntGauge,
     /// Total size of objects that is referenced by current version.
@@ -172,7 +172,7 @@ pub struct MetaMetrics {
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
     pub compact_task_batch_count: HistogramVec,
-    pub move_state_table_count: IntCounterVec,
+    pub split_compaction_group_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
 
@@ -199,10 +199,15 @@ pub struct MetaMetrics {
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
 
+    /// The number of compaction groups that have been triggered to move
+    pub merge_compaction_group_count: IntCounterVec,
+
     // ********************************** Auto Schema Change ************************************
     pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec<2>,
     pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec<2>,
     pub auto_schema_change_latency: LabelGuardedHistogramVec<2>,
+
+    pub time_travel_version_replay_latency: Histogram,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -382,13 +387,6 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let full_gc_last_object_id_watermark = register_int_gauge_with_registry!(
-            "storage_full_gc_last_object_id_watermark",
-            "the object id watermark used in last full GC",
-            registry
-        )
-        .unwrap();
-
         let full_gc_trigger_count = register_int_gauge_with_registry!(
             "storage_full_gc_trigger_count",
             "the number of attempts to trigger full GC",
@@ -496,6 +494,13 @@ impl MetaMetrics {
             "Total size of objects that includes dangling objects. Note that the metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.",
             registry
         ).unwrap();
+
+        let time_travel_object_count = register_int_gauge_with_registry!(
+            "storage_time_travel_object_count",
+            "total number of objects that is referenced by time travel.",
+            registry
+        )
+        .unwrap();
 
         let delta_log_count = register_int_gauge_with_registry!(
             "storage_delta_log_count",
@@ -689,9 +694,9 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let move_state_table_count = register_int_counter_vec_with_registry!(
-            "storage_move_state_table_count",
-            "Count of trigger move state table",
+        let split_compaction_group_count = register_int_counter_vec_with_registry!(
+            "storage_split_compaction_group_count",
+            "Count of trigger split compaction group",
             &["group"],
             registry
         )
@@ -729,6 +734,22 @@ impl MetaMetrics {
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let merge_compaction_group_count = register_int_counter_vec_with_registry!(
+            "storage_merge_compaction_group_count",
+            "Count of trigger merge compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "storage_time_travel_version_replay_latency",
+            "The latency(ms) of replaying a hummock version for time travel",
+            exponential_buckets(0.01, 10.0, 6).unwrap()
+        );
+        let time_travel_version_replay_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -760,6 +781,7 @@ impl MetaMetrics {
             stale_object_size,
             old_version_object_count,
             old_version_object_size,
+            time_travel_object_count,
             current_version_object_count,
             current_version_object_size,
             total_object_count,
@@ -771,7 +793,6 @@ impl MetaMetrics {
             min_pinned_version_id,
             min_safepoint_version_id,
             write_stop_compaction_groups,
-            full_gc_last_object_id_watermark,
             full_gc_trigger_count,
             full_gc_candidate_object_count,
             full_gc_selected_object_count,
@@ -794,7 +815,7 @@ impl MetaMetrics {
             compact_task_file_count,
             compact_task_batch_count,
             table_write_throughput,
-            move_state_table_count,
+            split_compaction_group_count,
             state_table_count,
             branched_sst_count,
             compaction_event_consumed_latency,
@@ -802,6 +823,8 @@ impl MetaMetrics {
             auto_schema_change_failure_cnt,
             auto_schema_change_success_cnt,
             auto_schema_change_latency,
+            merge_compaction_group_count,
+            time_travel_version_replay_latency,
         }
     }
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use risingwave_common::system_param::LICENSE_KEY_KEY;
 use risingwave_meta::manager::SystemParamsManagerImpl;
 use risingwave_pb::meta::system_params_service_server::SystemParamsService;
 use risingwave_pb::meta::{
@@ -22,12 +23,16 @@ use tonic::{Request, Response, Status};
 
 pub struct SystemParamsServiceImpl {
     system_params_manager: SystemParamsManagerImpl,
+
+    /// Whether the license key is managed by license key file, i.e., `--license-key-path` is set.
+    managed_license_key: bool,
 }
 
 impl SystemParamsServiceImpl {
-    pub fn new(system_params_manager: SystemParamsManagerImpl) -> Self {
+    pub fn new(system_params_manager: SystemParamsManagerImpl, managed_license_key: bool) -> Self {
         Self {
             system_params_manager,
+            managed_license_key,
         }
     }
 }
@@ -53,6 +58,17 @@ impl SystemParamsService for SystemParamsServiceImpl {
         request: Request<SetSystemParamRequest>,
     ) -> Result<Response<SetSystemParamResponse>, Status> {
         let req = request.into_inner();
+
+        // When license key path is specified, license key from system parameters can be easily
+        // overwritten. So we simply reject this case.
+        if self.managed_license_key && req.param == LICENSE_KEY_KEY {
+            return Err(Status::permission_denied(
+                "cannot alter license key manually when \
+                argument `--license-key-path` (or env var `RW_LICENSE_KEY_PATH`) is set, \
+                please update the license key file instead",
+            ));
+        }
+
         let params = match &self.system_params_manager {
             SystemParamsManagerImpl::Kv(mgr) => mgr.set_param(&req.param, req.value).await?,
             SystemParamsManagerImpl::Sql(mgr) => mgr.set_param(&req.param, req.value).await?,

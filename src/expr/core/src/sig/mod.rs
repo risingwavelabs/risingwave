@@ -21,7 +21,7 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::agg_call::PbType as AggregateFunctionType;
+use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::PbType as ScalarFunctionType;
 use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 
@@ -354,7 +354,7 @@ impl FuncSign {
 pub enum FuncName {
     Scalar(ScalarFunctionType),
     Table(TableFunctionType),
-    Aggregate(AggregateFunctionType),
+    Aggregate(PbAggKind),
     Udf(String),
 }
 
@@ -370,8 +370,8 @@ impl From<TableFunctionType> for FuncName {
     }
 }
 
-impl From<AggregateFunctionType> for FuncName {
-    fn from(ty: AggregateFunctionType) -> Self {
+impl From<PbAggKind> for FuncName {
+    fn from(ty: PbAggKind) -> Self {
         Self::Aggregate(ty)
     }
 }
@@ -405,9 +405,9 @@ impl FuncName {
         }
     }
 
-    pub fn as_aggregate(&self) -> AggregateFunctionType {
+    pub fn as_aggregate(&self) -> PbAggKind {
         match self {
-            Self::Aggregate(ty) => *ty,
+            Self::Aggregate(kind) => *kind,
             _ => panic!("Expected an aggregate function"),
         }
     }

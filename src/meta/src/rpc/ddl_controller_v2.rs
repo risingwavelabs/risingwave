@@ -46,7 +46,12 @@ impl DdlController {
 
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         mgr.catalog_controller
-            .create_job_catalog(&mut streaming_job, &ctx, &fragment_graph.parallelism)
+            .create_job_catalog(
+                &mut streaming_job,
+                &ctx,
+                &fragment_graph.parallelism,
+                fragment_graph.max_parallelism as _,
+            )
             .await?;
         let job_id = streaming_job.id();
 
@@ -296,6 +301,7 @@ impl DdlController {
                     &stream_ctx,
                     table.get_version()?,
                     &fragment_graph.specified_parallelism(),
+                    fragment_graph.max_parallelism(),
                 )
                 .await? as u32;
 
@@ -440,6 +446,7 @@ impl DdlController {
                 &ctx,
                 table.get_version()?,
                 &fragment_graph.specified_parallelism(),
+                fragment_graph.max_parallelism(),
             )
             .await?;
 

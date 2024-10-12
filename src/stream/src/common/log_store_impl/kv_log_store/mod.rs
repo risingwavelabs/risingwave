@@ -455,6 +455,7 @@ mod tests {
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::HummockStorage;
+    use risingwave_storage::store::TryWaitEpochOptions;
     use risingwave_storage::StateStore;
 
     use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
@@ -506,8 +507,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -616,8 +617,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -685,7 +686,10 @@ mod tests {
             .unwrap();
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch2),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -806,8 +810,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -901,7 +905,10 @@ mod tests {
         test_env.commit_epoch(epoch2).await;
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch2),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -1001,15 +1008,15 @@ mod tests {
         test_env.register_table(table.clone()).await;
 
         fn build_bitmap(indexes: impl Iterator<Item = usize>) -> Arc<Bitmap> {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
             for i in indexes {
                 builder.set(i, true);
             }
             Arc::new(builder.finish())
         }
 
-        let vnodes1 = build_bitmap((0..VirtualNode::COUNT).filter(|i| i % 2 == 0));
-        let vnodes2 = build_bitmap((0..VirtualNode::COUNT).filter(|i| i % 2 == 1));
+        let vnodes1 = build_bitmap((0..VirtualNode::COUNT_FOR_TEST).filter(|i| i % 2 == 0));
+        let vnodes2 = build_bitmap((0..VirtualNode::COUNT_FOR_TEST).filter(|i| i % 2 == 1));
 
         let factory1 = KvLogStoreFactory::new(
             test_env.storage.clone(),
@@ -1035,8 +1042,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -1137,7 +1144,10 @@ mod tests {
         test_env.commit_epoch(epoch2).await;
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch2),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -1150,7 +1160,7 @@ mod tests {
             .clear_shared_buffer(test_env.manager.get_current_version().await.id)
             .await;
 
-        let vnodes = build_bitmap(0..VirtualNode::COUNT);
+        let vnodes = build_bitmap(0..VirtualNode::COUNT_FOR_TEST);
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
@@ -1230,8 +1240,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -1370,8 +1380,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage
@@ -1401,7 +1411,10 @@ mod tests {
 
         test_env
             .storage
-            .try_wait_epoch(HummockReadEpoch::Committed(epoch3))
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(epoch3),
+                TryWaitEpochOptions::for_test(table.id.into()),
+            )
             .await
             .unwrap();
 
@@ -1707,8 +1720,8 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .version()
-            .max_committed_epoch()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
             .next_epoch();
         test_env
             .storage

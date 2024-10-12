@@ -81,6 +81,10 @@ impl InflightGraphInfo {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.fragment_infos.is_empty()
+    }
+
     /// Update worker nodes snapshot. We need to support incremental updates for it in the future.
     pub fn on_new_worker_node_map(&self, node_map: &HashMap<WorkerId, WorkerNode>) {
         for (node_id, actors) in &self.actor_map {

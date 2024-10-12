@@ -24,7 +24,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::error::tonic::extra::Score;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    GroupedSstableInfo, PbCreateMviewProgress,
+    PbCreateMviewProgress, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use thiserror_ext::AsReport;
@@ -494,9 +494,11 @@ impl LocalBarrierWorker {
                                 |LocalSstableInfo {
                                      sst_info,
                                      table_stats,
-                                 }| GroupedSstableInfo {
+                                     created_at,
+                                 }| PbLocalSstableInfo {
                                     sst: Some(sst_info.into()),
                                     table_stats_map: to_prost_table_stats_map(table_stats),
+                                    created_at,
                                 },
                             )
                             .collect_vec(),

@@ -20,7 +20,7 @@ use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
 use crate::types::{DataType, Datum, DatumRef, ScalarImpl, ScalarRefImpl};
 use crate::util::hash_util::Crc32FastBuilder;
-use crate::util::row_id::extract_vnode_id_from_row_id;
+use crate::util::row_id::compute_vnode_from_row_id;
 
 /// `VirtualNode` (a.k.a. Vnode) is a minimal partition that a set of keys belong to. It is used for
 /// consistent hashing.
@@ -51,24 +51,36 @@ impl Crc32HashCode {
 }
 
 impl VirtualNode {
-    /// The total count of virtual nodes.
-    // TODO(var-vnode): remove this and only keep `COUNT_FOR_TEST`
-    pub const COUNT: usize = 1 << 8;
-    /// The maximum value of the virtual node.
-    // TODO(var-vnode): remove this and only keep `MAX_FOR_TEST`
-    pub const MAX: VirtualNode = VirtualNode::from_index(Self::COUNT - 1);
+    /// The total count of virtual nodes, for compatibility purposes **ONLY**.
+    ///
+    /// Typical use cases:
+    ///
+    /// - As the default value for the session configuration.
+    /// - As the vnode count for all streaming jobs, fragments, and tables that were created before
+    ///   the variable vnode count support was introduced.
+    /// - As the vnode count for singletons.
+    pub const COUNT_FOR_COMPAT: usize = 1 << 8;
 }
 
 impl VirtualNode {
     /// The total count of virtual nodes, for testing purposes.
-    pub const COUNT_FOR_TEST: usize = Self::COUNT;
+    pub const COUNT_FOR_TEST: usize = Self::COUNT_FOR_COMPAT;
     /// The maximum value of the virtual node, for testing purposes.
-    pub const MAX_FOR_TEST: VirtualNode = Self::MAX;
+    pub const MAX_FOR_TEST: VirtualNode = VirtualNode::from_index(Self::COUNT_FOR_TEST - 1);
 }
 
 impl VirtualNode {
     /// The maximum count of virtual nodes that fits in [`VirtualNodeInner`].
-    pub const MAX_COUNT: usize = 1 << VirtualNodeInner::BITS;
+    ///
+    /// Note that the most significant bit is not used. This is because we use signed integers (`i16`)
+    /// for the scalar representation, where overflow can be confusing in terms of ordering.
+    // TODO(var-vnode): the only usage is in log-store, shall we update it by storing the vnode as
+    // bytea to enable 2^16 vnodes?
+    pub const MAX_COUNT: usize = 1 << (VirtualNodeInner::BITS - 1);
+    /// The maximum value of the virtual node that can be represented.
+    ///
+    /// Note that this is **NOT** the maximum value of the virtual node, which depends on the configuration.
+    pub const MAX_REPRESENTABLE: VirtualNode = VirtualNode::from_index(Self::MAX_COUNT - 1);
     /// The size of a virtual node in bytes, in memory or serialized representation.
     pub const SIZE: usize = std::mem::size_of::<Self>();
 }
@@ -96,6 +108,7 @@ impl VirtualNode {
 
     /// Creates a virtual node from the given scalar representation. Used by `VNODE` expression.
     pub const fn from_scalar(scalar: i16) -> Self {
+        debug_assert!(scalar >= 0);
         Self(scalar as _)
     }
 
@@ -115,6 +128,7 @@ impl VirtualNode {
     /// Creates a virtual node from the given big-endian bytes representation.
     pub const fn from_be_bytes(bytes: [u8; Self::SIZE]) -> Self {
         let inner = VirtualNodeInner::from_be_bytes(bytes);
+        debug_assert!((inner as usize) < Self::MAX_COUNT);
         Self(inner)
     }
 
@@ -147,7 +161,7 @@ impl VirtualNode {
                 .enumerate()
                 .map(|(idx, serial)| {
                     if let Some(serial) = serial {
-                        extract_vnode_id_from_row_id(serial.as_row_id())
+                        compute_vnode_from_row_id(serial.as_row_id(), vnode_count)
                     } else {
                         // NOTE: here it will hash the entire row when the `_row_id` is missing,
                         // which could result in rows from the same chunk being allocated to different chunks.
@@ -177,7 +191,7 @@ impl VirtualNode {
     pub fn compute_row(row: impl Row, indices: &[usize], vnode_count: usize) -> VirtualNode {
         let project = row.project(indices);
         if let Ok(Some(ScalarRefImpl::Serial(s))) = project.iter().exactly_one().as_ref() {
-            return extract_vnode_id_from_row_id(s.as_row_id());
+            return compute_vnode_from_row_id(s.as_row_id(), vnode_count);
         }
 
         project.hash(Crc32FastBuilder).to_vnode(vnode_count)
@@ -198,7 +212,8 @@ mod tests {
 
     #[test]
     fn test_serial_key_chunk() {
-        let mut gen = RowIdGenerator::new([VirtualNode::from_index(100)]);
+        let mut gen =
+            RowIdGenerator::new([VirtualNode::from_index(100)], VirtualNode::COUNT_FOR_TEST);
         let chunk = format!(
             "SRL I
              {} 1
@@ -218,7 +233,8 @@ mod tests {
 
     #[test]
     fn test_serial_key_row() {
-        let mut gen = RowIdGenerator::new([VirtualNode::from_index(100)]);
+        let mut gen =
+            RowIdGenerator::new([VirtualNode::from_index(100)], VirtualNode::COUNT_FOR_TEST);
         let row = OwnedRow::new(vec![
             Some(ScalarImpl::Serial(gen.next().into())),
             Some(ScalarImpl::Int64(12345)),
@@ -231,7 +247,10 @@ mod tests {
 
     #[test]
     fn test_serial_key_chunk_multiple_vnodes() {
-        let mut gen = RowIdGenerator::new([100, 200].map(VirtualNode::from_index));
+        let mut gen = RowIdGenerator::new(
+            [100, 200].map(VirtualNode::from_index),
+            VirtualNode::COUNT_FOR_TEST,
+        );
         let chunk = format!(
             "SRL I
              {} 1

@@ -224,6 +224,55 @@ DynamoDbConfig:
     required: false
     alias:
     - profile
+  - name: dynamodb.max_batch_item_nums
+    field_type: usize
+    required: false
+    default: '25'
+  - name: dynamodb.max_future_send_nums
+    field_type: usize
+    required: false
+    default: '256'
+ElasticSearchOpenSearchConfig:
+  fields:
+  - name: url
+    field_type: String
+    required: true
+  - name: index
+    field_type: String
+    comments: The index's name of elasticsearch or openserach
+    required: false
+  - name: delimiter
+    field_type: String
+    comments: If pk is set, then "pk1+delimiter+pk2+delimiter..." will be used as the key, if pk is not set, we will just use the first column as the key.
+    required: false
+  - name: username
+    field_type: String
+    comments: The username of elasticsearch or openserach
+    required: true
+  - name: password
+    field_type: String
+    comments: The username of elasticsearch or openserach
+    required: true
+  - name: index_column
+    field_type: String
+    comments: It is used for dynamic index, if it is be set, the value of this column will be used as the index. It and `index` can only set one
+    required: false
+  - name: routing_column
+    field_type: String
+    comments: It is used for dynamic route, if it is be set, the value of this column will be used as the route
+    required: false
+  - name: retry_on_conflict
+    field_type: i32
+    required: true
+  - name: batch_num_messages
+    field_type: usize
+    required: true
+  - name: batch_size_kb
+    field_type: usize
+    required: true
+  - name: concurrent_requests
+    field_type: usize
+    required: true
 FsConfig:
   fields:
   - name: fs.path
@@ -284,9 +333,6 @@ GooglePubSubConfig:
     required: false
 IcebergConfig:
   fields:
-  - name: connector
-    field_type: String
-    required: true
   - name: r#type
     field_type: String
     required: true
@@ -294,22 +340,7 @@ IcebergConfig:
     field_type: bool
     required: false
     default: Default::default
-  - name: table.name
-    field_type: String
-    required: true
-  - name: database.name
-    field_type: String
-    required: false
-  - name: catalog.name
-    field_type: String
-    required: false
   - name: catalog.type
-    field_type: String
-    required: false
-  - name: warehouse.path
-    field_type: String
-    required: true
-  - name: catalog.uri
     field_type: String
     required: false
   - name: s3.region
@@ -323,6 +354,27 @@ IcebergConfig:
     required: true
   - name: s3.secret.key
     field_type: String
+    required: true
+  - name: warehouse.path
+    field_type: String
+    comments: Path of iceberg warehouse, only applicable in storage catalog.
+    required: true
+  - name: catalog.name
+    field_type: String
+    comments: |-
+      Catalog name, can be omitted for storage catalog, but
+      must be set for other catalogs.
+    required: false
+  - name: catalog.uri
+    field_type: String
+    comments: URI of iceberg catalog, only applicable in rest catalog.
+    required: false
+  - name: database.name
+    field_type: String
+    required: false
+  - name: table.name
+    field_type: String
+    comments: Full name of table, must include schema name.
     required: true
   - name: s3.path.style.access
     field_type: bool

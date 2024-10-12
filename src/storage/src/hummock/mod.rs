@@ -29,7 +29,6 @@ pub mod sstable;
 pub use sstable::*;
 
 pub mod compactor;
-pub mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 pub mod iterator;

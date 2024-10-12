@@ -86,6 +86,17 @@ impl WindowStates {
         }
         Ok(())
     }
+
+    /// Slide all windows forward, until the current key is `curr_key`, ignoring the output and evict hints.
+    /// After this method, `self.curr_key() == Some(curr_key)`.
+    /// `curr_key` must exist in the `WindowStates`.
+    pub fn just_slide_to(&mut self, curr_key: &StateKey) -> Result<()> {
+        // TODO(rc): with the knowledge of the old output, we can "jump" to the `curr_key` directly for some window function kind
+        while self.curr_key() != Some(curr_key) {
+            self.just_slide()?;
+        }
+        Ok(())
+    }
 }
 
 impl Deref for WindowStates {

@@ -97,14 +97,12 @@ impl HummockManager {
             let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
             let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
             let pinned_versions_copy = context_info_guard.pinned_versions.clone();
-            let pinned_snapshots_copy = context_info_guard.pinned_snapshots.clone();
             let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
             let version_stats_copy = versioning_guard.version_stats.clone();
             ((
                 compact_statuses_copy,
                 compact_task_assignment_copy,
                 pinned_versions_copy,
-                pinned_snapshots_copy,
                 hummock_version_deltas_copy,
                 version_stats_copy,
             ),)

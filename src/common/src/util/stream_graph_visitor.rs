@@ -269,6 +269,12 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.bucket_state_table, "GlobalApproxPercentileBucketState");
                 always!(node.count_state_table, "GlobalApproxPercentileCountState");
             }
+
+            // AsOf join
+            NodeBody::AsOfJoin(node) => {
+                always!(node.left_table, "AsOfJoinLeft");
+                always!(node.right_table, "AsOfJoinRight");
+            }
             _ => {}
         }
     };
@@ -286,7 +292,6 @@ where
     visit_stream_node_tables_inner(stream_node, true, true, f)
 }
 
-#[allow(dead_code)]
 pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),
@@ -300,4 +305,14 @@ where
     F: FnMut(&mut Table, &str),
 {
     visit_stream_node_internal_tables(fragment.node.as_mut().unwrap(), f)
+}
+
+/// Visit the tables of a [`StreamFragment`].
+///
+/// Compared to [`visit_internal_tables`], this function also visits the table of `Materialize` node.
+pub fn visit_tables<F>(fragment: &mut StreamFragment, f: F)
+where
+    F: FnMut(&mut Table, &str),
+{
+    visit_stream_node_tables(fragment.node.as_mut().unwrap(), f)
 }

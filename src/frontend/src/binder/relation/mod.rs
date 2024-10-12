@@ -350,6 +350,15 @@ impl Binder {
         {
             // Handles CTE
 
+            if as_of.is_some() {
+                return Err(ErrorCode::BindError(
+                    "Right table of a temporal join should not be a CTE. \
+                 It should be a table, index, or materialized view"
+                        .to_string(),
+                )
+                .into());
+            }
+
             let BindingCte {
                 share_id,
                 state: cte_state,

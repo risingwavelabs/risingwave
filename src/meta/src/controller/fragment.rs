@@ -19,8 +19,9 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::hash::{VnodeCountCompat, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
@@ -48,7 +49,7 @@ use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
-    QuerySelect, RelationTrait, TransactionTrait, Value,
+    QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
@@ -56,7 +57,9 @@ use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
-use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
+use crate::manager::{
+    ActorInfos, FragmentParallelismInfo, InflightFragmentInfo, LocalNotification,
+};
 use crate::model::{TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
@@ -177,6 +180,7 @@ impl CatalogController {
         Vec<actor::Model>,
         HashMap<ActorId, Vec<actor_dispatcher::Model>>,
     )> {
+        let vnode_count = pb_fragment.vnode_count();
         let PbFragment {
             fragment_id: pb_fragment_id,
             fragment_type_mask: pb_fragment_type_mask,
@@ -294,6 +298,7 @@ impl CatalogController {
             stream_node,
             state_table_ids,
             upstream_fragment_id,
+            vnode_count: vnode_count as _,
         };
 
         Ok((fragment, actors, actor_dispatchers))
@@ -310,6 +315,7 @@ impl CatalogController {
             HashMap<ActorId, Vec<actor_dispatcher::Model>>,
         )>,
         parallelism: StreamingParallelism,
+        max_parallelism: usize,
     ) -> MetaResult<PbTableFragments> {
         let mut pb_fragments = HashMap::new();
         let mut pb_actor_splits = HashMap::new();
@@ -342,6 +348,7 @@ impl CatalogController {
             ),
             node_label: "".to_string(),
             backfill_done: true,
+            max_parallelism: Some(max_parallelism as _),
         };
 
         Ok(table_fragments)
@@ -365,6 +372,7 @@ impl CatalogController {
             stream_node,
             state_table_ids,
             upstream_fragment_id,
+            vnode_count,
         } = fragment;
 
         let stream_node_template = stream_node.to_protobuf();
@@ -463,6 +471,7 @@ impl CatalogController {
             actors: pb_actors,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            maybe_vnode_count: Some(vnode_count as _),
         };
 
         Ok((pb_fragment, pb_actor_status, pb_actor_splits))
@@ -471,21 +480,55 @@ impl CatalogController {
     pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
-    ) -> MetaResult<HashMap<FragmentId, usize>> {
+    ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let inner = self.inner.read().await;
-        let mut select = Actor::find()
-            .select_only()
+
+        let query_alias = Alias::new("fragment_actor_count");
+        let count_alias = Alias::new("count");
+
+        let mut query = SelectStatement::new()
             .column(actor::Column::FragmentId)
-            .column_as(actor::Column::ActorId.count(), "count")
-            .group_by(actor::Column::FragmentId);
+            .expr_as(actor::Column::ActorId.count(), count_alias.clone())
+            .from(Actor)
+            .group_by_col(actor::Column::FragmentId)
+            .to_owned();
+
         if let Some(id_filter) = id_filter {
-            select = select.having(actor::Column::FragmentId.is_in(id_filter));
+            query.cond_having(actor::Column::FragmentId.is_in(id_filter));
         }
-        let fragment_parallelisms: Vec<(FragmentId, i64)> =
-            select.into_tuple().all(&inner.db).await?;
+
+        let outer = SelectStatement::new()
+            .column((Fragment, fragment::Column::FragmentId))
+            .column(count_alias)
+            .column(fragment::Column::DistributionType)
+            .column(fragment::Column::VnodeCount)
+            .from_subquery(query.to_owned(), query_alias.clone())
+            .inner_join(
+                Fragment,
+                Expr::col((query_alias, actor::Column::FragmentId))
+                    .equals((Fragment, fragment::Column::FragmentId)),
+            )
+            .to_owned();
+
+        let fragment_parallelisms: Vec<(FragmentId, i64, DistributionType, i32)> =
+            Selector::<SelectGetableTuple<(FragmentId, i64, DistributionType, i32)>>::into_tuple(
+                outer.to_owned(),
+            )
+            .all(&inner.db)
+            .await?;
+
         Ok(fragment_parallelisms
             .into_iter()
-            .map(|(fragment_id, count)| (fragment_id, count as usize))
+            .map(|(fragment_id, count, distribution_type, vnode_count)| {
+                (
+                    fragment_id,
+                    FragmentParallelismInfo {
+                        distribution_type: distribution_type.into(),
+                        actor_count: count as usize,
+                        vnode_count: vnode_count as usize,
+                    },
+                )
+            })
             .collect())
     }
 
@@ -628,24 +671,35 @@ impl CatalogController {
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
             fragment_info,
             job_info.parallelism.clone(),
+            job_info.max_parallelism as _,
         )
     }
 
     pub async fn list_streaming_job_states(
         &self,
-    ) -> MetaResult<Vec<(ObjectId, JobStatus, StreamingParallelism)>> {
+    ) -> MetaResult<Vec<(ObjectId, JobStatus, StreamingParallelism, i32)>> {
         let inner = self.inner.read().await;
-        let job_states: Vec<(ObjectId, JobStatus, StreamingParallelism)> = StreamingJob::find()
+        let job_states = StreamingJob::find()
             .select_only()
             .columns([
                 streaming_job::Column::JobId,
                 streaming_job::Column::JobStatus,
                 streaming_job::Column::Parallelism,
+                streaming_job::Column::MaxParallelism,
             ])
             .into_tuple()
             .all(&inner.db)
             .await?;
         Ok(job_states)
+    }
+
+    pub async fn get_max_parallelism_by_id(&self, job_id: ObjectId) -> MetaResult<usize> {
+        let inner = self.inner.read().await;
+        let job = StreamingJob::find_by_id(job_id)
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
+        Ok(job.max_parallelism as usize)
     }
 
     /// Get all actor ids in the target streaming jobs.
@@ -749,6 +803,7 @@ impl CatalogController {
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),
                     fragment_info,
                     job.parallelism.clone(),
+                    job.max_parallelism as _,
                 )?,
             );
         }
@@ -763,6 +818,20 @@ impl CatalogController {
         Ok(actor_locations)
     }
 
+    pub async fn list_source_actors(&self) -> MetaResult<Vec<(ActorId, FragmentId)>> {
+        let inner = self.inner.read().await;
+
+        let source_actors: Vec<(ActorId, FragmentId)> = Actor::find()
+            .select_only()
+            .filter(actor::Column::Splits.is_not_null())
+            .columns([actor::Column::ActorId, actor::Column::FragmentId])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(source_actors)
+    }
+
     pub async fn list_fragment_descs(&self) -> MetaResult<Vec<FragmentDesc>> {
         let inner = self.inner.read().await;
         let fragment_descs: Vec<FragmentDesc> = Fragment::find()
@@ -774,6 +843,7 @@ impl CatalogController {
                 fragment::Column::DistributionType,
                 fragment::Column::StateTableIds,
                 fragment::Column::UpstreamFragmentId,
+                fragment::Column::VnodeCount,
             ])
             .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
             .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
@@ -1541,6 +1611,7 @@ mod tests {
                 .values()
                 .flat_map(|m| m.keys().map(|x| *x as _))
                 .collect(),
+            maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as _),
         };
 
         let pb_actor_status = (0..actor_count)
@@ -1684,6 +1755,7 @@ mod tests {
             stream_node: StreamNode::from(&stream_node),
             state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: I32Array::default(),
+            vnode_count: VirtualNode::COUNT_FOR_TEST as _,
         };
 
         let (pb_fragment, pb_actor_status, pb_actor_splits) = CatalogController::compose_fragment(
@@ -1793,6 +1865,7 @@ mod tests {
             actors: _,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            maybe_vnode_count: _,
         } = pb_fragment;
 
         assert_eq!(fragment_id, TEST_FRAGMENT_ID as u32);

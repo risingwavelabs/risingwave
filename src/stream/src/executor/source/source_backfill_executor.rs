@@ -32,6 +32,7 @@ use risingwave_connector::source::{
     SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::store::TryWaitEpochOptions;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -417,6 +418,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
 
         let state_store = self.backfill_state_store.state_store.state_store().clone();
+        let table_id = self.backfill_state_store.state_store.table_id().into();
         static STATE_TABLE_INITIALIZED: Once = Once::new();
         tokio::spawn(async move {
             // This is for self.backfill_finished() to be safe.
@@ -424,7 +426,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             let epoch = barrier.epoch.curr;
             tracing::info!("waiting for epoch: {}", epoch);
             state_store
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .try_wait_epoch(
+                    HummockReadEpoch::Committed(epoch),
+                    TryWaitEpochOptions { table_id },
+                )
                 .await
                 .expect("failed to wait epoch");
             STATE_TABLE_INITIALIZED.call_once(|| ());
@@ -580,7 +585,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // Currently, `CreateMviewProgress` is designed for MV backfill, and rw_ddl_progress calculates
                                     // progress based on the number of consumed rows and an estimated total number of rows from hummock.
                                     // For now, we just rely on the same code path, and for source backfill, the progress will always be 99.99%.
-                                    tracing::info!("progress finish");
+                                    tracing::debug!("progress finish");
                                     let epoch = barrier.epoch;
                                     self.progress.finish(epoch, 114514);
                                     // yield barrier after reporting progress

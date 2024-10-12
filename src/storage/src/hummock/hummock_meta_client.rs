@@ -18,9 +18,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, SstObjectIdRange, SyncResult};
-use risingwave_pb::hummock::{
-    HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest, VacuumTask,
-};
+use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest, VacuumTask};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
 use tokio::sync::mpsc::UnboundedSender;
@@ -54,22 +52,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
         self.meta_client.get_current_version().await
-    }
-
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.meta_client.pin_snapshot().await
-    }
-
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        self.meta_client.get_snapshot().await
-    }
-
-    async fn unpin_snapshot(&self) -> Result<()> {
-        self.meta_client.unpin_snapshot().await
-    }
-
-    async fn unpin_snapshot_before(&self, _min_epoch: HummockEpoch) -> Result<()> {
-        unreachable!("Currently CNs should not call this function")
     }
 
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
@@ -110,9 +92,17 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         filtered_object_ids: Vec<HummockSstableObjectId>,
         total_object_count: u64,
         total_object_size: u64,
+        start_after: Option<String>,
+        next_start_after: Option<String>,
     ) -> Result<()> {
         self.meta_client
-            .report_full_scan_task(filtered_object_ids, total_object_count, total_object_size)
+            .report_full_scan_task(
+                filtered_object_ids,
+                total_object_count,
+                total_object_size,
+                start_after,
+                next_start_after,
+            )
             .await
     }
 

@@ -22,6 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorId, ActorMapping, WorkerSlotId};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::stream_graph_visitor::visit_tables;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -665,6 +666,7 @@ impl ActorGraphBuilder {
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
     ) -> MetaResult<Self> {
+        let expected_vnode_count = fragment_graph.max_parallelism();
         let existing_distributions = fragment_graph.existing_distribution();
 
         // Schedule the distribution of all building fragments.
@@ -672,8 +674,18 @@ impl ActorGraphBuilder {
             streaming_job_id,
             &cluster_info.worker_nodes,
             default_parallelism,
+            expected_vnode_count,
         )?;
         let distributions = scheduler.schedule(&fragment_graph)?;
+
+        // Fill the vnode count for each internal table, based on schedule result.
+        let mut fragment_graph = fragment_graph;
+        for (id, fragment) in fragment_graph.building_fragments_mut() {
+            let vnode_count = distributions[id].vnode_count();
+            visit_tables(fragment, |table, _| {
+                table.maybe_vnode_count = Some(vnode_count as _);
+            })
+        }
 
         Ok(Self {
             distributions,
@@ -854,7 +866,10 @@ impl ActorGraphBuilder {
                     .worker_slots()
                     .map(|worker_slot| {
                         let actor_id = state.next_actor_id();
-                        let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&worker_slot]).cloned();
+                        let vnode_bitmap = bitmaps
+                            .as_ref()
+                            .map(|m: &HashMap<WorkerSlotId, Bitmap>| &m[&worker_slot])
+                            .cloned();
 
                         state.inner.add_actor(
                             actor_id,

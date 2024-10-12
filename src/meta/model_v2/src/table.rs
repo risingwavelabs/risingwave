@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
 use sea_orm::entity::prelude::*;
@@ -133,6 +134,7 @@ pub struct Model {
     pub retention_seconds: Option<i32>,
     pub incoming_sinks: I32Array,
     pub cdc_table_id: Option<String>,
+    pub vnode_count: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -207,6 +209,7 @@ impl From<PbTable> for ActiveModel {
     fn from(pb_table: PbTable) -> Self {
         let table_type = pb_table.table_type();
         let handle_pk_conflict_behavior = pb_table.handle_pk_conflict_behavior();
+        let vnode_count = pb_table.vnode_count();
 
         let fragment_id = if pb_table.fragment_id == OBJECT_ID_PLACEHOLDER {
             NotSet
@@ -255,6 +258,7 @@ impl From<PbTable> for ActiveModel {
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
             cdc_table_id: Set(pb_table.cdc_table_id),
+            vnode_count: Set(vnode_count as _),
         }
     }
 }

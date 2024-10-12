@@ -24,8 +24,9 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::ObserverState;
+use risingwave_hummock_sdk::FrontendHummockVersion;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::hummock::{HummockVersionDeltas, HummockVersionStats};
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
@@ -85,11 +86,8 @@ impl ObserverState for FrontendObserverNode {
                     resp
                 )
             }
-            Info::HummockSnapshot(_) => {
-                self.handle_hummock_snapshot_notification(resp);
-            }
-            Info::HummockVersionDeltas(_) => {
-                panic!("frontend node should not receive HummockVersionDeltas");
+            Info::HummockVersionDeltas(deltas) => {
+                self.handle_hummock_snapshot_notification(deltas);
             }
             Info::MetaBackupManifestId(_) => {
                 panic!("frontend node should not receive MetaBackupManifestId");
@@ -141,8 +139,7 @@ impl ObserverState for FrontendObserverNode {
             connections,
             users,
             nodes,
-            hummock_snapshot,
-            hummock_version: _,
+            hummock_version,
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
             streaming_worker_slot_mappings,
@@ -195,7 +192,9 @@ impl ObserverState for FrontendObserverNode {
             convert_worker_slot_mapping(&serving_worker_slot_mappings),
         );
         self.hummock_snapshot_manager
-            .update(hummock_snapshot.unwrap());
+            .init(FrontendHummockVersion::from_protobuf(
+                hummock_version.unwrap(),
+            ));
 
         let snapshot_version = version.unwrap();
         catalog_guard.set_version(snapshot_version.catalog_version);
@@ -465,19 +464,8 @@ impl FrontendObserverNode {
     }
 
     /// Update max committed epoch in `HummockSnapshotManager`.
-    fn handle_hummock_snapshot_notification(&self, resp: SubscribeResponse) {
-        let Some(info) = resp.info.as_ref() else {
-            return;
-        };
-        match info {
-            Info::HummockSnapshot(hummock_snapshot) => match resp.operation() {
-                Operation::Update => {
-                    self.hummock_snapshot_manager.update(*hummock_snapshot);
-                }
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
-            _ => unreachable!(),
-        }
+    fn handle_hummock_snapshot_notification(&self, deltas: HummockVersionDeltas) {
+        self.hummock_snapshot_manager.update(deltas);
     }
 
     fn handle_secret_notification(&mut self, resp: SubscribeResponse) {

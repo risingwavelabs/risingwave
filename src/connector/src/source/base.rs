@@ -243,6 +243,7 @@ pub enum SourceFormat {
     Plain,
 }
 
+/// Refer to [`crate::parser::EncodingProperties`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SourceEncode {
     #[default]

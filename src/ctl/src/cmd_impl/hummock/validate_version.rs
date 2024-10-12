@@ -190,7 +190,10 @@ pub async fn print_version_delta_in_archive(
                     if match_delta(d, sst_id) {
                         if is_first {
                             is_first = false;
-                            println!("delta: id {}, prev_id {}, max_committed_epoch {}, trivial_move {}, safe_epoch {}", delta.id, delta.prev_id, delta.max_committed_epoch, delta.trivial_move, delta.safe_epoch);
+                            println!(
+                                "delta: id {}, prev_id {}, trivial_move {}",
+                                delta.id, delta.prev_id, delta.trivial_move
+                            );
                         }
                         println!("compaction group id {cg_id}");
                         print_delta(d);

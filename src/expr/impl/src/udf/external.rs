@@ -18,11 +18,12 @@ use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use anyhow::bail;
-use arrow_schema::Fields;
+use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_udf_flight::Client;
 use futures_util::{StreamExt, TryStreamExt};
 use ginepro::{LoadBalancedChannel, ResolutionStrategy};
-use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
+use risingwave_common::array::arrow::arrow_schema_udf::{self, Fields};
+use risingwave_common::array::arrow::{UdfArrowConvert, UdfToArrow};
 use risingwave_common::util::addr::HostAddr;
 use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
@@ -45,15 +46,15 @@ static EXTERNAL: UdfImplDescriptor = UdfImplDescriptor {
         };
         // A helper function to create a unnamed field from data type.
         let to_field = |data_type| convert.to_arrow_field("", data_type);
-        let args = arrow_schema::Schema::new(
+        let args = arrow_schema_udf::Schema::new(
             opts.arg_types
                 .iter()
                 .map(to_field)
                 .try_collect::<Fields>()?,
         );
-        let returns = arrow_schema::Schema::new(if opts.kind.is_table() {
+        let returns = arrow_schema_udf::Schema::new(if opts.kind.is_table() {
             vec![
-                arrow_schema::Field::new("row", arrow_schema::DataType::Int32, true),
+                arrow_schema_udf::Field::new("row", arrow_schema_udf::DataType::Int32, true),
                 to_field(opts.return_type)?,
             ]
         } else {
@@ -186,7 +187,9 @@ fn get_or_create_flight_client(link: &str) -> Result<Arc<Client>> {
         let client = Arc::new(tokio::task::block_in_place(|| {
             RUNTIME.block_on(async {
                 let channel = connect_tonic(link).await?;
-                Ok(Client::new(channel).await?) as Result<_>
+                let client =
+                    FlightServiceClient::new(channel).max_decoding_message_size(usize::MAX);
+                Ok(Client::new(client).await?) as Result<_>
             })
         })?);
         clients.insert(link.to_owned(), Arc::downgrade(&client));
@@ -285,7 +288,7 @@ fn is_tonic_error(err: &arrow_udf_flight::Error) -> bool {
 }
 
 /// Check if two list of data types match, ignoring field names.
-fn data_types_match(a: &arrow_schema::Schema, b: &arrow_schema::Schema) -> bool {
+fn data_types_match(a: &arrow_schema_udf::Schema, b: &arrow_schema_udf::Schema) -> bool {
     if a.fields().len() != b.fields().len() {
         return false;
     }

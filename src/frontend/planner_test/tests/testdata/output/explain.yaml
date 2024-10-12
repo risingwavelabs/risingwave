@@ -160,3 +160,34 @@
         └─StreamExchange { dist: HashShard(_row_id) }
           └─StreamDml { columns: [v1, v2, _row_id] }
             └─StreamSource
+- sql: |
+    explain create table t (v1 int, v2 varchar) append only with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) FORMAT PLAIN ENCODE JSON;
+  explain_output: |
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+    └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamUnion { all: true }
+        ├─StreamExchange [no_shuffle] { dist: SomeShard }
+        │ └─StreamSource { source: t, columns: [v1, v2, _row_id] }
+        └─StreamExchange [no_shuffle] { dist: SomeShard }
+          └─StreamDml { columns: [v1, v2, _row_id] }
+            └─StreamSource
+- sql: |
+    explain create table t (v1 int, v2 varchar primary key) with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) FORMAT PLAIN ENCODE JSON;
+  explain_output: |
+    StreamMaterialize { columns: [v1, v2], stream_key: [v2], pk_columns: [v2], pk_conflict: Overwrite }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(v2) }
+      │ └─StreamSource { source: t, columns: [v1, v2] }
+      └─StreamExchange { dist: HashShard(v2) }
+        └─StreamDml { columns: [v1, v2] }
+          └─StreamSource
+- sql: |
+    explain create table t (v1 int, v2 varchar primary key) append only with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) FORMAT PLAIN ENCODE JSON;
+  explain_output: |
+    StreamMaterialize { columns: [v1, v2], stream_key: [v2], pk_columns: [v2], pk_conflict: IgnoreConflict }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(v2) }
+      │ └─StreamSource { source: t, columns: [v1, v2] }
+      └─StreamExchange { dist: HashShard(v2) }
+        └─StreamDml { columns: [v1, v2] }
+          └─StreamSource
