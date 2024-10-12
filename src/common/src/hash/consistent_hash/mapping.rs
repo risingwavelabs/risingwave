@@ -139,7 +139,10 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         }
     }
 
-    /// Create a vnode mapping with the single item and length of 1. Only for singletons.
+    /// Create a vnode mapping with the single item and length of 1.
+    ///
+    /// Should only be used for singletons. If you want a different vnode count, call
+    /// [`VnodeMapping::new_uniform`] with `std::iter::once(item)` and desired length.
     pub fn new_single(item: T::Item) -> Self {
         Self::new_uniform(std::iter::once(item), 1)
     }

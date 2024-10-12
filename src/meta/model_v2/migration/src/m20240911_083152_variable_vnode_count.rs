@@ -21,6 +21,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // Fill vnode count with 1 for singleton tables.
         manager
             .exec_stmt(
                 UpdateStatement::new()
@@ -42,6 +43,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // Fill vnode count with 1 for singleton fragments.
         manager
             .exec_stmt(
                 UpdateStatement::new()
