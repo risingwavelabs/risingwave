@@ -102,7 +102,7 @@ stacker = "0.1"
 static_assertions = "1"
 strum = "0.26"
 strum_macros = "0.26"
-sysinfo = { version = "0.31", default-features = false, features = ["system"] }
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
