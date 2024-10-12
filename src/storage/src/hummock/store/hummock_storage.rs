@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId, HummockVersionId};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -552,6 +552,14 @@ impl HummockStorage {
 
     pub fn compaction_await_tree_reg(&self) -> Option<&await_tree::Registry> {
         self.compact_await_tree_reg.as_ref()
+    }
+
+    pub async fn min_uncommitted_sst_id(&self) -> Option<HummockSstableObjectId> {
+        let (tx, rx) = oneshot::channel();
+        self.hummock_event_sender
+            .send(HummockEvent::GetMinUncommittedSstId { result_tx: tx })
+            .expect("should send success");
+        rx.await.expect("should await success")
     }
 }
 
