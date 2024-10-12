@@ -4088,17 +4088,6 @@ def section_iceberg_metrics(outer_panels):
                 ),
 
                 panels.timeseries_bytes(
-                    "Iceberg Table Storage Size",
-                    "iceberg table storage size group by table",
-                    [
-                        panels.target(
-                            f"sum({metric('iceberg_storage_data_file_size')}) by (table)",
-                            "storage size @ {{table}}",
-                        ),
-                    ],
-                ),
-
-                panels.timeseries_bytes(
                     "Iceberg Write Size",
                     "",
                     [
