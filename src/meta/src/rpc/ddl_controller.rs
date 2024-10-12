@@ -78,7 +78,7 @@ use crate::manager::{
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
-    create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
+    create_source_worker_handle, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef, StreamFragmentGraph,
 };
