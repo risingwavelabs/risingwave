@@ -17,10 +17,10 @@ normal = ["workspace-hack"]
 ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
-arrow-48-array = { package = "arrow-array", version = "48" }
-arrow-48-buffer = { package = "arrow-buffer", version = "48" }
-arrow-48-cast = { package = "arrow-cast", version = "48" }
-arrow-48-schema = { package = "arrow-schema", version = "48" }
+arrow-52-array = { package = "arrow-array", version = "52" }
+arrow-52-buffer = { package = "arrow-buffer", version = "52" }
+arrow-52-cast = { package = "arrow-cast", version = "52" }
+arrow-52-schema = { package = "arrow-schema", version = "52" }
 arrow-53-array = { package = "arrow-array", version = "53" }
 arrow-53-buffer = { package = "arrow-buffer", version = "53" }
 arrow-53-cast = { package = "arrow-cast", version = "53" }
