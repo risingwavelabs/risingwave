@@ -1022,13 +1022,13 @@ impl SourceManager {
     /// create and register connector worker for source.
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         let mut core = self.core.lock().await;
-        if core.managed_sources.contains_key(&source.get_id()) {
-            tracing::warn!("source {} already registered", source.get_id());
-        } else {
+        if let Entry::Vacant(e) = core.managed_sources.entry(source.get_id()) {
             let handle = create_source_worker_handle(source, self.metrics.clone())
                 .await
                 .context("failed to create source worker")?;
-            core.managed_sources.insert(source.get_id(), handle);
+            e.insert(handle);
+        } else {
+            tracing::warn!("source {} already registered", source.get_id());
         }
         Ok(())
     }
@@ -1040,10 +1040,10 @@ impl SourceManager {
         handle: ConnectorSourceWorkerHandle,
     ) {
         let mut core = self.core.lock().await;
-        if core.managed_sources.contains_key(&source_id) {
-            tracing::warn!("source {} already registered", source_id);
+        if let Entry::Vacant(e) = core.managed_sources.entry(source_id) {
+            e.insert(handle);
         } else {
-            core.managed_sources.insert(source_id, handle);
+            tracing::warn!("source {} already registered", source_id);
         }
     }
 
