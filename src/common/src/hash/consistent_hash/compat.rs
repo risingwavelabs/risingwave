@@ -58,18 +58,11 @@ impl VnodeCountCompat for risingwave_pb::catalog::Table {
         }
 
         // Compatibility: derive vnode count from distribution.
-        if self.distribution_key.is_empty() {
+        if self.distribution_key.is_empty()
+            && self.dist_key_in_pk.is_empty()
+            && self.vnode_col_index.is_none()
+        {
             // Singleton table.
-            assert!(
-                self.dist_key_in_pk.is_empty(),
-                "empty dist key, while dist key in pk is set: {:?}",
-                self.dist_key_in_pk
-            );
-            assert!(
-                self.vnode_col_index.is_none(),
-                "empty dist key, while vnode col index is set: {:?}",
-                self.vnode_col_index
-            );
             1
         } else {
             VirtualNode::COUNT_FOR_COMPAT
@@ -84,13 +77,8 @@ impl VnodeCountCompat for risingwave_pb::plan_common::StorageTableDesc {
         }
 
         // Compatibility: derive vnode count from distribution.
-        if self.dist_key_in_pk_indices.is_empty() {
+        if self.dist_key_in_pk_indices.is_empty() && self.vnode_col_idx_in_pk.is_none() {
             // Singleton table.
-            assert!(
-                self.vnode_col_idx_in_pk.is_none(),
-                "empty dist key in pk indices, while vnode col index is set: {:?}",
-                self.vnode_col_idx_in_pk
-            );
             1
         } else {
             VirtualNode::COUNT_FOR_COMPAT
