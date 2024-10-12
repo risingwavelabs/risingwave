@@ -477,8 +477,9 @@ impl DdlController {
         &self,
         mut source: Source,
     ) -> MetaResult<NotificationVersion> {
-        let handle =
-            create_source_worker_handle(&source, self.source_manager.metrics.clone()).await?;
+        let handle = create_source_worker_handle(&source, self.source_manager.metrics.clone())
+            .await
+            .context("failed to create source worker")?;
 
         let (source_id, version) = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
