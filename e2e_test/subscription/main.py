@@ -1,5 +1,6 @@
 import subprocess
 import psycopg2
+import threading
 import time
 
 
@@ -274,7 +275,7 @@ def test_cursor_with_table_alter():
     row = execute_query("fetch next from cur",conn)
     check_rows_data([1,2],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
-    assert(row == [])
+    assert row == []
     row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4,4],row[0],"Insert")
     execute_insert("insert into t1 values(5,5,5)",conn)
@@ -285,7 +286,7 @@ def test_cursor_with_table_alter():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    assert(row == [])
+    assert row == []
     row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
     drop_table_subscription()
@@ -355,6 +356,52 @@ def test_rebuild_table():
     check_rows_data([1,100],row[2],"UpdateInsert")
     drop_table_subscription()
 
+def test_block_cursor():
+    print(f"test_block_cursor")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+
+    execute_insert("declare cur subscription cursor for sub2 full",conn)
+    execute_insert("insert into t2 values(1,1)",conn)
+    execute_insert("flush",conn)
+    execute_insert("update t2 set v2 = 100 where v1 = 1",conn)
+    execute_insert("flush",conn)
+    start_time = time.time()
+    row = execute_query("fetch 100 from cur with (timeout = '30s')",conn)
+    assert (time.time() - start_time) < 3
+    assert len(row) == 3
+    check_rows_data([1,1],row[0],"Insert")
+    check_rows_data([1,1],row[1],"UpdateDelete")
+    check_rows_data([1,100],row[2],"UpdateInsert")
+
+    # Test block cursor fetches data successfully
+    thread = threading.Thread(target=insert_into_table)
+    thread.start()
+    row = execute_query("fetch 100 from cur with (timeout = '5s')",conn)
+    check_rows_data([10,10],row[0],"Insert")
+    thread.join()
+
+    # Test block cursor timeout
+    row = execute_query("fetch 100 from cur with (timeout = '5s')",conn)
+    assert row == []
+
+    drop_table_subscription()
+
+def insert_into_table():
+    time.sleep(2)
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t2 values(10,10)",conn)
+
 if __name__ == "__main__":
     test_cursor_snapshot()
     test_cursor_op()
@@ -366,3 +413,4 @@ if __name__ == "__main__":
     test_cursor_with_table_alter()
     test_cursor_fetch_n()
     test_rebuild_table()
+    test_block_cursor()

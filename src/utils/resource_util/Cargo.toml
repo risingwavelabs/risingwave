@@ -13,7 +13,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 fs-err = "2"
-sysinfo = { version = "0.30", default-features = false }
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 thiserror-ext = { workspace = true }
 tracing = "0.1"
 

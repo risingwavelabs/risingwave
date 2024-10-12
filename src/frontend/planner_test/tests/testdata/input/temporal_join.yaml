@@ -155,3 +155,10 @@
     select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on c1 = c2;
   expected_outputs:
     - stream_error
+- name: use CTE as temporal join right table. https://github.com/risingwavelabs/risingwave/issues/18703
+  sql: |
+    create table stream(id1 int, a1 int, b1 int, c1 int);
+    create table version(id2 int, a2 int, b2 int, c2 int, primary key (id2));
+    with version as (select * from version) select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1= id2;
+  expected_outputs:
+    - binder_error

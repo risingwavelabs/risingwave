@@ -13,28 +13,37 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
+use bytes::BytesMut;
 use chrono::{TimeZone, Utc};
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
+use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 use with_options::WithOptions;
 
 use crate::sink::catalog::SinkEncode;
+use crate::sink::encoder::{
+    JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
+};
 use crate::sink::file_sink::batching_log_sink::BatchingLogSinker;
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam};
+use crate::sink::{
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam,
+};
 use crate::source::TryFromBTreeMap;
 use crate::with_options::WithOptions;
 
@@ -113,12 +122,19 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
                     For example, `FORMAT xxx ENCODE xxx(force_append_only='true')`"
             )));
         }
-        if self.format_desc.encode != SinkEncode::Parquet {
+
+        if self.format_desc.encode != SinkEncode::Parquet
+            && self.format_desc.encode != SinkEncode::Json
+        {
             return Err(SinkError::Config(anyhow!(
-                "File sink only supports `PARQUET` encode at present."
+                "File sink only supports `PARQUET` and `JSON` encode at present."
             )));
         }
-        Ok(())
+
+        match self.op.list(&self.path).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(anyhow!(e).into()),
+        }
     }
 
     async fn new_log_sinker(
@@ -153,6 +169,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
             batching_strategy.rollover_seconds = Some(DEFAULT_ROLLOVER_SECONDS);
         }
         let engine_type = S::get_engine_type();
+
         Ok(Self {
             op,
             path,
@@ -175,6 +192,7 @@ pub struct OpenDalSinkWriter {
     write_path: String,
     executor_id: u64,
     encode_type: SinkEncode,
+    row_encoder: JsonEncoder,
     engine_type: EngineType,
     pub(crate) batching_strategy: BatchingStrategy,
     current_bached_row_num: usize,
@@ -190,10 +208,12 @@ pub struct OpenDalSinkWriter {
 /// - `ParquetFileWriter`: Represents a Parquet file writer using the `AsyncArrowWriter<W>`
 ///   for writing data to a Parquet file. It accepts an implementation of W: `AsyncWrite` + `Unpin` + `Send`
 ///   as the underlying writer. In this case, the `OpendalWriter` serves as the underlying writer.
+/// - `FileWriter`: Represents a basic `OpenDAL` writer, for writing files in encodes other than parquet.
 ///
 /// The choice of writer used during the actual writing process depends on the encode type of the sink.
 enum FileWriterEnum {
     ParquetFileWriter(AsyncArrowWriter<Compat<FuturesAsyncWriter>>),
+    FileWriter(OpendalWriter),
 }
 
 /// Method for writing files into file system.
@@ -254,6 +274,9 @@ impl OpenDalSinkWriter {
                         );
                         return Ok(true);
                     }
+                }
+                FileWriterEnum::FileWriter(mut w) => {
+                    w.close().await?;
                 }
             };
         }
@@ -350,7 +373,16 @@ impl OpenDalSinkWriter {
         engine_type: EngineType,
         batching_strategy: BatchingStrategy,
     ) -> Result<Self> {
-        let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
+        let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema.clone())?;
+        let row_encoder = JsonEncoder::new(
+            rw_schema,
+            None,
+            crate::sink::encoder::DateHandlingMode::String,
+            TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::String,
+            JsonbHandlingMode::String,
+        );
         Ok(Self {
             schema: Arc::new(arrow_schema),
             write_path: write_path.to_string(),
@@ -359,6 +391,7 @@ impl OpenDalSinkWriter {
             executor_id,
 
             encode_type,
+            row_encoder,
             engine_type,
             batching_strategy,
             current_bached_row_num: 0,
@@ -402,6 +435,7 @@ impl OpenDalSinkWriter {
         // Todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
             SinkEncode::Parquet => "parquet",
+            SinkEncode::Json => "json",
             _ => unimplemented!(),
         };
 
@@ -464,14 +498,15 @@ impl OpenDalSinkWriter {
 
                 self.created_time = SystemTime::now();
             }
-            _ => unimplemented!(),
+            _ => {
+                self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
+            }
         }
 
         Ok(())
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<bool> {
-        let (data_chunk, _) = chunk.compact().into_parts();
         match self
             .sink_writer
             .as_mut()
@@ -479,9 +514,29 @@ impl OpenDalSinkWriter {
         {
             FileWriterEnum::ParquetFileWriter(w) => {
                 let batch =
-                    IcebergArrowConvert.to_record_batch(self.schema.clone(), &data_chunk)?;
+                    IcebergArrowConvert.to_record_batch(self.schema.clone(), chunk.data_chunk())?;
                 let batch_row_nums = batch.num_rows();
                 w.write(&batch).await?;
+                self.current_bached_row_num += batch_row_nums;
+                let res = self.try_finish_write_via_batched_rows().await?;
+                Ok(res)
+            }
+            FileWriterEnum::FileWriter(w) => {
+                let mut chunk_buf = BytesMut::new();
+                let batch_row_nums = chunk.data_chunk().capacity();
+                // write the json representations of the row(s) in current chunk to `chunk_buf`
+                for (op, row) in chunk.rows() {
+                    assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
+                    // to prevent temporary string allocation,
+                    // so we directly write to `chunk_buf` implicitly via `write_fmt`.
+                    writeln!(
+                        chunk_buf,
+                        "{}",
+                        Value::Object(self.row_encoder.encode(row)?)
+                    )
+                    .unwrap(); // write to a `BytesMut` should never fail
+                }
+                w.write(chunk_buf.freeze()).await?;
                 self.current_bached_row_num += batch_row_nums;
                 let res = self.try_finish_write_via_batched_rows().await?;
                 Ok(res)

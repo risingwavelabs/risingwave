@@ -21,7 +21,7 @@ pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
-pub mod elasticsearch;
+pub mod elasticsearch_opensearch;
 pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
@@ -47,6 +47,7 @@ pub mod writer;
 
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::sync::LazyLock;
 
 use ::clickhouse::error::Error as ClickHouseError;
 use ::deltalake::DeltaTableError;
@@ -61,14 +62,22 @@ use decouple_checkpoint_log_sink::{
 use deltalake::DELTALAKE_SINK;
 use iceberg::ICEBERG_SINK;
 use opendal::Error as OpendalError;
+use prometheus::Registry;
 use risingwave_common::array::ArrayError;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::hash::ActorId;
 use risingwave_common::metrics::{
-    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+    LabelGuardedHistogram, LabelGuardedHistogramVec, LabelGuardedIntCounter,
+    LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::secret::{LocalSecretManager, SecretError};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use risingwave_common::{
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
+};
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
@@ -86,6 +95,7 @@ use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
+
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
 macro_rules! for_all_sinks {
@@ -103,8 +113,10 @@ macro_rules! for_all_sinks {
                 { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
-                { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
-                { Opensearch, $crate::sink::remote::OpenSearchSink },
+                // { ElasticSearchJava, $crate::sink::remote::ElasticSearchJavaSink },
+                // { OpensearchJava, $crate::sink::remote::OpenSearchJavaSink },
+                { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
+                { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
@@ -287,56 +299,208 @@ impl SinkParam {
     }
 }
 
+pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =
+    LazyLock::new(|| SinkMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration_metrics: LabelGuardedHistogram<4>,
-    pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
-    pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
-    pub log_store_write_rows: LabelGuardedIntCounter<4>,
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
-    pub log_store_read_rows: LabelGuardedIntCounter<4>,
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
+    pub sink_commit_duration: LabelGuardedHistogramVec<4>,
+    pub connector_sink_rows_received: LabelGuardedIntCounterVec<4>,
 
-    pub iceberg_write_qps: LabelGuardedIntCounter<3>,
-    pub iceberg_write_latency: LabelGuardedHistogram<3>,
-    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<3>,
-    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<3>,
-    pub iceberg_partition_num: LabelGuardedIntGauge<3>,
+    // Log store writer metrics
+    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<3>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<3>,
+    pub log_store_write_rows: LabelGuardedIntCounterVec<3>,
+
+    // Log store reader metrics
+    pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
+    pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
+
+    // Iceberg metrics
+    pub iceberg_write_qps: LabelGuardedIntCounterVec<3>,
+    pub iceberg_write_latency: LabelGuardedHistogramVec<3>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
+    pub iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
 }
 
 impl SinkMetrics {
-    fn for_test() -> Self {
-        SinkMetrics {
-            sink_commit_duration_metrics: LabelGuardedHistogram::test_histogram(),
-            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
-            log_store_first_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
-            log_store_latest_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
-            log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
-            log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
-            log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
-            log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter::test_int_counter(
-            ),
-            iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
-            iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
-            iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
-            iceberg_position_delete_cache_num: LabelGuardedIntGauge::test_int_gauge(),
-            iceberg_partition_num: LabelGuardedIntGauge::test_int_gauge(),
+    pub fn new(registry: &Registry) -> Self {
+        let sink_commit_duration = register_guarded_histogram_vec_with_registry!(
+            "sink_commit_duration",
+            "Duration of commit op in sink",
+            &["actor_id", "connector", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let connector_sink_rows_received = register_guarded_int_counter_vec_with_registry!(
+            "connector_sink_rows_received",
+            "Number of rows received by sink",
+            &["actor_id", "connector_type", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_first_write_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "log_store_first_write_epoch",
+            "The first write epoch of log store",
+            &["actor_id", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_latest_write_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "log_store_latest_write_epoch",
+            "The latest write epoch of log store",
+            &["actor_id", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_write_rows = register_guarded_int_counter_vec_with_registry!(
+            "log_store_write_rows",
+            "The write rate of rows",
+            &["actor_id", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_latest_read_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "log_store_latest_read_epoch",
+            "The latest read epoch of log store",
+            &["actor_id", "connector", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_read_rows = register_guarded_int_counter_vec_with_registry!(
+            "log_store_read_rows",
+            "The read rate of rows",
+            &["actor_id", "connector", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_reader_wait_new_future_duration_ns =
+            register_guarded_int_counter_vec_with_registry!(
+                "log_store_reader_wait_new_future_duration_ns",
+                "Accumulated duration of LogReader to wait for next call to create future",
+                &["actor_id", "connector", "sink_id", "sink_name"],
+                registry
+            )
+            .unwrap();
+
+        let iceberg_write_qps = register_guarded_int_counter_vec_with_registry!(
+            "iceberg_write_qps",
+            "The qps of iceberg writer",
+            &["actor_id", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_write_latency = register_guarded_histogram_vec_with_registry!(
+            "iceberg_write_latency",
+            "The latency of iceberg writer",
+            &["actor_id", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_rolling_unflushed_data_file = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_rolling_unflushed_data_file",
+            "The unflushed data file count of iceberg rolling writer",
+            &["actor_id", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_position_delete_cache_num = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_position_delete_cache_num",
+            "The delete cache num of iceberg position delete writer",
+            &["actor_id", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_partition_num = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_partition_num",
+            "The partition num of iceberg partition writer",
+            &["actor_id", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        Self {
+            sink_commit_duration,
+            connector_sink_rows_received,
+            log_store_first_write_epoch,
+            log_store_latest_write_epoch,
+            log_store_write_rows,
+            log_store_latest_read_epoch,
+            log_store_read_rows,
+            log_store_reader_wait_new_future_duration_ns,
+            iceberg_write_qps,
+            iceberg_write_latency,
+            iceberg_rolling_unflushed_data_file,
+            iceberg_position_delete_cache_num,
+            iceberg_partition_num,
         }
     }
 }
 
 #[derive(Clone)]
 pub struct SinkWriterParam {
+    // TODO(eric): deprecate executor_id
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<SinkMetaClient>,
-    pub sink_metrics: SinkMetrics,
     // The val has two effect:
     // 1. Indicates that the sink will accpect the data chunk with extra partition value column.
     // 2. The index of the extra partition value column.
     // More detail of partition value column, see `PartitionComputeInfo`
     pub extra_partition_col_idx: Option<usize>,
+
+    pub actor_id: ActorId,
+    pub sink_id: SinkId,
+    pub sink_name: String,
+    pub connector: String,
+}
+
+#[derive(Clone)]
+pub struct SinkWriterMetrics {
+    pub sink_commit_duration: LabelGuardedHistogram<4>,
+    pub connector_sink_rows_received: LabelGuardedIntCounter<4>,
+}
+
+impl SinkWriterMetrics {
+    pub fn new(writer_param: &SinkWriterParam) -> Self {
+        let labels = [
+            &writer_param.actor_id.to_string(),
+            writer_param.connector.as_str(),
+            &writer_param.sink_id.to_string(),
+            writer_param.sink_name.as_str(),
+        ];
+        let sink_commit_duration = GLOBAL_SINK_METRICS
+            .sink_commit_duration
+            .with_guarded_label_values(&labels);
+        let connector_sink_rows_received = GLOBAL_SINK_METRICS
+            .connector_sink_rows_received
+            .with_guarded_label_values(&labels);
+        Self {
+            sink_commit_duration,
+            connector_sink_rows_received,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self {
+            sink_commit_duration: LabelGuardedHistogram::test_histogram(),
+            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -368,8 +532,12 @@ impl SinkWriterParam {
             executor_id: Default::default(),
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
-            sink_metrics: SinkMetrics::for_test(),
             extra_partition_col_idx: Default::default(),
+
+            actor_id: 1,
+            sink_id: SinkId::new(1),
+            sink_name: "test_sink".to_string(),
+            connector: "test_connector".to_string(),
         }
     }
 }
@@ -628,6 +796,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error("ElasticSearch/OpenSearch error: {0}")]
+    ElasticSearchOpenSearch(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("File error: {0}")]
@@ -739,5 +913,17 @@ impl From<RedisError> for SinkError {
 impl From<tiberius::error::Error> for SinkError {
     fn from(err: tiberius::error::Error) -> Self {
         SinkError::SqlServer(anyhow!(err))
+    }
+}
+
+impl From<::elasticsearch::Error> for SinkError {
+    fn from(err: ::elasticsearch::Error) -> Self {
+        SinkError::ElasticSearchOpenSearch(anyhow!(err))
+    }
+}
+
+impl From<::opensearch::Error> for SinkError {
+    fn from(err: ::opensearch::Error) -> Self {
+        SinkError::ElasticSearchOpenSearch(anyhow!(err))
     }
 }

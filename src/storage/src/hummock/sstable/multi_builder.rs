@@ -94,7 +94,7 @@ where
         concurrent_uploading_sst_count: Option<usize>,
     ) -> Self {
         // TODO(var-vnode): should use value from caller
-        let vnode_count = VirtualNode::COUNT;
+        let vnode_count = VirtualNode::COUNT_FOR_COMPAT;
 
         Self {
             builder_factory,

@@ -145,7 +145,7 @@ async fn test_streaming_parallelism_index() -> Result<()> {
 
 #[tokio::test]
 async fn test_parallelism_exceed_virtual_node_max_create() -> Result<()> {
-    let vnode_max = VirtualNode::COUNT;
+    let vnode_max = VirtualNode::COUNT_FOR_COMPAT;
     let mut configuration = Configuration::for_auto_parallelism(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE,
         true,
@@ -177,12 +177,20 @@ async fn test_parallelism_exceed_virtual_node_max_create() -> Result<()> {
 
 #[tokio::test]
 async fn test_parallelism_exceed_virtual_node_max_alter_fixed() -> Result<()> {
-    let vnode_max = VirtualNode::COUNT;
+    const MAX_PARALLELISM: usize = 512;
+
     let mut configuration = Configuration::for_scale();
     configuration.compute_nodes = 1;
-    configuration.compute_node_cores = vnode_max + 100;
+    configuration.compute_node_cores = MAX_PARALLELISM + 100;
     let mut cluster = Cluster::start(configuration).await?;
     let mut session = cluster.start_session();
+
+    session
+        .run(format!(
+            "set streaming_max_parallelism = {}",
+            MAX_PARALLELISM
+        ))
+        .await?;
     session.run("set streaming_parallelism = 1").await?;
     session.run("create table t(v int)").await?;
     session
@@ -190,19 +198,37 @@ async fn test_parallelism_exceed_virtual_node_max_alter_fixed() -> Result<()> {
         .await?
         .assert_result_eq("FIXED(1)");
 
-    session
-        .run(format!("alter table t set parallelism = {}", vnode_max + 1))
-        .await?;
-    session
-        .run("select parallelism from rw_streaming_parallelism where name = 't'")
-        .await?
-        .assert_result_eq(format!("FIXED({})", vnode_max));
+    {
+        // Set to the max parallelism, should be accepted.
+        session
+            .run(format!(
+                "alter table t set parallelism = {}",
+                MAX_PARALLELISM
+            ))
+            .await?;
+        session
+            .run("select parallelism from rw_streaming_parallelism where name = 't'")
+            .await?
+            .assert_result_eq(format!("FIXED({})", MAX_PARALLELISM));
+    }
+
+    {
+        // Exceed the max parallelism, should be rejected.
+        let result = session
+            .run(format!(
+                "alter table t set parallelism = {}",
+                MAX_PARALLELISM + 1
+            ))
+            .await;
+        assert!(result.is_err(), "{result:?}");
+    }
+
     Ok(())
 }
 
 #[tokio::test]
 async fn test_parallelism_exceed_virtual_node_max_alter_adaptive() -> Result<()> {
-    let vnode_max = VirtualNode::COUNT;
+    let vnode_max = VirtualNode::COUNT_FOR_COMPAT;
     let mut configuration = Configuration::for_scale();
     configuration.compute_nodes = 1;
     configuration.compute_node_cores = vnode_max + 100;

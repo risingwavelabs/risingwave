@@ -36,12 +36,12 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-chrono-tz = { version = "0.9", features = ["case-insensitive"] }
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 educe = "0.6"
 fancy-regex = "0.13"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
-ginepro = "0.7" # TODO(http-bump): bump to 0.8 once arrow-udf switches to tonic 0.12
+ginepro = "0.8"
 hex = "0.4"
 icelake = { workspace = true }
 itertools = { workspace = true }
@@ -69,8 +69,7 @@ thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
 # For arrow-udf-flight
-# TODO(http-bump): bump once arrow-udf switches to tonic 0.12
-tonic = { version = "0.11", optional = true }
+tonic = { version = "0.12", optional = true }
 tracing = "0.1"
 zstd = { version = "0.13", default-features = false, optional = true }
 

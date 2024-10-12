@@ -21,7 +21,8 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    CacheContext, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
+    CacheContext, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder,
+    HybridCacheEntry,
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
@@ -192,7 +193,7 @@ impl SstableStore {
             .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                 u64::BITS as usize / 8 + value.estimate_size()
             })
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -204,7 +205,7 @@ impl SstableStore {
                 // FIXME(MrCroxx): Calculate block weight more accurately.
                 u64::BITS as usize * 2 / 8 + value.raw().len()
             })
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -614,9 +615,11 @@ impl SstableStore {
     pub async fn list_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
+        start_after: Option<String>,
+        limit: Option<usize>,
     ) -> HummockResult<ObjectMetadataIter> {
         let list_path = format!("{}/{}", self.path, prefix.unwrap_or("".into()));
-        let raw_iter = self.store.list(&list_path).await?;
+        let raw_iter = self.store.list(&list_path, start_after, limit).await?;
         let iter = raw_iter.filter(|r| match r {
             Ok(i) => future::ready(i.key.ends_with(&format!(".{}", OBJECT_SUFFIX))),
             Err(_) => future::ready(true),

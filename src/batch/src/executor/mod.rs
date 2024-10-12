@@ -30,6 +30,7 @@ mod max_one_row;
 mod merge_sort;
 mod merge_sort_exchange;
 mod order_by;
+mod postgres_query;
 mod project;
 mod project_set;
 mod row_seq_scan;
@@ -65,6 +66,7 @@ pub use max_one_row::*;
 pub use merge_sort::*;
 pub use merge_sort_exchange::*;
 pub use order_by::*;
+pub use postgres_query::*;
 pub use project::*;
 pub use project_set::*;
 use risingwave_common::array::DataChunk;
@@ -244,6 +246,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::MaxOneRow => MaxOneRowExecutor,
             NodeBody::FileScan => FileScanExecutorBuilder,
             NodeBody::IcebergScan => IcebergScanExecutorBuilder,
+            NodeBody::PostgresQuery => PostgresQueryExecutorBuilder,
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
@@ -260,7 +263,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+    use risingwave_hummock_sdk::test_batch_query_epoch;
     use risingwave_pb::batch_plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
@@ -278,7 +281,7 @@ mod tests {
             &plan_node,
             task_id,
             ComputeNodeContext::for_test(),
-            to_committed_batch_query_epoch(u64::MAX),
+            test_batch_query_epoch(),
             ShutdownToken::empty(),
         );
         let child_plan = &PlanNode::default();

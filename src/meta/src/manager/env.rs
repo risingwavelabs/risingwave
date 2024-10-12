@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use risingwave_common::config::{
@@ -20,6 +21,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::{bail, system_param};
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
@@ -176,6 +178,7 @@ pub struct MetaOpts {
     pub hummock_version_checkpoint_interval_sec: u64,
     pub enable_hummock_data_archive: bool,
     pub hummock_time_travel_snapshot_interval: u64,
+    pub hummock_time_travel_sst_info_fetch_batch_size: usize,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -186,8 +189,10 @@ pub struct MetaOpts {
     pub min_sst_retention_time_sec: u64,
     /// Interval of automatic hummock full GC.
     pub full_gc_interval_sec: u64,
-    /// The spin interval when collecting global GC watermark in hummock
-    pub collect_gc_watermark_spin_interval_sec: u64,
+    /// Max number of object per full GC job can fetch.
+    pub full_gc_object_limit: u64,
+    /// Max number of inflight time travel query.
+    pub max_inflight_time_travel_query: u64,
     /// Enable sanity check when SSTs are committed
     pub enable_committed_sst_sanity_check: bool,
     /// Schedule compaction for all compaction groups with this interval.
@@ -295,6 +300,8 @@ pub struct MetaOpts {
     // Cluster limits
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
     pub actor_cnt_per_worker_parallelism_soft_limit: usize,
+
+    pub license_key_path: Option<PathBuf>,
 }
 
 impl MetaOpts {
@@ -315,10 +322,12 @@ impl MetaOpts {
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             hummock_time_travel_snapshot_interval: 0,
+            hummock_time_travel_sst_info_fetch_batch_size: 10_000,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
-            collect_gc_watermark_spin_interval_sec: 5,
+            full_gc_object_limit: 100_000,
+            max_inflight_time_travel_query: 1000,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
@@ -360,6 +369,7 @@ impl MetaOpts {
             table_info_statistic_history_times: 240,
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
+            license_key_path: None,
         }
     }
 }
@@ -397,6 +407,19 @@ impl MetaSrvEnv {
             opts.event_log_enabled,
             opts.event_log_channel_max_size,
         ));
+
+        // When license key path is specified, license key from system parameters can be easily
+        // overwritten. So we simply reject this case.
+        if opts.license_key_path.is_some()
+            && init_system_params.license_key
+                != system_param::default::license_key_opt().map(Into::into)
+        {
+            bail!(
+                "argument `--license-key-path` (or env var `RW_LICENSE_KEY_PATH`) and \
+                 system parameter `license_key` (or env var `RW_LICENSE_KEY`) may not \
+                 be set at the same time"
+            );
+        }
 
         let env = match &meta_store_impl {
             MetaStoreImpl::Kv(meta_store) => {
@@ -521,6 +544,7 @@ impl MetaSrvEnv {
                 }
             }
         };
+
         Ok(env)
     }
 

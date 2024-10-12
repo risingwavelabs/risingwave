@@ -662,7 +662,7 @@ impl Binder {
                 ("pg_is_in_recovery", raw_call(ExprType::PgIsInRecovery)),
                 ("rw_recovery_status", raw_call(ExprType::RwRecoveryStatus)),
                 // internal
-                ("rw_vnode", raw_call(ExprType::Vnode)),
+                ("rw_vnode", raw_call(ExprType::VnodeUser)),
                 ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),

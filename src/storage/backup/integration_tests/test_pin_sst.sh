@@ -18,6 +18,8 @@ echo "try to backup meta after creating mvs"
 job_id_2=$(backup)
 echo "create snapshot ${job_id_2} succeeded"
 
+sleep 5
+
 restore "${job_id_1}"
 start_cluster
 sst_count_before_gc=$(get_total_sst_count)

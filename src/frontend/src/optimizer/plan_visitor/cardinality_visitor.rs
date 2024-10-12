@@ -181,6 +181,11 @@ impl PlanVisitor for CardinalityVisitor {
 
             // TODO: refine the cardinality of full outer join
             JoinType::FullOuter => Cardinality::unknown(),
+
+            // For each row from one side, we match `0..=1` rows from the other side.
+            JoinType::AsofInner => left.mul(right.min(0..=1)),
+            // For each row from left side, we match exactly 1 row from the right side or a `NULL` row`.
+            JoinType::AsofLeftOuter => left,
         }
     }
 

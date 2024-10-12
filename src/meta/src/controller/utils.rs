@@ -27,8 +27,8 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
-    view, ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
+    view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
@@ -256,6 +256,14 @@ pub struct PartialActorLocation {
     pub status: ActorStatus,
 }
 
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Actor")]
+pub struct PartialActorSplits {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub splits: Option<ConnectorSplits>,
+}
+
 #[derive(FromQueryResult)]
 pub struct FragmentDesc {
     pub fragment_id: FragmentId,
@@ -265,6 +273,7 @@ pub struct FragmentDesc {
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,
     pub parallelism: i64,
+    pub vnode_count: i64,
 }
 
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.

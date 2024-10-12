@@ -16,18 +16,17 @@ use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, JsonbArrayBuilder, RowRef, StreamChunk, Utf8ArrayBuilder,
+    ArrayBuilder, ArrayImpl, JsonbArrayBuilder, StreamChunk, Utf8ArrayBuilder,
 };
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
-use risingwave_common::types::{JsonbVal, Scalar, ToText};
+use risingwave_common::types::{JsonbVal, Scalar};
 use serde_json::Value;
 
-use super::encoder::{JsonEncoder, RowEncoder};
-use super::remote::{ElasticSearchSink, OpenSearchSink};
-use crate::sink::{Result, Sink};
-pub const ES_OPTION_DELIMITER: &str = "delimiter";
-pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
+use super::elasticsearch_opensearch_config::{
+    ES_OPTION_DELIMITER, ES_OPTION_INDEX, ES_OPTION_INDEX_COLUMN, ES_OPTION_ROUTING_COLUMN,
+};
+use super::elasticsearch_opensearch_formatter::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
+use crate::sink::Result;
 
 pub enum StreamChunkConverter {
     Es(EsStreamChunkConverter),
@@ -40,7 +39,7 @@ impl StreamChunkConverter {
         pk_indices: &Vec<usize>,
         properties: &BTreeMap<String, String>,
     ) -> Result<Self> {
-        if is_es_sink(sink_name) {
+        if is_remote_es_sink(sink_name) {
             let index_column = properties
                 .get(ES_OPTION_INDEX_COLUMN)
                 .cloned()
@@ -52,11 +51,25 @@ impl StreamChunkConverter {
                         .ok_or_else(|| anyhow!("Cannot find {}", ES_OPTION_INDEX_COLUMN))
                 })
                 .transpose()?;
+            let index = properties.get(ES_OPTION_INDEX).cloned();
+            let routing_column = properties
+                .get(ES_OPTION_ROUTING_COLUMN)
+                .cloned()
+                .map(|n| {
+                    schema
+                        .fields()
+                        .iter()
+                        .position(|s| s.name == n)
+                        .ok_or_else(|| anyhow!("Cannot find {}", ES_OPTION_ROUTING_COLUMN))
+                })
+                .transpose()?;
             Ok(StreamChunkConverter::Es(EsStreamChunkConverter::new(
                 schema,
                 pk_indices.clone(),
                 properties.get(ES_OPTION_DELIMITER).cloned(),
                 index_column,
+                index,
+                routing_column,
             )?))
         } else {
             Ok(StreamChunkConverter::Other)
@@ -71,106 +84,75 @@ impl StreamChunkConverter {
     }
 }
 pub struct EsStreamChunkConverter {
-    json_encoder: JsonEncoder,
-    fn_build_id: Box<dyn Fn(RowRef<'_>) -> Result<String> + Send>,
-    index_column: Option<usize>,
+    formatter: ElasticSearchOpenSearchFormatter,
 }
 impl EsStreamChunkConverter {
-    fn new(
+    pub fn new(
         schema: Schema,
         pk_indices: Vec<usize>,
         delimiter: Option<String>,
         index_column: Option<usize>,
+        index: Option<String>,
+        routing_column: Option<usize>,
     ) -> Result<Self> {
-        let fn_build_id: Box<dyn Fn(RowRef<'_>) -> Result<String> + Send> = if pk_indices.is_empty()
-        {
-            Box::new(|row: RowRef<'_>| {
-                Ok(row
-                    .datum_at(0)
-                    .ok_or_else(|| anyhow!("No value found in row, index is 0"))?
-                    .to_text())
-            })
-        } else if pk_indices.len() == 1 {
-            let index = *pk_indices.get(0).unwrap();
-            Box::new(move |row: RowRef<'_>| {
-                Ok(row
-                    .datum_at(index)
-                    .ok_or_else(|| anyhow!("No value found in row, index is 0"))?
-                    .to_text())
-            })
-        } else {
-            let delimiter = delimiter
-                .as_ref()
-                .ok_or_else(|| anyhow!("Please set delimiter in with option"))?
-                .clone();
-            Box::new(move |row: RowRef<'_>| {
-                let mut keys = vec![];
-                for index in &pk_indices {
-                    keys.push(
-                        row.datum_at(*index)
-                            .ok_or_else(|| anyhow!("No value found in row, index is {}", index))?
-                            .to_text(),
-                    );
-                }
-                Ok(keys.join(&delimiter))
-            })
-        };
-        let col_indices = if let Some(index) = index_column {
-            let mut col_indices: Vec<usize> = (0..schema.len()).collect();
-            col_indices.remove(index);
-            Some(col_indices)
-        } else {
-            None
-        };
-        let json_encoder = JsonEncoder::new_with_es(schema, col_indices);
-        Ok(Self {
-            json_encoder,
-            fn_build_id,
+        let formatter = ElasticSearchOpenSearchFormatter::new(
+            pk_indices,
+            &schema,
+            delimiter,
             index_column,
-        })
+            index,
+            routing_column,
+        )?;
+        Ok(Self { formatter })
     }
 
     fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk> {
-        let mut ops = vec![];
+        let mut ops = Vec::with_capacity(chunk.capacity());
         let mut id_string_builder =
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         let mut json_builder =
             <JsonbArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         let mut index_builder =
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
-        for (op, row) in chunk.rows() {
-            ops.push(op);
-            id_string_builder.append(Some(&self.build_id(row)?));
-            if let Some(index) = self.index_column {
-                index_builder.append(Some(
-                    row.datum_at(index)
-                        .ok_or_else(|| anyhow!("No value found in row, index is {}", index))?
-                        .into_utf8(),
-                ));
+        let mut routing_builder =
+            <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
+        for build_bulk_para in self.formatter.convert_chunk(chunk)? {
+            let BuildBulkPara {
+                key,
+                value,
+                index,
+                routing_column,
+                ..
+            } = build_bulk_para;
+
+            id_string_builder.append(Some(&key));
+            index_builder.append(Some(&index));
+            routing_builder.append(routing_column.as_deref());
+            if value.is_some() {
+                ops.push(risingwave_common::array::Op::Insert);
             } else {
-                index_builder.append_null();
+                ops.push(risingwave_common::array::Op::Delete);
             }
-            let json = JsonbVal::from(Value::Object(self.json_encoder.encode(row)?));
-            json_builder.append(Some(json.as_scalar_ref()));
+            let value = value.map(|json| JsonbVal::from(Value::Object(json)));
+            json_builder.append(value.as_ref().map(|json| json.as_scalar_ref()));
         }
         let json_array = risingwave_common::array::ArrayBuilder::finish(json_builder);
         let id_string_array = risingwave_common::array::ArrayBuilder::finish(id_string_builder);
         let index_string_array = risingwave_common::array::ArrayBuilder::finish(index_builder);
+        let routing_string_array = risingwave_common::array::ArrayBuilder::finish(routing_builder);
         Ok(StreamChunk::new(
             ops,
             vec![
                 std::sync::Arc::new(ArrayImpl::Utf8(index_string_array)),
                 std::sync::Arc::new(ArrayImpl::Utf8(id_string_array)),
                 std::sync::Arc::new(ArrayImpl::Jsonb(json_array)),
+                std::sync::Arc::new(ArrayImpl::Utf8(routing_string_array)),
             ],
         ))
     }
-
-    fn build_id(&self, row: RowRef<'_>) -> Result<String> {
-        (self.fn_build_id)(row)
-    }
 }
 
-pub fn is_es_sink(sink_name: &str) -> bool {
-    sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpenSearchSink::SINK_NAME
+pub fn is_remote_es_sink(_sink_name: &str) -> bool {
+    // sink_name == ElasticSearchJavaSink::SINK_NAME || sink_name == OpenSearchJavaSink::SINK_NAME
+    false
 }

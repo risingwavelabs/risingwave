@@ -14,9 +14,10 @@ threshold_auto = 0.8999999761581421
 dir = "./"
 
 [meta]
-min_sst_retention_time_sec = 86400
-full_gc_interval_sec = 86400
-collect_gc_watermark_spin_interval_sec = 5
+min_sst_retention_time_sec = 10800
+full_gc_interval_sec = 600
+full_gc_object_limit = 100000
+max_inflight_time_travel_query = 1000
 periodic_compaction_interval_sec = 60
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 200
@@ -83,6 +84,7 @@ meta_max_trivial_move_task_count_per_loop = 256
 meta_max_get_task_probe_times = 5
 meta_actor_cnt_per_worker_parallelism_soft_limit = 100
 meta_actor_cnt_per_worker_parallelism_hard_limit = 400
+meta_hummock_time_travel_sst_info_fetch_batch_size = 10000
 
 [batch]
 enable_barrier_read = false
@@ -157,6 +159,8 @@ compactor_fast_max_compact_task_size = 2147483648
 compactor_iter_max_io_retry_times = 8
 table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
+compactor_max_overlap_sst_count = 64
+time_travel_version_cache_capacity = 32
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
@@ -255,4 +259,4 @@ max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
 enable_tracing = false
 license_key = ""
-time_travel_retention_ms = 0
+time_travel_retention_ms = 600000

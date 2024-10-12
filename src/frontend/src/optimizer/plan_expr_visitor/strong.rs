@@ -304,6 +304,7 @@ impl Strong {
             | ExprType::MapInsert
             | ExprType::MapLength
             | ExprType::Vnode
+            | ExprType::VnodeUser
             | ExprType::TestPaidTier
             | ExprType::Proctime
             | ExprType::PgSleep

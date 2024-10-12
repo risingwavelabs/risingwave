@@ -1841,24 +1841,8 @@ impl fmt::Display for Statement {
                 if let Some(version_column) = with_version_column {
                     write!(f, " WITH VERSION COLUMN({})", version_column)?;
                 }
-                if !include_column_options.is_empty() { // (Ident, Option<Ident>)
-                    write!(f, "{}", display_comma_separated(
-                        include_column_options.iter().map(|option_item: &IncludeOptionItem| {
-                            format!(" INCLUDE {}{}{}",
-                                    option_item.column_type,
-                                    if let Some(inner_field) = &option_item.inner_field {
-                                        format!(" {}", inner_field)
-                                    } else {
-                                        "".into()
-                                    }
-                                    , if let Some(alias) = &option_item.column_alias {
-                                    format!(" AS {}", alias)
-                                } else {
-                                    "".into()
-                                }
-                            )
-                        }).collect_vec().as_slice()
-                    ))?;
+                if !include_column_options.is_empty() {
+                    write!(f, " {}", display_separated(include_column_options, " "))?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
@@ -2184,6 +2168,36 @@ impl fmt::Display for Statement {
                 Ok(())
             }
         }
+    }
+}
+
+impl Display for IncludeOptionItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            column_type,
+            inner_field,
+            header_inner_expect_type,
+            column_alias,
+        } = self;
+        write!(f, "INCLUDE {}", column_type)?;
+        if let Some(inner_field) = inner_field {
+            write!(f, " '{}'", value::escape_single_quote_string(inner_field))?;
+            if let Some(expected_type) = header_inner_expect_type {
+                write!(
+                    f,
+                    " {}",
+                    match expected_type {
+                        DataType::Varchar => "varchar",
+                        DataType::Bytea => "bytea",
+                        t => unreachable!("unparse header expected type: {t}"),
+                    }
+                )?;
+            }
+        }
+        if let Some(alias) = column_alias {
+            write!(f, " AS {}", alias)?;
+        }
+        Ok(())
     }
 }
 
@@ -2735,17 +2749,17 @@ impl fmt::Display for EmitMode {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum OnConflict {
-    OverWrite,
-    Ignore,
-    DoUpdateIfNotNull,
+    UpdateFull,
+    Nothing,
+    UpdateIfNotNull,
 }
 
 impl fmt::Display for OnConflict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            OnConflict::OverWrite => "OVERWRITE",
-            OnConflict::Ignore => "IGNORE",
-            OnConflict::DoUpdateIfNotNull => "DO UPDATE IF NOT NULL",
+            OnConflict::UpdateFull => "DO UPDATE FULL",
+            OnConflict::Nothing => "DO NOTHING",
+            OnConflict::UpdateIfNotNull => "DO UPDATE IF NOT NULL",
         })
     }
 }

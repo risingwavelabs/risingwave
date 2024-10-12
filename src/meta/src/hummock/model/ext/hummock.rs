@@ -223,7 +223,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
         let m = hummock_version_delta::ActiveModel {
             id: Set(self.id.to_u64().try_into().unwrap()),
             prev_id: Set(self.prev_id.to_u64().try_into().unwrap()),
-            max_committed_epoch: Set(self.visible_table_committed_epoch().try_into().unwrap()),
+            max_committed_epoch: Set(0.into()),
             safe_epoch: Set(0.into()),
             trivial_move: Set(self.trivial_move),
             full_version_delta: Set(FullVersionDelta::from(&self.into())),

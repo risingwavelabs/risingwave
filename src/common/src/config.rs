@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeConfig, S3FifoConfig};
+use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -192,9 +192,13 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_interval_sec")]
     pub full_gc_interval_sec: u64,
 
-    /// The spin interval when collecting global GC watermark in hummock.
-    #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
-    pub collect_gc_watermark_spin_interval_sec: u64,
+    /// Max number of object per full GC job can fetch.
+    #[serde(default = "default::meta::full_gc_object_limit")]
+    pub full_gc_object_limit: u64,
+
+    /// Max number of inflight time travel query.
+    #[serde(default = "default::meta::max_inflight_time_travel_query")]
+    pub max_inflight_time_travel_query: u64,
 
     /// Schedule compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
@@ -322,7 +326,7 @@ pub struct MetaConfig {
     pub do_not_config_object_storage_lifecycle: bool,
 
     /// Count of partition in split group. Meta will assign this value to every new group when it splits from default-group by automatically.
-    /// Each partition contains aligned data of `VirtualNode::COUNT / partition_vnode_count` consecutive virtual-nodes of one state table.
+    /// Each partition contains aligned data of `vnode_count / partition_vnode_count` consecutive virtual-nodes of one state table.
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
 
@@ -351,7 +355,7 @@ pub struct MetaConfig {
 
     /// Count of partitions of tables in default group and materialized view group.
     /// The meta node will decide according to some strategy whether to cut the boundaries of the file according to the vnode alignment.
-    /// Each partition contains aligned data of `VirtualNode::COUNT / hybrid_partition_vnode_count` consecutive virtual-nodes of one state table.
+    /// Each partition contains aligned data of `vnode_count / hybrid_partition_vnode_count` consecutive virtual-nodes of one state table.
     /// Set it zero to disable this feature.
     #[serde(default = "default::meta::hybrid_partition_vnode_count")]
     pub hybrid_partition_vnode_count: u32,
@@ -476,6 +480,10 @@ pub struct MetaDeveloperConfig {
     /// CREATE MV/Table will be rejected when the number of actors exceeds this limit.
     #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
+    /// Max number of SSTs fetched from meta store per SELECT, during time travel Hummock version replay.
+    pub hummock_time_travel_sst_info_fetch_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -796,12 +804,18 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
     pub compactor_concurrent_uploading_sst_count: Option<usize>,
 
+    #[serde(default = "default::storage::compactor_max_overlap_sst_count")]
+    pub compactor_max_overlap_sst_count: usize,
+
     /// Object storage configuration
     /// 1. General configuration
     /// 2. Some special configuration of Backend
     /// 3. Retry and timeout configuration
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
+
+    #[serde(default = "default::storage::time_travel_version_cache_capacity")]
+    pub time_travel_version_cache_capacity: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -889,7 +903,7 @@ pub struct FileCacheConfig {
     pub recover_mode: RecoverMode,
 
     #[serde(default = "default::file_cache::runtime_config")]
-    pub runtime_config: RuntimeConfig,
+    pub runtime_config: RuntimeOptions,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1339,15 +1353,19 @@ pub mod default {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            86400
+            3600 * 3
         }
 
         pub fn full_gc_interval_sec() -> u64 {
-            86400
+            600
         }
 
-        pub fn collect_gc_watermark_spin_interval_sec() -> u64 {
-            5
+        pub fn full_gc_object_limit() -> u64 {
+            100_000
+        }
+
+        pub fn max_inflight_time_travel_query() -> u64 {
+            1000
         }
 
         pub fn periodic_compaction_interval_sec() -> u64 {
@@ -1669,6 +1687,10 @@ pub mod default {
             None
         }
 
+        pub fn compactor_max_overlap_sst_count() -> usize {
+            64
+        }
+
         pub fn table_info_statistic_history_times() -> usize {
             240
         }
@@ -1679,6 +1701,10 @@ pub mod default {
 
         pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize {
             64
+        }
+
+        pub fn time_travel_version_cache_capacity() -> u64 {
+            32
         }
     }
 
@@ -1705,7 +1731,7 @@ pub mod default {
     }
 
     pub mod file_cache {
-        use foyer::{Compression, RecoverMode, RuntimeConfig, TokioRuntimeConfig};
+        use foyer::{Compression, RecoverMode, RuntimeOptions, TokioRuntimeOptions};
 
         pub fn dir() -> String {
             "".to_string()
@@ -1751,8 +1777,8 @@ pub mod default {
             RecoverMode::None
         }
 
-        pub fn runtime_config() -> RuntimeConfig {
-            RuntimeConfig::Unified(TokioRuntimeConfig::default())
+        pub fn runtime_config() -> RuntimeOptions {
+            RuntimeOptions::Unified(TokioRuntimeOptions::default())
         }
     }
 
@@ -1885,6 +1911,10 @@ pub mod default {
 
         pub fn actor_cnt_per_worker_parallelism_hard_limit() -> usize {
             400
+        }
+
+        pub fn hummock_time_travel_sst_info_fetch_batch_size() -> usize {
+            10_000
         }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {
@@ -2076,6 +2106,10 @@ pub mod default {
 
         pub fn sst_allowed_trivial_move_min_size() -> u64 {
             DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
+        }
+
+        pub fn disable_auto_group_scheduling() -> bool {
+            false
         }
     }
 

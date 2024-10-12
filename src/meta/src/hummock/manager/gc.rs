@@ -16,22 +16,21 @@ use std::cmp;
 use std::collections::HashSet;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use anyhow::Context;
-use futures::{stream, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
+use risingwave_meta_model_migration::OnConflict;
+use risingwave_meta_model_v2::hummock_sequence;
+use risingwave_meta_model_v2::hummock_sequence::HUMMOCK_NOW;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::FullScanTask;
+use sea_orm::{ActiveValue, EntityTrait};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
-use crate::manager::MetadataManager;
 use crate::model::BTreeMapTransaction;
 
 #[derive(Default)]
@@ -177,33 +176,44 @@ impl HummockManager {
     /// 3. Meta node decides which SSTs to delete. See `HummockManager::complete_full_gc`.
     ///
     /// Returns Ok(false) if there is no worker available.
-    pub fn start_full_gc(
+    pub async fn start_full_gc(
         &self,
         sst_retention_time: Duration,
         prefix: Option<String>,
     ) -> Result<bool> {
         self.metrics.full_gc_trigger_count.inc();
-        // Set a minimum sst_retention_time to avoid deleting SSTs of on-going write op.
+        // Set a minimum sst_retention_time.
         let sst_retention_time = cmp::max(
             sst_retention_time,
             Duration::from_secs(self.env.opts.min_sst_retention_time_sec),
         );
+        let start_after = self.full_gc_state.next_start_after();
+        let limit = self.full_gc_state.limit;
         tracing::info!(
             retention_sec = sst_retention_time.as_secs(),
             prefix = prefix.as_ref().unwrap_or(&String::from("")),
+            start_after,
+            limit,
             "run full GC"
         );
+
         let compactor = match self.compactor_manager.next_compactor() {
             None => {
-                tracing::warn!("Try full GC but no available idle worker.");
+                tracing::warn!("full GC attempt but no available idle worker");
                 return Ok(false);
             }
             Some(compactor) => compactor,
         };
+        let sst_retention_watermark = self
+            .now()
+            .await?
+            .saturating_sub(sst_retention_time.as_secs());
         compactor
             .send_event(ResponseEvent::FullScanTask(FullScanTask {
-                sst_retention_time_sec: sst_retention_time.as_secs(),
+                sst_retention_watermark,
                 prefix,
+                start_after,
+                limit,
             }))
             .map_err(|_| Error::CompactorUnreachable(compactor.context_id()))?;
         Ok(true)
@@ -211,17 +221,17 @@ impl HummockManager {
 
     /// Given candidate SSTs to GC, filter out false positive.
     /// Returns number of SSTs to GC.
-    pub async fn complete_full_gc(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<usize> {
+    pub async fn complete_full_gc(
+        &self,
+        object_ids: Vec<HummockSstableObjectId>,
+        next_start_after: Option<String>,
+    ) -> Result<usize> {
+        self.full_gc_state.set_next_start_after(next_start_after);
         if object_ids.is_empty() {
             tracing::info!("SST full scan returns no SSTs.");
             return Ok(0);
         }
         let metrics = &self.metrics;
-        let spin_interval =
-            Duration::from_secs(self.env.opts.collect_gc_watermark_spin_interval_sec);
-        let watermark =
-            collect_global_gc_watermark(self.metadata_manager().clone(), spin_interval).await?;
-        metrics.full_gc_last_object_id_watermark.set(watermark as _);
         let candidate_object_number = object_ids.len();
         metrics
             .full_gc_candidate_object_count
@@ -230,99 +240,193 @@ impl HummockManager {
             .all_object_ids_in_time_travel()
             .await?
             .collect::<HashSet<_>>();
-        // 1. filter by watermark
-        let object_ids = object_ids
-            .into_iter()
-            .filter(|s| *s < watermark)
-            .collect_vec();
-        let after_watermark = object_ids.len();
-        // 2. filter by time travel archive
+        self.metrics
+            .time_travel_object_count
+            .set(pinned_object_ids.len() as _);
+        // filter by time travel archive
         let object_ids = object_ids
             .into_iter()
             .filter(|s| !pinned_object_ids.contains(s))
             .collect_vec();
         let after_time_travel = object_ids.len();
-        // 3. filter by version
+        // filter by version
         let selected_object_number = self.extend_objects_to_delete_from_scan(&object_ids).await;
         metrics
             .full_gc_selected_object_count
             .observe(selected_object_number as _);
-        tracing::info!("GC watermark is {watermark}. Object full scan returns {candidate_object_number} objects. {after_watermark} remains after filtered by GC watermark. {after_time_travel} remains after filtered by time travel archives. {selected_object_number} remains after filtered by hummock version.");
+        tracing::info!("Object full scan returns {candidate_object_number} objects. {after_time_travel} remains after filtered by time travel archives. {selected_object_number} remains after filtered by hummock version.");
         Ok(selected_object_number)
+    }
+
+    pub async fn now(&self) -> Result<u64> {
+        let mut guard = self.now.lock().await;
+        let new_now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Clock may have gone backwards")
+            .as_secs();
+        if new_now < *guard {
+            return Err(anyhow::anyhow!(format!(
+                "unexpected decreasing now, old={}, new={}",
+                *guard, new_now
+            ))
+            .into());
+        }
+        *guard = new_now;
+        drop(guard);
+        // Persist now to maintain non-decreasing even after a meta node reboot.
+        if let Some(sql) = self.sql_store() {
+            let m = hummock_sequence::ActiveModel {
+                name: ActiveValue::Set(HUMMOCK_NOW.into()),
+                seq: ActiveValue::Set(new_now.try_into().unwrap()),
+            };
+            hummock_sequence::Entity::insert(m)
+                .on_conflict(
+                    OnConflict::column(hummock_sequence::Column::Name)
+                        .update_column(hummock_sequence::Column::Seq)
+                        .to_owned(),
+                )
+                .exec(&sql.conn)
+                .await?;
+        }
+        Ok(new_now)
+    }
+
+    pub(crate) async fn load_now(&self) -> Result<Option<u64>> {
+        let Some(sql) = self.sql_store() else {
+            return Ok(None);
+        };
+        let now = hummock_sequence::Entity::find_by_id(HUMMOCK_NOW.to_string())
+            .one(&sql.conn)
+            .await?
+            .map(|m| m.seq.try_into().unwrap());
+        Ok(now)
+    }
+
+    pub fn update_paged_metrics(
+        &self,
+        start_after: Option<String>,
+        next_start_after: Option<String>,
+        total_object_count_in_page: u64,
+        total_object_size_in_page: u64,
+    ) {
+        let mut paged_metrics = self.paged_metrics.lock();
+        paged_metrics.total_object_size.update(
+            start_after.clone(),
+            next_start_after.clone(),
+            total_object_size_in_page,
+        );
+        paged_metrics.total_object_count.update(
+            start_after,
+            next_start_after,
+            total_object_count_in_page,
+        );
+        if let Some(total_object_size) = paged_metrics.total_object_size.take() {
+            self.metrics.total_object_size.set(total_object_size as _);
+        }
+        if let Some(total_object_count) = paged_metrics.total_object_count.take() {
+            self.metrics.total_object_count.set(total_object_count as _);
+        }
     }
 }
 
-/// Collects SST GC watermark from related cluster nodes and calculates a global one.
-///
-/// It must wait enough heartbeats first. This precondition is checked at `spin_interval`.
-///
-/// Returns a global GC watermark. The watermark only guards SSTs created before this
-/// invocation.
-pub async fn collect_global_gc_watermark(
-    metadata_manager: MetadataManager,
-    spin_interval: Duration,
-) -> Result<HummockSstableObjectId> {
-    let mut global_watermark = HummockSstableObjectId::MAX;
-    let workers = [
-        metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await
-            .map_err(|err| Error::MetaStore(err.into()))?,
-        metadata_manager
-            .list_worker_node(Some(WorkerType::Compactor), Some(Running))
-            .await
-            .map_err(|err| Error::MetaStore(err.into()))?,
-    ]
-    .concat();
+pub struct FullGcState {
+    next_start_after: Mutex<Option<String>>,
+    limit: Option<u64>,
+}
 
-    if workers.is_empty() {
-        return Ok(global_watermark);
+impl FullGcState {
+    pub fn new(limit: Option<u64>) -> Self {
+        Self {
+            next_start_after: Mutex::new(None),
+            limit,
+        }
     }
 
-    let mut worker_futures = vec![];
-    for worker in &workers {
-        // For each cluster node, its watermark is collected after waiting for 2 heartbeats.
-        // The first heartbeat may carry watermark took before the start of this method,
-        // which doesn't correctly guard target SSTs.
-        // The second heartbeat guarantees its watermark is took after the start of this method.
-        let worker_id = worker.id;
-        let metadata_manager_clone = metadata_manager.clone();
-        worker_futures.push(tokio::spawn(async move {
-            let mut init_version_id: Option<u64> = None;
-            loop {
-                let worker_info = match metadata_manager_clone
-                    .get_worker_info_by_id(worker_id)
-                    .await
-                {
-                    None => {
-                        return None;
-                    }
-                    Some(worker_info) => worker_info,
-                };
-                match init_version_id.as_ref() {
-                    None => {
-                        init_version_id = Some(worker_info.info_version_id);
-                    }
-                    Some(init_version_id) => {
-                        if worker_info.info_version_id >= *init_version_id + 2 {
-                            return worker_info.hummock_gc_watermark;
-                        }
-                    }
-                }
-                tokio::time::sleep(spin_interval).await;
-            }
-        }));
+    pub fn set_next_start_after(&self, next_start_after: Option<String>) {
+        *self.next_start_after.lock() = next_start_after;
     }
-    let mut buffered = stream::iter(worker_futures).buffer_unordered(workers.len());
-    while let Some(worker_result) = buffered.next().await {
-        let worker_watermark = worker_result.context("Failed to collect GC watermark")?;
-        // None means either the worker has gone or the worker has not set a watermark.
-        global_watermark = cmp::min(
-            global_watermark,
-            worker_watermark.unwrap_or(HummockSstableObjectId::MAX),
-        );
+
+    pub fn next_start_after(&self) -> Option<String> {
+        self.next_start_after.lock().clone()
     }
-    Ok(global_watermark)
+}
+
+pub struct PagedMetrics {
+    total_object_count: PagedMetric,
+    total_object_size: PagedMetric,
+}
+
+impl PagedMetrics {
+    pub fn new() -> Self {
+        Self {
+            total_object_count: PagedMetric::new(),
+            total_object_size: PagedMetric::new(),
+        }
+    }
+}
+
+/// The metrics should be accumulated on a per-page basis and then finalized at the end.
+pub struct PagedMetric {
+    /// identifier of a page
+    expect_start_key: Option<String>,
+    /// accumulated metric value of pages seen so far
+    running_value: u64,
+    /// final metric value
+    sealed_value: Option<u64>,
+}
+
+impl PagedMetric {
+    fn new() -> Self {
+        Self {
+            expect_start_key: None,
+            running_value: 0,
+            sealed_value: None,
+        }
+    }
+
+    fn update(
+        &mut self,
+        current_start_key: Option<String>,
+        next_start_key: Option<String>,
+        value: u64,
+    ) {
+        // Encounter an update without pagination, replace current state.
+        if current_start_key.is_none() && next_start_key.is_none() {
+            self.running_value = value;
+            self.seal();
+            return;
+        }
+        // Encounter an update from unexpected page, reset current state.
+        if current_start_key != self.expect_start_key {
+            self.reset();
+            return;
+        }
+        self.running_value += value;
+        // There are more pages to add.
+        if next_start_key.is_some() {
+            self.expect_start_key = next_start_key;
+            return;
+        }
+        // This is the last page, seal the metric value.
+        self.seal();
+    }
+
+    fn seal(&mut self) {
+        self.sealed_value = Some(self.running_value);
+        self.reset();
+    }
+
+    fn reset(&mut self) {
+        self.running_value = 0;
+        self.expect_start_key = None;
+    }
+
+    fn take(&mut self) -> Option<u64> {
+        if self.sealed_value.is_some() {
+            self.reset();
+        }
+        self.sealed_value.take()
+    }
 }
 
 #[cfg(test)]
@@ -332,17 +436,15 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::HummockSstableObjectId;
     use risingwave_rpc_client::HummockMetaClient;
 
-    use super::ResponseEvent;
+    use super::{PagedMetric, ResponseEvent};
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::hummock::MockHummockMetaClient;
-    use crate::MetaOpts;
 
     #[tokio::test]
     async fn test_full_gc() {
-        let (mut env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+        let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager.clone(),
@@ -350,18 +452,13 @@ mod tests {
         ));
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-        // Use smaller spin interval to accelerate test.
-        env.opts = Arc::new(MetaOpts {
-            collect_gc_watermark_spin_interval_sec: 1,
-            ..(*env.opts).clone()
-        });
-
         // No task scheduled because no available worker.
         assert!(!hummock_manager
             .start_full_gc(
                 Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec - 1,),
                 None
             )
+            .await
             .unwrap());
 
         let mut receiver = compactor_manager.add_compactor(context_id);
@@ -371,64 +468,40 @@ mod tests {
                 Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec - 1),
                 None
             )
+            .await
             .unwrap());
-        let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
+        let _full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
             _ => {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec override user provided value.
-        assert_eq!(
-            hummock_manager.env.opts.min_sst_retention_time_sec,
-            full_scan_task.sst_retention_time_sec
-        );
 
         assert!(hummock_manager
             .start_full_gc(
                 Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec + 1),
                 None
             )
+            .await
             .unwrap());
-        let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
+        let _full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
             _ => {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec doesn't override user provided value.
-        assert_eq!(
-            hummock_manager.env.opts.min_sst_retention_time_sec + 1,
-            full_scan_task.sst_retention_time_sec
-        );
 
         // Empty input results immediate return, without waiting heartbeat.
-        hummock_manager.complete_full_gc(vec![]).await.unwrap();
-
-        // mimic CN heartbeat
-        use risingwave_pb::meta::heartbeat_request::extra_info::Info;
-        let heartbeat_interval = hummock_manager
-            .env
-            .opts
-            .collect_gc_watermark_spin_interval_sec;
-        tokio::spawn(async move {
-            loop {
-                cluster_manager
-                    .heartbeat(
-                        context_id,
-                        vec![Info::HummockGcWatermark(HummockSstableObjectId::MAX)],
-                    )
-                    .await
-                    .unwrap();
-                tokio::time::sleep(Duration::from_secs(heartbeat_interval)).await;
-            }
-        });
+        hummock_manager
+            .complete_full_gc(vec![], None)
+            .await
+            .unwrap();
 
         // LSMtree is empty. All input SST ids should be treated as garbage.
         assert_eq!(
             3,
             hummock_manager
-                .complete_full_gc(vec![1, 2, 3])
+                .complete_full_gc(vec![1, 2, 3], None)
                 .await
                 .unwrap()
         );
@@ -452,10 +525,42 @@ mod tests {
             1,
             hummock_manager
                 .complete_full_gc(
-                    [committed_object_ids, vec![max_committed_object_id + 1]].concat()
+                    [committed_object_ids, vec![max_committed_object_id + 1]].concat(),
+                    None
                 )
                 .await
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn test_paged_metric() {
+        let mut metric = PagedMetric::new();
+        fn assert_empty_state(metric: &mut PagedMetric) {
+            assert_eq!(metric.running_value, 0);
+            assert!(metric.expect_start_key.is_none());
+        }
+        assert!(metric.sealed_value.is_none());
+        assert_empty_state(&mut metric);
+
+        metric.update(None, None, 100);
+        assert_eq!(metric.take().unwrap(), 100);
+        assert!(metric.take().is_none());
+        assert_empty_state(&mut metric);
+
+        // "start" is not a legal identifier for the first page
+        metric.update(Some("start".into()), Some("end".into()), 100);
+        assert!(metric.take().is_none());
+        assert_empty_state(&mut metric);
+
+        metric.update(None, Some("middle".into()), 100);
+        assert!(metric.take().is_none());
+        assert_eq!(metric.running_value, 100);
+        assert_eq!(metric.expect_start_key, Some("middle".into()));
+
+        metric.update(Some("middle".into()), None, 50);
+        assert_eq!(metric.take().unwrap(), 150);
+        assert!(metric.take().is_none());
+        assert_empty_state(&mut metric);
     }
 }

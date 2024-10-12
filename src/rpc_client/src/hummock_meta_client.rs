@@ -19,8 +19,7 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange, SyncResult,
 };
 use risingwave_pb::hummock::{
-    HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest,
-    SubscribeCompactionEventResponse, VacuumTask,
+    PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -32,7 +31,6 @@ use crate::error::Result;
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
     async fn get_current_version(&self) -> Result<HummockVersion>;
-    async fn get_snapshot(&self) -> Result<HummockSnapshot>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
     // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch(
@@ -54,6 +52,8 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         filtered_object_ids: Vec<HummockSstableObjectId>,
         total_object_count: u64,
         total_object_size: u64,
+        start_after: Option<String>,
+        next_start_after: Option<String>,
     ) -> Result<()>;
     async fn trigger_full_gc(
         &self,

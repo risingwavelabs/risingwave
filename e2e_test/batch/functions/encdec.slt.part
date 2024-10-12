@@ -33,6 +33,11 @@ SELECT decode('MTIzAAE=', 'base64');
 ----
 \x3132330001
 
+query T
+SELECT decode('MTIz/A+=', 'base64');
+----
+\x313233fc0f
+
 # hex
 query T
 SELECT encode('joanna', 'hex');
