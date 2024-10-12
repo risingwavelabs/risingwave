@@ -1760,6 +1760,29 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
     let task2 = hummock_manager
         .get_compact_task(left_compaction_group_id, &mut default_compaction_selector())
         .await
+        .unwrap();
+
+    // sst is pending by the task
+    assert!(task2.is_none());
+    let ret = hummock_manager
+        .report_compact_task(
+            task.task_id,
+            TaskStatus::Success,
+            vec![],
+            None,
+            HashMap::default(),
+        )
+        .await
+        .unwrap();
+    assert!(ret);
+
+    let current_version_2 = hummock_manager.get_current_version().await;
+    // The compaction task is cancelled or failed.
+    assert_eq!(current_version_2, current_version);
+
+    let task2 = hummock_manager
+        .get_compact_task(left_compaction_group_id, &mut default_compaction_selector())
+        .await
         .unwrap()
         .unwrap();
 
@@ -1784,18 +1807,9 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .await
         .unwrap();
     assert!(ret);
-    let ret = hummock_manager
-        .report_compact_task(
-            task.task_id,
-            TaskStatus::Success,
-            vec![],
-            None,
-            HashMap::default(),
-        )
-        .await
-        .unwrap();
-    // the task has been canceled
-    assert!(!ret);
+
+    let current_version_3 = hummock_manager.get_current_version().await;
+    assert_ne!(current_version_3, current_version_2);
 }
 
 async fn get_manual_compact_task(
