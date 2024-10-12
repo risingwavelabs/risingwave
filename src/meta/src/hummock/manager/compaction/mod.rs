@@ -1191,7 +1191,7 @@ impl HummockManager {
                     let input_exist =
                         group.check_input_sst_ids_exist(&input_level_ids, input_sst_ids);
                     if !input_exist {
-                        compact_task.task_status = TaskStatus::InvalidGroupCanceled;
+                        compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                         warn!(
                             "The task may be expired because of group split, task:\n {:?}",
                             compact_task_to_string(&compact_task)
