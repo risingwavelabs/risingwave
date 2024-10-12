@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::pin::pin;
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Context};
@@ -20,8 +22,15 @@ use aws_sdk_emrserverless::types::builders::SparkSubmitBuilder;
 use aws_sdk_emrserverless::types::{JobDriver, JobRunState};
 use aws_sdk_emrserverless::Client;
 use aws_types::region::Region;
+use futures::future::select;
+use itertools::Itertools;
+use thiserror_ext::AsReport;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::sleep;
-use tracing::info;
+use tokio_retry::strategy::ExponentialBackoff;
+use tracing::{error, info, warn};
+
+use crate::sink::iceberg::IcebergConfig;
 
 pub struct NimtableCompactionConfig {
     region: Option<String>,
@@ -30,6 +39,8 @@ pub struct NimtableCompactionConfig {
     execution_role_arn: String,
     application_id: String,
     entrypoint: String,
+    compact_frequency: usize,
+    min_compact_gap_duration_sec: Duration,
 }
 
 impl NimtableCompactionConfig {
@@ -46,8 +57,150 @@ impl NimtableCompactionConfig {
                 .map_err(|_| anyhow!("NIMTABLE_COMPACTION_APPLICATION_ID not set in env var"))?,
             entrypoint: var("NIMTABLE_COMPACTION_ENTRYPOINT")
                 .map_err(|_| anyhow!("NIMTABLE_COMPACTION_ENTRYPOINT not set in env var"))?,
+            compact_frequency: var("NIMTABLE_COMPACTION_FREQUENCY")
+                .map_err(|_| anyhow!("NIMTABLE_COMPACTION_FREQUENCY not set in env var"))?
+                .parse::<usize>()
+                .context("invalid NIMTABLE_COMPACTION_FREQUENCY")?,
+            min_compact_gap_duration_sec: Duration::from_secs(
+                var("NIMTABLE_MIN_COMPACTION_GAP_DURATION_SEC")
+                    .map_err(|_| {
+                        anyhow!("NIMTABLE_MIN_COMPACTION_GAP_DURATION_SEC not set in env var")
+                    })?
+                    .parse::<u64>()
+                    .context("invalid NIMTABLE_MIN_COMPACTION_GAP_DURATION_SEC")?,
+            ),
         })
     }
+}
+
+async fn run_compact(
+    database: String,
+    table: String,
+    catalog_config: HashMap<String, String>,
+    mut commit_rx: mpsc::UnboundedReceiver<()>,
+) {
+    let config = match NimtableCompactionConfig::from_env() {
+        Ok(config) => config,
+        Err(e) => {
+            error!(database, table, e = ?e.as_report(), "failed to start compact worker");
+            return;
+        }
+    };
+    let compact_frequency = config.compact_frequency;
+    let min_compact_gap_duration_sec = config.min_compact_gap_duration_sec;
+    let mut pending_commit_num = 0;
+    let client = NimtableCompactionClient::new(config).await;
+    let new_backoff = || {
+        ExponentialBackoff::from_millis(1000)
+            .factor(2)
+            .max_delay(Duration::from_secs(60))
+    };
+
+    let mut prev_compact_success_time = Instant::now();
+    let mut error_backoff = new_backoff();
+    let mut error_count = 0;
+
+    loop {
+        if pending_commit_num >= compact_frequency
+            && Instant::now().duration_since(prev_compact_success_time)
+                > min_compact_gap_duration_sec
+        {
+            let compact_start_time = Instant::now();
+            if let Err(e) = client
+                .compact(database.clone(), table.clone(), &catalog_config)
+                .await
+            {
+                let backoff_duration = error_backoff.next().expect("should exist");
+                error_count += 1;
+                error!(
+                    err = ?e.as_report(),
+                    ?backoff_duration,
+                    error_count,
+                    database, table, "failed to compact"
+                );
+                sleep(backoff_duration).await;
+            } else {
+                info!(database, table, elapsed = ?compact_start_time.elapsed(),  "compact success");
+                pending_commit_num = 0;
+                error_backoff = new_backoff();
+                error_count = 0;
+                prev_compact_success_time = Instant::now();
+            }
+        }
+        if commit_rx.recv().await.is_some() {
+            pending_commit_num += 1;
+        } else {
+            break;
+        }
+    }
+}
+
+fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, String>> {
+    match config.common.catalog_type.as_deref() {
+        Some("storage") | None => Ok(HashMap::from_iter([
+            ("type".to_string(), "hadoop".to_string()),
+            (
+                "warehouse".to_string(),
+                config.common.warehouse_path.clone(),
+            ),
+        ])),
+        Some("jdbc") => Ok(HashMap::from_iter(
+            [
+                ("type".to_string(), "jdbc".to_string()),
+                (
+                    "warehouse".to_string(),
+                    config.common.warehouse_path.clone(),
+                ),
+                (
+                    "uri".to_string(),
+                    config
+                        .common
+                        .catalog_uri
+                        .clone()
+                        .ok_or_else(|| anyhow!("uri unspecified for jdbc catalog"))?,
+                ),
+            ]
+            .into_iter()
+            .chain(
+                config
+                    .java_catalog_props
+                    .iter()
+                    .filter(|(key, _)| key.starts_with("jdbc."))
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            ),
+        )),
+        Some(other) => Err(anyhow!("unsupported catalog type {} in compaction", other)),
+    }
+}
+
+pub fn spawn_compaction_client(
+    config: &IcebergConfig,
+) -> anyhow::Result<(mpsc::UnboundedSender<()>, oneshot::Sender<()>)> {
+    let database = config
+        .common
+        .database_name
+        .clone()
+        .ok_or_else(|| anyhow!("should specify database"))?;
+    let table = config.common.table_name.clone();
+    let (commit_tx, commit_rx) = mpsc::unbounded_channel();
+    let (finish_tx, finish_rx) = oneshot::channel();
+
+    let catalog_config = get_catalog_config(config)?;
+
+    let _join_handle = tokio::spawn(async move {
+        select(
+            finish_rx,
+            pin!(run_compact(
+                database.clone(),
+                table.clone(),
+                catalog_config,
+                commit_rx,
+            )),
+        )
+        .await;
+        warn!(database, table, "compact worker exits");
+    });
+    Ok((commit_tx, finish_tx))
 }
 
 pub struct NimtableCompactionClient {
@@ -133,9 +286,9 @@ impl NimtableCompactionClient {
 
     pub async fn compact(
         &self,
-        warehouse: String,
         db: String,
         table: String,
+        catalog_config: &HashMap<String, String>,
     ) -> anyhow::Result<()> {
         let start_result = self
             .client
@@ -152,9 +305,16 @@ impl NimtableCompactionClient {
             .job_driver(JobDriver::SparkSubmit(
                 SparkSubmitBuilder::default()
                     .entry_point(self.config.entrypoint.clone())
-                    .entry_point_arguments(warehouse)
                     .entry_point_arguments(db)
                     .entry_point_arguments(table)
+                    .spark_submit_parameters(
+                        catalog_config
+                            .iter()
+                            .map(|(key, value)| {
+                                format!("--conf spark.sql.catalog.nimtable.{}={}", key, value)
+                            })
+                            .join(" "),
+                    )
                     .build()
                     .unwrap(),
             ))
@@ -177,7 +337,14 @@ async fn trigger_compaction() {
     let config = NimtableCompactionConfig::from_env().unwrap();
     let client = NimtableCompactionClient::new(config).await;
     let result = client
-        .compact(warehouse.to_owned(), db.to_owned(), table.to_owned())
+        .compact(
+            db.to_owned(),
+            table.to_owned(),
+            &HashMap::from_iter([
+                ("type".to_string(), "hadoop".to_string()),
+                ("warehouse".to_string(), warehouse.to_string()),
+            ]),
+        )
         .await;
 
     info!(?result, "job result");
