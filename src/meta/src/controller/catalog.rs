@@ -76,7 +76,6 @@ use crate::controller::utils::{
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
-use crate::stream::SourceManagerRef;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
@@ -1161,8 +1160,7 @@ impl CatalogController {
     pub async fn create_source(
         &self,
         mut pb_source: PbSource,
-        source_manager_ref: Option<SourceManagerRef>,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(SourceId, NotificationVersion)> {
         let inner = self.inner.write().await;
         let owner_id = pb_source.owner as _;
         let txn = inner.db.begin().await?;
@@ -1185,17 +1183,11 @@ impl CatalogController {
             Some(pb_source.schema_id as _),
         )
         .await?;
-        pb_source.id = source_obj.oid as _;
+        let source_id = source_obj.oid;
+        pb_source.id = source_id as _;
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
 
-        if let Some(src_manager) = source_manager_ref {
-            let ret = src_manager.register_source(&pb_source).await;
-            if let Err(e) = ret {
-                txn.rollback().await?;
-                return Err(e);
-            }
-        }
         txn.commit().await?;
 
         let version = self
@@ -1204,7 +1196,7 @@ impl CatalogController {
                 PbRelationInfo::Source(pb_source),
             )
             .await;
-        Ok(version)
+        Ok((source_id, version))
     }
 
     pub async fn create_function(
@@ -3614,7 +3606,7 @@ mod tests {
                 .to_string(),
             ..Default::default()
         };
-        mgr.create_source(pb_source, None).await?;
+        mgr.create_source(pb_source).await?;
         let source_id: SourceId = Source::find()
             .select_only()
             .column(source::Column::SourceId)
