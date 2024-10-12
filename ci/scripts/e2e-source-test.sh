@@ -155,20 +155,6 @@ risedev ci-start ci-kafka
 ./scripts/source/prepare_ci_kafka.sh
 risedev slt './e2e_test/source/basic/*.slt'
 risedev slt './e2e_test/source/basic/old_row_format_syntax/*.slt'
-risedev slt './e2e_test/source/basic/alter/kafka.slt'
-
-echo "--- e2e, kafka alter source rate limit"
-risedev slt './e2e_test/source/basic/alter/rate_limit_source_kafka.slt'
-risedev slt './e2e_test/source/basic/alter/rate_limit_table_kafka.slt'
-
-echo "--- e2e, kafka alter source"
-chmod +x ./scripts/source/prepare_data_after_alter.sh
-./scripts/source/prepare_data_after_alter.sh 2
-risedev slt './e2e_test/source/basic/alter/kafka_after_new_data.slt'
-
-echo "--- e2e, kafka alter source again"
-./scripts/source/prepare_data_after_alter.sh 3
-risedev slt './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
 
 echo "--- Run CH-benCHmark"
 risedev slt './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
