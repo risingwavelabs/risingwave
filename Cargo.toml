@@ -157,6 +157,7 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 deltalake = { version = "0.20.1", features = [
     "s3",
     "gcs",
+    "datafusion",
 ] }
 itertools = "0.13.0"
 jsonbb = "0.1.4"
