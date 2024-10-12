@@ -161,6 +161,7 @@ table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
 time_travel_version_cache_capacity = 32
+max_cached_recent_versions_number = 60
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
