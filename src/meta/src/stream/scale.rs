@@ -185,6 +185,7 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use sea_orm::TransactionTrait;
 
 // The debug implementation is arbitrary. Just used in debug logs.
 #[derive(Educe)]
@@ -473,6 +474,18 @@ impl ScaleController {
             env,
             reschedule_lock: RwLock::new(()),
         }
+    }
+
+    pub async fn integrity_check(&self) -> MetaResult<()> {
+        let MetadataManager::V2(mgr) = &self.metadata_manager else {
+            return Ok(());
+        };
+
+        // let inner = mgr.catalog_controller.inner.write().await;
+        // let txn = inner.db.begin();
+        // // fragment
+
+        Ok(())
     }
 
     /// Build the context for rescheduling and do some validation for the request.

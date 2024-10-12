@@ -15,22 +15,27 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::hash;
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
     UnionType, WithClause, WithQuery,
 };
+use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
+use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, streaming_job, ActorId, FragmentId, ObjectId,
+    actor, actor_dispatcher, fragment, streaming_job, ActorId, ActorMapping, ActorUpstreamActors,
+    ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
 };
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, JoinType, QueryFilter, QuerySelect,
-    RelationTrait, Statement, TransactionTrait,
+    ColumnTrait, ConnectionTrait, DbErr, DerivePartialModel, EntityTrait, FromQueryResult,
+    JoinType, QueryFilter, QuerySelect, RelationTrait, Statement, TransactionTrait,
 };
 
 use crate::controller::catalog::CatalogController;
-use crate::{MetaError, MetaResult};
+use crate::{model, MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find `no_shuffle` upstream relation graph for target fragments.
 ///
@@ -227,7 +232,7 @@ impl CatalogController {
             txn,
             construct_no_shuffle_upstream_traverse_query(fragment_ids.clone()),
         )
-        .await?;
+            .await?;
 
         // NO_SHUFFLE related multi-layer downstream fragments
         let no_shuffle_related_downstream_fragment_ids = resolve_no_shuffle_query(
@@ -241,7 +246,7 @@ impl CatalogController {
                     .collect(),
             ),
         )
-        .await?;
+            .await?;
 
         // We need to identify all other types of dispatchers that are Leaves in the NO_SHUFFLE dependency tree.
         let extended_fragment_ids: HashSet<_> = no_shuffle_related_upstream_fragment_ids
@@ -350,5 +355,314 @@ impl CatalogController {
             fragment_upstreams,
             related_jobs,
         })
+    }
+}
+
+macro_rules! perform_check_in_loop {
+    ($flag:expr, $condition:expr, $message:expr) => {
+        if !$condition {
+            tracing::error!("Integrity check failed: {}", $message);
+            $flag = true;
+            continue;
+        }
+    };
+}
+
+impl CatalogController {
+    pub async fn integrity_check(&self) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        #[derive(Clone, DerivePartialModel, FromQueryResult)]
+        #[sea_orm(entity = "ActorDispatcher")]
+        pub struct PartialActorDispatcher {
+            pub id: i32,
+            pub actor_id: ActorId,
+            pub dispatcher_type: DispatcherType,
+            pub hash_mapping: Option<ActorMapping>,
+            pub dispatcher_id: FragmentId,
+            pub downstream_actor_ids: I32Array,
+        }
+
+        #[derive(Clone, DerivePartialModel, FromQueryResult)]
+        #[sea_orm(entity = "Fragment")]
+        pub struct PartialFragment {
+            pub fragment_id: FragmentId,
+            pub job_id: ObjectId,
+            pub distribution_type: DistributionType,
+            pub upstream_fragment_id: I32Array,
+        }
+
+        #[derive(Clone, DerivePartialModel, FromQueryResult)]
+        #[sea_orm(entity = "Actor")]
+        pub struct PartialActor {
+            pub actor_id: ActorId,
+            pub fragment_id: FragmentId,
+            pub status: ActorStatus,
+            pub splits: Option<ConnectorSplits>,
+            pub upstream_actor_ids: ActorUpstreamActors,
+            pub vnode_bitmap: Option<VnodeBitmap>,
+        }
+
+        let mut flag = false;
+
+        let fragments: Vec<PartialFragment> =
+            Fragment::find().into_partial_model().all(&txn).await?;
+
+        let fragment_map: HashMap<_, _> = fragments
+            .into_iter()
+            .map(|fragment| (fragment.fragment_id, fragment))
+            .collect();
+
+        let actors: Vec<PartialActor> = Actor::find().into_partial_model().all(&txn).await?;
+
+        let mut fragment_actors = HashMap::new();
+        for actor in &actors {
+            fragment_actors
+                .entry(actor.fragment_id)
+                .or_insert(HashSet::new())
+                .insert(actor.actor_id);
+        }
+
+        let actor_map: HashMap<_, _> = actors
+            .into_iter()
+            .map(|actor| (actor.actor_id, actor))
+            .collect();
+
+        let actor_dispatchers: Vec<PartialActorDispatcher> = ActorDispatcher::find()
+            .into_partial_model()
+            .all(&txn)
+            .await?;
+
+        let mut discovered_upstream_fragments = HashMap::new();
+        let mut discovered_upstream_actors = HashMap::new();
+
+        for PartialActorDispatcher {
+            id,
+            actor_id,
+            dispatcher_type,
+            hash_mapping,
+            dispatcher_id,
+            downstream_actor_ids,
+        } in &actor_dispatchers
+        {
+            perform_check_in_loop!(
+                flag,
+                actor_map.contains_key(actor_id),
+                format!(
+                    "ActorDispatcher {} has actor_id {} which does not exist",
+                    id, actor_id
+                )
+            );
+
+            let actor = &actor_map[actor_id];
+
+            perform_check_in_loop!(
+                flag,
+                fragment_map.contains_key(dispatcher_id),
+                format!(
+                    "ActorDispatcher {} has dispatcher_id {} which does not exist",
+                    id, dispatcher_id
+                )
+            );
+
+            discovered_upstream_fragments
+                .entry(*dispatcher_id)
+                .or_insert(HashSet::new())
+                .insert(actor.fragment_id);
+
+            let downstream_fragment = &fragment_map[dispatcher_id];
+
+            perform_check_in_loop!(
+                flag,
+                downstream_fragment.upstream_fragment_id.inner_ref().contains(&actor.fragment_id),
+                format!(
+                    "ActorDispatcher {} has downstream fragment {} which does not have upstream fragment {}",
+                    id, dispatcher_id, actor.fragment_id
+                )
+            );
+
+            perform_check_in_loop!(
+                flag,
+                fragment_actors.contains_key(&dispatcher_id),
+                format!(
+                    "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has no actors",
+                )
+            );
+
+            let dispatcher_downstream_actor_ids: HashSet<_> =
+                downstream_actor_ids.inner_ref().iter().cloned().collect();
+
+            let target_fragment_actor_ids = &fragment_actors[&dispatcher_id];
+
+            for dispatcher_downstream_actor_id in &dispatcher_downstream_actor_ids {
+                perform_check_in_loop!(
+                    flag,
+                    actor_map.contains_key(&dispatcher_downstream_actor_id),
+                    format!(
+                        "ActorDispatcher {id} has downstream_actor_id {dispatcher_downstream_actor_id} which does not exist",
+                    )
+                );
+
+                let actor_fragment_id = actor.fragment_id;
+
+                perform_check_in_loop!(
+                    flag,
+                    actor_map[dispatcher_downstream_actor_id].upstream_actor_ids.inner_ref().contains_key(&actor.fragment_id),
+                    format!(
+                        "ActorDispatcher {id} has downstream_actor_id {dispatcher_downstream_actor_id} which does not have fragment_id {actor_fragment_id} in upstream_actor_id",
+                    )
+                );
+
+                discovered_upstream_actors
+                    .entry(*dispatcher_downstream_actor_id)
+                    .or_insert(HashSet::new())
+                    .insert(actor.actor_id);
+            }
+
+            match dispatcher_type {
+                DispatcherType::NoShuffle => {}
+                _ => {
+                    perform_check_in_loop!(
+                        flag,
+                        &dispatcher_downstream_actor_ids == target_fragment_actor_ids,
+                        format!(
+                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has different actors: {dispatcher_downstream_actor_ids:?} != {target_fragment_actor_ids:?}",
+                        )
+                    );
+                }
+            }
+
+            match dispatcher_type {
+                DispatcherType::Hash => {
+                    perform_check_in_loop!(
+                        flag,
+                        hash_mapping.is_some(),
+                        format!(
+                            "ActorDispatcher {id} has no hash_mapping set for {dispatcher_type:?}",
+                        )
+                    );
+                }
+                _ => {
+                    perform_check_in_loop!(
+                        flag,
+                        hash_mapping.is_none(),
+                        format!(
+                            "ActorDispatcher {id} has hash_mapping set for {dispatcher_type:?}"
+                        )
+                    );
+                }
+            }
+
+            match dispatcher_type {
+                DispatcherType::Simple | DispatcherType::NoShuffle => {
+                    perform_check_in_loop!(
+                        flag,
+                        dispatcher_downstream_actor_ids.len() == 1,
+                        format!(
+                            "ActorDispatcher {id} has more than one downstream_actor_ids for {dispatcher_type:?}",
+                        )
+                    );
+                }
+                _ => {}
+            }
+
+            match dispatcher_type {
+                DispatcherType::Hash => {
+                    let mapping = hash::ActorMapping::from_protobuf(
+                        &hash_mapping.as_ref().unwrap().to_protobuf(),
+                    );
+
+                    let mapping_actors: HashSet<_> =
+                        mapping.iter().map(|actor_id| actor_id as ActorId).collect();
+
+                    perform_check_in_loop!(
+                        flag,
+                        &mapping_actors == target_fragment_actor_ids,
+                        format!(
+                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has different actors: {mapping_actors:?} != {target_fragment_actor_ids:?}",
+                        )
+                    );
+
+                    // actors only from hash distribution fragment can have hash mapping
+                    if let DistributionType::Hash = downstream_fragment.distribution_type {
+                        let mut downstream_bitmaps = HashMap::new();
+
+                        for downstream_actor in target_fragment_actor_ids {
+                            // todo, check map before
+                            let bitmap = Bitmap::from(
+                                &actor_map[downstream_actor]
+                                    .vnode_bitmap
+                                    .as_ref()
+                                    .unwrap()
+                                    .to_protobuf(),
+                            );
+
+                            downstream_bitmaps.insert(*downstream_actor as hash::ActorId, bitmap);
+                        }
+
+                        perform_check_in_loop!(
+                            flag,
+                            mapping.to_bitmaps() == downstream_bitmaps,
+                            format!(
+                                "ActorDispatcher {id} has hash downstream fragment {dispatcher_id} which has different bitmaps: {mapping:?} != {downstream_bitmaps:?}"
+                            )
+                        );
+                    }
+                }
+
+                DispatcherType::Simple => {
+                    perform_check_in_loop!(
+                        flag,
+                        target_fragment_actor_ids.len() == 1,
+                        format!(
+                            "ActorDispatcher {id} has more than one actors in downstream fragment {dispatcher_id} for {dispatcher_type:?}",
+                        )
+                    );
+                }
+
+                DispatcherType::NoShuffle => {
+                    let downstream_actor_id =
+                        dispatcher_downstream_actor_ids.iter().next().unwrap();
+                    let downstream_actor = &actor_map[downstream_actor_id];
+
+                    perform_check_in_loop!(
+                        flag,
+                        actor.vnode_bitmap == downstream_actor.vnode_bitmap,
+                        format!(
+                            "ActorDispatcher {id} has different vnode_bitmap with downstream_actor_id {downstream_actor_id} for {dispatcher_type:?}",
+                        )
+                    );
+                }
+
+                DispatcherType::Broadcast => {}
+            }
+        }
+
+        for (fragment_id, fragment) in &fragment_map {
+            // todo, check job id
+
+            for upstream_fragment_id in fragment.upstream_fragment_id.inner_ref() {
+                perform_check_in_loop!(
+                    flag,
+                    fragment_map.contains_key(upstream_fragment_id),
+                    format!(
+                        "Fragment {} has upstream fragment {} which does not exist",
+                        fragment_id, upstream_fragment_id
+                    )
+                );
+            }
+        }
+
+        // todo, fragment.upstream_fragment = actor.dispatcher to fragment
+
+        let _ = discovered_upstream_fragments;
+        // let _ = discovered_upstream_actors;
+
+        if flag {
+            return Err(MetaError::integrity_check_failed());
+        }
+
+        Ok(())
     }
 }
