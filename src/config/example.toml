@@ -137,6 +137,7 @@ shared_buffer_flush_ratio = 0.800000011920929
 shared_buffer_min_batch_flush_size_mb = 800
 imm_merge_threshold = 0
 write_conflict_detection_enabled = true
+max_cached_recent_versions_number = 60
 max_prefetch_block_number = 16
 disable_remote_compactor = false
 share_buffer_upload_concurrency = 8
@@ -161,7 +162,6 @@ table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
 time_travel_version_cache_capacity = 32
-max_cached_recent_versions_number = 60
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
