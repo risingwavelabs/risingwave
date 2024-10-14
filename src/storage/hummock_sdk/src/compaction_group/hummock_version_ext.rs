@@ -1070,7 +1070,7 @@ impl Levels {
         }
     }
 
-    pub(crate) fn check_deleted_sst_exist(
+    pub fn check_deleted_sst_exist(
         &self,
         delete_sst_levels: &[u32],
         mut delete_sst_ids_set: HashSet<u64>,
