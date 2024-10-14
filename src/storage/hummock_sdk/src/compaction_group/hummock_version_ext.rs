@@ -514,6 +514,7 @@ impl HummockVersion {
 
         // apply to `levels`, which is different compaction groups
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
+            let mut is_l0_changed = false;
             for group_delta in &group_deltas.group_deltas {
                 match group_delta {
                     GroupDeltaCommon::GroupConstruct(group_construct) => {
@@ -607,6 +608,7 @@ impl HummockVersion {
                                         inserted_table_infos.clone(),
                                         None,
                                     );
+                                    is_l0_changed = true;
                                 }
                             }
                         } else {
@@ -616,6 +618,9 @@ impl HummockVersion {
                                 self.state_table_info
                                     .compaction_group_member_table_ids(*compaction_group_id),
                             );
+                            if level_delta.level_idx == 0 {
+                                is_l0_changed = true;
+                            }
                         }
                     }
                     GroupDeltaCommon::NewL0SubLevel(inserted_table_infos) => {
@@ -625,25 +630,31 @@ impl HummockVersion {
                             });
                         assert!(is_commit_epoch);
 
-                        let next_l0_sub_level_id = levels
-                            .l0
-                            .sub_levels
-                            .last()
-                            .map(|level| level.sub_level_id + 1)
-                            .unwrap_or(1);
+                        if !inserted_table_infos.is_empty() {
+                            let next_l0_sub_level_id = levels
+                                .l0
+                                .sub_levels
+                                .last()
+                                .map(|level| level.sub_level_id + 1)
+                                .unwrap_or(1);
 
-                        insert_new_sub_level(
-                            &mut levels.l0,
-                            next_l0_sub_level_id,
-                            PbLevelType::Overlapping,
-                            inserted_table_infos.clone(),
-                            None,
-                        );
+                            insert_new_sub_level(
+                                &mut levels.l0,
+                                next_l0_sub_level_id,
+                                PbLevelType::Overlapping,
+                                inserted_table_infos.clone(),
+                                None,
+                            );
+                            is_l0_changed = true;
+                        }
                     }
                     GroupDeltaCommon::GroupDestroy(_) => {
                         self.levels.remove(compaction_group_id);
                     }
                 }
+            }
+            if is_l0_changed && let Some(levels) = self.levels.get_mut(compaction_group_id) {
+                levels.update_l0();
             }
         }
         self.id = version_delta.id;
@@ -950,9 +961,8 @@ impl HummockVersionCommon<SstableInfo> {
     }
 }
 
-#[easy_ext::ext(HummockLevelsExt)]
 impl Levels {
-    pub fn apply_compact_ssts(
+    pub(crate) fn apply_compact_ssts(
         &mut self,
         level_delta: &IntraLevelDeltaCommon<SstableInfo>,
         member_table_ids: &BTreeSet<TableId>,
@@ -1038,7 +1048,10 @@ impl Levels {
                 level_insert_ssts(&mut self.levels[idx], insert_table_infos);
             }
         }
-        if *level_idx == 0 && !delete_sst_ids_set.is_empty() {
+    }
+
+    pub(crate) fn update_l0(&mut self) {
+        {
             self.l0
                 .sub_levels
                 .retain(|level| !level.table_infos.is_empty());
@@ -1057,7 +1070,7 @@ impl Levels {
         }
     }
 
-    pub fn check_deleted_sst_exist(
+    pub(crate) fn check_deleted_sst_exist(
         &self,
         delete_sst_levels: &[u32],
         mut delete_sst_ids_set: HashSet<u64>,
