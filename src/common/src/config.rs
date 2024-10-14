@@ -711,8 +711,8 @@ pub struct StorageConfig {
     #[serde(default)]
     pub prefetch_buffer_capacity_mb: Option<usize>,
 
-    #[serde(default)]
-    pub max_cached_recent_versions_number: Option<usize>,
+    #[serde(default = "default::storage::max_cached_recent_versions_number")]
+    pub max_cached_recent_versions_number: usize,
 
     /// max prefetch block number
     #[serde(default = "default::storage::max_prefetch_block_number")]
@@ -1552,6 +1552,10 @@ pub mod default {
 
         pub fn write_conflict_detection_enabled() -> bool {
             cfg!(debug_assertions)
+        }
+
+        pub fn max_cached_recent_versions_number() -> usize {
+            60
         }
 
         pub fn block_cache_capacity_mb() -> usize {
