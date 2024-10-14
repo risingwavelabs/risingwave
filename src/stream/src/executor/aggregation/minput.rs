@@ -30,7 +30,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
-use super::GroupKey;
+use super::{AggStateCacheStats, GroupKey};
 use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -165,6 +165,7 @@ impl MaterializedInputState {
     }
 
     /// Apply a chunk of data to the state cache.
+    /// This method should never involve any state table operations.
     pub fn apply_chunk(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()> {
         self.cache.apply_batch(
             chunk,
@@ -176,13 +177,19 @@ impl MaterializedInputState {
     }
 
     /// Get the output of the state.
+    /// We may need to read from the state table into the cache to get the output.
     pub async fn get_output(
         &mut self,
         state_table: &StateTable<impl StateStore>,
         group_key: Option<&GroupKey>,
         func: &BoxedAggregateFunction,
-    ) -> StreamExecutorResult<Datum> {
+    ) -> StreamExecutorResult<(Datum, AggStateCacheStats)> {
+        let mut stats = AggStateCacheStats::default();
+        stats.agg_state_cache_lookup_count += 1;
+
         if !self.cache.is_synced() {
+            stats.agg_state_cache_miss_count += 1;
+
             let mut cache_filler = self.cache.begin_syncing();
             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
                 &(Bound::Unbounded, Bound::Unbounded);
@@ -225,7 +232,7 @@ impl MaterializedInputState {
         if self.output_first_value {
             // special case for `min`, `max`, `first_value` and `last_value`
             // take the first value from the cache
-            Ok(self.cache.output_first())
+            Ok((self.cache.output_first(), stats))
         } else {
             const CHUNK_SIZE: usize = 1024;
             let chunks = self.cache.output_batches(CHUNK_SIZE).collect_vec();
@@ -233,7 +240,7 @@ impl MaterializedInputState {
             for chunk in chunks {
                 func.update(&mut state, &chunk).await?;
             }
-            Ok(func.get_result(&state).await?)
+            Ok((func.get_result(&state).await?, stats))
         }
     }
 }
