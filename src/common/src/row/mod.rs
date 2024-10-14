@@ -95,6 +95,12 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         buf.freeze()
     }
 
+    fn value_estimate_size(&self) -> usize {
+        self.iter()
+            .map(value_encoding::estimate_serialize_datum_size)
+            .sum()
+    }
+
     /// Serializes the row with memcomparable encoding, into the given `buf`. As each datum may have
     /// different order type, a `serde` should be provided.
     #[inline]

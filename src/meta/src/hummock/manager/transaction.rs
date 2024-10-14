@@ -156,18 +156,6 @@ impl<'a> HummockVersionTransaction<'a> {
 
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
-            let l0_sub_level_id = new_version_delta
-                .latest_version()
-                .levels
-                .get(&compaction_group_id)
-                .and_then(|levels| {
-                    levels
-                        .l0
-                        .sub_levels
-                        .last()
-                        .map(|level| level.sub_level_id + 1)
-                })
-                .unwrap_or_else(|| *max_epoch_to_commit);
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
@@ -175,7 +163,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .group_deltas;
             let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
                 0,
-                l0_sub_level_id,
+                0,      // l0_sub_level_id will be generated during apply_version_delta
                 vec![], // default
                 inserted_table_infos,
                 0, // default
