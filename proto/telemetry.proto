@@ -7,7 +7,9 @@ option go_package = "risingwavelabs.com/risingwave/proto/telemetry";
 enum MetaBackend {
   META_BACKEND_UNSPECIFIED = 0;
   META_BACKEND_MEMORY = 1;
-  META_BACKEND_RDB = 2;
+  reserved 2;
+  reserved "META_BACKEND_ETCD";
+  META_BACKEND_RDB = 3;
 }
 
 enum TelemetryNodeType {
