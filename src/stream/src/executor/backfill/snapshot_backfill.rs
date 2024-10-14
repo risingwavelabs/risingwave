@@ -160,12 +160,11 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     yield Message::Barrier(recv_barrier);
                 }
 
-                // TODO: may set the `max_pending_barrier_num_gap` by config
-                let mut upstream_buffer = upstream_buffer.start_consuming_log_store(10);
+                let mut upstream_buffer = upstream_buffer.start_consuming_log_store();
 
                 let mut barrier_epoch = first_barrier_epoch;
 
-                let initial_pending_barrier = upstream_buffer.state.barrier_count();
+                let initial_pending_barrier = upstream_buffer.barrier_count();
                 info!(
                     ?barrier_epoch,
                     table_id = self.upstream_table.table_id().table_id,
@@ -217,7 +216,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
                     self.progress.update_create_mview_log_store_progress(
                         barrier.epoch,
-                        upstream_buffer.state.barrier_count(),
+                        upstream_buffer.barrier_count(),
                     );
 
                     yield Message::Barrier(barrier);
@@ -312,45 +311,14 @@ async fn read_change_log(
     }
 }
 
-trait UpstreamBufferState {
-    /// Return whether to be able to consume upstream. This is used to control backpressure to upstream
-    fn can_consume_upstream(&self) -> bool;
-    fn on_upstream_barrier(&mut self, upstream_barrier: DispatcherBarrier);
-}
+struct ConsumingSnapshot;
+struct ConsumingLogStore;
 
-struct StateOfConsumingSnapshot {
-    pending_barriers: Vec<DispatcherBarrier>,
-}
-
-impl UpstreamBufferState for StateOfConsumingSnapshot {
+impl<S> UpstreamBuffer<'_, S> {
     fn can_consume_upstream(&self) -> bool {
-        // no backpressure to upstream when consuming snapshot
-        true
-    }
-
-    fn on_upstream_barrier(&mut self, upstream_barrier: DispatcherBarrier) {
-        self.pending_barriers.push(upstream_barrier)
-    }
-}
-
-struct StateOfConsumingLogStore {
-    /// Barriers received from upstream but not yet received the barrier from local barrier worker
-    /// newer barrier at the front
-    upstream_pending_barriers: VecDeque<DispatcherBarrier>,
-    max_pending_barrier_num: usize,
-    /// The amount of `max_pending_barrier_num` to decrease whenever emitting a checkpoint barrier to downstream
-    max_pending_barrier_num_gap: usize,
-}
-
-impl StateOfConsumingLogStore {
-    fn barrier_count(&self) -> usize {
-        self.upstream_pending_barriers.len()
-    }
-}
-
-impl UpstreamBufferState for StateOfConsumingLogStore {
-    fn can_consume_upstream(&self) -> bool {
-        if let Some(prev_barrier) = self.upstream_pending_barriers.front()
+        if self.is_polling_epoch_data {
+            true
+        } else if let Some(prev_barrier) = self.upstream_pending_barriers.front()
             && prev_barrier.kind.is_barrier()
         {
             // allow consuming upstream when the barrier is non-checkpoint barrier to avoid deadlock
@@ -359,24 +327,24 @@ impl UpstreamBufferState for StateOfConsumingLogStore {
             self.upstream_pending_barriers.len() < self.max_pending_barrier_num
         }
     }
-
-    fn on_upstream_barrier(&mut self, upstream_barrier: DispatcherBarrier) {
-        self.upstream_pending_barriers.push_front(upstream_barrier);
-    }
 }
 
 struct UpstreamBuffer<'a, S> {
     upstream: &'a mut MergeExecutorInput,
-    state: S,
+    max_pending_barrier_num: usize,
+    /// Barriers received from upstream but not yet received the barrier from local barrier worker
+    /// newer barrier at the front
+    upstream_pending_barriers: VecDeque<DispatcherBarrier>,
     /// Whether we have started polling any upstream data before the next barrier.
     /// When `true`, we should continue polling until the next barrier, because
     /// some data in this epoch have been discarded and data in this epoch
     /// must be read from log store
     is_polling_epoch_data: bool,
     consume_upstream_row_count: LabelGuardedIntCounter<3>,
+    _phase: S,
 }
 
-impl<'a> UpstreamBuffer<'a, StateOfConsumingSnapshot> {
+impl<'a> UpstreamBuffer<'a, ConsumingSnapshot> {
     fn new(
         upstream: &'a mut MergeExecutorInput,
         consume_upstream_row_count: LabelGuardedIntCounter<3>,
@@ -384,47 +352,38 @@ impl<'a> UpstreamBuffer<'a, StateOfConsumingSnapshot> {
         Self {
             upstream,
             is_polling_epoch_data: false,
-            state: StateOfConsumingSnapshot {
-                pending_barriers: vec![],
-            },
             consume_upstream_row_count,
+            upstream_pending_barriers: Default::default(),
+            // no limit on the number of pending barrier in the beginning
+            max_pending_barrier_num: usize::MAX,
+            _phase: ConsumingSnapshot {},
         }
     }
 
-    fn start_consuming_log_store(
-        self,
-        max_pending_barrier_num_gap: usize,
-    ) -> UpstreamBuffer<'a, StateOfConsumingLogStore> {
-        let StateOfConsumingSnapshot { pending_barriers } = self.state;
-        let mut upstream_pending_barriers = VecDeque::with_capacity(pending_barriers.len());
-        for pending_barrier in pending_barriers {
-            upstream_pending_barriers.push_front(pending_barrier);
-        }
-        let max_pending_barrier_num = upstream_pending_barriers.len();
+    fn start_consuming_log_store(self) -> UpstreamBuffer<'a, ConsumingLogStore> {
+        let max_pending_barrier_num = self.barrier_count();
         UpstreamBuffer {
             upstream: self.upstream,
-            state: StateOfConsumingLogStore {
-                upstream_pending_barriers,
-                max_pending_barrier_num,
-                max_pending_barrier_num_gap,
-            },
+            upstream_pending_barriers: self.upstream_pending_barriers,
+            max_pending_barrier_num,
             is_polling_epoch_data: self.is_polling_epoch_data,
             consume_upstream_row_count: self.consume_upstream_row_count,
+            _phase: ConsumingLogStore {},
         }
     }
 }
 
-impl<'a, S: UpstreamBufferState> UpstreamBuffer<'a, S> {
+impl<'a, S> UpstreamBuffer<'a, S> {
     async fn concurrently_consume_upstream(&mut self) -> StreamExecutorError {
         {
             loop {
                 if let Err(e) = try {
-                    if !self.state.can_consume_upstream() && !self.is_polling_epoch_data {
+                    if !self.can_consume_upstream() {
                         // pause the future to block consuming upstream
                         return pending().await;
                     }
                     let barrier = self.consume_until_next_barrier().await?;
-                    self.state.on_upstream_barrier(barrier);
+                    self.upstream_pending_barriers.push_front(barrier);
                 } {
                     break e;
                 }
@@ -459,10 +418,10 @@ impl<'a, S: UpstreamBufferState> UpstreamBuffer<'a, S> {
     }
 }
 
-impl<'a> UpstreamBuffer<'a, StateOfConsumingLogStore> {
+impl<'a> UpstreamBuffer<'a, ConsumingLogStore> {
     async fn next_barrier(&mut self) -> StreamExecutorResult<Option<DispatcherBarrier>> {
         Ok(
-            if let Some(barrier) = self.state.upstream_pending_barriers.pop_back() {
+            if let Some(barrier) = self.upstream_pending_barriers.pop_back() {
                 // Only update the `max_pending_barrier_num` on checkpoint barrier to avoid deadlock.
                 //
                 // After updating and decreasing `max_pending_barrier_num`, we won't poll upstream until
@@ -472,16 +431,15 @@ impl<'a> UpstreamBuffer<'a, StateOfConsumingLogStore> {
                 // the upstream is blocked by back pressure, it cannot process the next checkpoint epoch, which
                 // causes deadlock.
                 if barrier.kind.is_checkpoint() {
-                    self.state.max_pending_barrier_num = min(
-                        self.state.upstream_pending_barriers.len(),
-                        self.state
-                            .max_pending_barrier_num
-                            .saturating_sub(self.state.max_pending_barrier_num_gap),
+                    // sub(1) to ensure that the lag is monotonically decreasing.
+                    self.max_pending_barrier_num = min(
+                        self.upstream_pending_barriers.len(),
+                        self.max_pending_barrier_num.saturating_sub(1),
                     )
                 }
                 Some(barrier)
             } else {
-                self.state.max_pending_barrier_num = 0;
+                self.max_pending_barrier_num = 0;
                 if self.is_polling_epoch_data {
                     let barrier = self.consume_until_next_barrier().await?;
                     Some(barrier)
@@ -493,7 +451,7 @@ impl<'a> UpstreamBuffer<'a, StateOfConsumingLogStore> {
     }
 }
 
-impl<'a, S: UpstreamBufferState> UpstreamBuffer<'a, S> {
+impl<'a, S> UpstreamBuffer<'a, S> {
     /// Run a future while concurrently polling the upstream so that the upstream
     /// won't be back-pressured.
     async fn run_future<T, E: Into<StreamExecutorError>>(
@@ -510,6 +468,10 @@ impl<'a, S: UpstreamBufferState> UpstreamBuffer<'a, S> {
                 result.map_err(Into::into)
             }
         }
+    }
+
+    fn barrier_count(&self) -> usize {
+        self.upstream_pending_barriers.len()
     }
 }
 
