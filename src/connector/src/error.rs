@@ -62,6 +62,7 @@ def_anyhow_newtype! {
     async_nats::jetstream::consumer::pull::MessagesError => "Nats error",
     async_nats::jetstream::context::CreateStreamError => "Nats error",
     async_nats::jetstream::stream::ConsumerError => "Nats error",
+    async_nats::error::Error<async_nats::jetstream::context::RequestErrorKind> => "Nats error",
     NatsJetStreamError => "Nats error",
 
     icelake::Error => "Iceberg error",

@@ -648,6 +648,7 @@ impl NatsCommon {
     pub(crate) async fn build_consumer(
         &self,
         stream: String,
+        durable_consumer_name: String,
         split_id: String,
         start_sequence: NatsOffset,
         mut config: jetstream::consumer::pull::Config,
@@ -666,6 +667,7 @@ impl NatsCommon {
             NatsOffset::Earliest => DeliverPolicy::All,
             NatsOffset::Latest => DeliverPolicy::New,
             NatsOffset::SequenceNumber(v) => {
+                // for compatibility, we do not write to any state table now
                 let parsed = v
                     .parse::<u64>()
                     .context("failed to parse nats offset as sequence number")?;
@@ -683,6 +685,8 @@ impl NatsCommon {
         let consumer = stream
             .get_or_create_consumer(&name, {
                 config.deliver_policy = deliver_policy;
+                config.durable_name = Some(durable_consumer_name);
+                config.filter_subjects = self.subject.split(',').map(|s| s.to_string()).collect();
                 config
             })
             .await?;
@@ -695,8 +699,17 @@ impl NatsCommon {
         stream: String,
     ) -> ConnectorResult<jetstream::stream::Stream> {
         let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
+        if let Ok(mut stream_instance) = jetstream.get_stream(&stream).await {
+            tracing::info!(
+                "load existing nats stream ({:?}) with config {:?}",
+                stream,
+                stream_instance.info().await?
+            );
+            return Ok(stream_instance);
+        }
+
         let mut config = jetstream::stream::Config {
-            name: stream,
+            name: stream.clone(),
             max_bytes: 1000000,
             subjects,
             ..Default::default()
@@ -716,6 +729,11 @@ impl NatsCommon {
         if let Some(v) = self.max_message_size {
             config.max_message_size = v;
         }
+        tracing::info!(
+            "create nats stream ({:?}) with config {:?}",
+            &stream,
+            config
+        );
         let stream = jetstream.get_or_create_stream(config).await?;
         Ok(stream)
     }

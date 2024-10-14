@@ -88,6 +88,7 @@ impl SplitReader for NatsSplitReader {
             .common
             .build_consumer(
                 properties.stream.clone(),
+                properties.durable_consumer_name.clone(),
                 split_id.to_string(),
                 start_position.clone(),
                 config,

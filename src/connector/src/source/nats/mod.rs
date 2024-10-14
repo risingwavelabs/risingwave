@@ -100,6 +100,9 @@ pub struct NatsProperties {
     #[serde(rename = "stream")]
     pub stream: String,
 
+    #[serde(rename = "durable_consumer_name")]
+    pub durable_consumer_name: String,
+
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
