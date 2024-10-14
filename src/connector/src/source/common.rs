@@ -82,7 +82,7 @@ pub(crate) async fn into_chunk_stream(
                     .flat_map(|msg| msg.payload.as_ref().map(|p| p.len() as u64))
                     .sum();
 
-                partition_input_count
+                partition_bytes_count
                     .get_mut(&split_id)
                     .unwrap()
                     .inc_by(sum_bytes);
