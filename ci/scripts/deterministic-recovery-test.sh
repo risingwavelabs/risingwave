@@ -95,4 +95,4 @@ seq "$TEST_NUM" | parallel './risingwave_simulation \
 --kill-rate=${KILL_RATE} \
 --kafka-datadir=./scripts/source/test_data \
 ${EXTRA_ARGS:-} \
-./e2e_test/source/basic/kafka\*.slt 2> $LOGDIR/recovery-source-{}.log && rm $LOGDIR/recovery-source-{}.log'
+./e2e_test/source_legacy/basic/kafka\*.slt 2> $LOGDIR/recovery-source-{}.log && rm $LOGDIR/recovery-source-{}.log'

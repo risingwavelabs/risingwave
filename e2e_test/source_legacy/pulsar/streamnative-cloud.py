@@ -33,7 +33,7 @@ def do_test(config):
 
     # Do test with slt
     ret = os.system(
-        "sqllogictest -p 4566 -d dev './e2e_test/source/pulsar/pulsar.slt'")
+        "sqllogictest -p 4566 -d dev './e2e_test/source_legacy/pulsar/pulsar.slt'")
     # Clean up
     cur.execute('drop table t')
 
