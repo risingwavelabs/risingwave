@@ -30,7 +30,6 @@ use with_options::WithOptions;
 use crate::connector_common::NatsCommon;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::nats::enumerator::NatsSplitEnumerator;
-pub use crate::source::nats::source::NatsJetStreamMeta;
 use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::source::SourceProperties;
 use crate::{

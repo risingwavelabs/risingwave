@@ -25,23 +25,18 @@ pub struct NatsMessage {
     pub reply_subject: Option<String>,
 }
 
-#[derive(Clone, Debug)]
-pub struct NatsJetStreamMeta {
-    pub reply_subject: Option<String>,
-}
-
 impl From<NatsMessage> for SourceMessage {
     fn from(message: NatsMessage) -> Self {
         SourceMessage {
             key: None,
             payload: Some(message.payload),
             // For nats jetstream, use sequence id as offset
+            //
             // DEPRECATED: no longer use sequence id as offset, let nats broker handle failover
-            offset: message.sequence_number,
+            // use reply_subject as offset for ack use, we just check the persisted state for whether this is the first run
+            offset: message.reply_subject.unwrap_or_default(),
             split_id: message.split_id,
-            meta: SourceMeta::NatsJetStream(NatsJetStreamMeta {
-                reply_subject: message.reply_subject,
-            }),
+            meta: SourceMeta::Empty,
         }
     }
 }
