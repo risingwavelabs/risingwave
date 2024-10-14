@@ -1453,7 +1453,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "bytes",
- "fastrand 2.0.1",
+ "fastrand",
  "http 0.2.9",
  "once_cell",
  "regex-lite",
