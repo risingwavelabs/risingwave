@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::bitmap::Bitmap;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash;
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -232,7 +232,7 @@ impl CatalogController {
             txn,
             construct_no_shuffle_upstream_traverse_query(fragment_ids.clone()),
         )
-            .await?;
+        .await?;
 
         // NO_SHUFFLE related multi-layer downstream fragments
         let no_shuffle_related_downstream_fragment_ids = resolve_no_shuffle_query(
@@ -246,7 +246,7 @@ impl CatalogController {
                     .collect(),
             ),
         )
-            .await?;
+        .await?;
 
         // We need to identify all other types of dispatchers that are Leaves in the NO_SHUFFLE dependency tree.
         let extended_fragment_ids: HashSet<_> = no_shuffle_related_upstream_fragment_ids
@@ -358,12 +358,29 @@ impl CatalogController {
     }
 }
 
-macro_rules! perform_check_in_loop {
+macro_rules! crit_check_in_loop {
     ($flag:expr, $condition:expr, $message:expr) => {
         if !$condition {
             tracing::error!("Integrity check failed: {}", $message);
             $flag = true;
             continue;
+        }
+    };
+}
+
+macro_rules! warn_check_in_loop {
+    ($flag:expr, $condition:expr, $message:expr) => {
+        if !$condition {
+            tracing::warn!("Integrity check warned: {}", $message);
+            continue;
+        }
+    };
+}
+
+macro_rules! warn_check {
+    ($flag:expr, $condition:expr, $message:expr) => {
+        if !$condition {
+            tracing::warn!("Integrity check warned: {}", $message);
         }
     };
 }
@@ -391,6 +408,7 @@ impl CatalogController {
             pub job_id: ObjectId,
             pub distribution_type: DistributionType,
             pub upstream_fragment_id: I32Array,
+            pub vnode_count: i32,
         }
 
         #[derive(Clone, DerivePartialModel, FromQueryResult)]
@@ -437,6 +455,77 @@ impl CatalogController {
         let mut discovered_upstream_fragments = HashMap::new();
         let mut discovered_upstream_actors = HashMap::new();
 
+        for (fragment_id, actor_ids) in &fragment_actors {
+            crit_check_in_loop!(
+                flag,
+                fragment_map.contains_key(fragment_id),
+                format!("Actor {actor_id} has fragment_id {fragment_id} which does not exist",)
+            );
+
+            let fragment = &fragment_map[fragment_id];
+
+            match fragment.distribution_type {
+                DistributionType::Single => {
+                    crit_check_in_loop!(
+                        flag,
+                        actor_ids.len() == 1,
+                        format!(
+                            "Fragment {fragment_id} has more than one actors {actor_ids:?} for single distribution type",
+                        )
+                    );
+
+                    let actor_id = actor_ids.iter().exactly_one().unwrap();
+                    let actor = &actor_map[actor_id];
+
+                    crit_check_in_loop!(
+                        flag,
+                        actor.vnode_bitmap.is_none(),
+                        format!(
+                            "Fragment {fragment_id} actor {actor_id} has vnode_bitmap set for single distribution type",
+                        )
+                    );
+                }
+                DistributionType::Hash => {
+                    crit_check_in_loop!(
+                        flag,
+                        actor_ids.len() >= 1,
+                        format!(
+                            "Fragment {fragment_id} has less than one actors {actor_ids:?} for hash distribution type",
+                        )
+                    );
+
+                    let mut builder = BitmapBuilder::zeroed(fragment.vnode_count as _);
+
+                    for actor_id in actor_ids {
+                        let actor = &actor_map[actor_id];
+
+                        crit_check_in_loop!(
+                            flag,
+                            actor.vnode_bitmap.is_some(),
+                            format!(
+                                "Fragment {fragment_id} actor {actor_id} has no vnode_bitmap set for hash distribution type",
+                            )
+                        );
+
+                        let bitmap =
+                            Bitmap::from(actor.vnode_bitmap.as_ref().unwrap().to_protobuf());
+
+                        builder.append_bitmap(&bitmap);
+                    }
+
+                    let bitmap = builder.finish();
+
+                    crit_check_in_loop!(
+                        flag,
+                        bitmap.all(),
+                        format!(
+                            "Fragment {fragment_id} has incomplete vnode_bitmap for hash distribution type",
+                        )
+                    );
+                }
+            }
+        }
+
         for PartialActorDispatcher {
             id,
             actor_id,
@@ -446,7 +535,7 @@ impl CatalogController {
             downstream_actor_ids,
         } in &actor_dispatchers
         {
-            perform_check_in_loop!(
+            crit_check_in_loop!(
                 flag,
                 actor_map.contains_key(actor_id),
                 format!(
@@ -457,7 +546,7 @@ impl CatalogController {
 
             let actor = &actor_map[actor_id];
 
-            perform_check_in_loop!(
+            crit_check_in_loop!(
                 flag,
                 fragment_map.contains_key(dispatcher_id),
                 format!(
@@ -473,7 +562,7 @@ impl CatalogController {
 
             let downstream_fragment = &fragment_map[dispatcher_id];
 
-            perform_check_in_loop!(
+            crit_check_in_loop!(
                 flag,
                 downstream_fragment.upstream_fragment_id.inner_ref().contains(&actor.fragment_id),
                 format!(
@@ -482,7 +571,7 @@ impl CatalogController {
                 )
             );
 
-            perform_check_in_loop!(
+            crit_check_in_loop!(
                 flag,
                 fragment_actors.contains_key(&dispatcher_id),
                 format!(
@@ -496,7 +585,7 @@ impl CatalogController {
             let target_fragment_actor_ids = &fragment_actors[&dispatcher_id];
 
             for dispatcher_downstream_actor_id in &dispatcher_downstream_actor_ids {
-                perform_check_in_loop!(
+                crit_check_in_loop!(
                     flag,
                     actor_map.contains_key(&dispatcher_downstream_actor_id),
                     format!(
@@ -506,7 +595,7 @@ impl CatalogController {
 
                 let actor_fragment_id = actor.fragment_id;
 
-                perform_check_in_loop!(
+                crit_check_in_loop!(
                     flag,
                     actor_map[dispatcher_downstream_actor_id].upstream_actor_ids.inner_ref().contains_key(&actor.fragment_id),
                     format!(
@@ -523,7 +612,7 @@ impl CatalogController {
             match dispatcher_type {
                 DispatcherType::NoShuffle => {}
                 _ => {
-                    perform_check_in_loop!(
+                    crit_check_in_loop!(
                         flag,
                         &dispatcher_downstream_actor_ids == target_fragment_actor_ids,
                         format!(
@@ -535,7 +624,7 @@ impl CatalogController {
 
             match dispatcher_type {
                 DispatcherType::Hash => {
-                    perform_check_in_loop!(
+                    crit_check_in_loop!(
                         flag,
                         hash_mapping.is_some(),
                         format!(
@@ -544,7 +633,7 @@ impl CatalogController {
                     );
                 }
                 _ => {
-                    perform_check_in_loop!(
+                    crit_check_in_loop!(
                         flag,
                         hash_mapping.is_none(),
                         format!(
@@ -556,7 +645,7 @@ impl CatalogController {
 
             match dispatcher_type {
                 DispatcherType::Simple | DispatcherType::NoShuffle => {
-                    perform_check_in_loop!(
+                    crit_check_in_loop!(
                         flag,
                         dispatcher_downstream_actor_ids.len() == 1,
                         format!(
@@ -576,7 +665,7 @@ impl CatalogController {
                     let mapping_actors: HashSet<_> =
                         mapping.iter().map(|actor_id| actor_id as ActorId).collect();
 
-                    perform_check_in_loop!(
+                    crit_check_in_loop!(
                         flag,
                         &mapping_actors == target_fragment_actor_ids,
                         format!(
@@ -585,38 +674,53 @@ impl CatalogController {
                     );
 
                     // actors only from hash distribution fragment can have hash mapping
-                    if let DistributionType::Hash = downstream_fragment.distribution_type {
-                        let mut downstream_bitmaps = HashMap::new();
+                    match downstream_fragment.distribution_type {
+                        DistributionType::Hash => {
+                            let mut downstream_bitmaps = HashMap::new();
 
-                        for downstream_actor in target_fragment_actor_ids {
-                            // todo, check map before
-                            let bitmap = Bitmap::from(
-                                &actor_map[downstream_actor]
-                                    .vnode_bitmap
-                                    .as_ref()
-                                    .unwrap()
-                                    .to_protobuf(),
+                            for downstream_actor in target_fragment_actor_ids {
+                                let bitmap = Bitmap::from(
+                                    &actor_map[downstream_actor]
+                                        .vnode_bitmap
+                                        .as_ref()
+                                        .unwrap()
+                                        .to_protobuf(),
+                                );
+
+                                downstream_bitmaps
+                                    .insert(*downstream_actor as hash::ActorId, bitmap);
+                            }
+
+                            crit_check_in_loop!(
+                                flag,
+                                mapping.to_bitmaps() == downstream_bitmaps,
+                                format!(
+                                    "ActorDispatcher {id} has hash downstream fragment {dispatcher_id} which has different bitmaps: {mapping:?} != {downstream_bitmaps:?}"
+                                )
                             );
-
-                            downstream_bitmaps.insert(*downstream_actor as hash::ActorId, bitmap);
                         }
-
-                        perform_check_in_loop!(
-                            flag,
-                            mapping.to_bitmaps() == downstream_bitmaps,
-                            format!(
-                                "ActorDispatcher {id} has hash downstream fragment {dispatcher_id} which has different bitmaps: {mapping:?} != {downstream_bitmaps:?}"
-                            )
-                        );
+                        DistributionType::Single => {
+                            tracing::warn!(
+                                "ActorDispatcher {id} has hash downstream fragment {dispatcher_id} which has single distribution type"
+                            );
+                        }
                     }
                 }
 
                 DispatcherType::Simple => {
-                    perform_check_in_loop!(
+                    crit_check_in_loop!(
                         flag,
                         target_fragment_actor_ids.len() == 1,
                         format!(
                             "ActorDispatcher {id} has more than one actors in downstream fragment {dispatcher_id} for {dispatcher_type:?}",
+                        )
+                    );
+
+                    crit_check_in_loop!(
+                        flag,
+                        downstream_fragment.distribution_type != DistributionType::Hash,
+                        format!(
+                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has hash distribution type for {dispatcher_type:?}",
                         )
                     );
                 }
@@ -626,7 +730,7 @@ impl CatalogController {
                         dispatcher_downstream_actor_ids.iter().next().unwrap();
                     let downstream_actor = &actor_map[downstream_actor_id];
 
-                    perform_check_in_loop!(
+                    crit_check_in_loop!(
                         flag,
                         actor.vnode_bitmap == downstream_actor.vnode_bitmap,
                         format!(
@@ -635,29 +739,59 @@ impl CatalogController {
                     );
                 }
 
-                DispatcherType::Broadcast => {}
+                DispatcherType::Broadcast => {
+                    if let DistributionType::Single = downstream_fragment.distribution_type {
+                        tracing::warn!(
+                            "ActorDispatcher {id} has broadcast downstream fragment {dispatcher_id} which has single distribution type"
+                        );
+                    }
+                }
             }
         }
 
-        for (fragment_id, fragment) in &fragment_map {
-            // todo, check job id
+        for fragment in fragment_map.values() {
+            let discovered_upstream_fragment_ids = discovered_upstream_fragments
+                .get(&fragment.fragment_id)
+                .map(|set| set.clone())
+                .unwrap_or_default();
 
-            for upstream_fragment_id in fragment.upstream_fragment_id.inner_ref() {
-                perform_check_in_loop!(
-                    flag,
-                    fragment_map.contains_key(upstream_fragment_id),
-                    format!(
-                        "Fragment {} has upstream fragment {} which does not exist",
-                        fragment_id, upstream_fragment_id
-                    )
-                );
-            }
+            let upstream_fragment_ids: HashSet<_> = fragment
+                .upstream_fragment_id
+                .inner_ref()
+                .iter()
+                .copied()
+                .collect();
+
+            crit_check_in_loop!(
+                flag,
+                discovered_upstream_fragment_ids == upstream_fragment_ids,
+                format!(
+                    "Fragment {fragment_id} has different upstream_fragment_ids from discovered: {discovered_upstream_fragment_ids:?} != {upstream_fragment_ids:?}",
+                )
+            );
         }
 
-        // todo, fragment.upstream_fragment = actor.dispatcher to fragment
+        for actor in actor_map.values() {
+            let discovered_upstream_actor_ids = discovered_upstream_actors
+                .get(&actor.actor_id)
+                .map(|set| set.clone())
+                .unwrap_or_default();
 
-        let _ = discovered_upstream_fragments;
-        // let _ = discovered_upstream_actors;
+            let upstream_actor_ids: HashSet<_> = actor
+                .upstream_actor_ids
+                .inner_ref()
+                .iter()
+                .flat_map(|(_, v)| v.iter().copied())
+                .collect();
+
+            crit_check_in_loop!(
+                flag,
+                discovered_upstream_actor_ids == upstream_actor_ids,
+                format!(
+                    "Actor {actor_id} has different upstream_actor_ids from discovered: {discovered_upstream_actor_ids:?} != {upstream_actor_ids:?}",
+                )
+            )
+        }
 
         if flag {
             return Err(MetaError::integrity_check_failed());
