@@ -917,7 +917,7 @@ impl CursorManager {
         }
     }
 
-    pub async fn iter_query_cursors(&self, mut f: impl FnMut(&String, &QueryCursor) -> ()) {
+    pub async fn iter_query_cursors(&self, mut f: impl FnMut(&String, &QueryCursor)) {
         self.cursor_map
             .lock()
             .await
@@ -929,10 +929,7 @@ impl CursorManager {
             });
     }
 
-    pub async fn iter_subscription_cursors(
-        &self,
-        mut f: impl FnMut(&String, &SubscriptionCursor) -> (),
-    ) {
+    pub async fn iter_subscription_cursors(&self, mut f: impl FnMut(&String, &SubscriptionCursor)) {
         self.cursor_map
             .lock()
             .await
