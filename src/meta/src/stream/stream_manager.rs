@@ -361,10 +361,12 @@ impl GlobalStreamManager {
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
+        let mut worker_locations = building_locations.worker_locations.clone();
+        worker_locations.extend(existing_locations.worker_locations.clone().into_iter());
         self.stream_rpc_manager
             .broadcast_update_actor_info(
-                &building_locations.worker_locations,
-                building_worker_actors.keys().cloned(),
+                &worker_locations,
+                worker_locations.keys().cloned(),
                 actor_infos_to_broadcast,
                 building_worker_actors.iter().map(|(worker_id, actors)| {
                     let stream_actors = actors
@@ -385,10 +387,7 @@ impl GlobalStreamManager {
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
         self.stream_rpc_manager
-            .build_actors(
-                &building_locations.worker_locations,
-                building_worker_actors.into_iter(),
-            )
+            .build_actors(&worker_locations, building_worker_actors.into_iter())
             .await?;
 
         Ok(())
