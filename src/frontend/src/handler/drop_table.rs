@@ -111,9 +111,15 @@ pub async fn handle_drop_table(
             // Drop source
             crate::handler::drop_sink::handle_drop_sink(
                 handler_args.clone(),
-                ObjectName::from(vec![Ident::from(
-                    (ICEBERG_SINK_PREFIX.to_string() + &table_name).as_str(),
-                )]),
+                ObjectName::from(match schema_name {
+                    Some(ref schema) => vec![
+                        Ident::from(schema.as_str()),
+                        Ident::from((ICEBERG_SINK_PREFIX.to_string() + &table_name).as_str()),
+                    ],
+                    None => vec![Ident::from(
+                        (ICEBERG_SINK_PREFIX.to_string() + &table_name).as_str(),
+                    )],
+                }),
                 true,
                 false,
             )
@@ -158,9 +164,15 @@ pub async fn handle_drop_table(
 
                 crate::handler::drop_source::handle_drop_source(
                     handler_args.clone(),
-                    ObjectName::from(vec![Ident::from(
-                        (ICEBERG_SOURCE_PREFIX.to_string() + &table_name).as_str(),
-                    )]),
+                    ObjectName::from(match schema_name {
+                        Some(ref schema) => vec![
+                            Ident::from(schema.as_str()),
+                            Ident::from((ICEBERG_SOURCE_PREFIX.to_string() + &table_name).as_str()),
+                        ],
+                        None => vec![Ident::from(
+                            (ICEBERG_SOURCE_PREFIX.to_string() + &table_name).as_str(),
+                        )],
+                    }),
                     true,
                     false,
                 )
