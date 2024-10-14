@@ -153,17 +153,15 @@ impl<'a> HummockVersionTransaction<'a> {
             .entry(compact_task.compaction_group_id)
             .or_default()
             .group_deltas;
-        let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
+        let mut removed_table_ids_map: BTreeMap<u32, HashSet<u64>> = BTreeMap::default();
 
         for level in &compact_task.input_ssts {
             let level_idx = level.level_idx;
-            let mut removed_table_ids =
-                level.table_infos.iter().map(|sst| sst.sst_id).collect_vec();
 
             removed_table_ids_map
                 .entry(level_idx)
                 .or_default()
-                .append(&mut removed_table_ids);
+                .extend(level.table_infos.iter().map(|sst| sst.sst_id));
         }
 
         for (level_idx, removed_table_ids) in removed_table_ids_map {
@@ -181,7 +179,7 @@ impl<'a> HummockVersionTransaction<'a> {
         let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
             compact_task.target_level,
             compact_task.target_sub_level_id,
-            vec![], // default
+            HashSet::new(), // default
             compact_task.sorted_output_ssts.clone(),
             compact_task.split_weight_by_vnode,
         ));

@@ -20,9 +20,7 @@ use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
-use risingwave_hummock_sdk::version::{
-    GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
-};
+use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, FrontendHummockVersionDelta, HummockEpoch, HummockVersionId,
 };
@@ -154,13 +152,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
-            let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
-                0,
-                0,      // l0_sub_level_id will be generated during apply_version_delta
-                vec![], // default
-                inserted_table_infos,
-                0, // default
-            ));
+            let group_delta = GroupDelta::NewL0SubLevel(inserted_table_infos);
 
             group_deltas.push(group_delta);
         }
