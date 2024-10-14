@@ -1,6 +1,5 @@
 [meta]
 min_sst_retention_time_sec = 5
-collect_gc_watermark_spin_interval_sec = 1
 vacuum_interval_sec = 10
 
 [system]

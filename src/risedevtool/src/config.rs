@@ -57,7 +57,7 @@ impl ConfigExpander {
     ///   config-path: src/config/ci-recovery.toml
     ///   env:
     ///     RUST_LOG: "info,risingwave_storage::hummock=off"
-    ///     RW_ENABLE_PRETTY_LOG: "true"
+    ///     ENABLE_PRETTY_LOG: "true"
     ///   steps:
     ///     - use: minio
     ///     - use: sqlite

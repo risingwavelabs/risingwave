@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
@@ -38,18 +37,9 @@ impl HeartbeatService for HeartbeatServiceImpl {
         request: Request<HeartbeatRequest>,
     ) -> Result<Response<HeartbeatResponse>, Status> {
         let req = request.into_inner();
-        let info = req
-            .info
-            .into_iter()
-            .filter_map(|node_info| node_info.info)
-            .collect_vec();
         let result = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.cluster_manager.heartbeat(req.node_id, info).await,
-            MetadataManager::V2(mgr) => {
-                mgr.cluster_controller
-                    .heartbeat(req.node_id as _, info)
-                    .await
-            }
+            MetadataManager::V1(mgr) => mgr.cluster_manager.heartbeat(req.node_id).await,
+            MetadataManager::V2(mgr) => mgr.cluster_controller.heartbeat(req.node_id as _).await,
         };
 
         match result {

@@ -21,7 +21,7 @@ profile:
     # # Specify custom environment variables
     # env:
     #   RUST_LOG: "info,risingwave_storage::hummock=off"
-    #   RW_ENABLE_PRETTY_LOG: "true"
+    #   ENABLE_PRETTY_LOG: "true"
     steps:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio

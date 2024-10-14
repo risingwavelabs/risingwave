@@ -178,7 +178,7 @@ fn disabled_filter() -> filter::Targets {
 /// `RW_QUERY_LOG_TRUNCATE_LEN` configures the max length of the SQLs logged in the query log,
 /// to avoid the log file growing too large. The default value is 1024 in production.
 ///
-/// ### `RW_ENABLE_PRETTY_LOG`
+/// ### `ENABLE_PRETTY_LOG`
 ///
 /// If it is set to `true`, enable pretty log output, which contains line numbers and prints spans in multiple lines.
 /// This can be helpful for development and debugging.
@@ -186,7 +186,7 @@ fn disabled_filter() -> filter::Targets {
 /// Hint: Also turn off other uninteresting logs to make the most of the pretty log.
 /// e.g.,
 /// ```bash
-/// RUST_LOG="risingwave_storage::hummock::event_handler=off,batch_execute=off,risingwave_batch::task=off" RW_ENABLE_PRETTY_LOG=true risedev d
+/// RUST_LOG="risingwave_storage::hummock::event_handler=off,batch_execute=off,risingwave_batch::task=off" ENABLE_PRETTY_LOG=true risedev d
 /// ```
 pub fn init_risingwave_logger(settings: LoggerSettings) {
     let deployment = Deployment::current();
@@ -296,7 +296,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 .map_event_format(|e| e.with_current_span(false)) // avoid duplication as there's a span list field
                 .boxed(),
             Deployment::Other => {
-                if env_var_is_true("RW_ENABLE_PRETTY_LOG") {
+                if env_var_is_true("ENABLE_PRETTY_LOG") {
                     fmt_layer.pretty().boxed()
                 } else {
                     fmt_layer.boxed()

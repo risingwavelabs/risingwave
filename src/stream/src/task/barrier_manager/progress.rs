@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::fmt::{Display, Formatter};
 
 use risingwave_common::util::epoch::EpochPair;
@@ -229,15 +230,13 @@ impl CreateMviewProgressReporter {
         epoch: EpochPair,
         pending_barrier_num: usize,
     ) {
-        match self.state {
+        assert_matches!(
+            self.state,
             Some(BackfillState::DoneConsumingUpstreamTable(_))
-            | Some(BackfillState::ConsumingLogStore { .. }) => {
-                // valid state
-            }
-            state => {
-                panic!("cannot update log store progress at state {:?}", state)
-            }
-        }
+                | Some(BackfillState::ConsumingLogStore { .. }),
+            "cannot update log store progress at state {:?}",
+            self.state
+        );
         self.update_inner(
             epoch,
             BackfillState::ConsumingLogStore {
@@ -247,15 +246,13 @@ impl CreateMviewProgressReporter {
     }
 
     pub(crate) fn finish_consuming_log_store(&mut self, epoch: EpochPair) {
-        match self.state {
+        assert_matches!(
+            self.state,
             Some(BackfillState::DoneConsumingUpstreamTable(_))
-            | Some(BackfillState::ConsumingLogStore { .. }) => {
-                // valid state
-            }
-            state => {
-                panic!("cannot finish log store progress at state {:?}", state)
-            }
-        }
+                | Some(BackfillState::ConsumingLogStore { .. }),
+            "cannot finish log store progress at state {:?}",
+            self.state
+        );
         self.update_inner(epoch, BackfillState::DoneConsumingLogStore);
     }
 }

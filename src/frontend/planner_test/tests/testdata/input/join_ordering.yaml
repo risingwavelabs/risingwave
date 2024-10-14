@@ -23,7 +23,7 @@
     - batch_plan
 - name: bushy tree join ordering manually
   sql: |
-    set rw_enable_join_ordering = false;
+    set enable_join_ordering = false;
     create table t1 (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
     create table t3 (v5 int, v6 int);
@@ -35,7 +35,7 @@
     - batch_plan
 - name: right deep tree join ordering manually
   sql: |
-    set rw_enable_join_ordering = false;
+    set enable_join_ordering = false;
     create table t1 (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
     create table t3 (v5 int, v6 int);

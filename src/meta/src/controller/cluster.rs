@@ -25,7 +25,6 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_license::LicenseManager;
 use risingwave_meta_model_v2::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model_v2::worker::{WorkerStatus, WorkerType};
@@ -33,7 +32,6 @@ use risingwave_meta_model_v2::{worker, worker_property, TransactionId, WorkerId}
 use risingwave_pb::common::worker_node::{PbProperty, PbResource, PbState};
 use risingwave_pb::common::{HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
-use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use sea_orm::prelude::Expr;
@@ -198,16 +196,12 @@ impl ClusterController {
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(
-        &self,
-        worker_id: WorkerId,
-        info: Vec<heartbeat_request::extra_info::Info>,
-    ) -> MetaResult<()> {
+    pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
         self.inner
             .write()
             .await
-            .heartbeat(worker_id, self.max_heartbeat_interval, info)
+            .heartbeat(worker_id, self.max_heartbeat_interval)
     }
 
     pub fn start_heartbeat_checker(
@@ -394,10 +388,6 @@ pub struct WorkerExtraInfo {
     // Unix timestamp that the worker will expire at.
     expire_at: Option<u64>,
     started_at: Option<u64>,
-    // Monotonic increasing id since meta node bootstrap.
-    pub(crate) info_version_id: u64,
-    // GC watermark.
-    pub(crate) hummock_gc_watermark: Option<HummockSstableObjectId>,
     resource: Option<PbResource>,
 }
 
@@ -417,17 +407,6 @@ impl WorkerExtraInfo {
     fn update_started_at(&mut self) {
         self.started_at = Some(timestamp_now_sec());
     }
-
-    fn update_hummock_info(&mut self, info: Vec<heartbeat_request::extra_info::Info>) {
-        self.info_version_id += 1;
-        for i in info {
-            match i {
-                heartbeat_request::extra_info::Info::HummockGcWatermark(watermark) => {
-                    self.hummock_gc_watermark = Some(watermark);
-                }
-            }
-        }
-    }
 }
 
 // TODO: remove this when we deprecate model v1.
@@ -436,8 +415,6 @@ impl From<crate::model::Worker> for WorkerExtraInfo {
         Self {
             expire_at: Some(worker.expire_at),
             started_at: worker.started_at,
-            info_version_id: worker.info_version_id,
-            hummock_gc_watermark: worker.hummock_gc_watermark,
             resource: worker.resource,
         }
     }
@@ -821,15 +798,9 @@ impl ClusterControllerInner {
         Ok(WorkerInfo(worker, property, extra_info).into())
     }
 
-    pub fn heartbeat(
-        &mut self,
-        worker_id: WorkerId,
-        ttl: Duration,
-        info: Vec<heartbeat_request::extra_info::Info>,
-    ) -> MetaResult<()> {
+    pub fn heartbeat(&mut self, worker_id: WorkerId, ttl: Duration) -> MetaResult<()> {
         if let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) {
             worker_info.update_ttl(ttl);
-            worker_info.update_hummock_info(info);
             Ok(())
         } else {
             Err(MetaError::invalid_worker(

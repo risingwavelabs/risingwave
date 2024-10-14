@@ -326,7 +326,11 @@ impl CheckpointControl {
 
     /// Change the state of this `prev_epoch` to `Completed`. Return continuous nodes
     /// with `Completed` starting from first node [`Completed`..`InFlight`) and remove them.
-    fn barrier_collected(&mut self, resp: BarrierCompleteResponse) {
+    fn barrier_collected(
+        &mut self,
+        resp: BarrierCompleteResponse,
+        control_stream_manager: &mut ControlStreamManager,
+    ) -> MetaResult<()> {
         let worker_id = resp.worker_id;
         let prev_epoch = resp.epoch;
         tracing::trace!(
@@ -350,8 +354,9 @@ impl CheckpointControl {
             self.creating_streaming_job_controls
                 .get_mut(&creating_table_id)
                 .expect("should exist")
-                .collect(prev_epoch, worker_id, resp);
+                .collect(prev_epoch, worker_id, resp, control_stream_manager)?;
         }
+        Ok(())
     }
 
     /// Pause inject barrier until True.
@@ -815,12 +820,8 @@ impl GlobalBarrierManager {
                     }
                 }
                 (worker_id, resp_result) = self.control_stream_manager.next_complete_barrier_response() => {
-                    match resp_result {
-                        Ok(resp) => {
-                            self.checkpoint_control.barrier_collected(resp);
-
-                        }
-                        Err(e) => {
+                    if let  Err(e) = resp_result.and_then(|resp| self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager)) {
+                        {
                             let failed_command = self.checkpoint_control.command_wait_collect_from_worker(worker_id);
                             if failed_command.is_some()
                                 || self.checkpoint_control.state.inflight_graph_info.contains_worker(worker_id)
@@ -846,9 +847,11 @@ impl GlobalBarrierManager {
                                 assert_matches!(output.command_ctx.barrier_info.kind, BarrierKind::Barrier);
                                 self.scheduled_barriers.force_checkpoint_in_next_barrier();
                             }
-                            self.control_stream_manager.remove_partial_graph(
-                                output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
-                            );
+                            if !output.table_ids_to_finish.is_empty() {
+                                self.control_stream_manager.remove_partial_graph(
+                                    output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
+                                );
+                            }
                         }
                         Ok(None) => {}
                         Err(e) => {
@@ -957,16 +960,6 @@ impl CheckpointControl {
                 ),
             );
         }
-
-        // may inject fake barrier
-        for creating_job in self.creating_streaming_job_controls.values_mut() {
-            creating_job.may_inject_fake_barrier(control_stream_manager, checkpoint)?
-        }
-
-        tracing::trace!(
-            prev_epoch = barrier_info.prev_epoch.value().0,
-            "inject barrier"
-        );
 
         // Collect the jobs to finish
         if let (BarrierKind::Checkpoint(_), Command::Plain(None)) = (&barrier_info.kind, &command)
@@ -1604,13 +1597,13 @@ fn collect_resp_info(
     let mut old_value_ssts = Vec::with_capacity(resps.len());
 
     for resp in resps {
-        let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
-            let sst_info = grouped.sst.expect("field not None");
+        let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
+            let sst_info = local_sst.sst.expect("field not None");
             sst_to_worker.insert(sst_info.object_id, resp.worker_id);
             LocalSstableInfo::new(
                 sst_info.into(),
-                from_prost_table_stats_map(grouped.table_stats_map),
-                grouped.created_at,
+                from_prost_table_stats_map(local_sst.table_stats_map),
+                local_sst.created_at,
             )
         });
         synced_ssts.extend(ssts_iter);

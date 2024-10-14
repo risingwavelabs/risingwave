@@ -148,3 +148,22 @@ SELECT * FROM generate_series(0::numeric,10::numeric,'nan'::numeric);
 
 statement error start value cannot be infinity
 SELECT * FROM generate_series('-infinity'::numeric,'infinity'::numeric,'nan'::numeric);
+
+# ------
+# generate_series(timestamptz, timestamptz, interval) is not supported in batch mode
+
+statement error Unsupported function
+select * from generate_series(
+  '2024-06-21 17:36:00'::timestamptz,
+  now(),
+  interval '1 hour'
+);
+
+statement error Unsupported function
+select * from generate_series(
+  '2024-06-21 17:36:00',
+  now(),
+  '1 hour'
+);
+
+# ------

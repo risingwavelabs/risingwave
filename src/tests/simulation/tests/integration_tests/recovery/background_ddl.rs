@@ -320,7 +320,7 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
         tracing::info!(progress, "get progress before cancel stream job");
         let progress = progress.replace('%', "");
         let progress = progress.parse::<f64>().unwrap();
-        if progress > 0.01 {
+        if progress >= 0.01 {
             break;
         } else {
             sleep(Duration::from_micros(1)).await;

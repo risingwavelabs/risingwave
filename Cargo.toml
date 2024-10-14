@@ -182,7 +182,7 @@ sea-orm = { version = "0.12.15", features = [
     "sqlx-sqlite",
     "runtime-tokio-native-tls",
 ] }
-sqlx = { version = "0.7.3", default-features = false, features = [
+sqlx = { version = "0.7.4", default-features = false, features = [
     "bigdecimal",
     "chrono",
     "json",
@@ -353,7 +353,7 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 # NOTE(kwannoel): patch sqlx to use a version compatible with madsim.
 # If we can merge in: https://github.com/madsim-rs/sqlx/pull/2,
 # we can change it to patch madsim version instead.
-sqlx = { git = "https://github.com/kwannoel/sqlx.git", rev = "5a32ad8ce842176c202df30910e1416655eda071" }
+sqlx = { git = "https://github.com/kwannoel/sqlx.git", rev = "ddf222f56cf99f865231a5383053645c6ea05ba3" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }

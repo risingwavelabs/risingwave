@@ -120,8 +120,6 @@ pub struct MetaMetrics {
     pub min_safepoint_version_id: IntGauge,
     /// Compaction groups that is in write stop state.
     pub write_stop_compaction_groups: IntGaugeVec,
-    /// The object id watermark used in last full GC.
-    pub full_gc_last_object_id_watermark: IntGauge,
     /// The number of attempts to trigger full GC.
     pub full_gc_trigger_count: IntGauge,
     /// The number of candidate object to delete after scanning object store.
@@ -376,13 +374,6 @@ impl MetaMetrics {
             "storage_write_stop_compaction_groups",
             "compaction groups of write stop state",
             &["compaction_group_id"],
-            registry
-        )
-        .unwrap();
-
-        let full_gc_last_object_id_watermark = register_int_gauge_with_registry!(
-            "storage_full_gc_last_object_id_watermark",
-            "the object id watermark used in last full GC",
             registry
         )
         .unwrap();
@@ -792,7 +783,6 @@ impl MetaMetrics {
             min_pinned_version_id,
             min_safepoint_version_id,
             write_stop_compaction_groups,
-            full_gc_last_object_id_watermark,
             full_gc_trigger_count,
             full_gc_candidate_object_count,
             full_gc_selected_object_count,

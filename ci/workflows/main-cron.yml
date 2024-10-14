@@ -247,7 +247,7 @@ steps:
 
   - label: "unit test (madsim)"
     key: "unit-test-deterministic"
-    command: "MADSIM_TEST_NUM=100 timeout 30m ci/scripts/deterministic-unit-test.sh"
+    command: "MADSIM_TEST_NUM=100 timeout 50m ci/scripts/deterministic-unit-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation"
@@ -257,7 +257,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 30
+    timeout_in_minutes: 50
     retry: *auto-retry
 
   - label: "integration test (madsim) - scale"
@@ -347,7 +347,7 @@ steps:
 
   - label: "end-to-end test (madsim)"
     key: "e2e-test-deterministic"
-    command: "TEST_NUM=64 timeout 75m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=32 timeout 120m ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
@@ -364,30 +364,10 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 80
+    timeout_in_minutes: 120
     retry: *auto-retry
 
-  # sql backend recovery tests
-  - label: "recovery test (sql,madsim)"
-    key: "recovery-test-deterministic-sql"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 USE_SQL_BACKEND=true timeout 65m ci/scripts/deterministic-recovery-test.sh"
-    # NOTE(kwannoel): It will only run when the recovery tests label is added currently.
-    # This is because there are currently some bugs which cause the test to fail.
-    if: |
-      build.pull_request.labels includes "ci/run-sql-recovery-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)sql-recovery-tests?-deterministic-simulation(,|$$)/
-    depends_on: "build-simulation"
-    plugins:
-      - docker-compose#v5.1.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      # Only upload zipped files, otherwise the logs is too much.
-      - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 70
-    retry: *auto-retry
-
-  - label: "recovery test (etcd,madsim)"
+  - label: "recovery test (madsim)"
     key: "recovery-test-deterministic"
     command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 65m ci/scripts/deterministic-recovery-test.sh"
     if: |
@@ -406,7 +386,7 @@ steps:
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
-  - label: "background_ddl, arrangement_backfill recovery test (etcd,madsim)"
+  - label: "background_ddl, arrangement_backfill recovery test (madsim)"
     key: "background-ddl-arrangement-backfill-recovery-test-deterministic"
     command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 65m ci/scripts/deterministic-recovery-test.sh"
     if: |
@@ -460,7 +440,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 11
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"
@@ -481,7 +461,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     # Extra 2 minutes to account for docker-compose latency.
     # See: https://github.com/risingwavelabs/risingwave/issues/9423#issuecomment-1521222169
-    timeout_in_minutes: 10
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "S3 source check on AWS (json parser)"
@@ -528,9 +508,9 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3 source and sink on parquet file"
-    key: "s3-source-and-sink-parquet-encode"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_parquet_source_and_sink.py"
+  - label: "S3 sink on parquet and json file"
+    key: "s3-sink-parquet-and-json-encode"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_sink.py"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"

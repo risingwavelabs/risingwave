@@ -249,7 +249,6 @@ pub async fn compactor_serve(
         is_share_buffer_compact: false,
         compaction_executor,
         memory_limiter,
-
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
     };
@@ -259,7 +258,6 @@ pub async fn compactor_serve(
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            vec![sstable_object_id_manager.clone()],
         ),
         risingwave_storage::hummock::compactor::start_compactor(
             compactor_context.clone(),

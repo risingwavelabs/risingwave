@@ -895,19 +895,19 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 FileSink::<S3Sink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<GcsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<AzblobSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<WebhdfsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<FsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],

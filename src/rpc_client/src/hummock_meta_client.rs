@@ -52,6 +52,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         filtered_object_ids: Vec<HummockSstableObjectId>,
         total_object_count: u64,
         total_object_size: u64,
+        start_after: Option<String>,
         next_start_after: Option<String>,
     ) -> Result<()>;
     async fn trigger_full_gc(

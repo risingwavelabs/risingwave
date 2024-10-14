@@ -201,7 +201,7 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let ((result_task, task_stats), _) = compact(
+    let ((result_task, task_stats, object_timestamps), _) = compact(
         compact_ctx,
         compact_task.clone(),
         rx,
@@ -216,6 +216,7 @@ pub async fn compact_once(
             result_task.task_status,
             result_task.sorted_output_ssts,
             Some(to_prost_table_stats_map(task_stats)),
+            object_timestamps,
         )
         .await
         .unwrap();

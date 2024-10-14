@@ -43,7 +43,7 @@ pub enum Tier {
 ///
 /// The issuer must be `prod.risingwave.com` in production, and can be `test.risingwave.com` in
 /// development. This will be validated when refreshing the license key.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub enum Issuer {
     #[serde(rename = "prod.risingwave.com")]
     Prod,
@@ -58,10 +58,13 @@ pub enum Issuer {
 /// The content of a license.
 ///
 /// We use JSON Web Token (JWT) to represent the license. This struct is the payload.
+///
+/// Prefer calling [`crate::Feature::check_available`] to check the availability of a feature,
+/// other than directly checking the content of the license.
 // TODO(license): Shall we add a version field?
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) struct License {
+pub struct License {
     /// Subject of the license.
     ///
     /// See <https://tools.ietf.org/html/rfc7519#section-4.1.2>.
@@ -171,7 +174,10 @@ impl LicenseManager {
     /// Get the current license if it is valid.
     ///
     /// Since the license can expire, the returned license should not be cached by the caller.
-    pub(super) fn license(&self) -> Result<License, LicenseKeyError> {
+    ///
+    /// Prefer calling [`crate::Feature::check_available`] to check the availability of a feature,
+    /// other than directly calling this method and checking the content of the license.
+    pub fn license(&self) -> Result<License, LicenseKeyError> {
         let license = self.inner.read().unwrap().license.clone()?;
 
         // Check the expiration time additionally.

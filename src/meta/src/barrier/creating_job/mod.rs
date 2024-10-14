@@ -19,6 +19,7 @@ use std::cmp::max;
 use std::collections::HashMap;
 use std::ops::Bound::{Excluded, Unbounded};
 
+use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -167,40 +168,33 @@ impl CreatingStreamingJobControl {
         ))
     }
 
-    pub(super) fn may_inject_fake_barrier(
-        &mut self,
+    fn inject_barrier(
+        table_id: TableId,
         control_stream_manager: &mut ControlStreamManager,
-        is_checkpoint: bool,
+        barrier_control: &mut CreatingStreamingJobBarrierControl,
+        pre_applied_graph_info: &InflightGraphInfo,
+        applied_graph_info: Option<&InflightGraphInfo>,
+        CreatingJobInjectBarrierInfo {
+            barrier_info,
+            new_actors,
+            mutation,
+        }: CreatingJobInjectBarrierInfo,
     ) -> MetaResult<()> {
-        if let Some(barriers_to_inject) = self.status.may_inject_fake_barrier(is_checkpoint) {
-            let graph_info = self
-                .status
-                .active_graph_info()
-                .expect("must exist when having barriers to inject");
-            let table_id = self.info.table_fragments.table_id();
-            for CreatingJobInjectBarrierInfo {
-                barrier_info,
-                new_actors,
-                mutation,
-            } in barriers_to_inject
-            {
-                let node_to_collect = control_stream_manager.inject_barrier(
-                    Some(table_id),
-                    mutation,
-                    &barrier_info,
-                    graph_info,
-                    Some(graph_info),
-                    new_actors,
-                    vec![],
-                    vec![],
-                )?;
-                self.barrier_control.enqueue_epoch(
-                    barrier_info.prev_epoch.value().0,
-                    node_to_collect,
-                    barrier_info.kind.is_checkpoint(),
-                );
-            }
-        }
+        let node_to_collect = control_stream_manager.inject_barrier(
+            Some(table_id),
+            mutation,
+            &barrier_info,
+            pre_applied_graph_info,
+            applied_graph_info,
+            new_actors,
+            vec![],
+            vec![],
+        )?;
+        barrier_control.enqueue_epoch(
+            barrier_info.prev_epoch.value().0,
+            node_to_collect,
+            barrier_info.kind.is_checkpoint(),
+        );
         Ok(())
     }
 
@@ -232,34 +226,50 @@ impl CreatingStreamingJobControl {
         );
         match &mut self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot {
-                pending_barriers, ..
+                pending_barriers,
+                prev_epoch_fake_physical_time,
+                pending_non_checkpoint_barriers,
+                initial_barrier_info,
+                ref graph_info,
+                ..
             } => {
                 assert!(
                     !start_consume_upstream,
                     "should not start consuming upstream for a job that are consuming snapshot"
                 );
+                let new_barrier = CreatingStreamingJobStatus::new_fake_barrier(
+                    prev_epoch_fake_physical_time,
+                    pending_non_checkpoint_barriers,
+                    initial_barrier_info,
+                    barrier_info.kind.is_checkpoint(),
+                );
                 pending_barriers.push(barrier_info.clone());
+                Self::inject_barrier(
+                    self.info.table_fragments.table_id(),
+                    control_stream_manager,
+                    &mut self.barrier_control,
+                    graph_info,
+                    Some(graph_info),
+                    new_barrier,
+                )?;
             }
             CreatingStreamingJobStatus::ConsumingLogStore { graph_info, .. } => {
-                let node_to_collect = control_stream_manager.inject_barrier(
-                    Some(table_id),
-                    None,
-                    barrier_info,
+                Self::inject_barrier(
+                    self.info.table_fragments.table_id(),
+                    control_stream_manager,
+                    &mut self.barrier_control,
                     graph_info,
                     if start_consume_upstream {
                         None
                     } else {
                         Some(graph_info)
                     },
-                    None,
-                    vec![],
-                    vec![],
+                    CreatingJobInjectBarrierInfo {
+                        barrier_info: barrier_info.clone(),
+                        new_actors: None,
+                        mutation: None,
+                    },
                 )?;
-                self.barrier_control.enqueue_epoch(
-                    barrier_info.prev_epoch.value().0,
-                    node_to_collect,
-                    barrier_info.kind.is_checkpoint(),
-                );
                 let prev_epoch = barrier_info.prev_epoch.value().0;
                 if start_consume_upstream {
                     info!(
@@ -285,9 +295,24 @@ impl CreatingStreamingJobControl {
         epoch: u64,
         worker_id: WorkerId,
         resp: BarrierCompleteResponse,
-    ) {
-        self.status.update_progress(&resp.create_mview_progress);
+        control_stream_manager: &mut ControlStreamManager,
+    ) -> MetaResult<()> {
+        let prev_barriers_to_inject = self.status.update_progress(&resp.create_mview_progress);
         self.barrier_control.collect(epoch, worker_id, resp);
+        if let Some((prev_barriers_to_inject, graph_info)) = prev_barriers_to_inject {
+            let table_id = self.info.table_fragments.table_id();
+            for info in prev_barriers_to_inject {
+                Self::inject_barrier(
+                    table_id,
+                    control_stream_manager,
+                    &mut self.barrier_control,
+                    graph_info,
+                    Some(graph_info),
+                    info,
+                )?;
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn should_merge_to_upstream(&self) -> Option<InflightGraphInfo> {

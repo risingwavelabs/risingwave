@@ -36,14 +36,14 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState};
+use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState, PagedMetrics};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager};
 use crate::model::{ClusterId, MetadataModel, MetadataModelError};
@@ -110,7 +110,11 @@ pub struct HummockManager {
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
     full_gc_state: FullGcState,
+    /// Gather metrics that require accumulation across multiple operations.
+    /// For example, to get the total number of objects in object store, multiple LISTs are required because a single LIST can visit at most `full_gc_object_limit` objects.
+    paged_metrics: parking_lot::Mutex<PagedMetrics>,
     now: Mutex<u64>,
+    inflight_time_travel_query: Semaphore,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -245,6 +249,7 @@ impl HummockManager {
         let version_archive_dir = version_archive_dir(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let full_gc_object_limit = env.opts.full_gc_object_limit;
+        let inflight_time_travel_query = env.opts.max_inflight_time_travel_query;
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -281,7 +286,9 @@ impl HummockManager {
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
             full_gc_state: FullGcState::new(Some(full_gc_object_limit)),
+            paged_metrics: parking_lot::Mutex::new(PagedMetrics::new()),
             now: Mutex::new(0),
+            inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;

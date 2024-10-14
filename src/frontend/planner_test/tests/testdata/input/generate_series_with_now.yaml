@@ -10,6 +10,16 @@
     - stream_plan
 - sql: |
     select * from generate_series(
+      '2024-06-21 17:36:00',
+      now(),
+      '1 hour'
+    );
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+- sql: |
+    select * from generate_series(
       '2024-06-21 17:36:00'::timestamp, -- `timestamp` type is not supported
       now(),
       interval '1 hour'

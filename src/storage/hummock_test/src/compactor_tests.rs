@@ -282,7 +282,7 @@ pub(crate) mod tests {
         {
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats), _) = compact(
+            let ((result_task, task_stats, object_timestamps), _) = compact(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
@@ -297,6 +297,7 @@ pub(crate) mod tests {
                     result_task.task_status,
                     result_task.sorted_output_ssts,
                     Some(to_prost_table_stats_map(task_stats)),
+                    object_timestamps,
                 )
                 .await
                 .unwrap();
@@ -623,7 +624,7 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -637,6 +638,7 @@ pub(crate) mod tests {
                 result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                object_timestamps,
             )
             .await
             .unwrap();
@@ -822,7 +824,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -837,6 +839,7 @@ pub(crate) mod tests {
                 result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                object_timestamps,
             )
             .await
             .unwrap();
@@ -1015,7 +1018,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1030,6 +1033,7 @@ pub(crate) mod tests {
                 result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                object_timestamps,
             )
             .await
             .unwrap();
@@ -1189,7 +1193,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1204,6 +1208,7 @@ pub(crate) mod tests {
                 result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                object_timestamps,
             )
             .await
             .unwrap();
@@ -1999,7 +2004,7 @@ pub(crate) mod tests {
 
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats), _) = compact(
+            let ((result_task, task_stats, object_timestamps), _) = compact(
                 compact_ctx,
                 compact_task.clone(),
                 rx,
@@ -2014,6 +2019,7 @@ pub(crate) mod tests {
                     result_task.task_status,
                     result_task.sorted_output_ssts,
                     Some(to_prost_table_stats_map(task_stats)),
+                    object_timestamps,
                 )
                 .await
                 .unwrap();
@@ -2223,7 +2229,7 @@ pub(crate) mod tests {
 
                 // 3. compact
                 let (_tx, rx) = tokio::sync::oneshot::channel();
-                let ((result_task, task_stats), _) = compact(
+                let ((result_task, task_stats, object_timestamps), _) = compact(
                     compact_ctx.clone(),
                     compact_task.clone(),
                     rx,
@@ -2238,6 +2244,7 @@ pub(crate) mod tests {
                         result_task.task_status,
                         result_task.sorted_output_ssts,
                         Some(to_prost_table_stats_map(task_stats)),
+                        object_timestamps,
                     )
                     .await
                     .unwrap();

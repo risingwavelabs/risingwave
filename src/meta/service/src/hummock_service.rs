@@ -251,14 +251,12 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
         let req = request.into_inner();
         let hummock_manager = self.hummock_manager.clone();
-        hummock_manager
-            .metrics
-            .total_object_count
-            .set(req.total_object_count as _);
-        hummock_manager
-            .metrics
-            .total_object_size
-            .set(req.total_object_size as _);
+        hummock_manager.update_paged_metrics(
+            req.start_after,
+            req.next_start_after.clone(),
+            req.total_object_count,
+            req.total_object_size,
+        );
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {
@@ -533,7 +531,6 @@ impl HummockManagerService for HummockServiceImpl {
             min_delta_log_num_for_hummock_version_checkpoint,
             min_sst_retention_time_sec,
             full_gc_interval_sec,
-            collect_gc_watermark_spin_interval_sec,
             periodic_compaction_interval_sec,
             periodic_space_reclaim_compaction_interval_sec,
             periodic_ttl_reclaim_compaction_interval_sec,
@@ -618,22 +615,6 @@ impl HummockManagerService for HummockServiceImpl {
 
         let response = Response::new(CancelCompactTaskResponse { ret });
         return Ok(response);
-    }
-
-    async fn list_change_log_epochs(
-        &self,
-        request: Request<ListChangeLogEpochsRequest>,
-    ) -> Result<Response<ListChangeLogEpochsResponse>, Status> {
-        let ListChangeLogEpochsRequest {
-            table_id,
-            min_epoch,
-            max_count,
-        } = request.into_inner();
-        let epochs = self
-            .hummock_manager
-            .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await;
-        Ok(Response::new(ListChangeLogEpochsResponse { epochs }))
     }
 
     async fn get_version_by_epoch(

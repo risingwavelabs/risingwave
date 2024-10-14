@@ -245,6 +245,7 @@ impl HummockManager {
                         task_status: TaskStatus::ManualCanceled,
                         table_stats_change: HashMap::default(),
                         sorted_output_ssts: vec![],
+                        object_timestamps: HashMap::default(),
                     });
                 }
             });
@@ -268,6 +269,21 @@ impl HummockManager {
         group: &TableGroupInfo,
         created_tables: &HashSet<u32>,
     ) {
+        let compaction_group_config = {
+            let compaction_group_manager = self.compaction_group_manager.read().await;
+            compaction_group_manager
+                .try_get_compaction_group_config(group.group_id)
+                .unwrap()
+        };
+
+        if compaction_group_config
+            .compaction_config
+            .disable_auto_group_scheduling
+            .unwrap_or(false)
+        {
+            return;
+        }
+
         // split high throughput table to dedicated compaction group
         for (table_id, table_size) in &group.table_statistic {
             self.try_move_table_to_dedicated_cg(
@@ -556,6 +572,7 @@ impl HummockManager {
                             task_status: TaskStatus::ManualCanceled,
                             table_stats_change: HashMap::default(),
                             sorted_output_ssts: vec![],
+                            object_timestamps: HashMap::default(),
                         });
                     }
                 }

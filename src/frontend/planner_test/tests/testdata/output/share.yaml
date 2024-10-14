@@ -147,7 +147,7 @@
                             └─StreamRowIdGen { row_id_index: 7 }
                               └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
 - sql: |
-    set rw_enable_share_plan=true;
+    set enable_share_plan=true;
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
   stream_plan: |-
@@ -170,7 +170,7 @@
                   └─StreamStatelessSimpleAgg { aggs: [count] }
                     └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
-    set rw_enable_share_plan=false;
+    set enable_share_plan=false;
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
   stream_plan: |-
@@ -192,7 +192,7 @@
   before:
   - create_sources
   sql: |
-    set rw_enable_share_plan=false;
+    set enable_share_plan=false;
     select count(*) cnt from auction A join auction B on A.id = B.id;
   stream_plan: |-
     StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: NoCheck }

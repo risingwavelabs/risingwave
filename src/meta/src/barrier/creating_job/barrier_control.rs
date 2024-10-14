@@ -178,6 +178,8 @@ impl CreatingStreamingJobBarrierControl {
     /// Return Some((epoch, resps, `is_first_commit`))
     ///
     /// Only epoch within the `epoch_end_bound` can be started.
+    /// Usually `epoch_end_bound` is the upstream committed epoch. This is to ensure that
+    /// the creating job won't have higher committed epoch than the upstream.
     pub(super) fn start_completing(
         &mut self,
         epoch_end_bound: Bound<u64>,

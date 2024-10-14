@@ -199,9 +199,20 @@ mod tests {
         // check new params are set.
         let params = session_param_ctl.get_params().await;
         assert_eq!(params.get("rw_implicit_flush").unwrap(), new_params);
+        assert_eq!(
+            params.get("rw_implicit_flush").unwrap(),
+            params.get("implicit_flush").unwrap()
+        );
         // check db consistency.
+        // rw_implicit_flush is alias to implicit_flush <https://github.com/risingwavelabs/risingwave/pull/18769>
         let models = SessionParameter::find()
             .filter(session_parameter::Column::Name.eq("rw_implicit_flush"))
+            .one(&session_param_ctl.db)
+            .await
+            .unwrap();
+        assert!(models.is_none());
+        let models = SessionParameter::find()
+            .filter(session_parameter::Column::Name.eq("implicit_flush"))
             .one(&session_param_ctl.db)
             .await
             .unwrap()

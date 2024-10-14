@@ -14,7 +14,6 @@
 
 use std::future::Future;
 
-use risingwave_common::hash::VirtualNode;
 use risingwave_expr::{define_context, Result as ExprResult};
 use risingwave_pb::plan_common::ExprContext;
 
@@ -30,11 +29,11 @@ pub fn capture_expr_context() -> ExprResult<ExprContext> {
     Ok(ExprContext { time_zone })
 }
 
-/// Get the vnode count from the context, or [`VirtualNode::COUNT_FOR_COMPAT`] if not set.
-// TODO(var-vnode): the only case where this is not set is for batch queries, is it still
-// necessary to support `rw_vnode` expression in batch queries?
-pub fn vnode_count() -> usize {
-    VNODE_COUNT::try_with(|&x| x).unwrap_or(VirtualNode::COUNT_FOR_COMPAT)
+/// Get the vnode count from the context.
+///
+/// Always returns `Ok` in streaming mode and `Err` in batch mode.
+pub fn vnode_count() -> ExprResult<usize> {
+    VNODE_COUNT::try_with(|&x| x)
 }
 
 pub async fn expr_context_scope<Fut>(expr_context: ExprContext, future: Fut) -> Fut::Output

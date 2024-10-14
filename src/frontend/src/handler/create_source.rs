@@ -1662,7 +1662,7 @@ pub async fn handle_create_source(
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
     let is_shared = create_cdc_source_job
         || (with_properties.is_shareable_non_cdc_connector()
-            && session.config().rw_enable_shared_source());
+            && session.config().enable_shared_source());
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema)?

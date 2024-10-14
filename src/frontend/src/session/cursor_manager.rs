@@ -112,13 +112,18 @@ impl Cursor {
         count: u32,
         handle_args: HandlerArgs,
         formats: &Vec<Format>,
+        timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         match self {
             Cursor::Subscription(cursor) => cursor
-                .next(count, handle_args, formats)
+                .next(count, handle_args, formats, timeout_seconds)
                 .await
                 .inspect_err(|_| cursor.cursor_metrics.subscription_cursor_error_count.inc()),
-            Cursor::Query(cursor) => cursor.next(count, formats, handle_args).await,
+            Cursor::Query(cursor) => {
+                cursor
+                    .next(count, formats, handle_args, timeout_seconds)
+                    .await
+            }
         }
     }
 
@@ -163,9 +168,11 @@ impl QueryCursor {
         count: u32,
         formats: &Vec<Format>,
         handle_args: HandlerArgs,
+        timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         // `FETCH NEXT` is equivalent to `FETCH 1`.
         // min with 100 to avoid allocating too many memory at once.
+        let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
         let session = handle_args.session;
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
         let mut cur = 0;
@@ -177,6 +184,11 @@ impl QueryCursor {
         {
             cur += 1;
             ans.push(row);
+            if let Some(timeout_instant) = timeout_instant
+                && Instant::now() > timeout_instant
+            {
+                break;
+            }
         }
         Ok((ans, desc))
     }
@@ -318,9 +330,7 @@ impl SubscriptionCursor {
                         *expected_timestamp,
                         handle_args.clone(),
                         &self.subscription,
-                    )
-                    .await
-                    {
+                    ) {
                         Ok((Some(rw_timestamp), expected_timestamp)) => {
                             let (mut chunk_stream, fields, init_query_timer) =
                                 Self::initiate_query(
@@ -434,7 +444,9 @@ impl SubscriptionCursor {
         count: u32,
         handle_args: HandlerArgs,
         formats: &Vec<Format>,
+        timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
+        let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
         if Instant::now() > self.cursor_need_drop_time {
             return Err(ErrorCode::InternalError(
                 "The cursor has exceeded its maximum lifetime, please recreate it (close then declare cursor).".to_string(),
@@ -442,9 +454,9 @@ impl SubscriptionCursor {
             .into());
         }
 
+        let session = &handle_args.session;
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
         let mut cur = 0;
-        let desc = self.fields.iter().map(to_pg_field).collect();
         if let State::Fetch {
             from_snapshot,
             chunk_stream,
@@ -456,7 +468,7 @@ impl SubscriptionCursor {
                 formats,
                 from_snapshot,
                 &self.fields,
-                handle_args.session.clone(),
+                session.clone(),
             );
         }
         while cur < count {
@@ -472,16 +484,43 @@ impl SubscriptionCursor {
                     ans.push(row);
                 }
                 None => {
-                    break;
+                    let timeout_seconds = timeout_seconds.unwrap_or(0);
+                    if cur > 0 || timeout_seconds == 0 {
+                        break;
+                    }
+                    // It's only blocked when there's no data
+                    // This method will only be called once, either to trigger a timeout or to get the return value in the next loop via `next_row`.
+                    match tokio::time::timeout(
+                        Duration::from_secs(timeout_seconds),
+                        session
+                            .env
+                            .hummock_snapshot_manager()
+                            .wait_table_change_log_notification(self.dependent_table_id.table_id()),
+                    )
+                    .await
+                    {
+                        Ok(result) => result?,
+                        Err(_) => {
+                            tracing::debug!("Cursor wait next epoch timeout");
+                            break;
+                        }
+                    }
                 }
+            }
+            // Timeout, return with current value
+            if let Some(timeout_instant) = timeout_instant
+                && Instant::now() > timeout_instant
+            {
+                break;
             }
         }
         self.last_fetch = Instant::now();
+        let desc = self.fields.iter().map(to_pg_field).collect();
 
         Ok((ans, desc))
     }
 
-    async fn get_next_rw_timestamp(
+    fn get_next_rw_timestamp(
         seek_timestamp: u64,
         table_id: &TableId,
         expected_timestamp: Option<u64>,
@@ -496,9 +535,7 @@ impl SubscriptionCursor {
         )?;
 
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
-        let new_epochs = session
-            .list_change_log_epochs(table_id.table_id(), seek_timestamp, 2)
-            .await?;
+        let new_epochs = session.list_change_log_epochs(table_id.table_id(), seek_timestamp, 2)?;
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {
@@ -794,9 +831,12 @@ impl CursorManager {
         count: u32,
         handle_args: HandlerArgs,
         formats: &Vec<Format>,
+        timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         if let Some(cursor) = self.cursor_map.lock().await.get_mut(&cursor_name) {
-            cursor.next(count, handle_args, formats).await
+            cursor
+                .next(count, handle_args, formats, timeout_seconds)
+                .await
         } else {
             Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
         }

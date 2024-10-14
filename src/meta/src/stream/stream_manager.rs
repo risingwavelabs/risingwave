@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::join_all;
@@ -59,7 +59,7 @@ pub struct CreateStreamingJobContext {
     pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
 
     /// Internal tables in the streaming job.
-    pub internal_tables: HashMap<u32, Table>,
+    pub internal_tables: BTreeMap<u32, Table>,
 
     /// The locations of the actors to build in the streaming job.
     pub building_locations: Locations,
@@ -300,6 +300,12 @@ impl GlobalStreamManager {
                             tracing::debug!(
                                 "cancelling streaming job {table_id} by issue cancel command."
                             );
+
+                            if let MetadataManager::V2(mgr) = &self.metadata_manager {
+                                mgr.catalog_controller
+                                    .try_abort_creating_streaming_job(table_id.table_id as _, true)
+                                    .await?;
+                            }
 
                             self.barrier_scheduler
                                 .run_command(Command::CancelStreamingJob(table_fragments))
@@ -631,8 +637,18 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
-                if let MetadataManager::V1(mgr) = &self.metadata_manager {
-                    mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
+                match &self.metadata_manager {
+                    MetadataManager::V1(mgr) => {
+                        mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
+                    }
+                    MetadataManager::V2(mgr) => {
+                        mgr.catalog_controller
+                            .try_abort_creating_streaming_job(
+                                id.table_id as _,
+                                true,
+                            )
+                            .await?;
+                    }
                 }
 
                 self.barrier_scheduler

@@ -18,6 +18,17 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 /// A license key with the paid tier that only works in tests.
+///
+/// The content is a JWT token with the following payload:
+/// ```text
+/// License {
+///     sub: "rw-test",
+///     iss: Test,
+///     tier: Paid,
+///     cpu_core_limit: None,
+///     exp: 9999999999,
+/// }
+/// ```
 pub(crate) const TEST_PAID_LICENSE_KEY_CONTENT: &str =
  "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
   eyJzdWIiOiJydy10ZXN0IiwidGllciI6InBhaWQiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\

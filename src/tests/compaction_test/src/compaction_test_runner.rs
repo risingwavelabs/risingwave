@@ -292,7 +292,7 @@ async fn pull_version_deltas(
     meta_client.activate(advertise_addr).await.unwrap();
 
     let (handle, shutdown_tx) =
-        MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000), vec![]);
+        MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000));
     let res = meta_client
         .list_version_deltas(HummockVersionId::new(0), u32::MAX, u64::MAX)
         .await
@@ -343,7 +343,6 @@ async fn start_replay(
     let sub_tasks = vec![MetaClient::start_heartbeat_loop(
         meta_client.clone(),
         Duration::from_millis(1000),
-        vec![],
     )];
 
     // Prevent the embedded meta to commit new epochs during version replay

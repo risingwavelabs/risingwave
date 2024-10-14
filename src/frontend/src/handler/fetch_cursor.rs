@@ -22,11 +22,12 @@ use risingwave_sqlparser::ast::{FetchCursorStatement, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::query::BoundResult;
+use super::util::convert_interval_to_u64_seconds;
 use super::RwPgResponse;
 use crate::binder::BoundStatement;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
-use crate::{Binder, PgResponseStream};
+use crate::{Binder, PgResponseStream, WithOptions};
 
 pub async fn handle_fetch_cursor_execute(
     handler_args: HandlerArgs,
@@ -61,10 +62,31 @@ pub async fn handle_fetch_cursor(
     let (_, cursor_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
 
+    let with_options = WithOptions::try_from(stmt.with_properties.0.as_slice())?;
+
+    if with_options.len() > 1 {
+        bail_not_implemented!("only `timeout` is supported in with options")
+    }
+
+    let timeout_seconds = with_options
+        .get("timeout")
+        .map(convert_interval_to_u64_seconds)
+        .transpose()?;
+
+    if with_options.len() == 1 && timeout_seconds.is_none() {
+        bail_not_implemented!("only `timeout` is supported in with options")
+    }
+
     let cursor_manager = session.get_cursor_manager();
 
     let (rows, pg_descs) = cursor_manager
-        .get_rows_with_cursor(cursor_name, stmt.count, handler_args, formats)
+        .get_rows_with_cursor(
+            cursor_name,
+            stmt.count,
+            handler_args,
+            formats,
+            timeout_seconds,
+        )
         .await?;
     Ok(build_fetch_cursor_response(rows, pg_descs))
 }

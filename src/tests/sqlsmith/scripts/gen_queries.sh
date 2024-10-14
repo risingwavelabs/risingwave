@@ -257,7 +257,7 @@ check_failed_to_generate_queries() {
 # Otherwise don't update this batch of queries yet.
 run_queries_timed() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
-  timeout "$TIME_BOUND" seq $E2E_TEST_NUM | parallel "MADSIM_TEST_SEED={} \
+  timeout "$TIME_BOUND" seq $E2E_TEST_NUM | parallel "\
     timeout 6m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
@@ -268,7 +268,7 @@ run_queries_timed() {
 run_queries() {
   set +e
   echo "" > $LOGDIR/run_deterministic.stdout.log
-  seq $TEST_NUM | parallel "MADSIM_TEST_SEED={} \
+  seq $TEST_NUM | parallel "\
     timeout 15m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \

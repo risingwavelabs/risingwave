@@ -72,5 +72,5 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Failed to get/set session config
-  2: Invalid value `maybe` for `rw_implicit_flush`
+  2: Invalid value `maybe` for `implicit_flush`
   3: Invalid bool

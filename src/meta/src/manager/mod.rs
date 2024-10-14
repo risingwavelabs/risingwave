@@ -19,6 +19,7 @@ mod env;
 pub mod event_log;
 mod id;
 mod idle;
+mod license;
 mod metadata;
 mod notification;
 mod notification_version;

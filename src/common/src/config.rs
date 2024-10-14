@@ -196,9 +196,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_object_limit")]
     pub full_gc_object_limit: u64,
 
-    /// The spin interval when collecting global GC watermark in hummock.
-    #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
-    pub collect_gc_watermark_spin_interval_sec: u64,
+    /// Max number of inflight time travel query.
+    #[serde(default = "default::meta::max_inflight_time_travel_query")]
+    pub max_inflight_time_travel_query: u64,
 
     /// Schedule compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
@@ -1358,8 +1358,8 @@ pub mod default {
             100_000
         }
 
-        pub fn collect_gc_watermark_spin_interval_sec() -> u64 {
-            5
+        pub fn max_inflight_time_travel_query() -> u64 {
+            1000
         }
 
         pub fn periodic_compaction_interval_sec() -> u64 {
@@ -2092,6 +2092,10 @@ pub mod default {
 
         pub fn sst_allowed_trivial_move_min_size() -> u64 {
             DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
+        }
+
+        pub fn disable_auto_group_scheduling() -> bool {
+            false
         }
     }
 

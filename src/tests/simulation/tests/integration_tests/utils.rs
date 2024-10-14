@@ -26,17 +26,7 @@ pub(crate) async fn kill_cn_and_wait_recover(cluster: &Cluster) {
 
 pub(crate) async fn kill_cn_and_meta_and_wait_recover(cluster: &Cluster) {
     cluster
-        .kill_nodes(
-            [
-                "compute-1",
-                "compute-2",
-                "compute-3",
-                "meta-1",
-                "meta-2",
-                "meta-3",
-            ],
-            0,
-        )
+        .kill_nodes(["compute-1", "compute-2", "compute-3", "meta-1"], 0)
         .await;
     sleep(Duration::from_secs(10)).await;
 }

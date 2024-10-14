@@ -29,17 +29,17 @@
         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression shouldn't extract impure function
   sql: |
-    create table t(v1 varchar, v2 int, v3 int);
-    select rw_vnode(v2) + 1 as vnode,  rw_vnode(v2) + 1 as vnode2, v2 + 1 x, v2 + 1 y from t;
+    create table t(v1 varchar, v2 double, v3 double);
+    select pg_sleep(v2) + 1 as a,  pg_sleep(v2) + 1 as b, v2 + 1 x, v2 + 1 y from t;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [(Vnode(t.v2) + 1:Int32) as $expr2, (Vnode(t.v2) + 1:Int32) as $expr3, $expr1, $expr1] }
-      └─BatchProject { exprs: [t.v2, (t.v2 + 1:Int32) as $expr1] }
+    └─BatchProject { exprs: [(PgSleep(t.v2) + 1:Int32) as $expr2, (PgSleep(t.v2) + 1:Int32) as $expr3, $expr1, $expr1] }
+      └─BatchProject { exprs: [t.v2, (t.v2 + 1:Float64) as $expr1] }
         └─BatchScan { table: t, columns: [t.v2], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [vnode, vnode2, x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [(Vnode(t.v2) + 1:Int32) as $expr2, (Vnode(t.v2) + 1:Int32) as $expr3, $expr1, $expr1, t._row_id] }
-      └─StreamProject { exprs: [t.v2, (t.v2 + 1:Int32) as $expr1, t._row_id] }
+    StreamMaterialize { columns: [a, b, x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [(PgSleep(t.v2) + 1:Int32) as $expr2, (PgSleep(t.v2) + 1:Int32) as $expr3, $expr1, $expr1, t._row_id] }
+      └─StreamProject { exprs: [t.v2, (t.v2 + 1:Float64) as $expr1, t._row_id] }
         └─StreamTableScan { table: t, columns: [t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression shouldn't extract const
   sql: |

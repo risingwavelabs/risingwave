@@ -302,6 +302,7 @@ message ExprNode {
     // Internal functions
     VNODE = 1101;
     TEST_PAID_TIER = 1102;
+    VNODE_USER = 1103;
     // Non-deterministic functions
     PROCTIME = 2023;
     PG_SLEEP = 2024;
