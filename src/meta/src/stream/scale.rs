@@ -185,7 +185,6 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
-use sea_orm::TransactionTrait;
 
 // The debug implementation is arbitrary. Just used in debug logs.
 #[derive(Educe)]
@@ -481,11 +480,7 @@ impl ScaleController {
             return Ok(());
         };
 
-        // let inner = mgr.catalog_controller.inner.write().await;
-        // let txn = inner.db.begin();
-        // // fragment
-
-        Ok(())
+        mgr.catalog_controller.integrity_check().await
     }
 
     /// Build the context for rescheduling and do some validation for the request.

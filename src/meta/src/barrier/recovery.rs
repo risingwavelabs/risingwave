@@ -667,6 +667,11 @@ impl GlobalBarrierManagerContext {
         let Ok(_guard) = self.scale_controller.reschedule_lock.try_write() else {
             return Err(anyhow!("scale_actors failed to acquire reschedule_lock").into());
         };
+
+        self.scale_controller.integrity_check().await?;
+
+        info!("integrity check passed");
+
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.scale_actors_v1(active_nodes).await,
             MetadataManager::V2(_) => self.scale_actors_v2(active_nodes).await,

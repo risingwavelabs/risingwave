@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash;
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
     UnionType, WithClause, WithQuery,
@@ -35,7 +36,7 @@ use sea_orm::{
 };
 
 use crate::controller::catalog::CatalogController;
-use crate::{model, MetaError, MetaResult};
+use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find `no_shuffle` upstream relation graph for target fragments.
 ///
@@ -368,23 +369,6 @@ macro_rules! crit_check_in_loop {
     };
 }
 
-macro_rules! warn_check_in_loop {
-    ($flag:expr, $condition:expr, $message:expr) => {
-        if !$condition {
-            tracing::warn!("Integrity check warned: {}", $message);
-            continue;
-        }
-    };
-}
-
-macro_rules! warn_check {
-    ($flag:expr, $condition:expr, $message:expr) => {
-        if !$condition {
-            tracing::warn!("Integrity check warned: {}", $message);
-        }
-    };
-}
-
 impl CatalogController {
     pub async fn integrity_check(&self) -> MetaResult<()> {
         let inner = self.inner.read().await;
@@ -405,7 +389,6 @@ impl CatalogController {
         #[sea_orm(entity = "Fragment")]
         pub struct PartialFragment {
             pub fragment_id: FragmentId,
-            pub job_id: ObjectId,
             pub distribution_type: DistributionType,
             pub upstream_fragment_id: I32Array,
             pub vnode_count: i32,
@@ -459,8 +442,30 @@ impl CatalogController {
             crit_check_in_loop!(
                 flag,
                 fragment_map.contains_key(fragment_id),
-                format!("Actor {actor_id} has fragment_id {fragment_id} which does not exist",)
+                format!("Fragment {fragment_id} has actors {actor_ids:?} which does not exist",)
             );
+
+            let mut split_map = HashMap::new();
+            for actor_id in actor_ids {
+                let actor = &actor_map[actor_id];
+
+                if let Some(splits) = &actor.splits {
+                    for split in splits.to_protobuf().splits {
+                        let Ok(split_impl) = SplitImpl::try_from(&split) else {
+                            continue;
+                        };
+
+                        let dup_split_actor = split_map.insert(split_impl.id(), actor_id);
+                        crit_check_in_loop!(
+                            flag,
+                            dup_split_actor.is_none(),
+                            format!(
+                                "Fragment {fragment_id} actor {actor_id} has duplicate split {split:?} from actor {dup_split_actor:?}",
+                            )
+                        );
+                    }
+                }
+            }
 
             let fragment = &fragment_map[fragment_id];
 
@@ -488,7 +493,7 @@ impl CatalogController {
                 DistributionType::Hash => {
                     crit_check_in_loop!(
                         flag,
-                        actor_ids.len() >= 1,
+                        !actor_ids.is_empty(),
                         format!(
                             "Fragment {fragment_id} has less than one actors {actor_ids:?} for hash distribution type",
                         )
@@ -573,7 +578,7 @@ impl CatalogController {
 
             crit_check_in_loop!(
                 flag,
-                fragment_actors.contains_key(&dispatcher_id),
+                fragment_actors.contains_key(dispatcher_id),
                 format!(
                     "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has no actors",
                 )
@@ -582,12 +587,12 @@ impl CatalogController {
             let dispatcher_downstream_actor_ids: HashSet<_> =
                 downstream_actor_ids.inner_ref().iter().cloned().collect();
 
-            let target_fragment_actor_ids = &fragment_actors[&dispatcher_id];
+            let target_fragment_actor_ids = &fragment_actors[dispatcher_id];
 
             for dispatcher_downstream_actor_id in &dispatcher_downstream_actor_ids {
                 crit_check_in_loop!(
                     flag,
-                    actor_map.contains_key(&dispatcher_downstream_actor_id),
+                    actor_map.contains_key(dispatcher_downstream_actor_id),
                     format!(
                         "ActorDispatcher {id} has downstream_actor_id {dispatcher_downstream_actor_id} which does not exist",
                     )
@@ -749,10 +754,10 @@ impl CatalogController {
             }
         }
 
-        for fragment in fragment_map.values() {
+        for (fragment_id, fragment) in &fragment_map {
             let discovered_upstream_fragment_ids = discovered_upstream_fragments
                 .get(&fragment.fragment_id)
-                .map(|set| set.clone())
+                .cloned()
                 .unwrap_or_default();
 
             let upstream_fragment_ids: HashSet<_> = fragment
@@ -771,14 +776,25 @@ impl CatalogController {
             );
         }
 
-        for actor in actor_map.values() {
+        for PartialActor {
+            actor_id,
+            status,
+            upstream_actor_ids,
+            ..
+        } in actor_map.values()
+        {
+            crit_check_in_loop!(
+                flag,
+                *status == ActorStatus::Running,
+                format!("Actor {actor_id} has status {status:?} which is not Running",)
+            );
+
             let discovered_upstream_actor_ids = discovered_upstream_actors
-                .get(&actor.actor_id)
-                .map(|set| set.clone())
+                .get(actor_id)
+                .cloned()
                 .unwrap_or_default();
 
-            let upstream_actor_ids: HashSet<_> = actor
-                .upstream_actor_ids
+            let upstream_actor_ids: HashSet<_> = upstream_actor_ids
                 .inner_ref()
                 .iter()
                 .flat_map(|(_, v)| v.iter().copied())
