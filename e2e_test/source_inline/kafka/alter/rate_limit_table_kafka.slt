@@ -1,3 +1,5 @@
+control substitution on
+
 ############## Create kafka seed data
 
 statement ok
@@ -12,11 +14,10 @@ statement ok
 create sink kafka_sink
 from
   kafka_seed_data with (
-    properties.bootstrap.server = 'message_queue:29092',
-    topic = 'rate_limit_source_kafka_0',
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_rate_limit_for_table',
     type = 'append-only',
     force_append_only='true',
-    connector = 'kafka'
 );
 
 # topic may not be created yet
@@ -26,9 +27,8 @@ sleep 4s
 
 statement ok
 create table kafka_source (v1 int) with (
-  connector = 'kafka',
-  topic = 'rate_limit_source_kafka_0',
-  properties.bootstrap.server = 'message_queue:29092',
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_rate_limit_for_table',
   scan.startup.mode = 'earliest',
   source_rate_limit = 0
 ) FORMAT PLAIN ENCODE JSON

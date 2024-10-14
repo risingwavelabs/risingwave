@@ -79,9 +79,9 @@ use crate::manager::{
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
-    validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
-    CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
-    ReplaceTableContext, SourceManagerRef, StreamFragmentGraph,
+    create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
+    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
+    GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -477,9 +477,14 @@ impl DdlController {
         &self,
         mut source: Source,
     ) -> MetaResult<NotificationVersion> {
-        match &self.metadata_manager {
+        let handle = create_source_worker_handle(&source, self.source_manager.metrics.clone())
+            .await
+            .context("failed to create source worker")?;
+
+        let (source_id, version) = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
-                source.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+                let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+                source.id = source_id;
                 // set the initialized_at_epoch to the current epoch.
                 source.initialized_at_epoch = Some(Epoch::now().0);
                 source.initialized_at_cluster_version = Some(current_cluster_version());
@@ -487,24 +492,21 @@ impl DdlController {
                 mgr.catalog_manager
                     .start_create_source_procedure(&source)
                     .await?;
-
-                if let Err(e) = self.source_manager.register_source(&source).await {
-                    mgr.catalog_manager
-                        .cancel_create_source_procedure(&source)
-                        .await?;
-                    return Err(e);
-                }
-
-                mgr.catalog_manager
+                let version = mgr
+                    .catalog_manager
                     .finish_create_source_procedure(source, vec![])
-                    .await
+                    .await?;
+                (source_id, version)
             }
             MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .create_source(source, Some(self.source_manager.clone()))
-                    .await
+                let (source_id, version) = mgr.catalog_controller.create_source(source).await?;
+                (source_id as _, version)
             }
-        }
+        };
+        self.source_manager
+            .register_source_with_handle(source_id, handle)
+            .await;
+        Ok(version)
     }
 
     async fn drop_source(
