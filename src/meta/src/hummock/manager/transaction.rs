@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::LazyCell;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -145,14 +144,6 @@ impl<'a> HummockVersionTransaction<'a> {
                 }));
             }
         }
-
-        let max_epoch_to_commit = LazyCell::new(|| {
-            tables_to_commit
-                .values()
-                .cloned()
-                .max()
-                .expect("non empty tables_to_commit")
-        });
 
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {

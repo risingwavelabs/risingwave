@@ -245,7 +245,10 @@ impl CheckpointControl {
     fn total_command_num(&self) -> usize {
         self.command_ctx_queue.len()
             + match &self.completing_task {
-                CompletingTask::Completing { .. } => 1,
+                CompletingTask::Completing {
+                    command_ctx: Some(_),
+                    ..
+                } => 1,
                 _ => 0,
             }
     }
