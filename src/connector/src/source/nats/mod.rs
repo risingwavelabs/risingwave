@@ -17,13 +17,13 @@ pub mod source;
 pub mod split;
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::time::Duration;
 
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, ReplayPolicy};
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
-use strum_macros::Display;
 use thiserror::Error;
 use with_options::WithOptions;
 
@@ -36,10 +36,13 @@ use crate::{
     deserialize_optional_string_seq_from_string, deserialize_optional_u64_seq_from_string,
 };
 
-#[derive(Debug, Clone, Error, Display)]
-pub enum NatsJetStreamError {
-    InvalidAckPolicy(String),
-    InvalidReplayPolicy(String),
+#[derive(Debug, Clone, Error)]
+pub struct NatsJetStreamError(String);
+
+impl Display for NatsJetStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 pub const NATS_CONNECTOR: &str = "nats";
@@ -52,7 +55,7 @@ impl AckPolicyWrapper {
             "none" => Ok(AckPolicy::None),
             "all" => Ok(AckPolicy::All),
             "explicit" => Ok(AckPolicy::Explicit),
-            _ => Err(NatsJetStreamError::InvalidAckPolicy(format!(
+            _ => Err(NatsJetStreamError(format!(
                 "Invalid AckPolicy '{}', expect `none`, `all`, and `explicit`",
                 s
             ))),
@@ -67,7 +70,7 @@ impl ReplayPolicyWrapper {
         match s {
             "instant" => Ok(ReplayPolicy::Instant),
             "original" => Ok(ReplayPolicy::Original),
-            _ => Err(NatsJetStreamError::InvalidReplayPolicy(format!(
+            _ => Err(NatsJetStreamError(format!(
                 "Invalid ReplayPolicy '{}', expect `instant` and `original`",
                 s
             ))),
