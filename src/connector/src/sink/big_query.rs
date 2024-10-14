@@ -730,8 +730,18 @@ impl StorageWriterClient {
                     append_rows_response.row_errors
                 )));
             }
+            if let Some(google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_response::Response::Error(status)) = append_rows_response.response{
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "bigquery insert error {:?}",
+                    status
+                )));
+            }
         }
-        assert_eq!(resp_count,0,"bigquery sink insert error: the number of response inserted is not equal to the number of request");
+        if resp_count != 0 {
+            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                "bigquery sink insert error: the number of response inserted is not equal to the number of request"
+            )));
+        }
         Ok(())
     }
 
