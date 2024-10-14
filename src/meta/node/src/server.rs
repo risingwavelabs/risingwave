@@ -201,19 +201,20 @@ pub async fn rpc_serve(
             .await
         }
         MetaStoreBackend::Sql { endpoint } => {
-            let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
-                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
-                // here we forcibly specify the number of connections as 1.
-                1
-            } else {
-                10
-            };
-
+            let is_sqlite = DbBackend::Sqlite.is_prefix_of(&endpoint);
             let mut options = sea_orm::ConnectOptions::new(endpoint);
             options
-                .max_connections(max_connection)
+                .max_connections(10)
                 .connect_timeout(Duration::from_secs(10))
-                .idle_timeout(Duration::from_secs(30));
+                .idle_timeout(Duration::from_secs(30))
+                .acquire_timeout(Duration::from_secs(30));
+
+            if is_sqlite {
+                // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                // here we forcibly specify the number of connections as 1.
+                options.max_connections(1);
+            }
+
             let conn = sea_orm::Database::connect(options).await?;
             let meta_store_sql = SqlMetaStore::new(conn);
 
