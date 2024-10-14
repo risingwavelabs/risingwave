@@ -1344,12 +1344,14 @@ pub async fn handle_create_table(
                 bail!("To create an iceberg engine table, AWS_REGION needed to be set");
             };
 
-            let Ok(s3_bucket) = std::env::var("AWS_S3_BUCKET") else {
-                bail!("To create an iceberg engine table, AWS_BUCKET needed to be set");
+            let Ok(s3_bucket) = std::env::var("NIMTABLE_S3_BUCKET") else {
+                bail!("To create an iceberg engine table, NIMTABLE_S3_BUCKET needed to be set");
             };
 
-            let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
-                bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
+            let Ok(data_directory) = std::env::var("NIMTABLE_DATA_DIRECTORY") else {
+                bail!(
+                    "To create an iceberg engine table, NIMTABLE_DATA_DIRECTORY needed to be set"
+                );
             };
 
             let s3_ak = if let Ok(s3_ak) = std::env::var("AWS_ACCESS_KEY_ID") {
