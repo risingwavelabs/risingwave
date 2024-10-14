@@ -65,7 +65,7 @@ pub struct SessionConfig {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
-    #[parameter(default = true, rename = "rw_implicit_flush")]
+    #[parameter(default = true, alias = "rw_implicit_flush")]
     implicit_flush: bool,
 
     /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in

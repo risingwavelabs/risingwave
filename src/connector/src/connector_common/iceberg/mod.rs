@@ -122,12 +122,14 @@ impl IcebergCommon {
                 s3_region.clone().to_string(),
             );
 
-            let Ok(s3_bucket) = std::env::var("AWS_S3_BUCKET") else {
-                bail!("To create an iceberg engine table, AWS_S3_BUCKET needed to be set");
+            let Ok(s3_bucket) = std::env::var("NIMTABLE_S3_BUCKET") else {
+                bail!("To create an iceberg engine table, NIMTABLE_S3_BUCKET needed to be set");
             };
 
-            let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
-                bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
+            let Ok(data_directory) = std::env::var("NIMTABLE_DATA_DIRECTORY") else {
+                bail!(
+                    "To create an iceberg engine table, NIMTABLE_DATA_DIRECTORY needed to be set"
+                );
             };
             let warehouse_path = format!("s3://{}/{}/nimtable", s3_bucket, data_directory);
 
@@ -825,13 +827,13 @@ mod v2 {
                     };
                     file_io_props.insert(S3_REGION.to_string(), s3_region);
 
-                    let Ok(s3_bucket) = std::env::var("AWS_S3_BUCKET") else {
-                        bail!("To create an iceberg engine table, AWS_S3_BUCKET needed to be set");
+                    let Ok(s3_bucket) = std::env::var("NIMTABLE_S3_BUCKET") else {
+                        bail!("To create an iceberg engine table, NIMTABLE_S3_BUCKET needed to be set");
                     };
 
-                    let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
+                    let Ok(data_directory) = std::env::var("NIMTABLE_DATA_DIRECTORY") else {
                         bail!(
-                            "To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set"
+                            "To create an iceberg engine table, NIMTABLE_DATA_DIRECTORY needed to be set"
                         );
                     };
 
