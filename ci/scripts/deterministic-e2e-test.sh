@@ -11,7 +11,7 @@ download-and-decompress-artifact risingwave_simulation .
 chmod +x ./risingwave_simulation
 
 echo "--- Extract data for Kafka"
-pushd ./scripts/source/
+pushd ./e2e_test/source_legacy/basic/scripts/
 mkdir -p ./test_data
 unzip -o test_data.zip -d .
 popd
@@ -39,7 +39,7 @@ echo "--- deterministic simulation e2e, ci-3cn-2fe, batch"
 seq "$TEST_NUM" | parallel './risingwave_simulation ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/batch-{}.log && rm $LOGDIR/batch-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, kafka source"
-seq "$TEST_NUM" | parallel './risingwave_simulation --kafka-datadir=./scripts/source/test_data ./e2e_test/source_legacy/basic/kafka\*.slt 2> $LOGDIR/source-{}.log && rm $LOGDIR/source-{}.log'
+seq "$TEST_NUM" | parallel './risingwave_simulation --kafka-datadir=./e2e_test/source_legacy/basic/scripts/test_data ./e2e_test/source_legacy/basic/kafka\*.slt 2> $LOGDIR/source-{}.log && rm $LOGDIR/source-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, streaming"
 seq "$TEST_NUM" | parallel './risingwave_simulation -j 16 ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/parallel-streaming-{}.log && rm $LOGDIR/parallel-streaming-{}.log'

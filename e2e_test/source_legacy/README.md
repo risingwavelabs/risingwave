@@ -7,8 +7,8 @@
 
 Test in this directory needs some prior setup.
 
-See also `ci/scripts/e2e-source-test.sh`, and `scripts/source`
+See also `ci/scripts/e2e-source-test.sh`, and `e2e_test/source_legacy/basic/scripts`
 
 ## Kafka
 
-`scripts/source/test_data` contains the data. Filename's convention is `<topic_name>.<n_partitions>`.
+`e2e_test/source_legacy/basic/scripts/test_data` contains the data. Filename's convention is `<topic_name>.<n_partitions>`.

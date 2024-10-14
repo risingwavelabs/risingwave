@@ -93,6 +93,6 @@ echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, kafka source
 seq "$TEST_NUM" | parallel './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
---kafka-datadir=./scripts/source/test_data \
+--kafka-datadir=./e2e_test/source_legacy/basic/scripts/test_data \
 ${EXTRA_ARGS:-} \
 ./e2e_test/source_legacy/basic/kafka\*.slt 2> $LOGDIR/recovery-source-{}.log && rm $LOGDIR/recovery-source-{}.log'
