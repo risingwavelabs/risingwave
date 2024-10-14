@@ -5,11 +5,11 @@ system ok
 mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
 
 system ok
-mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_create.sql
+mysql --protocol=tcp -u root mytest < e2e_test/source_legacy/cdc/mysql_create.sql
 
 # generate data to mysql
 system ok
-mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_init_data.sql
+mysql --protocol=tcp -u root mytest < e2e_test/source_legacy/cdc/mysql_init_data.sql
 
 statement ok
 create secret mysql_pwd with (
