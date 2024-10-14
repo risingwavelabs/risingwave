@@ -258,7 +258,7 @@ struct ShowSubscriptionRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowCursorRow {
-    id: String,
+    session_id: String,
     user: String,
     host: String,
     database: String,
@@ -268,7 +268,7 @@ struct ShowCursorRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowSubscriptionCursorRow {
-    id: String,
+    session_id: String,
     user: String,
     host: String,
     database: String,
@@ -531,7 +531,7 @@ pub async fn handle_show_object(
                 .collect_vec();
             let mut rows = vec![];
             for s in sessions {
-                let id = format!("{}", s.id().0);
+                let session_id = format!("{}", s.id().0);
                 let user = s.user_name().to_owned();
                 let host = format!("{}", s.peer_addr());
                 let database = s.database().to_owned();
@@ -539,7 +539,7 @@ pub async fn handle_show_object(
                 s.get_cursor_manager()
                     .iter_query_cursors(|cursor_name: &String, _| {
                         rows.push(ShowCursorRow {
-                            id: id.clone(),
+                            session_id: session_id.clone(),
                             user: user.clone(),
                             host: host.clone(),
                             database: database.clone(),
@@ -562,7 +562,7 @@ pub async fn handle_show_object(
                 .collect_vec();
             let mut rows = vec![];
             for s in sessions {
-                let id = format!("{}", s.id().0);
+                let ssession_id = format!("{}", s.id().0);
                 let user = s.user_name().to_owned();
                 let host = format!("{}", s.peer_addr());
                 let database = s.database().to_owned();
@@ -571,7 +571,7 @@ pub async fn handle_show_object(
                     .iter_subscription_cursors(
                         |cursor_name: &String, cursor: &SubscriptionCursor| {
                             rows.push(ShowSubscriptionCursorRow {
-                                id: id.clone(),
+                                session_id: ssession_id.clone(),
                                 user: user.clone(),
                                 host: host.clone(),
                                 database: database.clone(),
