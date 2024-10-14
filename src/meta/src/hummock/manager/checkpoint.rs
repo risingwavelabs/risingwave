@@ -161,16 +161,19 @@ impl HummockManager {
                         .iter()
                         .flat_map(|delta| {
                             match delta {
-                                GroupDeltaCommon::IntraLevel(level_delta) => Some(level_delta),
-                                _ => None,
+                                GroupDeltaCommon::IntraLevel(level_delta) => {
+                                    Some(level_delta.inserted_table_infos.iter())
+                                }
+                                GroupDeltaCommon::NewL0SubLevel(inserted_table_infos) => {
+                                    Some(inserted_table_infos.iter())
+                                }
+                                GroupDeltaCommon::GroupConstruct(_)
+                                | GroupDeltaCommon::GroupDestroy(_)
+                                | GroupDeltaCommon::GroupMerge(_) => None,
                             }
                             .into_iter()
-                            .flat_map(|level_delta| {
-                                level_delta
-                                    .inserted_table_infos
-                                    .iter()
-                                    .map(|t| (t.object_id, t.file_size))
-                            })
+                            .flatten()
+                            .map(|t| (t.object_id, t.file_size))
                         })
                         .chain(
                             version_delta
