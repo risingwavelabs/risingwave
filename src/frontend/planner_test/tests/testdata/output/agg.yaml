@@ -1360,7 +1360,7 @@
 - name: enable two phase aggregation with simple agg should have two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
-    SET RW_ENABLE_TWO_PHASE_AGG=true;
+    SET ENABLE_TWO_PHASE_AGG=true;
     create table t(v1 int, v2 int);
     select min(v1), sum(v2) from t;
   batch_plan: |-
@@ -1379,7 +1379,7 @@
 - name: disable two phase aggregation with simple agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
-    SET RW_ENABLE_TWO_PHASE_AGG=false;
+    SET ENABLE_TWO_PHASE_AGG=false;
     create table t(v1 int, v2 int);
     select min(v1), sum(v2) from t;
   batch_plan: |-

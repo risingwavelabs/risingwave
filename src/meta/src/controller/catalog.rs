@@ -52,7 +52,7 @@ use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbRelation, PbRelationGro
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::sea_query::{Expr, SimpleExpr};
+use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
@@ -76,7 +76,6 @@ use crate::controller::utils::{
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
-use crate::stream::SourceManagerRef;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
@@ -609,10 +608,21 @@ impl CatalogController {
     pub async fn clean_dirty_subscription(&self) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        let _res = Subscription::delete_many()
+
+        Object::delete_many()
             .filter(
-                subscription::Column::SubscriptionState
-                    .eq(Into::<i32>::into(SubscriptionState::Init)),
+                object::Column::ObjType.eq(ObjectType::Subscription).and(
+                    object::Column::Oid.not_in_subquery(
+                        Query::select()
+                            .column(subscription::Column::SubscriptionId)
+                            .from(Subscription)
+                            .and_where(
+                                subscription::Column::SubscriptionState
+                                    .eq(SubscriptionState::Created as i32),
+                            )
+                            .take(),
+                    ),
+                ),
             )
             .exec(&txn)
             .await?;
@@ -1150,8 +1160,7 @@ impl CatalogController {
     pub async fn create_source(
         &self,
         mut pb_source: PbSource,
-        source_manager_ref: Option<SourceManagerRef>,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(SourceId, NotificationVersion)> {
         let inner = self.inner.write().await;
         let owner_id = pb_source.owner as _;
         let txn = inner.db.begin().await?;
@@ -1174,17 +1183,11 @@ impl CatalogController {
             Some(pb_source.schema_id as _),
         )
         .await?;
-        pb_source.id = source_obj.oid as _;
+        let source_id = source_obj.oid;
+        pb_source.id = source_id as _;
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
 
-        if let Some(src_manager) = source_manager_ref {
-            let ret = src_manager.register_source(&pb_source).await;
-            if let Err(e) = ret {
-                txn.rollback().await?;
-                return Err(e);
-            }
-        }
         txn.commit().await?;
 
         let version = self
@@ -1193,7 +1196,7 @@ impl CatalogController {
                 PbRelationInfo::Source(pb_source),
             )
             .await;
-        Ok(version)
+        Ok((source_id, version))
     }
 
     pub async fn create_function(
@@ -1669,7 +1672,21 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
+                let is_shared = source.is_shared();
                 relations.push(PbRelationInfo::Source(ObjectModel(source, obj).into()));
+
+                // Note: For non-shared source, we don't update their state tables, which
+                // belongs to the MV.
+                if is_shared {
+                    update_internal_tables(
+                        &txn,
+                        object_id,
+                        object::Column::OwnerId,
+                        Value::Int(Some(new_owner)),
+                        &mut relations,
+                    )
+                    .await?;
+                }
             }
             ObjectType::Sink => {
                 let sink = Sink::find_by_id(object_id)
@@ -1678,34 +1695,14 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
                 relations.push(PbRelationInfo::Sink(ObjectModel(sink, obj).into()));
 
-                // internal tables.
-                let internal_tables: Vec<TableId> = Table::find()
-                    .select_only()
-                    .column(table::Column::TableId)
-                    .filter(table::Column::BelongsToJobId.eq(object_id))
-                    .into_tuple()
-                    .all(&txn)
-                    .await?;
-
-                Object::update_many()
-                    .col_expr(
-                        object::Column::OwnerId,
-                        SimpleExpr::Value(Value::Int(Some(new_owner))),
-                    )
-                    .filter(object::Column::Oid.is_in(internal_tables.clone()))
-                    .exec(&txn)
-                    .await?;
-
-                let table_objs = Table::find()
-                    .find_also_related(Object)
-                    .filter(table::Column::TableId.is_in(internal_tables))
-                    .all(&txn)
-                    .await?;
-                for (table, table_obj) in table_objs {
-                    relations.push(PbRelationInfo::Table(
-                        ObjectModel(table, table_obj.unwrap()).into(),
-                    ));
-                }
+                update_internal_tables(
+                    &txn,
+                    object_id,
+                    object::Column::OwnerId,
+                    Value::Int(Some(new_owner)),
+                    &mut relations,
+                )
+                .await?;
             }
             ObjectType::Subscription => {
                 let subscription = Subscription::find_by_id(object_id)
@@ -1883,11 +1880,25 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
                 check_relation_name_duplicate(&source.name, database_id, new_schema, &txn).await?;
+                let is_shared = source.is_shared();
 
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
                 relations.push(PbRelationInfo::Source(ObjectModel(source, obj).into()));
+
+                // Note: For non-shared source, we don't update their state tables, which
+                // belongs to the MV.
+                if is_shared {
+                    update_internal_tables(
+                        &txn,
+                        object_id,
+                        object::Column::SchemaId,
+                        Value::Int(Some(new_schema)),
+                        &mut relations,
+                    )
+                    .await?;
+                }
             }
             ObjectType::Sink => {
                 let sink = Sink::find_by_id(object_id)
@@ -1901,36 +1912,14 @@ impl CatalogController {
                 let obj = obj.update(&txn).await?;
                 relations.push(PbRelationInfo::Sink(ObjectModel(sink, obj).into()));
 
-                // internal tables.
-                let internal_tables: Vec<TableId> = Table::find()
-                    .select_only()
-                    .column(table::Column::TableId)
-                    .filter(table::Column::BelongsToJobId.eq(object_id))
-                    .into_tuple()
-                    .all(&txn)
-                    .await?;
-
-                if !internal_tables.is_empty() {
-                    Object::update_many()
-                        .col_expr(
-                            object::Column::SchemaId,
-                            SimpleExpr::Value(Value::Int(Some(new_schema))),
-                        )
-                        .filter(object::Column::Oid.is_in(internal_tables.clone()))
-                        .exec(&txn)
-                        .await?;
-
-                    let table_objs = Table::find()
-                        .find_also_related(Object)
-                        .filter(table::Column::TableId.is_in(internal_tables))
-                        .all(&txn)
-                        .await?;
-                    for (table, table_obj) in table_objs {
-                        relations.push(PbRelationInfo::Table(
-                            ObjectModel(table, table_obj.unwrap()).into(),
-                        ));
-                    }
-                }
+                update_internal_tables(
+                    &txn,
+                    object_id,
+                    object::Column::SchemaId,
+                    Value::Int(Some(new_schema)),
+                    &mut relations,
+                )
+                .await?;
             }
             ObjectType::Subscription => {
                 let subscription = Subscription::find_by_id(object_id)
@@ -2452,6 +2441,7 @@ impl CatalogController {
             }};
         }
 
+        // TODO: check is there any thing to change for shared source?
         let old_name = match object_type {
             ObjectType::Table => rename_relation!(Table, table, table_id, object_id),
             ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
@@ -3253,7 +3243,7 @@ impl CatalogControllerInner {
 
     /// `list_sources` return all sources and `CREATED` ones if contains any streaming jobs.
     async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
-        let source_objs = Source::find()
+        let mut source_objs = Source::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
@@ -3263,7 +3253,27 @@ impl CatalogControllerInner {
             )
             .all(&self.db)
             .await?;
-        // TODO: filter out inner connector source that are still under creating.
+
+        // filter out inner connector sources that are still under creating.
+        let created_table_ids: HashSet<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .join(JoinType::InnerJoin, table::Relation::Object1.def())
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .filter(
+                table::Column::OptionalAssociatedSourceId
+                    .is_not_null()
+                    .and(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
+            )
+            .into_tuple()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .collect();
+        source_objs.retain_mut(|(source, _)| {
+            source.optional_associated_table_id.is_none()
+                || created_table_ids.contains(&source.optional_associated_table_id.unwrap())
+        });
 
         Ok(source_objs
             .into_iter()
@@ -3393,6 +3403,42 @@ impl CatalogControllerInner {
             let _ = tx.send(Err(err.clone()));
         }
     }
+}
+
+async fn update_internal_tables(
+    txn: &DatabaseTransaction,
+    object_id: i32,
+    column: object::Column,
+    new_value: Value,
+    relations_to_notify: &mut Vec<PbRelationInfo>,
+) -> MetaResult<()> {
+    let internal_tables: Vec<TableId> = Table::find()
+        .select_only()
+        .column(table::Column::TableId)
+        .filter(table::Column::BelongsToJobId.eq(object_id))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    if !internal_tables.is_empty() {
+        Object::update_many()
+            .col_expr(column, SimpleExpr::Value(new_value))
+            .filter(object::Column::Oid.is_in(internal_tables.clone()))
+            .exec(txn)
+            .await?;
+
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::TableId.is_in(internal_tables))
+            .all(txn)
+            .await?;
+        for (table, table_obj) in table_objs {
+            relations_to_notify.push(PbRelationInfo::Table(
+                ObjectModel(table, table_obj.unwrap()).into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -3560,7 +3606,7 @@ mod tests {
                 .to_string(),
             ..Default::default()
         };
-        mgr.create_source(pb_source, None).await?;
+        mgr.create_source(pb_source).await?;
         let source_id: SourceId = Source::find()
             .select_only()
             .column(source::Column::SourceId)

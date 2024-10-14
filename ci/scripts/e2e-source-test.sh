@@ -51,12 +51,12 @@ cp src/connector/src/test_data/complex-schema.json ./json-complex-schema
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 
 # import data to mysql
-mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
+mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source_legacy/cdc/mysql_cdc.sql
 
 # import data to postgres
 export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
 createdb
-psql < ./e2e_test/source/cdc/postgres_cdc.sql
+psql < ./e2e_test/source_legacy/cdc/postgres_cdc.sql
 
 echo "--- starting risingwave cluster"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
@@ -82,30 +82,30 @@ echo 'db.runCommand({ping: 1})' | mongo mongodb://mongodb:27017
 echo '> rs config'
 echo 'rs.conf()' | mongo mongodb://mongodb:27017
 echo '> run test..'
-risedev slt './e2e_test/source/cdc/mongodb/**/*.slt'
+risedev slt './e2e_test/source_legacy/cdc/mongodb/**/*.slt'
 
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
-risedev slt './e2e_test/source/cdc_inline/**/*.slt'
+risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
 
 echo "--- opendal source test"
-risedev slt './e2e_test/source/opendal/**/*.slt'
+risedev slt './e2e_test/source_legacy/opendal/**/*.slt'
 
 echo "--- mysql & postgres cdc validate test"
-risedev slt './e2e_test/source/cdc/cdc.validate.mysql.slt'
-risedev slt './e2e_test/source/cdc/cdc.validate.postgres.slt'
+risedev slt './e2e_test/source_legacy/cdc/cdc.validate.mysql.slt'
+risedev slt './e2e_test/source_legacy/cdc/cdc.validate.postgres.slt'
 
 echo "--- cdc share source test"
 # cdc share stream test cases
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
-risedev slt './e2e_test/source/cdc/cdc.share_stream.slt'
+risedev slt './e2e_test/source_legacy/cdc/cdc.share_stream.slt'
 
 echo "--- mysql & postgres load and check"
-risedev slt './e2e_test/source/cdc/cdc.load.slt'
+risedev slt './e2e_test/source_legacy/cdc/cdc.load.slt'
 # wait for cdc loading
 sleep 10
-risedev slt './e2e_test/source/cdc/cdc.check.slt'
+risedev slt './e2e_test/source_legacy/cdc/cdc.check.slt'
 
 # kill cluster
 risedev kill
@@ -121,10 +121,10 @@ mysql --protocol=tcp -u root mytest -e "INSERT INTO products
 
 
 # insert new rows
-mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
+mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source_legacy/cdc/mysql_cdc_insert.sql
 echo "> inserted new rows into mysql"
 
-psql < ./e2e_test/source/cdc/postgres_cdc_insert.sql
+psql < ./e2e_test/source_legacy/cdc/postgres_cdc_insert.sql
 echo "> inserted new rows into postgres"
 
 # start cluster w/o clean-data
@@ -136,10 +136,13 @@ echo "> wait for cluster recovery finish"
 sleep 20
 echo "> check mviews after cluster recovery"
 # check results
-risedev slt './e2e_test/source/cdc/cdc.check_new_rows.slt'
+risedev slt './e2e_test/source_legacy/cdc/cdc.check_new_rows.slt'
 
 # drop relations
-risedev slt './e2e_test/source/cdc/cdc_share_stream_drop.slt'
+risedev slt './e2e_test/source_legacy/cdc/cdc_share_stream_drop.slt'
+
+echo "--- postgres_query tvf test"
+risedev slt './e2e_test/source_legacy/tvf/postgres_query.slt'
 
 echo "--- Kill cluster"
 risedev ci-kill
@@ -150,22 +153,8 @@ export RUST_MIN_STACK=4194304
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-kafka
 ./scripts/source/prepare_ci_kafka.sh
-risedev slt './e2e_test/source/basic/*.slt'
-risedev slt './e2e_test/source/basic/old_row_format_syntax/*.slt'
-risedev slt './e2e_test/source/basic/alter/kafka.slt'
-
-echo "--- e2e, kafka alter source rate limit"
-risedev slt './e2e_test/source/basic/alter/rate_limit_source_kafka.slt'
-risedev slt './e2e_test/source/basic/alter/rate_limit_table_kafka.slt'
-
-echo "--- e2e, kafka alter source"
-chmod +x ./scripts/source/prepare_data_after_alter.sh
-./scripts/source/prepare_data_after_alter.sh 2
-risedev slt './e2e_test/source/basic/alter/kafka_after_new_data.slt'
-
-echo "--- e2e, kafka alter source again"
-./scripts/source/prepare_data_after_alter.sh 3
-risedev slt './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
+risedev slt './e2e_test/source_legacy/basic/*.slt'
+risedev slt './e2e_test/source_legacy/basic/old_row_format_syntax/*.slt'
 
 echo "--- Run CH-benCHmark"
 risedev slt './e2e_test/ch_benchmark/batch/ch_benchmark.slt'

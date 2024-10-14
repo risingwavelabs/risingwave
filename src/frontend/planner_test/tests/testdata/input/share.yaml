@@ -61,13 +61,13 @@
   - logical_plan
   - batch_plan
 - sql: |
-    set rw_enable_share_plan=true;
+    set enable_share_plan=true;
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
   expected_outputs:
   - stream_plan
 - sql: |
-    set rw_enable_share_plan=false;
+    set enable_share_plan=false;
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
   expected_outputs:
@@ -76,7 +76,7 @@
   before:
   - create_sources
   sql: |
-    set rw_enable_share_plan=false;
+    set enable_share_plan=false;
     select count(*) cnt from auction A join auction B on A.id = B.id;
   expected_outputs:
   - stream_plan

@@ -26,6 +26,7 @@ use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
+use crate::HummockSstableObjectId;
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
@@ -373,6 +374,7 @@ pub struct ReportTask {
     pub task_id: u64,
     pub task_status: TaskStatus,
     pub sorted_output_ssts: Vec<SstableInfo>,
+    pub object_timestamps: HashMap<HummockSstableObjectId, u64>,
 }
 
 impl From<PbReportTask> for ReportTask {
@@ -386,6 +388,7 @@ impl From<PbReportTask> for ReportTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }
@@ -401,6 +404,7 @@ impl From<ReportTask> for PbReportTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }

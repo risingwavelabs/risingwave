@@ -28,7 +28,6 @@ use risingwave_license::LicenseManager;
 use risingwave_pb::common::worker_node::{Property, Resource, State};
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
-use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
@@ -348,17 +347,12 @@ impl ClusterManager {
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(
-        &self,
-        worker_id: WorkerId,
-        info: Vec<heartbeat_request::extra_info::Info>,
-    ) -> MetaResult<()> {
+    pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
         tracing::debug!(target: "events::meta::server_heartbeat", worker_id, "receive heartbeat");
         let mut core = self.core.write().await;
         for worker in core.workers.values_mut() {
             if worker.worker_id() == worker_id {
                 worker.update_expire_at(self.max_heartbeat_interval);
-                worker.update_info(info);
                 return Ok(());
             }
         }
@@ -1036,10 +1030,7 @@ mod tests {
         let keep_alive_join_handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(cluster_manager_ref.max_heartbeat_interval / 3).await;
-                cluster_manager_ref
-                    .heartbeat(context_id_1, vec![])
-                    .await
-                    .unwrap();
+                cluster_manager_ref.heartbeat(context_id_1).await.unwrap();
             }
         });
 

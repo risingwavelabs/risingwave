@@ -306,6 +306,7 @@ message CompactTask {
     TRACK_SST_OBJECT_ID_FAILED = 12;
     NO_AVAIL_CPU_RESOURCE_CANCELED = 13;
     HEARTBEAT_PROGRESS_CANCELED = 14;
+    RETENTION_TIME_REJECTED = 17;
 
     // for serverless compaction
     SERVERLESS_SEND_FAIL_CANCELED = 15;
@@ -460,6 +461,7 @@ message SubscribeCompactionEventRequest {
     uint64 task_id = 4;
     CompactTask.TaskStatus task_status = 5;
     repeated SstableInfo sorted_output_ssts = 6;
+    map<uint64, uint64> object_timestamps = 7;
   }
 
   // HeartBeat provides the progress status of all tasks on the Compactor.
@@ -507,6 +509,7 @@ message ReportCompactionTaskRequest {
   message ReportTask {
     CompactTask compact_task = 2;
     map<uint32, TableStats> table_stats_change = 3;
+    map<uint64, uint64> object_timestamps = 4;
   }
   // HeartBeat provides the progress status of all tasks on the Compactor.
   message HeartBeat {
@@ -574,7 +577,10 @@ message ReportFullScanTaskRequest {
   uint64 total_object_count = 2;
   // Total size of objects before filtered by conditions specified by FullScanTask.
   uint64 total_object_size = 3;
+  // Start key of the next page.
   optional string next_start_after = 4;
+  // Start key of this page.
+  optional string start_after = 5;
 }
 
 message ReportFullScanTaskResponse {
@@ -674,6 +680,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 max_l0_compact_level_count = 18;
       uint64 sst_allowed_trivial_move_min_size = 19;
       uint32 split_weight_by_vnode = 20;
+      bool disable_auto_group_scheduling = 21;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -832,7 +839,6 @@ service HummockManagerService {
   rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
   rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
-  rpc ListChangeLogEpochs(ListChangeLogEpochsRequest) returns (ListChangeLogEpochsResponse);
   rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
   rpc MergeCompactionGroup(MergeCompactionGroupRequest) returns (MergeCompactionGroupResponse);
 }
@@ -872,6 +878,9 @@ message CompactionConfig {
 
   // The limitation of base level trivial move sst size
   optional uint64 sst_allowed_trivial_move_min_size = 22;
+
+  // The limitation of auto group scheduling
+  optional bool disable_auto_group_scheduling = 23;
 }
 
 message TableStats {
@@ -903,14 +912,4 @@ message BranchedObject {
   repeated uint64 sst_id = 2;
   // Compaction group id the SST belongs to.
   uint64 compaction_group_id = 3;
-}
-
-message ListChangeLogEpochsRequest {
-  uint32 table_id = 1;
-  uint64 min_epoch = 2;
-  uint32 max_count = 3;
-}
-
-message ListChangeLogEpochsResponse {
-  repeated uint64 epochs = 1;
 }

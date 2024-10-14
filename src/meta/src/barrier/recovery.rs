@@ -193,21 +193,12 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<bool> {
         let (dropped_actors, cancelled) = scheduled_barriers.pre_apply_drop_cancel_scheduled();
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
-        if !cancelled.is_empty() {
-            match &self.metadata_manager {
-                MetadataManager::V1(mgr) => {
-                    mgr.fragment_manager
-                        .drop_table_fragments_vec(&cancelled)
-                        .await?;
-                }
-                MetadataManager::V2(mgr) => {
-                    for job_id in cancelled {
-                        mgr.catalog_controller
-                            .try_abort_creating_streaming_job(job_id.table_id as _, true)
-                            .await?;
-                    }
-                }
-            };
+        if !cancelled.is_empty()
+            && let MetadataManager::V1(mgr) = &self.metadata_manager
+        {
+            mgr.fragment_manager
+                .drop_table_fragments_vec(&cancelled)
+                .await?;
             // no need to unregister state table id from hummock manager here, because it's expected that
             // we call `purge_state_table_from_hummock` anyway after the current method returns.
         }

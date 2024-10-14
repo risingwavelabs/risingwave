@@ -14,6 +14,19 @@
     └─StreamNow { output: [ts] }
 - sql: |
     select * from generate_series(
+      '2024-06-21 17:36:00',
+      now(),
+      '1 hour'
+    );
+  logical_plan: |-
+    LogicalProject { exprs: [generate_series] }
+    └─LogicalTableFunction { table_function: GenerateSeries('2024-06-21 17:36:00':Varchar::Timestamptz, Now, '01:00:00':Interval) }
+  optimized_logical_plan_for_stream: 'LogicalNow { output: [ts] }'
+  stream_plan: |-
+    StreamMaterialize { columns: [generate_series], stream_key: [generate_series], pk_columns: [generate_series], pk_conflict: NoCheck, watermark_columns: [generate_series] }
+    └─StreamNow { output: [ts] }
+- sql: |
+    select * from generate_series(
       '2024-06-21 17:36:00'::timestamp, -- `timestamp` type is not supported
       now(),
       interval '1 hour'
