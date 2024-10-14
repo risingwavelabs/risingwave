@@ -24,11 +24,11 @@ AzblobConfig:
   - name: max_row_count
     field_type: usize
     required: false
-    default: Default::default
+    default: DEFAULT_MAX_ROW_COUNR
   - name: rollover_seconds
     field_type: usize
     required: false
-    default: Default::default
+    default: DEFAULT_ROLLOVER_SECONDS
   - name: path_partition_prefix
     field_type: PathPartitionPrefix
     required: false
@@ -294,11 +294,11 @@ FsConfig:
   - name: max_row_count
     field_type: usize
     required: false
-    default: Default::default
+    default: DEFAULT_MAX_ROW_COUNR
   - name: rollover_seconds
     field_type: usize
     required: false
-    default: Default::default
+    default: DEFAULT_ROLLOVER_SECONDS
   - name: path_partition_prefix
     field_type: PathPartitionPrefix
     required: false
@@ -327,11 +327,11 @@ GcsConfig:
   - name: max_row_count
     field_type: usize
     required: false
-    default: Default::default
+    default: DEFAULT_MAX_ROW_COUNR
   - name: rollover_seconds
     field_type: usize
     required: false
-    default: Default::default
+    default: DEFAULT_ROLLOVER_SECONDS
   - name: path_partition_prefix
     field_type: PathPartitionPrefix
     required: false
@@ -1002,11 +1002,11 @@ S3Config:
   - name: max_row_count
     field_type: usize
     required: false
-    default: Default::default
+    default: DEFAULT_MAX_ROW_COUNR
   - name: rollover_seconds
     field_type: usize
     required: false
-    default: Default::default
+    default: DEFAULT_ROLLOVER_SECONDS
   - name: path_partition_prefix
     field_type: PathPartitionPrefix
     required: false
@@ -1145,11 +1145,11 @@ WebhdfsConfig:
   - name: max_row_count
     field_type: usize
     required: false
-    default: Default::default
+    default: DEFAULT_MAX_ROW_COUNR
   - name: rollover_seconds
     field_type: usize
     required: false
-    default: Default::default
+    default: DEFAULT_ROLLOVER_SECONDS
   - name: path_partition_prefix
     field_type: PathPartitionPrefix
     required: false
