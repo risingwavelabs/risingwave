@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use itertools::Either::{Left, Right};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
@@ -434,10 +435,10 @@ impl HummockVersion {
                     continue;
                 }
                 match group_split::get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
-                    Ok(idx) => {
+                    Left(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
                     }
-                    Err(idx) => {
+                    Right(idx) => {
                         insert_new_sub_level(
                             target_l0,
                             sub_level.sub_level_id,
@@ -946,10 +947,10 @@ impl HummockVersionCommon<SstableInfo> {
                         l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                     });
                 match group_split::get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
-                    Ok(idx) => {
+                    Left(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
                     }
-                    Err(idx) => {
+                    Right(idx) => {
                         insert_new_sub_level(
                             target_l0,
                             sub_level.sub_level_id,

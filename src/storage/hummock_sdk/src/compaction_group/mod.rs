@@ -49,6 +49,8 @@ pub mod group_split {
     use std::collections::BTreeSet;
 
     use bytes::Bytes;
+    use itertools::Either;
+    use itertools::Either::{Left, Right};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_pb::hummock::PbLevelType;
@@ -354,26 +356,26 @@ pub mod group_split {
         }
     }
 
-    // When `insert_hint` is `Ok(idx)`, it means that the sub level `idx` in `target_l0`
-    // will extend these SSTs. When `insert_hint` is `Err(idx)`, it
+    // When `insert_hint` is `Left(idx)`, it means that the sub level `idx` in `target_l0`
+    // will extend these SSTs. When `insert_hint` is `Right(idx)`, it
     // means that we will add a new sub level `idx` into `target_l0`.
     pub fn get_sub_level_insert_hint(
         target_levels: &Vec<Level>,
         sub_level: &Level,
-    ) -> Result<usize, usize> {
+    ) -> Either<usize, usize> {
         for (idx, other) in target_levels.iter().enumerate() {
             match other.sub_level_id.cmp(&sub_level.sub_level_id) {
                 Ordering::Less => {}
                 Ordering::Equal => {
-                    return Ok(idx);
+                    return Left(idx);
                 }
                 Ordering::Greater => {
-                    return Err(idx);
+                    return Right(idx);
                 }
             }
         }
 
-        Err(target_levels.len())
+        Right(target_levels.len())
     }
 
     /// Split the SSTs in the level according to the split key.
