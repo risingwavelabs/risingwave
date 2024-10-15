@@ -285,12 +285,13 @@ impl HummockMetaClient for MockHummockMetaClient {
         let _compactor_rx = self
             .hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id);
+            .add_compactor(context_id as _);
 
         let (request_sender, mut request_receiver) =
             unbounded_channel::<SubscribeCompactionEventRequest>();
 
-        self.compact_context_id.store(context_id, Ordering::Release);
+        self.compact_context_id
+            .store(context_id as _, Ordering::Release);
 
         let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
 

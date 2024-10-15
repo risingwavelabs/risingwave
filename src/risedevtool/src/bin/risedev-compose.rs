@@ -119,10 +119,6 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::Etcd(c) => {
-                volumes.insert(c.id.clone(), ComposeVolume::default());
-                (c.address.clone(), c.compose(&compose_config)?)
-            }
             ServiceConfig::Sqlite(_) => continue,
             ServiceConfig::Prometheus(c) => {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
