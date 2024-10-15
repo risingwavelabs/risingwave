@@ -3043,7 +3043,7 @@ impl CatalogController {
         Ok(table_ids)
     }
 
-    /// Returns column ids versioned tables.
+    /// Returns column ids of versioned tables.
     /// Being versioned implies using `ColumnAwareSerde`.
     pub async fn get_versioned_table_schemas(&self) -> MetaResult<HashMap<TableId, Vec<i32>>> {
         let res = self
