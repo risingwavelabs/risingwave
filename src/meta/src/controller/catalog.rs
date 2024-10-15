@@ -3042,6 +3042,30 @@ impl CatalogController {
 
         Ok(table_ids)
     }
+
+    /// Returns column ids versioned tables.
+    /// Being versioned implies using `ColumnAwareSerde`.
+    pub async fn get_versioned_table_schemas(&self) -> MetaResult<HashMap<TableId, Vec<i32>>> {
+        let res = self
+            .list_all_state_tables()
+            .await?
+            .into_iter()
+            .filter_map(|t| {
+                if t.version.is_some() {
+                    let ret = (
+                        t.id.try_into().unwrap(),
+                        t.columns
+                            .iter()
+                            .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                            .collect_vec(),
+                    );
+                    return Some(ret);
+                }
+                None
+            })
+            .collect();
+        Ok(res)
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.

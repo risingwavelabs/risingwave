@@ -827,7 +827,6 @@ impl HummockManager {
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
                     if self.env.opts.enable_dropped_column_reclaim {
-                        // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
                         compact_task.table_schemas = match self.metadata_manager() {
                             MetadataManager::V1(mgr) => mgr
                                 .catalog_manager
@@ -838,9 +837,25 @@ impl HummockManager {
                                     (table_id, TableSchema { column_ids })
                                 })
                                 .collect(),
-                            MetadataManager::V2(_) => {
-                                // TODO #13952: support V2
-                                BTreeMap::default()
+                            MetadataManager::V2(mgr) => {
+                                let selected_tables: HashSet<u32> =
+                                    compact_task.existing_table_ids.iter().copied().collect();
+                                // TODO: get_versioned_table_schemas need to be called only once outside
+                                let all_versioned_table_schemas = mgr
+                                    .catalog_controller
+                                    .get_versioned_table_schemas()
+                                    .await
+                                    .map_err(|e| Error::Internal(e.into()))?;
+                                all_versioned_table_schemas
+                                    .into_iter()
+                                    .filter_map(|(table_id, column_ids)| {
+                                        let id = table_id.try_into().unwrap();
+                                        if !selected_tables.contains(&id) {
+                                            return None;
+                                        }
+                                        Some((id, TableSchema { column_ids }))
+                                    })
+                                    .collect()
                             }
                         };
                     }
