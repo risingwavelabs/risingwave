@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::iter;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -765,7 +766,9 @@ impl HummockVersion {
         self.max_sub_level_id = self
             .levels
             .values()
-            .filter_map(|levels| levels.l0.sub_levels.iter().map(|s| s.sub_level_id).max())
+            .map(|levels| levels.l0.sub_levels.iter().map(|s| s.sub_level_id).max())
+            .chain(iter::once(self.max_sub_level_id))
+            .flatten()
             .max();
     }
 
