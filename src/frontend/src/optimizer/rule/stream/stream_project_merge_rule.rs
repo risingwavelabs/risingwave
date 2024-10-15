@@ -22,18 +22,16 @@ use crate::utils::Substitute;
 pub struct StreamProjectMergeRule {}
 impl Rule for StreamProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let outer_project = plan.as_stream_project();
-        if outer_project.is_none() {
-            return Ok(None);
-        }
-        let outer_project = outer_project.unwrap();
+        let outer_project = match plan.as_stream_project() {
+            Some(outer_project) => outer_project,
+            None => return Ok(None),
+        };
 
         let input = outer_project.input();
-        let inner_project = input.as_stream_project();
-        if inner_project.is_none() {
-            return Ok(None);
-        }
-        let inner_project = inner_project.unwrap();
+        let inner_project = match input.as_stream_project() {
+            Some(inner_project) => inner_project,
+            None => return Ok(None),
+        };
 
         let mut input_ref_counter = InputRefCounter::default();
         for expr in outer_project.exprs() {

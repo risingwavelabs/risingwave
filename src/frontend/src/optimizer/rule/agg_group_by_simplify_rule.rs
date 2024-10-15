@@ -28,11 +28,10 @@ use crate::utils::{Condition, IndexSet};
 pub struct AggGroupBySimplifyRule {}
 impl Rule for AggGroupBySimplifyRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let plan = plan.as_logical_agg();
-        if plan.is_none() {
-            return Ok(None);
-        }
-        let agg = plan.unwrap();
+        let agg = match plan.as_logical_agg() {
+            Some(agg) => agg,
+            None => return Ok(None),
+        };
         let (agg_calls, group_key, grouping_sets, agg_input, _two_phase) = agg.clone().decompose();
         if !grouping_sets.is_empty() {
             return Ok(None);

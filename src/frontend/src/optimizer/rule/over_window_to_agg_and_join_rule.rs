@@ -35,11 +35,10 @@ impl OverWindowToAggAndJoinRule {
 
 impl Rule for OverWindowToAggAndJoinRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let over_window = plan.as_logical_over_window();
-        if over_window.is_none() {
-            return Ok(None);
-        }
-        let over_window = over_window.unwrap();
+        let over_window = match plan.as_logical_over_window() {
+            Some(over_window) => over_window,
+            None => return Ok(None),
+        };
 
         let window_functions = over_window.window_functions();
         if window_functions.iter().any(|window| {
@@ -66,10 +65,10 @@ impl Rule for OverWindowToAggAndJoinRule {
                     Condition::true_cond(),
                     vec![],
                 );
-                if agg_call.is_err() {
-                    return Ok(None);
-                }
-                let agg_call = agg_call.unwrap();
+                let agg_call = match agg_call {
+                    Ok(agg_call) => agg_call,
+                    Err(_) => return Ok(None),
+                };
                 select_exprs.push(agg_call.into());
             } else {
                 return Ok(None);
@@ -91,7 +90,10 @@ impl Rule for OverWindowToAggAndJoinRule {
         if agg_result.is_err() {
             return Ok(None);
         }
-        let (agg, ..) = agg_result.unwrap();
+        let agg = match agg_result {
+            Ok((agg, ..)) => agg,
+            Err(_) => return Ok(None),
+        };
 
         let on_clause = window_functions[0].partition_by.iter().enumerate().fold(
             Condition::true_cond(),

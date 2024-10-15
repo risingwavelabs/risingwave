@@ -24,24 +24,21 @@ impl ProjectJoinMergeRule {
 
 impl Rule for ProjectJoinMergeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let project = plan.as_logical_project();
-        if project.is_none() {
-            return Ok(None);
-        }
-        let project = project.unwrap();
+        let project = match plan.as_logical_project() {
+            Some(project) => project,
+            None => return Ok(None),
+        };
 
         let input = project.input();
-        let join = input.as_logical_join();
-        if join.is_none() {
-            return Ok(None);
-        }
-        let join = join.unwrap();
+        let join = match input.as_logical_join() {
+            Some(join) => join,
+            None => return Ok(None),
+        };
 
-        let outer_output_indices = project.try_as_projection();
-        if outer_output_indices.is_none() {
-            return Ok(None);
-        }
-        let outer_output_indices = outer_output_indices.unwrap();
+        let outer_output_indices = match project.try_as_projection() {
+            Some(outer_output_indices) => outer_output_indices,
+            None => return Ok(None),
+        };
 
         let inner_output_indices = join.output_indices();
 

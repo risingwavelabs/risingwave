@@ -38,11 +38,10 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
     /// NOTE: `e` should only contain at most a single column
     /// otherwise we will not conduct the optimization
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let filter = plan.as_logical_filter();
-        if filter.is_none() {
-            return Ok(None);
-        }
-        let filter = filter.unwrap();
+        let filter = match plan.as_logical_filter() {
+            Some(filter) => filter,
+            None => return Ok(None),
+        };
 
         // rewrite the entire condition first
         // i.e., the specific optimization that will apply to the entire condition

@@ -23,11 +23,10 @@ pub struct AlwaysFalseFilterRule;
 
 impl Rule for AlwaysFalseFilterRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let filter = plan.as_logical_filter();
-        if filter.is_none() {
-            return Ok(None);
-        }
-        let filter = filter.unwrap();
+        let filter = match plan.as_logical_filter() {
+            Some(filter) => filter,
+            None => return Ok(None),
+        };
         let always_false = filter
             .predicate()
             .conjunctions

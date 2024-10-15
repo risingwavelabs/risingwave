@@ -24,11 +24,10 @@ pub struct IndexDeltaJoinRule {}
 
 impl Rule for IndexDeltaJoinRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let join = plan.as_stream_hash_join();
-        if join.is_none() {
-            return Ok(None);
-        }
-        let join = join.unwrap();
+        let join = match plan.as_stream_hash_join() {
+            Some(join) => join,
+            None => return Ok(None),
+        };
 
         if join.eq_join_predicate().has_non_eq() || join.join_type() != JoinType::Inner {
             return Ok(Some(plan));
@@ -47,29 +46,25 @@ impl Rule for IndexDeltaJoinRule {
             }
         }
 
-        let input_left_dyn = match_through_exchange(join.inputs()[0].clone());
-        if input_left_dyn.is_none() {
-            return Ok(None);
-        }
-        let input_left_dyn = input_left_dyn.unwrap();
+        let input_left_dyn = match match_through_exchange(join.inputs()[0].clone()) {
+            Some(input_left_dyn) => input_left_dyn,
+            None => return Ok(None),
+        };
 
-        let input_left = input_left_dyn.as_stream_table_scan();
-        if input_left.is_none() {
-            return Ok(None);
-        }
-        let input_left = input_left.unwrap();
+        let input_left = match input_left_dyn.as_stream_table_scan() {
+            Some(input_left) => input_left,
+            None => return Ok(None),
+        };
 
-        let input_right_dyn = match_through_exchange(join.inputs()[1].clone());
-        if input_right_dyn.is_none() {
-            return Ok(None);
-        }
-        let input_right_dyn = input_right_dyn.unwrap();
+        let input_right_dyn = match match_through_exchange(join.inputs()[1].clone()) {
+            Some(input_right_dyn) => input_right_dyn,
+            None => return Ok(None),
+        };
 
-        let input_right = input_right_dyn.as_stream_table_scan();
-        if input_right.is_none() {
-            return Ok(None);
-        }
-        let input_right = input_right.unwrap();
+        let input_right = match input_right_dyn.as_stream_table_scan() {
+            Some(input_right) => input_right,
+            None => return Ok(None),
+        };
 
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();

@@ -34,11 +34,10 @@ pub struct DistinctAggRule {
 
 impl Rule for DistinctAggRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let agg = plan.as_logical_agg();
-        if agg.is_none() {
-            return Ok(None);
-        }
-        let agg = agg.unwrap();
+        let agg = match plan.as_logical_agg() {
+            Some(agg) => agg,
+            None => return Ok(None),
+        };
 
         let (mut agg_calls, mut agg_group_keys, grouping_sets, input, enable_two_phase) =
             agg.clone().decompose();

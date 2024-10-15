@@ -23,11 +23,10 @@ use crate::optimizer::PlanRef;
 pub struct ExceptToAntiJoinRule {}
 impl Rule for ExceptToAntiJoinRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let logical_except = plan.as_logical_except();
-        if logical_except.is_none() {
-            return Ok(None);
-        }
-        let logical_except = logical_except.unwrap();
+        let logical_except = match plan.as_logical_except() {
+            Some(logical_except) => logical_except,
+            None => return Ok(None),
+        };
 
         let all = logical_except.all();
         if all {

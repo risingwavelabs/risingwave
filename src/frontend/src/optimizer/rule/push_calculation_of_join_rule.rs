@@ -28,11 +28,10 @@ pub struct PushCalculationOfJoinRule {}
 
 impl Rule for PushCalculationOfJoinRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let join = plan.as_logical_join();
-        if join.is_none() {
-            return Ok(None);
-        }
-        let join = join.unwrap();
+        let join = match plan.as_logical_join() {
+            Some(join) => join,
+            None => return Ok(None),
+        };
 
         let (mut left, mut right, mut on, join_type, mut output_indices) = join.clone().decompose();
         let left_col_num = left.schema().len();

@@ -44,19 +44,17 @@ use crate::optimizer::PlanRef;
 pub struct ApplyProjectTransposeRule {}
 impl Rule for ApplyProjectTransposeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = plan.as_logical_apply();
-        if apply.is_none() {
-            return Ok(None);
-        }
-        let apply = apply.unwrap();
+        let apply = match plan.as_logical_apply() {
+            Some(apply) => apply,
+            None => return Ok(None),
+        };
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
-        let project = right.as_logical_project();
-        if project.is_none() {
-            return Ok(None);
-        }
-        let project = project.unwrap();
+        let project = match right.as_logical_project() {
+            Some(project) => project,
+            None => return Ok(None),
+        };
 
         assert_eq!(join_type, JoinType::Inner);
 

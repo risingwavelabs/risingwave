@@ -19,11 +19,10 @@ use super::{BoxedRule, Result, Rule};
 pub struct ProjectEliminateRule {}
 impl Rule for ProjectEliminateRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let project = plan.as_logical_project();
-        if project.is_none() {
-            return Ok(None);
-        }
-        let project = project.unwrap();
+        let project = match plan.as_logical_project() {
+            Some(project) => project,
+            None => return Ok(None),
+        };
 
         if project.is_identity() {
             Ok(Some(project.input()))

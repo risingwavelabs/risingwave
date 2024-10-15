@@ -32,11 +32,10 @@ const BUSHY_TREE_JOIN_LOWER_LIMIT: usize = 4;
 
 impl Rule for BushyTreeJoinOrderingRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let join = plan.as_logical_multi_join();
-        if join.is_none() {
-            return Ok(None);
-        }
-        let join = join.unwrap();
+        let join = match plan.as_logical_multi_join() {
+            Some(join) => join,
+            None => return Ok(None),
+        };
 
         if join.inputs().len() >= BUSHY_TREE_JOIN_LOWER_LIMIT
             && join.inputs().len() <= BUSHY_TREE_JOIN_UPPER_LIMIT
@@ -50,11 +49,10 @@ impl Rule for BushyTreeJoinOrderingRule {
             }
         } else {
             // Too many inputs, so fallback to a left deep tree.
-            let join_ordering = join.heuristic_ordering().ok();
-            if join_ordering.is_none() {
-                return Ok(None);
-            }
-            let join_ordering = join_ordering.unwrap();
+            let join_ordering = match join.heuristic_ordering() {
+                Ok(join_ordering) => join_ordering,
+                Err(_) => return Ok(None),
+            };
 
             let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
             Ok(Some(left_deep_join))

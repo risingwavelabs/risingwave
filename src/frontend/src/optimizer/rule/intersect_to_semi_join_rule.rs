@@ -25,11 +25,10 @@ use crate::optimizer::PlanRef;
 pub struct IntersectToSemiJoinRule {}
 impl Rule for IntersectToSemiJoinRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let logical_intersect = plan.as_logical_intersect();
-        if logical_intersect.is_none() {
-            return Ok(None);
-        }
-        let logical_intersect = logical_intersect.unwrap();
+        let logical_intersect = match plan.as_logical_intersect() {
+            Some(logical_intersect) => logical_intersect,
+            None => return Ok(None),
+        };
 
         let all = logical_intersect.all();
         if all {

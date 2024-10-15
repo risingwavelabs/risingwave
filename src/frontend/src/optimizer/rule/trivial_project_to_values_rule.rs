@@ -21,11 +21,10 @@ use crate::optimizer::{PlanRef, PlanVisitor};
 pub struct TrivialProjectToValuesRule {}
 impl Rule for TrivialProjectToValuesRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let project = plan.as_logical_project();
-        if project.is_none() {
-            return Ok(None);
-        }
-        let project = project.unwrap();
+        let project = match plan.as_logical_project() {
+            Some(project) => project,
+            None => return Ok(None),
+        };
 
         if !project.exprs().iter().all(|e| e.is_const()) {
             return Ok(None);
@@ -34,11 +33,10 @@ impl Rule for TrivialProjectToValuesRule {
             return Ok(None);
         }
 
-        let row_count = project.input().row_count();
-        if row_count.is_none() {
-            return Ok(None);
-        }
-        let row_count = row_count.unwrap();
+        let row_count = match project.input().row_count() {
+            Some(row_count) => row_count,
+            None => return Ok(None),
+        };
 
         let values = LogicalValues::new(
             vec![project.exprs().clone(); row_count],

@@ -26,11 +26,10 @@ impl ExpandToProjectRule {
 }
 impl Rule for ExpandToProjectRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let expand = plan.as_logical_expand();
-        if expand.is_none() {
-            return Ok(None);
-        }
-        let expand = expand.unwrap();
+        let expand = match plan.as_logical_expand() {
+            Some(expand) => expand,
+            None => return Ok(None),
+        };
 
         let (input, column_subsets) = expand.clone().decompose();
         assert!(!column_subsets.is_empty());

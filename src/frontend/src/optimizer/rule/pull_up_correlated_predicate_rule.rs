@@ -29,11 +29,10 @@ use crate::utils::Condition;
 pub struct PullUpCorrelatedPredicateRule {}
 impl Rule for PullUpCorrelatedPredicateRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = plan.as_logical_apply();
-        if apply.is_none() {
-            return Ok(None);
-        }
-        let apply = apply.unwrap();
+        let apply = match plan.as_logical_apply() {
+            Some(apply) => apply,
+            None => return Ok(None),
+        };
 
         let (apply_left, apply_right, apply_on, join_type, correlated_id, _, max_one_row) =
             apply.clone().decompose();
@@ -53,11 +52,10 @@ impl Rule for PullUpCorrelatedPredicateRule {
         let (mut proj_exprs, _) = project.clone().decompose();
 
         let input = project.input();
-        let filter = input.as_logical_filter();
-        if filter.is_none() {
-            return Ok(None);
-        }
-        let filter = filter.unwrap();
+        let filter = match input.as_logical_filter() {
+            Some(filter) => filter,
+            None => return Ok(None),
+        };
 
         let mut rewriter = Rewriter {
             input_refs: vec![],

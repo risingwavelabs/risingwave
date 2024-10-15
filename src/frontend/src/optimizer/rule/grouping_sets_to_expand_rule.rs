@@ -70,11 +70,10 @@ impl GroupingSetsToExpandRule {
 
 impl Rule for GroupingSetsToExpandRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let agg = plan.as_logical_agg();
-        if agg.is_none() {
-            return Ok(None);
-        }
-        let agg = agg.unwrap();
+        let agg = match plan.as_logical_agg() {
+            Some(agg) => agg,
+            None => return Ok(None),
+        };
 
         if agg.grouping_sets().is_empty() {
             return Ok(None);

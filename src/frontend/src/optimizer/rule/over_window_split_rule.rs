@@ -29,11 +29,10 @@ impl OverWindowSplitRule {
 
 impl Rule for OverWindowSplitRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let over_window = plan.as_logical_over_window();
-        if over_window.is_none() {
-            return Ok(None);
-        }
-        let over_window = over_window.unwrap();
+        let over_window = match plan.as_logical_over_window() {
+            Some(over_window) => over_window,
+            None => return Ok(None),
+        };
 
         let mut rank_func_seq = 0;
         let groups: HashMap<_, _> = over_window

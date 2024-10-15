@@ -20,20 +20,18 @@ use crate::optimizer::PlanRef;
 pub struct ApplyShareEliminateRule {}
 impl Rule for ApplyShareEliminateRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = plan.as_logical_apply();
-        if apply.is_none() {
-            return Ok(None);
-        }
-        let apply = apply.unwrap();
+        let apply = match plan.as_logical_apply() {
+            Some(apply) => apply,
+            None => return Ok(None),
+        };
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
 
-        let share = right.as_logical_share();
-        if share.is_none() {
-            return Ok(None);
-        }
-        let share = share.unwrap();
+        let share = match right.as_logical_share() {
+            Some(share) => share,
+            None => return Ok(None),
+        };
 
         // Eliminate the share operator
         Ok(Some(LogicalApply::create(

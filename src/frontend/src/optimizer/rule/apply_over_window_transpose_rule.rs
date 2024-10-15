@@ -44,20 +44,19 @@ use crate::utils::Condition;
 pub struct ApplyOverWindowTransposeRule {}
 impl Rule for ApplyOverWindowTransposeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = plan.as_logical_apply();
-        if apply.is_none() {
-            return Ok(None);
-        }
-        let apply = apply.unwrap();
+        let apply = match plan.as_logical_apply() {
+            Some(apply) => apply,
+            None => return Ok(None),
+        };
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-        let over_window = right.as_logical_over_window();
-        if over_window.is_none() {
-            return Ok(None);
-        }
-        let over_window = over_window.unwrap();
+
+        let over_window = match right.as_logical_over_window() {
+            Some(over_window) => over_window,
+            None => return Ok(None),
+        };
 
         let (window_input, mut window_functions) = over_window.clone().decompose();
 

@@ -91,11 +91,10 @@ pub struct IndexSelectionRule {}
 
 impl Rule for IndexSelectionRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let logical_scan = plan.as_logical_scan();
-        if logical_scan.is_none() {
-            return Ok(None);
-        }
-        let logical_scan = logical_scan.unwrap();
+        let logical_scan = match plan.as_logical_scan() {
+            Some(logical_scan) => logical_scan,
+            None => return Ok(None),
+        };
 
         let indexes = logical_scan.indexes();
         if indexes.is_empty() {

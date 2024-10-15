@@ -25,11 +25,10 @@ use crate::optimizer::PlanRef;
 pub struct ValuesExtractProjectRule {}
 impl Rule for ValuesExtractProjectRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let old_values = plan.as_logical_values();
-        if old_values.is_none() {
-            return Ok(None);
-        }
-        let old_values = old_values.unwrap();
+        let old_values = match plan.as_logical_values() {
+            Some(old_values) => old_values,
+            None => return Ok(None),
+        };
 
         let mut expr_correlated_id_finder = ExprCorrelatedIdFinder::default();
 

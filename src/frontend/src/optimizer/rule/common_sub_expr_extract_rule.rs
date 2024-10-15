@@ -24,11 +24,10 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 pub struct CommonSubExprExtractRule {}
 impl Rule for CommonSubExprExtractRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let project = plan.as_logical_project();
-        if project.is_none() {
-            return Ok(None);
-        }
-        let project = project.unwrap();
+        let project = match plan.as_logical_project() {
+            Some(project) => project,
+            None => return Ok(None),
+        };
 
         let mut expr_counter = CseExprCounter::default();
         for expr in project.exprs() {

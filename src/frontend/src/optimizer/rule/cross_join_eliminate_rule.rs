@@ -36,18 +36,17 @@ use crate::optimizer::PlanRef;
 pub struct CrossJoinEliminateRule {}
 impl Rule for CrossJoinEliminateRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let join = plan.as_logical_join();
-        if join.is_none() {
-            return Ok(None);
-        }
-        let join = join.unwrap();
+        let join = match plan.as_logical_join() {
+            Some(join) => join,
+            None => return Ok(None),
+        };
 
         let (left, right, on, join_type, _output_indices) = join.clone().decompose();
-        let values = right.as_logical_values();
-        if values.is_none() {
-            return Ok(None);
-        }
-        let values = values.unwrap();
+
+        let values = match right.as_logical_values() {
+            Some(values) => values,
+            None => return Ok(None),
+        };
 
         if on.always_true() // cross join
             && join_type == JoinType::Inner

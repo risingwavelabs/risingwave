@@ -19,11 +19,10 @@ use crate::optimizer::PlanRef;
 pub struct SourceToKafkaScanRule {}
 impl Rule for SourceToKafkaScanRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let source = plan.as_logical_source();
-        if source.is_none() {
-            return Ok(None);
-        }
-        let source = source.unwrap();
+        let source = match plan.as_logical_source() {
+            Some(source) => source,
+            None => return Ok(None),
+        };
         if source.core.is_kafka_connector() {
             Ok(Some(LogicalKafkaScan::create(source)))
         } else {

@@ -30,11 +30,10 @@ use crate::optimizer::PlanRef;
 pub struct JoinCommuteRule {}
 impl Rule for JoinCommuteRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let join = plan.as_logical_join();
-        if join.is_none() {
-            return Ok(None);
-        }
-        let join = join.unwrap();
+        let join = match plan.as_logical_join() {
+            Some(join) => join,
+            None => return Ok(None),
+        };
 
         let join_type = join.join_type();
         match join_type {

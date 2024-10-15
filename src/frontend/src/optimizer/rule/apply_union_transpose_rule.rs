@@ -43,22 +43,21 @@ use crate::optimizer::PlanRef;
 pub struct ApplyUnionTransposeRule {}
 impl Rule for ApplyUnionTransposeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = plan.as_logical_apply();
-        if apply.is_none() {
-            return Ok(None);
-        }
-        let apply = apply.unwrap();
+        let apply = match plan.as_logical_apply() {
+            Some(apply) => apply,
+            None => return Ok(None),
+        };
 
         if apply.max_one_row() {
             return Ok(None);
         }
         let left = apply.left();
         let right = apply.right();
-        let union = right.as_logical_union();
-        if union.is_none() {
-            return Ok(None);
-        }
-        let union = union.unwrap();
+
+        let union = match right.as_logical_union() {
+            Some(union) => union,
+            None => return Ok(None),
+        };
 
         let new_inputs = union
             .inputs()

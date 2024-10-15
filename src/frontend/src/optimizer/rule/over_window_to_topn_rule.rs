@@ -60,19 +60,18 @@ impl Rule for OverWindowToTopNRule {
                 (None, plan)
             }
         };
-        let filter = plan.as_logical_filter();
-        if filter.is_none() {
-            return Ok(None);
-        }
-        let filter = filter.unwrap();
+
+        let filter = match plan.as_logical_filter() {
+            Some(filter) => filter,
+            None => return Ok(None),
+        };
 
         let plan = filter.input();
         // The filter is directly on top of the over window after predicate pushdown.
-        let over_window = plan.as_logical_over_window();
-        if over_window.is_none() {
-            return Ok(None);
-        }
-        let over_window = over_window.unwrap();
+        let over_window = match plan.as_logical_over_window() {
+            Some(over_window) => over_window,
+            None => return Ok(None),
+        };
 
         if over_window.window_functions().len() != 1 {
             // Queries with multiple window function calls are not supported yet.
@@ -105,11 +104,10 @@ impl Rule for OverWindowToTopNRule {
             predicate.clone().split_disjoint(&rank_col)
         };
 
-        let rank_result = handle_rank_preds(&rank_pred.conjunctions, window_func_pos);
-        if rank_result.is_none() {
-            return Ok(None);
-        }
-        let (limit, offset) = rank_result.unwrap();
+        let (limit, offset) = match handle_rank_preds(&rank_pred.conjunctions, window_func_pos) {
+            Some(rank_result) => rank_result,
+            None => return Ok(None),
+        };
 
         if offset > 0 && with_ties {
             tracing::warn!("Failed to optimize with ties and offset");

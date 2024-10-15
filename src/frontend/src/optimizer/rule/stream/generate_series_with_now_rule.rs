@@ -25,12 +25,11 @@ pub struct GenerateSeriesWithNowRule {}
 impl Rule for GenerateSeriesWithNowRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
         let ctx = plan.ctx();
-        let table_func = plan.as_logical_table_function();
-        if table_func.is_none() {
-            return Ok(None);
+        let table_func = match plan.as_logical_table_function() {
+            Some(table_func) => table_func,
+            None => return Ok(None),
         }
-        let table_func = table_func.unwrap();
-        let table_func = table_func.table_function();
+        .table_function();
 
         if !table_func.args.iter().any(|arg| arg.has_now()) {
             return Ok(None);

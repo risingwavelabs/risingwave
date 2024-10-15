@@ -22,19 +22,17 @@ use crate::utils::IndexSet;
 pub struct AggProjectMergeRule {}
 impl Rule for AggProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let plan = plan.as_logical_agg();
-        if plan.is_none() {
-            return Ok(None);
-        }
-        let agg = plan.unwrap();
+        let agg = match plan.as_logical_agg() {
+            Some(agg) => agg,
+            None => return Ok(None),
+        };
         let agg = agg.core().clone();
         assert!(agg.grouping_sets.is_empty());
         let old_input = agg.input.clone();
-        let proj = old_input.as_logical_project();
-        if proj.is_none() {
-            return Ok(None);
-        }
-        let proj = proj.unwrap();
+        let proj = match old_input.as_logical_project() {
+            Some(proj) => proj,
+            None => return Ok(None),
+        };
         // only apply when the input proj is all input-ref
         if !proj.is_all_inputref() {
             return Ok(None);

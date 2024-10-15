@@ -45,11 +45,10 @@ use crate::optimizer::PlanRef;
 pub struct TableFunctionToProjectSetRule {}
 impl Rule for TableFunctionToProjectSetRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let logical_table_function = plan.as_logical_table_function();
-        if logical_table_function.is_none() {
-            return Ok(None);
-        }
-        let logical_table_function = logical_table_function.unwrap();
+        let logical_table_function = match plan.as_logical_table_function() {
+            Some(logical_table_function) => logical_table_function,
+            None => return Ok(None),
+        };
 
         let table_function =
             ExprImpl::TableFunction(logical_table_function.table_function().clone().into());

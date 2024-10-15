@@ -24,11 +24,10 @@ impl ProjectJoinSeparateRule {
 
 impl Rule for ProjectJoinSeparateRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let join = plan.as_logical_join();
-        if join.is_none() {
-            return Ok(None);
-        }
-        let join = join.unwrap();
+        let join = match plan.as_logical_join() {
+            Some(join) => join,
+            None => return Ok(None),
+        };
 
         if join.is_full_out() {
             Ok(None)

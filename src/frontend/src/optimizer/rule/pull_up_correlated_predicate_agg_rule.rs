@@ -69,11 +69,10 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
             LogicalFilter::new(plan.clone(), Condition::true_cond())
         };
         let top_filter_input = top_filter.input();
-        let apply = top_filter_input.as_logical_apply();
-        if apply.is_none() {
-            return Ok(None);
-        }
-        let apply = apply.unwrap();
+        let apply = match top_filter_input.as_logical_apply() {
+            Some(apply) => apply,
+            None => return Ok(None),
+        };
 
         let (apply_left, apply_right, apply_on, join_type, correlated_id, _, max_one_row) =
             apply.clone().decompose();
@@ -93,11 +92,10 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         let (top_proj_exprs, _) = top_project.clone().decompose();
 
         let input = top_project.input();
-        let agg = input.as_logical_agg();
-        if agg.is_none() {
-            return Ok(None);
-        }
-        let agg = agg.unwrap();
+        let agg = match input.as_logical_agg() {
+            Some(agg) => agg,
+            None => return Ok(None),
+        };
 
         let (agg_calls, group_key, grouping_sets, input, _enable_two_phase) =
             agg.clone().decompose();
@@ -116,11 +114,10 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         };
         let (mut bottom_proj_exprs, _) = bottom_project.clone().decompose();
         let bottom_project_input = bottom_project.input();
-        let bottom_filter = bottom_project_input.as_logical_filter();
-        if bottom_filter.is_none() {
-            return Ok(None);
-        }
-        let bottom_filter = bottom_filter.unwrap();
+        let bottom_filter = match bottom_project_input.as_logical_filter() {
+            Some(bottom_filter) => bottom_filter,
+            None => return Ok(None),
+        };
 
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.

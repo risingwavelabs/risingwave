@@ -28,18 +28,16 @@ pub struct BatchPushLimitToScanRule {}
 
 impl Rule for BatchPushLimitToScanRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let limit = plan.as_batch_limit();
-        if limit.is_none() {
-            return Ok(None);
-        }
-        let limit = limit.unwrap();
+        let limit = match plan.as_batch_limit() {
+            Some(limit) => limit,
+            None => return Ok(None),
+        };
 
         let limit_input = limit.input();
-        let scan = limit_input.as_batch_seq_scan();
-        if scan.is_none() {
-            return Ok(None);
-        }
-        let scan = scan.unwrap();
+        let scan = match limit_input.as_batch_seq_scan() {
+            Some(scan) => scan,
+            None => return Ok(None),
+        };
 
         if scan.limit().is_some() {
             return Ok(None);

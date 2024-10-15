@@ -19,11 +19,10 @@ use crate::optimizer::PlanRef;
 pub struct IntersectMergeRule {}
 impl Rule for IntersectMergeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let top_intersect = plan.as_logical_intersect();
-        if top_intersect.is_none() {
-            return Ok(None);
-        }
-        let top_intersect = top_intersect.unwrap();
+        let top_intersect = match plan.as_logical_intersect() {
+            Some(top_intersect) => top_intersect,
+            None => return Ok(None),
+        };
 
         let top_all = top_intersect.all();
         let mut new_inputs = vec![];

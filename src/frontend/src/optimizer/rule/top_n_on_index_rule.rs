@@ -30,18 +30,17 @@ pub struct TopNOnIndexRule {}
 
 impl Rule for TopNOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let logical_top_n = plan.as_logical_top_n();
-        if logical_top_n.is_none() {
-            return Ok(None);
-        }
-        let logical_top_n = logical_top_n.unwrap();
+        let logical_top_n = match plan.as_logical_top_n() {
+            Some(logical_top_n) => logical_top_n,
+            None => return Ok(None),
+        };
 
         let logical_top_n_input = logical_top_n.input();
-        let logical_scan = logical_top_n_input.as_logical_scan();
-        if logical_scan.is_none() {
-            return Ok(None);
-        }
-        let logical_scan = logical_scan.unwrap().to_owned();
+        let logical_scan = match logical_top_n_input.as_logical_scan() {
+            Some(logical_scan) => logical_scan.to_owned(),
+            None => return Ok(None),
+        };
+
         if !logical_scan.predicate().always_true() {
             return Ok(None);
         }

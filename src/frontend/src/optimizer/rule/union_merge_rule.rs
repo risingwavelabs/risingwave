@@ -19,11 +19,10 @@ use crate::optimizer::PlanRef;
 pub struct UnionMergeRule {}
 impl Rule for UnionMergeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let top_union = plan.as_logical_union();
-        if top_union.is_none() {
-            return Ok(None);
-        }
-        let top_union = top_union.unwrap();
+        let top_union = match plan.as_logical_union() {
+            Some(top_union) => top_union,
+            None => return Ok(None),
+        };
 
         let top_all = top_union.all();
         let mut new_inputs = vec![];

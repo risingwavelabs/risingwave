@@ -46,20 +46,19 @@ use crate::utils::Condition;
 pub struct ApplyLimitTransposeRule {}
 impl Rule for ApplyLimitTransposeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = plan.as_logical_apply();
-        if apply.is_none() {
-            return Ok(None);
-        }
-        let apply = apply.unwrap();
+        let apply = match plan.as_logical_apply() {
+            Some(apply) => apply,
+            None => return Ok(None),
+        };
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-        let logical_limit = right.as_logical_limit();
-        if logical_limit.is_none() {
-            return Ok(None);
-        }
-        let logical_limit = logical_limit.unwrap();
+
+        let logical_limit = match right.as_logical_limit() {
+            Some(logical_limit) => logical_limit,
+            None => return Ok(None),
+        };
 
         let limit_input = logical_limit.input();
         let limit = logical_limit.limit();

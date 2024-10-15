@@ -47,20 +47,19 @@ use crate::utils::{Condition, IndexSet};
 pub struct ApplyAggTransposeRule {}
 impl Rule for ApplyAggTransposeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = plan.as_logical_apply();
-        if apply.is_none() {
-            return Ok(None);
-        }
-        let apply = apply.unwrap();
+        let apply = match plan.as_logical_apply() {
+            Some(apply) => apply,
+            None => return Ok(None),
+        };
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-        let agg = right.as_logical_agg();
-        if agg.is_none() {
-            return Ok(None);
-        }
-        let agg = agg.unwrap();
+
+        let agg = match right.as_logical_agg() {
+            Some(agg) => agg,
+            None => return Ok(None),
+        };
 
         let (mut agg_calls, agg_group_key, grouping_sets, agg_input, enable_two_phase) =
             agg.clone().decompose();

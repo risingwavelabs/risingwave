@@ -25,11 +25,10 @@ pub struct LimitPushDownRule {}
 
 impl Rule for LimitPushDownRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let limit = plan.as_logical_limit();
-        if limit.is_none() {
-            return Ok(None);
-        }
-        let limit = limit.unwrap();
+        let limit = match plan.as_logical_limit() {
+            Some(limit) => limit,
+            None => return Ok(None),
+        };
 
         let input = limit.input();
         let project = input.as_logical_project().to_owned();

@@ -44,11 +44,10 @@ use crate::optimizer::{PlanRef, Result};
 pub struct SplitNowOrRule {}
 impl Rule for SplitNowOrRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let filter = plan.as_logical_filter();
-        if filter.is_none() {
-            return Ok(None);
-        }
-        let filter = filter.unwrap();
+        let filter = match plan.as_logical_filter() {
+            Some(filter) => filter,
+            None => return Ok(None),
+        };
 
         let input = filter.input();
 
@@ -56,11 +55,10 @@ impl Rule for SplitNowOrRule {
             return Ok(None);
         }
 
-        let disjunctions = filter.predicate().conjunctions[0].as_or_disjunctions();
-        if disjunctions.is_none() {
-            return Ok(None);
-        }
-        let disjunctions = disjunctions.unwrap();
+        let disjunctions = match filter.predicate().conjunctions[0].as_or_disjunctions() {
+            Some(disjunctions) => disjunctions,
+            None => return Ok(None),
+        };
 
         if disjunctions.len() < 2 {
             return Ok(None);

@@ -45,11 +45,10 @@ use crate::utils::Condition;
 pub struct ApplyFilterTransposeRule {}
 impl Rule for ApplyFilterTransposeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = plan.as_logical_apply();
-        if apply.is_none() {
-            return Ok(None);
-        }
-        let apply = apply.unwrap();
+        let apply = match plan.as_logical_apply() {
+            Some(apply) => apply,
+            None => return Ok(None),
+        };
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
@@ -59,11 +58,10 @@ impl Rule for ApplyFilterTransposeRule {
         }
 
         assert_eq!(join_type, JoinType::Inner);
-        let filter = right.as_logical_filter();
-        if filter.is_none() {
-            return Ok(None);
-        }
-        let filter = filter.unwrap();
+        let filter = match right.as_logical_filter() {
+            Some(filter) => filter,
+            None => return Ok(None),
+        };
 
         let input = filter.input();
 

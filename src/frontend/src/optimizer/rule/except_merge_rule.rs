@@ -21,11 +21,10 @@ use crate::optimizer::PlanRef;
 pub struct ExceptMergeRule {}
 impl Rule for ExceptMergeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let top_except = plan.as_logical_except();
-        if top_except.is_none() {
-            return Ok(None);
-        }
-        let top_except = top_except.unwrap();
+        let top_except = match plan.as_logical_except() {
+            Some(top_except) => top_except,
+            None => return Ok(None),
+        };
 
         let top_all = top_except.all();
         let top_except_inputs = top_except.inputs();

@@ -20,11 +20,10 @@ use crate::optimizer::{PlanRef, PlanTreeNode};
 pub struct UnionInputValuesMergeRule {}
 impl Rule for UnionInputValuesMergeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let union = plan.as_logical_union();
-        if union.is_none() {
-            return Ok(None);
-        }
-        let union = union.unwrap();
+        let union = match plan.as_logical_union() {
+            Some(union) => union,
+            None => return Ok(None),
+        };
 
         // !union.all() is already handled by [`UnionToDistinctRule`]
         if !union.all() {
@@ -33,11 +32,10 @@ impl Rule for UnionInputValuesMergeRule {
 
         let mut rows = vec![];
         for v in union.inputs() {
-            let v = v.as_logical_values();
-            if v.is_none() {
-                return Ok(None);
-            }
-            let v = v.unwrap();
+            let v = match v.as_logical_values() {
+                Some(v) => v,
+                None => return Ok(None),
+            };
             rows.extend_from_slice(v.rows());
         }
         Ok(Some(

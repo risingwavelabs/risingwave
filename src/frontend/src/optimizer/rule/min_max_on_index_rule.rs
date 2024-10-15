@@ -39,11 +39,10 @@ pub struct MinMaxOnIndexRule {}
 
 impl Rule for MinMaxOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let logical_agg = plan.as_logical_agg();
-        if logical_agg.is_none() {
-            return Ok(None);
-        }
-        let logical_agg = logical_agg.unwrap();
+        let logical_agg = match plan.as_logical_agg() {
+            Some(logical_agg) => logical_agg,
+            None => return Ok(None),
+        };
 
         if !logical_agg.group_key().is_empty() {
             return Ok(None);
@@ -52,11 +51,11 @@ impl Rule for MinMaxOnIndexRule {
         if calls.is_empty() {
             return Ok(None);
         }
-        let first_call = calls.iter().exactly_one();
-        if first_call.is_err() {
-            return Ok(None);
-        }
-        let first_call = first_call.unwrap();
+
+        let first_call = match calls.iter().exactly_one() {
+            Ok(first_call) => first_call,
+            Err(_) => return Ok(None),
+        };
 
         if matches!(
             first_call.agg_type,
@@ -66,27 +65,25 @@ impl Rule for MinMaxOnIndexRule {
             && first_call.order_by.is_empty()
         {
             let input = logical_agg.input();
-            let logical_scan = input.as_logical_scan();
-            if logical_scan.is_none() {
-                return Ok(None);
-            }
-            let logical_scan = logical_scan.unwrap().to_owned();
+            let logical_scan = match input.as_logical_scan() {
+                Some(logical_scan) => logical_scan.to_owned(),
+                None => return Ok(None),
+            };
 
-            let first = calls.first();
-            if first.is_none() {
-                return Ok(None);
-            }
-            let first = first.unwrap();
+            let first = match calls.first() {
+                Some(first) => first.to_owned(),
+                None => return Ok(None),
+            };
 
             let kind = &first.agg_type;
             if !logical_scan.predicate().always_true() {
                 return Ok(None);
             }
-            let inputs_first = first.inputs.first();
-            if inputs_first.is_none() {
-                return Ok(None);
-            }
-            let inputs_first = inputs_first.unwrap();
+
+            let inputs_first = match first.inputs.first() {
+                Some(inputs_first) => inputs_first.to_owned(),
+                None => return Ok(None),
+            };
             let order = Order {
                 column_orders: vec![ColumnOrder::new(
                     inputs_first.index(),

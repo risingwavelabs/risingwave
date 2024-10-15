@@ -21,11 +21,10 @@ use crate::optimizer::PlanRef;
 pub struct UnionToDistinctRule {}
 impl Rule for UnionToDistinctRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let union = plan.as_logical_union();
-        if union.is_none() {
-            return Ok(None);
-        }
-        let union = union.unwrap();
+        let union = match plan.as_logical_union() {
+            Some(union) => union,
+            None => return Ok(None),
+        };
 
         if !union.all() {
             let union_all = LogicalUnion::create(true, union.inputs().into_iter().collect());

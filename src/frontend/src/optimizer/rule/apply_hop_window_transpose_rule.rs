@@ -43,20 +43,17 @@ use crate::utils::Condition;
 pub struct ApplyHopWindowTransposeRule {}
 impl Rule for ApplyHopWindowTransposeRule {
     fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = plan.as_logical_apply();
-        if apply.is_none() {
-            return Ok(None);
-        }
-        let apply = apply.unwrap();
+        let apply = match plan.as_logical_apply() {
+            Some(apply) => apply,
+            None => return Ok(None),
+        };
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
-        let hop_window = right.as_logical_hop_window();
-        if hop_window.is_none() {
-            return Ok(None);
-        }
-        let hop_window = hop_window.unwrap();
-
+        let hop_window = match right.as_logical_hop_window() {
+            Some(hop_window) => hop_window,
+            None => return Ok(None),
+        };
         assert_eq!(join_type, JoinType::Inner);
 
         if !hop_window.output_indices_are_trivial() {
