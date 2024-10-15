@@ -1,6 +1,6 @@
 # regression test data
 src/tests/regress/data/** linguist-vendored
 # source test data
-scripts/source/test_data/** linguist-vendored
+e2e_test/source_legacy/basic/scripts/test_data/** linguist-vendored
 # generated grafana dashboard
 grafana/risingwave-dashboard.json linguist-generated

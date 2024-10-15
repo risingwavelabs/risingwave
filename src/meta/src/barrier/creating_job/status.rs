@@ -20,6 +20,7 @@ use std::sync::Arc;
 use risingwave_common::hash::ActorId;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::StreamActor;
@@ -32,7 +33,6 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{BarrierKind, TracedEpoch};
-use crate::manager::WorkerId;
 
 #[derive(Debug)]
 pub(super) struct CreateMviewLogStoreProgressTracker {
