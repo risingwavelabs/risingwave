@@ -4749,22 +4749,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "etcd-client"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39bde3ce50a626efeb1caa9ab1083972d178bebb55ca627639c8ded507dfcbde"
-dependencies = [
- "http 1.1.0",
- "prost 0.13.1",
- "tokio",
- "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
- "tonic",
- "tonic-build",
- "tower",
- "tower-service",
-]
-
-[[package]]
 name = "etcetera"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7276,26 +7260,6 @@ dependencies = [
  "http 1.1.0",
  "madsim",
  "spin 0.9.8",
- "tracing",
-]
-
-[[package]]
-name = "madsim-etcd-client"
-version = "0.6.0+0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8edcf23498cb590e415ce2ba6c7f186c7aa3340e7aa716ddddb34faf0a9ffdfb"
-dependencies = [
- "etcd-client",
- "futures-util",
- "http 1.1.0",
- "madsim",
- "serde",
- "serde_with 3.8.0",
- "spin 0.9.8",
- "thiserror",
- "tokio",
- "toml 0.8.12",
- "tonic",
  "tracing",
 ]
 
@@ -11573,7 +11537,6 @@ dependencies = [
  "http 1.1.0",
  "itertools 0.13.0",
  "jsonbb",
- "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -11681,7 +11644,6 @@ dependencies = [
  "futures",
  "hex",
  "itertools 0.13.0",
- "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "otlp-embedded",
