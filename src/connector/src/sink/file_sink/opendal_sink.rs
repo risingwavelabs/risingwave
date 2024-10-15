@@ -197,6 +197,7 @@ pub struct OpenDalSinkWriter {
     pub(crate) batching_strategy: BatchingStrategy,
     current_bached_row_num: usize,
     created_time: SystemTime,
+    // The `chunk_id` that has been written, which is used when truncating the log store.
     written_chunk_id: Option<usize>,
 }
 
@@ -216,48 +217,20 @@ enum FileWriterEnum {
     FileWriter(OpendalWriter),
 }
 
-/// Method for writing files into file system.
-///
-/// # Write Chunk Methods
-/// - `write_batch_and_try_finish`: Writes a stream chunk to the sink and tries to close the writer according to the batching strategy.
-///
-/// # Close Writer Methods
-/// - `try_finish`: Attempts to complete the file write using the writer's internal batching strategy.
-/// - `should_finish`: Force close writer regardless of whether it trigger batching strategy.
-///
-/// # Batching Condition Methods
-/// - `try_finish_write_via_batched_rows`: Checks if writing can be completed based on the number of batched rows.
-/// - `try_finish_write_via_rollover_interval`: Checks if writing can be completed based on the rollover time interval.
+/// Public interface exposed to `BatchingLogSinker`, used to write chunk and commit files.
 impl OpenDalSinkWriter {
-    /// This method writes a chunk and attempts to complete the file write
-    /// based on the writer's internal batching strategy. If the write is
-    /// successful, it returns the last `chunk_id` that was written;
-    /// otherwise, it returns None.
-    pub async fn write_batch_and_try_finish(
-        &mut self,
-        chunk: StreamChunk,
-        chunk_id: usize,
-    ) -> Result<Option<usize>> {
+    /// This method writes a chunk and update the `written_chunk_id`.
+    pub async fn write_batch(&mut self, chunk: StreamChunk, chunk_id: usize) -> Result<()> {
         if self.sink_writer.is_none() {
             self.create_sink_writer().await?;
         };
-
-        // While writing this chunk (via `append_only`), it checks if the maximum row count
-        // has been reached to determine if the file should be finalized.
-        // Then, it checks the rollover interval to see if the time-based batching threshold
-        // has been met. If either condition results in a successful write, the write is marked as complete.
-        let finish_write =
-            self.append_only(chunk).await? || self.try_finish_write_via_rollover_interval().await?;
+        self.append_only(chunk).await?;
         self.written_chunk_id = Some(chunk_id);
-        if finish_write {
-            Ok(Some(chunk_id))
-        } else {
-            Ok(None)
-        }
+        Ok(())
     }
 
-    /// Close current writer, finish writing a file.
-    pub async fn commit(&mut self) -> Result<bool> {
+    /// This method close current writer, finish writing a file and returns the last `written_chunk_id` that has been written downstream.
+    pub async fn commit(&mut self) -> Result<Option<usize>> {
         if let Some(sink_writer) = self.sink_writer.take() {
             match sink_writer {
                 FileWriterEnum::ParquetFileWriter(w) => {
@@ -272,84 +245,99 @@ impl OpenDalSinkWriter {
                                 .as_secs(),
                             metadata
                         );
-                        return Ok(true);
                     }
                 }
                 FileWriterEnum::FileWriter(mut w) => {
                     w.close().await?;
                 }
             };
-        }
-        Ok(false)
-    }
-
-    /// Attempts to complete the file write using the writer's internal batching strategy.
-    ///
-    /// If the write is completed, returns the last `chunk_id` that was written;
-    /// otherwise, returns None.
-    ///
-    /// For the file sink, currently, the sink decoupling feature is not enabled.
-    /// When a checkpoint arrives, the force commit is performed to write the data to the file.
-    /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
-    pub async fn try_finish(&mut self) -> Result<Option<usize>> {
-        match self.try_finish_write_via_rollover_interval().await? {
-            true => Ok(self.written_chunk_id),
-            false => Ok(None),
-        }
-    }
-
-    /// This asynchronous function checks if the duration since the writer was
-    /// created exceeds the configured rollover interval (`rollover_seconds`).
-    /// If the duration condition is met and a sink writer is available, it
-    /// closes the current writer (e.g., a Parquet file writer) if any bytes
-    /// have been written. The function logs the completion message and
-    /// increments the writer index for subsequent writes.
-    ///
-    ///
-    /// Returns:
-    /// - `Ok(true)` if the write was finalized successfully due to the
-    ///   rollover interval being exceeded.
-    /// - `Ok(false)` if the rollover interval has not been met, indicating that
-    ///   no action was taken.
-    async fn try_finish_write_via_rollover_interval(&mut self) -> Result<bool> {
-        if self.duration_seconds_since_writer_created()
-            >= self.batching_strategy.clone().rollover_seconds
-            && self.commit().await?
-        {
-            return Ok(true);
-        }
-
-        Ok(false)
-    }
-
-    /// This asynchronous function checks if the number of rows accumulated
-    /// (`current_bached_row_num`) meets or exceeds the maximum row count
-    /// defined in the `batching_strategy`. If the threshold is met, it
-    /// closes the current writer (e.g., a Parquet file writer), logs the
-    /// completion message, and resets the row count. It also increments
-    /// the writer index for subsequent writes.
-    ///
-    /// Returns:
-    /// - `Ok(true)` if the write was finalized successfully.
-    /// - `Ok(false)` if the threshold has not been met, indicating that
-    ///   no action was taken.
-    async fn try_finish_write_via_batched_rows(&mut self) -> Result<bool> {
-        if self.current_bached_row_num >= self.batching_strategy.clone().max_row_count
-            && self.commit().await?
-        {
-            self.current_bached_row_num = 0;
-            return Ok(true);
-        }
-
-        Ok(false)
-    }
-
-    pub async fn should_finish(&mut self) -> Result<Option<usize>> {
-        if self.commit().await? {
             return Ok(self.written_chunk_id);
         }
-
         Ok(None)
+    }
+
+    // Try commit if the batching condition is met.
+    pub async fn try_commit(&mut self) -> Result<Option<usize>> {
+        if self.can_commit() {
+            return self.commit().await;
+        }
+        Ok(None)
+    }
+}
+
+/// Private methods related to batching.
+impl OpenDalSinkWriter {
+    /// Method for judging whether batch condiction is met.
+    fn can_commit(&self) -> bool {
+        self.duration_seconds_since_writer_created() >= self.batching_strategy.rollover_seconds
+            || self.current_bached_row_num >= self.batching_strategy.max_row_count
+    }
+
+    fn path_partition_prefix(&self) -> String {
+        match self.created_time.duration_since(UNIX_EPOCH) {
+            Ok(duration) => {
+                let datetime = Utc
+                    .timestamp_opt(duration.as_secs() as i64, 0)
+                    .single()
+                    .expect("Failed to convert timestamp to DateTime<Utc>")
+                    .with_timezone(&Utc);
+                let path_partition_prefix = self
+                    .batching_strategy
+                    .path_partition_prefix
+                    .as_ref()
+                    .unwrap_or(&PathPartitionPrefix::None);
+                match path_partition_prefix {
+                    PathPartitionPrefix::None => "".to_string(),
+                    PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
+                    PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
+                    PathPartitionPrefix::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
+                }
+            }
+            Err(_) => "Invalid time".to_string(),
+        }
+    }
+
+    fn duration_seconds_since_writer_created(&self) -> usize {
+        let now = SystemTime::now();
+        now.duration_since(self.created_time)
+            .expect("Time went backwards")
+            .as_secs() as usize
+    }
+
+    // Method for writing chunk and update related batching condition.
+    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+        match self
+            .sink_writer
+            .as_mut()
+            .ok_or_else(|| SinkError::File("Sink writer is not created.".to_string()))?
+        {
+            FileWriterEnum::ParquetFileWriter(w) => {
+                let batch =
+                    IcebergArrowConvert.to_record_batch(self.schema.clone(), chunk.data_chunk())?;
+                let batch_row_nums = batch.num_rows();
+                w.write(&batch).await?;
+                self.current_bached_row_num += batch_row_nums;
+            }
+            FileWriterEnum::FileWriter(w) => {
+                let mut chunk_buf = BytesMut::new();
+                let batch_row_nums = chunk.data_chunk().capacity();
+                // write the json representations of the row(s) in current chunk to `chunk_buf`
+                for (op, row) in chunk.rows() {
+                    assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
+                    // to prevent temporary string allocation,
+                    // so we directly write to `chunk_buf` implicitly via `write_fmt`.
+                    writeln!(
+                        chunk_buf,
+                        "{}",
+                        Value::Object(self.row_encoder.encode(row)?)
+                    )
+                    .unwrap(); // write to a `BytesMut` should never fail
+                }
+                w.write(chunk_buf.freeze()).await?;
+                self.current_bached_row_num += batch_row_nums;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -389,37 +377,6 @@ impl OpenDalSinkWriter {
             created_time: SystemTime::now(),
             written_chunk_id: None,
         })
-    }
-
-    pub fn path_partition_prefix(&self) -> String {
-        match self.created_time.duration_since(UNIX_EPOCH) {
-            Ok(duration) => {
-                let datetime = Utc
-                    .timestamp_opt(duration.as_secs() as i64, 0)
-                    .single()
-                    .expect("Failed to convert timestamp to DateTime<Utc>")
-                    .with_timezone(&Utc);
-                let path_partition_prefix = self
-                    .batching_strategy
-                    .path_partition_prefix
-                    .as_ref()
-                    .unwrap_or(&PathPartitionPrefix::None);
-                match path_partition_prefix {
-                    PathPartitionPrefix::None => "".to_string(),
-                    PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
-                    PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
-                    PathPartitionPrefix::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
-                }
-            }
-            Err(_) => "Invalid time".to_string(),
-        }
-    }
-
-    fn duration_seconds_since_writer_created(&self) -> usize {
-        let now = SystemTime::now();
-        now.duration_since(self.created_time)
-            .expect("Time went backwards")
-            .as_secs() as usize
     }
 
     async fn create_object_writer(&mut self) -> Result<OpendalWriter> {
@@ -495,44 +452,6 @@ impl OpenDalSinkWriter {
         }
 
         Ok(())
-    }
-
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<bool> {
-        match self
-            .sink_writer
-            .as_mut()
-            .ok_or_else(|| SinkError::File("Sink writer is not created.".to_string()))?
-        {
-            FileWriterEnum::ParquetFileWriter(w) => {
-                let batch =
-                    IcebergArrowConvert.to_record_batch(self.schema.clone(), chunk.data_chunk())?;
-                let batch_row_nums = batch.num_rows();
-                w.write(&batch).await?;
-                self.current_bached_row_num += batch_row_nums;
-                let res = self.try_finish_write_via_batched_rows().await?;
-                Ok(res)
-            }
-            FileWriterEnum::FileWriter(w) => {
-                let mut chunk_buf = BytesMut::new();
-                let batch_row_nums = chunk.data_chunk().capacity();
-                // write the json representations of the row(s) in current chunk to `chunk_buf`
-                for (op, row) in chunk.rows() {
-                    assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
-                    // to prevent temporary string allocation,
-                    // so we directly write to `chunk_buf` implicitly via `write_fmt`.
-                    writeln!(
-                        chunk_buf,
-                        "{}",
-                        Value::Object(self.row_encoder.encode(row)?)
-                    )
-                    .unwrap(); // write to a `BytesMut` should never fail
-                }
-                w.write(chunk_buf.freeze()).await?;
-                self.current_bached_row_num += batch_row_nums;
-                let res = self.try_finish_write_via_batched_rows().await?;
-                Ok(res)
-            }
-        }
     }
 }
 

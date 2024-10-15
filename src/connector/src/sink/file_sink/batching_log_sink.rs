@@ -55,7 +55,7 @@ impl LogSinker for BatchingLogSinker {
                 match &state {
                     LogConsumerState::BarrierReceived { prev_epoch } => {
                         // we need to force to finish the batch here. Otherwise, there can be data loss because actor can be dropped and rebuilt during scaling.
-                        if let Some(committed_chunk_id) = sink_writer.should_finish().await? {
+                        if let Some(committed_chunk_id) = sink_writer.commit().await? {
                             // If epoch increased, we first need to truncate the previous epoch.
                             if epoch > *prev_epoch {
                                 log_reader
@@ -101,19 +101,14 @@ impl LogSinker for BatchingLogSinker {
             };
             match item {
                 LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
-                    match sink_writer
-                        .write_batch_and_try_finish(chunk, chunk_id)
-                        .await
-                    {
+                    sink_writer.write_batch(chunk, chunk_id).await?;
+                    match sink_writer.try_commit().await {
                         Err(e) => {
                             return Err(e);
                         }
                         // The file has been successfully written and is now visible to downstream consumers.
                         // Truncate the file to remove the specified `chunk_id` and any preceding content.
                         Ok(Some(chunk_id)) => {
-                            // When the chunk we need to truncate encounters an epoch increase, we need to truncate the barrier first.
-                            log_reader.truncate(TruncateOffset::Barrier { epoch: (epoch) })?;
-
                             log_reader.truncate(TruncateOffset::Chunk {
                                 epoch: (epoch),
                                 chunk_id: (chunk_id),
@@ -132,7 +127,7 @@ impl LogSinker for BatchingLogSinker {
                     // The current sink specifies a batching strategy, which means that sink decoupling is enabled; therefore, there is no need to forcibly write to the file when the checkpoint barrier arrives.
                     // When the barrier arrives, call the writer's try_finish interface to check if the file write can be completed.
                     // If it is completed, which means the file is visible in the downstream file system, thentruncate the file in the log store; otherwise, do nothing.
-                    if let Some(committed_chunk_id) = sink_writer.try_finish().await? {
+                    if let Some(committed_chunk_id) = sink_writer.try_commit().await? {
                         // If epoch increased, we first need to truncate the previous epoch.
                         if epoch > prev_epoch {
                             log_reader.truncate(TruncateOffset::Barrier { epoch: prev_epoch })?;
