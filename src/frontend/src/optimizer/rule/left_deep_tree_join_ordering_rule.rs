@@ -27,11 +27,10 @@ impl Rule for LeftDeepTreeJoinOrderingRule {
         };
 
         // check if join is inner and can be merged into multijoin
-        let join_ordering = join.heuristic_ordering(); // maybe panic here instead?
-        if join_ordering.is_err() {
-            return Ok(None);
-        }
-        let join_ordering = join_ordering.unwrap();
+        let join_ordering = match join.heuristic_ordering() {
+            Ok(join_ordering) => join_ordering,
+            Err(_) => return Ok(None),
+        };
         let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
         Ok(Some(left_deep_join))
     }

@@ -24,11 +24,10 @@ pub struct PullUpHopRule {}
 
 impl Rule for PullUpHopRule {
     fn apply(&self, plan: crate::PlanRef) -> Result<Option<crate::PlanRef>> {
-        let join = plan.as_logical_join();
-        if join.is_none() {
-            return Ok(None);
-        }
-        let join = join.unwrap();
+        let join = match plan.as_logical_join() {
+            Some(join) => join,
+            None => return Ok(None),
+        };
 
         let (left, right, on, join_type, mut output_index) = join.clone().decompose();
 

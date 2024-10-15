@@ -87,9 +87,6 @@ impl Rule for OverWindowToAggAndJoinRule {
             None,
             common_input.clone(),
         );
-        if agg_result.is_err() {
-            return Ok(None);
-        }
         let agg = match agg_result {
             Ok((agg, ..)) => agg,
             Err(_) => return Ok(None),

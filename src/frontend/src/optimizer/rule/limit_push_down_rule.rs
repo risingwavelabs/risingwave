@@ -31,11 +31,10 @@ impl Rule for LimitPushDownRule {
         };
 
         let input = limit.input();
-        let project = input.as_logical_project().to_owned();
-        if project.is_none() {
-            return Ok(None);
-        }
-        let project = project.unwrap();
+        let project = match input.as_logical_project() {
+            Some(project) => project,
+            None => return Ok(None),
+        };
 
         let input = project.input();
         let logical_limit = limit.clone_with_input(input);
