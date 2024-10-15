@@ -2433,10 +2433,10 @@ async fn test_unregister_moved_table() {
 
 #[tokio::test]
 async fn test_merge_compaction_group_task_expired() {
-    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     let original_groups = hummock_manager
         .get_current_version()
