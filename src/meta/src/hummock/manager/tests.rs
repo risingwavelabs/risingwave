@@ -2583,7 +2583,8 @@ async fn test_merge_compaction_group_task_expired() {
         )
         .await
         .unwrap();
-    assert!(ret);
+    // has been cancelled by merge
+    assert!(!ret);
 
     let current_version_3 = hummock_manager.get_current_version().await;
     let sst_ids = current_version_3
