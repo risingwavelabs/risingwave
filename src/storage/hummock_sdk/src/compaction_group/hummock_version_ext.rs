@@ -420,11 +420,12 @@ impl HummockVersion {
             let mut removed_ssts: BTreeMap<u32, BTreeSet<u64>> = BTreeMap::new();
 
             // Build only if all deltas are intra level deltas.
-            if !group_deltas
-                .group_deltas
-                .iter()
-                .all(|delta| matches!(delta, GroupDelta::IntraLevel(_)))
-            {
+            if !group_deltas.group_deltas.iter().all(|delta| {
+                matches!(
+                    delta,
+                    GroupDelta::IntraLevel(_) | GroupDelta::NewL0SubLevel(_)
+                )
+            }) {
                 continue;
             }
 
@@ -432,24 +433,36 @@ impl HummockVersion {
             // current `hummock::manager::gen_version_delta` implementation. Better refactor the
             // struct to reduce conventions.
             for group_delta in &group_deltas.group_deltas {
-                if let GroupDelta::IntraLevel(intra_level) = group_delta {
-                    if !intra_level.inserted_table_infos.is_empty() {
-                        info.insert_sst_level = intra_level.level_idx;
-                        info.insert_sst_infos
-                            .extend(intra_level.inserted_table_infos.iter().cloned());
+                match group_delta {
+                    GroupDeltaCommon::NewL0SubLevel(inserted_table_infos) => {
+                        if !inserted_table_infos.is_empty() {
+                            info.insert_sst_level = 0;
+                            info.insert_sst_infos
+                                .extend(inserted_table_infos.iter().cloned());
+                        }
                     }
-                    if !intra_level.removed_table_ids.is_empty() {
-                        for id in &intra_level.removed_table_ids {
-                            if intra_level.level_idx == 0 {
-                                removed_l0_ssts.insert(*id);
-                            } else {
-                                removed_ssts
-                                    .entry(intra_level.level_idx)
-                                    .or_default()
-                                    .insert(*id);
+                    GroupDeltaCommon::IntraLevel(intra_level) => {
+                        if !intra_level.inserted_table_infos.is_empty() {
+                            info.insert_sst_level = intra_level.level_idx;
+                            info.insert_sst_infos
+                                .extend(intra_level.inserted_table_infos.iter().cloned());
+                        }
+                        if !intra_level.removed_table_ids.is_empty() {
+                            for id in &intra_level.removed_table_ids {
+                                if intra_level.level_idx == 0 {
+                                    removed_l0_ssts.insert(*id);
+                                } else {
+                                    removed_ssts
+                                        .entry(intra_level.level_idx)
+                                        .or_default()
+                                        .insert(*id);
+                                }
                             }
                         }
                     }
+                    GroupDeltaCommon::GroupConstruct(_)
+                    | GroupDeltaCommon::GroupDestroy(_)
+                    | GroupDeltaCommon::GroupMerge(_) => {}
                 }
             }
 
