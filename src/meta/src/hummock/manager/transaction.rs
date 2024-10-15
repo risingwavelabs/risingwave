@@ -150,6 +150,9 @@ impl<'a> HummockVersionTransaction<'a> {
 
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
+            // No need to call may_bump_max_sub_level_id, because
+            // - There's at most one IntraLevel for each compaction group in one delta.
+            // - The pre_apply is called immediately, which calls may_bump_max_sub_level_id once.
             let l0_sub_level_id = new_version_delta
                 .latest_version()
                 .max_sub_level_id

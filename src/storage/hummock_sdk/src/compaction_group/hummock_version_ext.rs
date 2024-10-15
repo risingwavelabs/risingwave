@@ -761,15 +761,7 @@ impl HummockVersion {
             &changed_table_info,
         );
 
-        // The max_sub_level_id may have been increased, e.g. during commit_epoch or merge_group.
-        // Recalculate it.
-        self.max_sub_level_id = self
-            .levels
-            .values()
-            .map(|levels| levels.l0.sub_levels.iter().map(|s| s.sub_level_id).max())
-            .chain(iter::once(self.max_sub_level_id))
-            .flatten()
-            .max();
+        self.may_bump_max_sub_level_id();
     }
 
     pub fn apply_change_log_delta<T: Clone>(
@@ -890,6 +882,19 @@ impl HummockVersion {
         });
 
         group_split::merge_levels(left_levels, right_levels, self.max_sub_level_id);
+        // Need to call may_bump_max_sub_level_id, because multiple merge may be called in one delta.
+        self.may_bump_max_sub_level_id();
+    }
+
+    fn may_bump_max_sub_level_id(&mut self) {
+        // The max_sub_level_id may have been increased, recalculate it.
+        self.max_sub_level_id = self
+            .levels
+            .values()
+            .map(|levels| levels.l0.sub_levels.iter().map(|s| s.sub_level_id).max())
+            .chain(iter::once(self.max_sub_level_id))
+            .flatten()
+            .max();
     }
 }
 
