@@ -14,7 +14,10 @@
 - input: CREATE OR REPLACE TABLE t (a INT)
   formatted_sql: CREATE OR REPLACE TABLE t (a INT)
 - input: CREATE OR REPLACE TABLE t (a CHAR AS)
-  formatted_sql: CREATE OR REPLACE TABLE t (a CHAR)
+  error_msg: |-
+    sql parser error: expected an expression, found: )
+    LINE 1: CREATE OR REPLACE TABLE t (a CHAR AS)
+                                                ^
 - input: CREATE TABLE t (a INT, b INT) AS SELECT 1 AS b, 2 AS a
   formatted_sql: CREATE TABLE t (a INT, b INT) AS SELECT 1 AS b, 2 AS a
 - input: CREATE SOURCE src
