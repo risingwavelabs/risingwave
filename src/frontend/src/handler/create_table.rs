@@ -913,7 +913,9 @@ fn derive_with_options_for_cdc_table(
                 // we remove the database name prefix and split the schema name and table name
                 let schema_table_name = external_table_name
                     .split_once('.')
-                    .ok_or_else(|| anyhow!("The upstream table name must contain database name prefix, e.g. 'database.schema.table'"))?
+                    .ok_or_else(|| {
+                        anyhow!("The upstream table name must be in 'database.schema.table' format")
+                    })?
                     .1;
 
                 let (schema_name, table_name) =

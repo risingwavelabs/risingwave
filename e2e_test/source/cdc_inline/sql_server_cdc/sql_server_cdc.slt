@@ -159,7 +159,7 @@ CREATE SOURCE upper_mssql_source WITH (
 statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
 create materialized view mv as select * from mssql_source;
 
-statement error The upstream table name must contain schema name prefix*
+statement error The upstream table name must be in 'database.schema.table' format
 CREATE TABLE shared_orders (
     order_id INT,
     order_date BIGINT,
