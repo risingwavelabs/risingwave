@@ -224,7 +224,7 @@ pub struct HummockVersionCommon<T> {
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<T>>,
     pub state_table_info: HummockVersionStateTableInfo,
-    /// The maximum sub_level_id that has been recorded thus far, regardless of whether the sub_level_id currently exists.
+    /// The maximum `sub_level_id` that has been recorded thus far, regardless of whether the `sub_level_id` currently exists.
     pub max_sub_level_id: Option<u64>,
 }
 
