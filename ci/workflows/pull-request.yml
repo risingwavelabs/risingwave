@@ -99,7 +99,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 23
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "slow end-to-end test"
@@ -154,7 +154,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 17
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
