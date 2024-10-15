@@ -2634,15 +2634,30 @@ impl Parser<'_> {
                 self.next_token();
                 column_inner_field = Some(inner_field);
 
-                match self.parse_data_type() {
-                    Ok(dt) => {
-                        header_inner_expect_type = Some(dt);
-                    }
-                    Err(winnow::error::ErrMode::Backtrack(_)) => {
-                        // no-op
-                    }
-                    Err(err) => return Err(err),
-                }
+                // `verify` rejects `DataType::Custom` so that a following `INCLUDE` (or even `WITH`)
+                // will not be misrecognized as a DataType.
+                //
+                // For example, the following look structurally the same because `INCLUDE` is not a
+                // reserved keyword. (`AS` is reserved.)
+                // * `INCLUDE header 'foo' varchar`
+                // * `INCLUDE header 'foo' INCLUDE`
+                //
+                // To be honest `bytea` shall be a `DataType::Custom` rather than a keyword, and the
+                // logic here shall be:
+                // ```
+                // match dt {
+                //     DataType::Custom(name) => allowed.contains(name.real_value()),
+                //     _ => true,
+                // }
+                // ```
+                // An allowlist is better than a denylist, as the following token may be other than
+                // `INCLUDE` or `WITH` in the future.
+                //
+                // If this sounds too complicated - it means we should have designed this extension
+                // syntax differently to make ambiguity handling easier.
+                header_inner_expect_type =
+                    opt(parser_v2::data_type.verify(|dt| !matches!(dt, DataType::Custom(_))))
+                        .parse_next(self)?;
             }
 
             let mut column_alias = None;
