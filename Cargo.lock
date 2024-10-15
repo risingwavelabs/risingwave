@@ -6329,7 +6329,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_repr",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "tokio",
  "typed-builder 0.20.0",
  "url",
@@ -6412,7 +6412,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "tokio",
  "toml 0.7.8",
  "url",
@@ -7309,7 +7309,7 @@ dependencies = [
  "http 1.1.0",
  "madsim",
  "serde",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "spin 0.9.8",
  "thiserror",
  "tokio",
@@ -8339,7 +8339,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_plain",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "sha2",
  "subtle",
  "thiserror",
@@ -8361,7 +8361,7 @@ dependencies = [
  "rustc_version 0.4.0",
  "serde",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "url",
  "void",
 ]
@@ -10399,7 +10399,7 @@ dependencies = [
  "reqwest 0.12.4",
  "serde",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "tempfile",
  "thiserror-ext",
@@ -10697,7 +10697,7 @@ dependencies = [
  "serde_bytes",
  "serde_default",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "smallbitset",
  "speedate",
  "stacker",
@@ -11047,7 +11047,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "simd-json",
  "sqlx",
@@ -11825,7 +11825,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_sqlparser",
  "serde",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "tempfile",
  "thiserror-ext",
@@ -11977,7 +11977,7 @@ dependencies = [
  "madsim-tokio",
  "matches",
  "serde",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "thiserror",
  "tracing",
@@ -12027,7 +12027,7 @@ dependencies = [
  "regex",
  "risingwave_rt",
  "serde",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "tokio-postgres",
  "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "toml 0.8.12",
@@ -13245,9 +13245,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.8.0"
+version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c85f8e96d1d6857f13768fcbd895fcb06225510022a2774ed8b5150581847b0"
+checksum = "0ad483d2ab0149d5a5ebcd9972a3852711e0153d863bf5a5d0391d28883c4a20"
 dependencies = [
  "base64 0.22.0",
  "chrono",
@@ -13257,7 +13257,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serde_with_macros 3.8.0",
+ "serde_with_macros 3.8.1",
  "time",
 ]
 
@@ -13275,9 +13275,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.8.0"
+version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8b3a576c4eb2924262d5951a3b737ccaf16c931e39a2810c36f9a7e25575557"
+checksum = "65569b702f41443e8bc8bbb1c5779bd0450bbe723b56198980e80ec45780bce2"
 dependencies = [
  "darling 0.20.9",
  "proc-macro2",
