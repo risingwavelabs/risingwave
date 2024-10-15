@@ -54,11 +54,10 @@ async fn test_vacuum() {
             .chain(iter::once(nonexistent_id))
             .collect_vec(),
     };
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (_env, hummock_manager_ref, _cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     Vacuum::handle_vacuum_task(sstable_store, &vacuum_task.sstable_object_ids)
         .await
@@ -68,12 +67,11 @@ async fn test_vacuum() {
 
 #[tokio::test]
 async fn test_full_scan() {
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (_env, hummock_manager_ref, _cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
     let sstable_store = mock_sstable_store().await;
     let _mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref,
-        worker_node.id,
+        worker_id as _,
     ));
     let now_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     let object_store_list_result = vec![

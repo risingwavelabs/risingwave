@@ -148,23 +148,24 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
 name = "anstream"
-version = "0.6.11"
+version = "0.6.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e2e1ebcb11de5c03c67de28a7df593d32191b44939c482e97702baaaa6ab6a5"
+checksum = "64e15c1ab1f89faffbf04a634d5e1962e9074f2741eef6d97f3c4e322426d526"
 dependencies = [
  "anstyle",
  "anstyle-parse",
  "anstyle-query",
  "anstyle-wincon",
  "colorchoice",
+ "is_terminal_polyfill",
  "utf8parse",
 ]
 
 [[package]]
 name = "anstyle"
-version = "1.0.2"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15c4c2c83f81532e5845a733998b6971faca23490340a418e9b72a3ec9de12ea"
+checksum = "1bec1de6f59aedf83baf9ff929c98f2ad654b97c9510f4e70cf6f661d49fd5b1"
 
 [[package]]
 name = "anstyle-parse"
@@ -4749,22 +4750,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "etcd-client"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39bde3ce50a626efeb1caa9ab1083972d178bebb55ca627639c8ded507dfcbde"
-dependencies = [
- "http 1.1.0",
- "prost 0.13.1",
- "tokio",
- "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
- "tonic",
- "tonic-build",
- "tower",
- "tower-service",
-]
-
-[[package]]
 name = "etcetera"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6328,7 +6313,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_repr",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "tokio",
  "typed-builder 0.20.0",
  "url",
@@ -6411,7 +6396,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "tokio",
  "toml 0.7.8",
  "url",
@@ -6658,6 +6643,12 @@ dependencies = [
  "rustix 0.38.37",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "is_terminal_polyfill"
+version = "1.70.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "itertools"
@@ -7038,14 +7029,26 @@ dependencies = [
 
 [[package]]
 name = "libtest-mimic"
-version = "0.7.0"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f0f4c6f44ecfd52e8b443f2ad18f2b996540135771561283c2352ce56a1c70b"
+checksum = "cc0bda45ed5b3a2904262c1bb91e526127aa70e7ef3758aba2ef93cf896b9b58"
 dependencies = [
  "clap",
  "escape8259",
  "termcolor",
  "threadpool",
+]
+
+[[package]]
+name = "libtest-mimic"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5297962ef19edda4ce33aaa484386e0a5b3d7f2f4e037cbeee00503ef6b29d33"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap",
+ "escape8259",
 ]
 
 [[package]]
@@ -7276,26 +7279,6 @@ dependencies = [
  "http 1.1.0",
  "madsim",
  "spin 0.9.8",
- "tracing",
-]
-
-[[package]]
-name = "madsim-etcd-client"
-version = "0.6.0+0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8edcf23498cb590e415ce2ba6c7f186c7aa3340e7aa716ddddb34faf0a9ffdfb"
-dependencies = [
- "etcd-client",
- "futures-util",
- "http 1.1.0",
- "madsim",
- "serde",
- "serde_with 3.8.0",
- "spin 0.9.8",
- "thiserror",
- "tokio",
- "toml 0.8.12",
- "tonic",
  "tracing",
 ]
 
@@ -8320,7 +8303,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_plain",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "sha2",
  "subtle",
  "thiserror",
@@ -8342,7 +8325,7 @@ dependencies = [
  "rustc_version 0.4.0",
  "serde",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "url",
  "void",
 ]
@@ -10380,7 +10363,7 @@ dependencies = [
  "reqwest 0.12.4",
  "serde",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "tempfile",
  "thiserror-ext",
@@ -10678,7 +10661,7 @@ dependencies = [
  "serde_bytes",
  "serde_default",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "smallbitset",
  "speedate",
  "stacker",
@@ -11028,7 +11011,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "simd-json",
  "sqlx",
@@ -11103,7 +11086,6 @@ dependencies = [
  "hex",
  "inquire",
  "itertools 0.13.0",
- "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -11574,7 +11556,6 @@ dependencies = [
  "http 1.1.0",
  "itertools 0.13.0",
  "jsonbb",
- "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -11682,7 +11663,6 @@ dependencies = [
  "futures",
  "hex",
  "itertools 0.13.0",
- "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "otlp-embedded",
@@ -11799,14 +11779,14 @@ dependencies = [
  "anyhow",
  "expect-test",
  "itertools 0.13.0",
- "libtest-mimic",
+ "libtest-mimic 0.8.1",
  "madsim-tokio",
  "paste",
  "risingwave_expr_impl",
  "risingwave_frontend",
  "risingwave_sqlparser",
  "serde",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "tempfile",
  "thiserror-ext",
@@ -11954,11 +11934,11 @@ dependencies = [
  "anyhow",
  "console",
  "itertools 0.13.0",
- "libtest-mimic",
+ "libtest-mimic 0.8.1",
  "madsim-tokio",
  "matches",
  "serde",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "thiserror",
  "tracing",
@@ -11977,7 +11957,7 @@ dependencies = [
  "clap",
  "expect-test",
  "itertools 0.13.0",
- "libtest-mimic",
+ "libtest-mimic 0.8.1",
  "madsim-tokio",
  "rand",
  "rand_chacha",
@@ -12008,7 +11988,7 @@ dependencies = [
  "regex",
  "risingwave_rt",
  "serde",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "tokio-postgres",
  "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "toml 0.8.12",
@@ -13226,9 +13206,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.8.0"
+version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c85f8e96d1d6857f13768fcbd895fcb06225510022a2774ed8b5150581847b0"
+checksum = "0ad483d2ab0149d5a5ebcd9972a3852711e0153d863bf5a5d0391d28883c4a20"
 dependencies = [
  "base64 0.22.0",
  "chrono",
@@ -13238,7 +13218,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serde_with_macros 3.8.0",
+ "serde_with_macros 3.8.1",
  "time",
 ]
 
@@ -13256,9 +13236,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.8.0"
+version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8b3a576c4eb2924262d5951a3b737ccaf16c931e39a2810c36f9a7e25575557"
+checksum = "65569b702f41443e8bc8bbb1c5779bd0450bbe723b56198980e80ec45780bce2"
 dependencies = [
  "darling 0.20.9",
  "proc-macro2",
@@ -13706,7 +13686,7 @@ dependencies = [
  "glob",
  "humantime",
  "itertools 0.13.0",
- "libtest-mimic",
+ "libtest-mimic 0.7.3",
  "md-5",
  "owo-colors",
  "regex",

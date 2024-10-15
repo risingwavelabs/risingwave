@@ -26,6 +26,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};
@@ -45,7 +46,6 @@ use uuid::Uuid;
 use super::command::CommandContext;
 use super::{BarrierKind, GlobalBarrierManagerContext, InflightSubscriptionInfo, TracedEpoch};
 use crate::barrier::info::InflightGraphInfo;
-use crate::manager::WorkerId;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -73,7 +73,8 @@ impl ControlStreamManager {
         node: WorkerNode,
         subscription: &InflightSubscriptionInfo,
     ) {
-        if self.nodes.contains_key(&node.id) {
+        let node_id = node.id as WorkerId;
+        if self.nodes.contains_key(&node_id) {
             warn!(id = node.id, host = ?node.host, "node already exists");
             return;
         }
@@ -82,7 +83,6 @@ impl ControlStreamManager {
             .hummock_manager
             .on_current_version(|version| version.id)
             .await;
-        let node_id = node.id;
         let node_host = node.host.clone().unwrap();
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
@@ -309,7 +309,7 @@ impl ControlStreamManager {
                     .flat_map(|new_actors| new_actors.keys().cloned()),
             )
         {
-            if !self.nodes.contains_key(&worker_id) {
+            if !self.nodes.contains_key(&(worker_id as _)) {
                 return Err(anyhow!("unconnected worker node {}", worker_id).into());
             }
         }
@@ -323,7 +323,7 @@ impl ControlStreamManager {
                     actor_id: actor_info.actor_id,
                     host: self
                         .nodes
-                        .get(worker_id)
+                        .get(&(*worker_id as _))
                         .expect("have checked exist previously")
                         .worker
                         .host
@@ -336,7 +336,7 @@ impl ControlStreamManager {
             .iter()
             .try_for_each(|(node_id, node)| {
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
-                    .actor_ids_to_collect(*node_id)
+                    .actor_ids_to_collect(*node_id as _)
                     .collect();
                 let table_ids_to_sync = if let Some(graph_info) = applied_graph_info {
                     graph_info
@@ -374,7 +374,7 @@ impl ControlStreamManager {
                                         broadcast_info: new_actors_location_to_broadcast.clone(),
                                         actors_to_build: new_actors
                                             .as_mut()
-                                            .map(|new_actors| new_actors.remove(node_id))
+                                            .map(|new_actors| new_actors.remove(&(*node_id as _)))
                                             .into_iter()
                                             .flatten()
                                             .flatten()
@@ -393,7 +393,7 @@ impl ControlStreamManager {
                             ))
                         })?;
 
-                    node_need_collect.insert(*node_id);
+                    node_need_collect.insert(*node_id as WorkerId);
                     Result::<_, MetaError>::Ok(())
                 }
             })
