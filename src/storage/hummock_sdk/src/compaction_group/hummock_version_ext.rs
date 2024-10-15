@@ -882,8 +882,10 @@ impl HummockVersion {
         });
 
         group_split::merge_levels(left_levels, right_levels, self.max_sub_level_id);
-        // Need to call may_bump_max_sub_level_id, because multiple merge may be called in one delta.
-        self.may_bump_max_sub_level_id();
+        // There is no necessity to invoke may_bump_max_sub_level_id here, because
+        // - There's at most one GroupMerge delta in one delta.
+        // - No other delta type will be present.
+        // - may_bump_max_sub_level_id will be invoked once later for this delta in apply_version_delta.
     }
 
     fn may_bump_max_sub_level_id(&mut self) {
