@@ -52,7 +52,11 @@ impl Rule for MinMaxOnIndexRule {
         if calls.is_empty() {
             return Ok(None);
         }
-        let first_call = calls.iter().exactly_one().unwrap();
+        let first_call = calls.iter().exactly_one();
+        if first_call.is_err() {
+            return Ok(None);
+        }
+        let first_call = first_call.unwrap();
 
         if matches!(
             first_call.agg_type,
