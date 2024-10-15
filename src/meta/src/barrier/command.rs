@@ -444,8 +444,6 @@ pub struct CommandContext {
 
     pub command: Command,
 
-    barrier_manager_context: GlobalBarrierManagerContext,
-
     /// The tracing span of this command.
     ///
     /// Differs from [`TracedEpoch`], this span focuses on the lifetime of the corresponding
@@ -470,7 +468,6 @@ impl CommandContext {
         subscription_info: InflightSubscriptionInfo,
         table_ids_to_commit: HashSet<TableId>,
         command: Command,
-        barrier_manager_context: GlobalBarrierManagerContext,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -479,7 +476,6 @@ impl CommandContext {
             barrier_info,
             table_ids_to_commit,
             command,
-            barrier_manager_context,
             _span: span,
         }
     }
@@ -928,7 +924,10 @@ impl Command {
 }
 
 impl CommandContext {
-    pub async fn wait_epoch_commit(&self) -> MetaResult<()> {
+    pub async fn wait_epoch_commit(
+        &self,
+        barrier_manager_context: &GlobalBarrierManagerContext,
+    ) -> MetaResult<()> {
         let table_id = self.table_ids_to_commit.iter().next().cloned();
         // try wait epoch on an existing random table id
         let Some(table_id) = table_id else {
@@ -936,8 +935,7 @@ impl CommandContext {
             return Ok(());
         };
         let futures = self.node_map.values().map(|worker_node| async {
-            let client = self
-                .barrier_manager_context
+            let client = barrier_manager_context
                 .env
                 .stream_client_pool()
                 .get(worker_node)
@@ -956,7 +954,10 @@ impl CommandContext {
 
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
-    pub async fn post_collect(&self) -> MetaResult<()> {
+    pub async fn post_collect(
+        &self,
+        barrier_manager_context: &GlobalBarrierManagerContext,
+    ) -> MetaResult<()> {
         match &self.command {
             Command::Plain(_) => {}
 
@@ -968,18 +969,18 @@ impl CommandContext {
                     // storage version with this epoch is synced to all compute nodes before the
                     // execution of the next command of `Update`, as some newly created operators
                     // may immediately initialize their states on that barrier.
-                    self.wait_epoch_commit().await?;
+                    self.wait_epoch_commit(barrier_manager_context).await?;
                 }
             }
 
             Command::Resume(_) => {}
 
             Command::SourceSplitAssignment(split_assignment) => {
-                self.barrier_manager_context
+                barrier_manager_context
                     .metadata_manager
                     .update_actor_splits_by_split_assignment(split_assignment)
                     .await?;
-                self.barrier_manager_context
+                barrier_manager_context
                     .source_manager
                     .apply_source_change(None, None, Some(split_assignment.clone()), None)
                     .await;
@@ -989,7 +990,7 @@ impl CommandContext {
                 unregistered_state_table_ids,
                 ..
             } => {
-                self.barrier_manager_context
+                barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
@@ -1007,12 +1008,12 @@ impl CommandContext {
                 // It won't clean the tables on failure,
                 // since the failure could be recoverable.
                 // As such it needs to be handled here.
-                self.barrier_manager_context
+                barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(table_fragments.all_table_ids().map(TableId::new))
                     .await?;
 
-                if let MetadataManager::V1(mgr) = &self.barrier_manager_context.metadata_manager {
+                if let MetadataManager::V1(mgr) = &barrier_manager_context.metadata_manager {
                     // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
                     // We need to cleanup the table state. So we can do it here.
                     // The logic is the same as above, for hummock_manager.unregister_table_ids.
@@ -1057,7 +1058,7 @@ impl CommandContext {
                     init_split_assignment,
                     ..
                 } = info;
-                match &self.barrier_manager_context.metadata_manager {
+                match &barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {
                         let mut dependent_table_actors =
                             Vec::with_capacity(upstream_root_actors.len());
@@ -1130,7 +1131,7 @@ impl CommandContext {
                 // Extract the fragments that include source operators.
                 let source_fragments = table_fragments.stream_source_fragments();
                 let backfill_fragments = table_fragments.source_backfill_fragments()?;
-                self.barrier_manager_context
+                barrier_manager_context
                     .source_manager
                     .apply_source_change(
                         Some(source_fragments),
@@ -1145,7 +1146,7 @@ impl CommandContext {
                 table_parallelism,
                 ..
             } => {
-                self.barrier_manager_context
+                barrier_manager_context
                     .scale_controller
                     .post_apply_reschedule(reschedules, table_parallelism)
                     .await?;
@@ -1159,7 +1160,7 @@ impl CommandContext {
                 init_split_assignment,
                 ..
             }) => {
-                match &self.barrier_manager_context.metadata_manager {
+                match &barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {
                         // Drop fragment info in meta store.
                         mgr.fragment_manager
@@ -1186,14 +1187,14 @@ impl CommandContext {
                 }
 
                 // Apply the split changes in source manager.
-                self.barrier_manager_context
+                barrier_manager_context
                     .source_manager
                     .drop_source_fragments(std::slice::from_ref(old_table_fragments))
                     .await;
                 let source_fragments = new_table_fragments.stream_source_fragments();
                 // XXX: is it possible to have backfill fragments here?
                 let backfill_fragments = new_table_fragments.source_backfill_fragments()?;
-                self.barrier_manager_context
+                barrier_manager_context
                     .source_manager
                     .apply_source_change(
                         Some(source_fragments),
@@ -1206,7 +1207,7 @@ impl CommandContext {
 
             Command::CreateSubscription {
                 subscription_id, ..
-            } => match &self.barrier_manager_context.metadata_manager {
+            } => match &barrier_manager_context.metadata_manager {
                 MetadataManager::V1(mgr) => {
                     mgr.catalog_manager
                         .finish_create_subscription_procedure(*subscription_id)
