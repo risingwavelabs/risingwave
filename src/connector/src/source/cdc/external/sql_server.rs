@@ -90,8 +90,10 @@ impl SqlServerExternalTable {
             &config.username,
             &config.password,
         ));
-        // TODO(kexiang): add ssl support
         // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
+        if config.encrypt == "true" {
+            client_config.encryption(tiberius::EncryptionLevel::Required);
+        }
         client_config.trust_cert();
 
         let mut client = SqlServerClient::new_with_config(client_config).await?;
@@ -282,8 +284,10 @@ impl SqlServerExternalTableReader {
             &config.username,
             &config.password,
         ));
-        // TODO(kexiang): add ssl support
         // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
+        if config.encrypt == "true" {
+            client_config.encryption(tiberius::EncryptionLevel::Required);
+        }
         client_config.trust_cert();
 
         let client = SqlServerClient::new_with_config(client_config).await?;
