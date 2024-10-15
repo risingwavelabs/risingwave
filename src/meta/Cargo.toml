@@ -31,7 +31,6 @@ easy-ext = "1"
 educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
-etcd-client = { workspace = true }
 fail = "0.5"
 flate2 = "1"
 function_name = "0.3.0"
@@ -75,12 +74,12 @@ sync-point = { path = "../utils/sync-point" }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
 ] }
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
@@ -93,10 +92,10 @@ uuid = { version = "1", features = ["v4"] }
 [target.'cfg(not(madsim))'.dependencies]
 axum = { workspace = true }
 tower-http = { version = "0.5", features = [
-  "add-extension",
-  "cors",
-  "fs",
-  "compression-gzip",
+    "add-extension",
+    "cors",
+    "fs",
+    "compression-gzip",
 ] }
 workspace-hack = { path = "../workspace-hack" }
 

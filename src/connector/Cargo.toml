@@ -174,7 +174,7 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
-typed-builder = "^0.18"
+typed-builder = "^0.20"
 url = "2"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
@@ -187,7 +187,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
-deltalake = { workspace = true, features = ["datafusion"] }
+deltalake = { workspace = true }
 expect-test = "1"
 fs-err = "2"
 paste = "1"

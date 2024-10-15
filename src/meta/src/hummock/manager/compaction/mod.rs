@@ -90,7 +90,7 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
-use crate::manager::{MetadataManager, META_NODE_ID};
+use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
 pub mod compaction_group_manager;
@@ -648,7 +648,15 @@ impl HummockManager {
         if deterministic_mode {
             version.disable_apply_to_txn();
         }
-
+        let all_versioned_table_schemas = if self.env.opts.enable_dropped_column_reclaim {
+            self.metadata_manager
+                .catalog_controller
+                .get_versioned_table_schemas()
+                .await
+                .map_err(|e| Error::Internal(e.into()))?
+        } else {
+            HashMap::default()
+        };
         let mut unschedule_groups = vec![];
         let mut trivial_tasks = vec![];
         let mut pick_tasks = vec![];
@@ -825,25 +833,21 @@ impl HummockManager {
                     compact_task.table_watermarks = version
                         .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
-
-                    if self.env.opts.enable_dropped_column_reclaim {
-                        // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
-                        compact_task.table_schemas = match self.metadata_manager() {
-                            MetadataManager::V1(mgr) => mgr
-                                .catalog_manager
-                                .get_versioned_table_schemas(&compact_task.existing_table_ids)
-                                .await
-                                .into_iter()
-                                .map(|(table_id, column_ids)| {
-                                    (table_id, TableSchema { column_ids })
-                                })
-                                .collect(),
-                            MetadataManager::V2(_) => {
-                                // TODO #13952: support V2
-                                BTreeMap::default()
-                            }
-                        };
-                    }
+                    compact_task.table_schemas = compact_task
+                        .existing_table_ids
+                        .iter()
+                        .filter_map(|table_id| {
+                            let id = (*table_id).try_into().unwrap();
+                            all_versioned_table_schemas.get(&id).map(|column_ids| {
+                                (
+                                    *table_id,
+                                    TableSchema {
+                                        column_ids: column_ids.clone(),
+                                    },
+                                )
+                            })
+                        })
+                        .collect();
 
                     compact_task_assignment.insert(
                         compact_task.task_id,

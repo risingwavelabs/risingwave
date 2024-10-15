@@ -74,11 +74,24 @@ use crate::controller::utils::{
     resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
-use crate::stream::SourceManagerRef;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
+
+pub type Catalog = (
+    Vec<PbDatabase>,
+    Vec<PbSchema>,
+    Vec<PbTable>,
+    Vec<PbSource>,
+    Vec<PbSink>,
+    Vec<PbSubscription>,
+    Vec<PbIndex>,
+    Vec<PbView>,
+    Vec<PbFunction>,
+    Vec<PbConnection>,
+    Vec<PbSecret>,
+);
 
 pub type CatalogControllerRef = Arc<CatalogController>;
 
@@ -108,7 +121,7 @@ pub struct ReleaseContext {
 
 impl CatalogController {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env.meta_store().as_sql().clone();
+        let meta_store = env.meta_store();
         let catalog_controller = Self {
             env,
             inner: RwLock::new(CatalogControllerInner {
@@ -1161,8 +1174,7 @@ impl CatalogController {
     pub async fn create_source(
         &self,
         mut pb_source: PbSource,
-        source_manager_ref: Option<SourceManagerRef>,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(SourceId, NotificationVersion)> {
         let inner = self.inner.write().await;
         let owner_id = pb_source.owner as _;
         let txn = inner.db.begin().await?;
@@ -1185,17 +1197,11 @@ impl CatalogController {
             Some(pb_source.schema_id as _),
         )
         .await?;
-        pb_source.id = source_obj.oid as _;
+        let source_id = source_obj.oid;
+        pb_source.id = source_id as _;
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
 
-        if let Some(src_manager) = source_manager_ref {
-            let ret = src_manager.register_source(&pb_source).await;
-            if let Err(e) = ret {
-                txn.rollback().await?;
-                return Err(e);
-            }
-        }
         txn.commit().await?;
 
         let version = self
@@ -1204,7 +1210,7 @@ impl CatalogController {
                 PbRelationInfo::Source(pb_source),
             )
             .await;
-        Ok(version)
+        Ok((source_id, version))
     }
 
     pub async fn create_function(
@@ -3050,6 +3056,30 @@ impl CatalogController {
 
         Ok(table_ids)
     }
+
+    /// Returns column ids of versioned tables.
+    /// Being versioned implies using `ColumnAwareSerde`.
+    pub async fn get_versioned_table_schemas(&self) -> MetaResult<HashMap<TableId, Vec<i32>>> {
+        let res = self
+            .list_all_state_tables()
+            .await?
+            .into_iter()
+            .filter_map(|t| {
+                if t.version.is_some() {
+                    let ret = (
+                        t.id.try_into().unwrap(),
+                        t.columns
+                            .iter()
+                            .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                            .collect_vec(),
+                    );
+                    return Some(ret);
+                }
+                None
+            })
+            .collect();
+        Ok(res)
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.
@@ -3450,7 +3480,6 @@ async fn update_internal_tables(
 }
 
 #[cfg(test)]
-#[cfg(not(madsim))]
 mod tests {
 
     use super::*;
@@ -3461,7 +3490,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_database = PbDatabase {
             name: "db1".to_string(),
             owner: TEST_OWNER_ID as _,
@@ -3493,7 +3522,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_schema = PbSchema {
             database_id: TEST_DATABASE_ID as _,
             name: "schema1".to_string(),
@@ -3526,7 +3555,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_view() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
@@ -3551,7 +3580,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let test_data_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
             ..Default::default()
@@ -3599,7 +3628,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_alter_relation_rename() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_source = PbSource {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
@@ -3614,7 +3643,7 @@ mod tests {
                 .to_string(),
             ..Default::default()
         };
-        mgr.create_source(pb_source, None).await?;
+        mgr.create_source(pb_source).await?;
         let source_id: SourceId = Source::find()
             .select_only()
             .column(source::Column::SourceId)
