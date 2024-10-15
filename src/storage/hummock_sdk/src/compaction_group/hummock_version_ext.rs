@@ -660,15 +660,10 @@ impl HummockVersion {
                         || group_destroy.is_some(),
                     "no sst should be deleted when committing an epoch"
                 );
-                let mut next_l0_sub_level_id = levels
-                    .l0
-                    .sub_levels
-                    .last()
-                    .map(|level| level.sub_level_id + 1)
-                    .unwrap_or(1);
                 for group_delta in &group_deltas.group_deltas {
                     if let GroupDelta::IntraLevel(IntraLevelDelta {
                         level_idx,
+                        l0_sub_level_id,
                         inserted_table_infos,
                         ..
                     }) = group_delta
@@ -680,12 +675,11 @@ impl HummockVersion {
                         if !inserted_table_infos.is_empty() {
                             insert_new_sub_level(
                                 &mut levels.l0,
-                                next_l0_sub_level_id,
+                                *l0_sub_level_id,
                                 PbLevelType::Overlapping,
                                 inserted_table_infos.clone(),
                                 None,
                             );
-                            next_l0_sub_level_id += 1;
                         }
                     }
                 }
