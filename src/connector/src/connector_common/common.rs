@@ -682,14 +682,19 @@ impl NatsCommon {
             NatsOffset::None => DeliverPolicy::All,
         };
 
-        let consumer = stream
-            .get_or_create_consumer(&name, {
-                config.deliver_policy = deliver_policy;
-                config.durable_name = Some(durable_consumer_name);
-                config.filter_subjects = self.subject.split(',').map(|s| s.to_string()).collect();
-                config
-            })
-            .await?;
+        let consumer = if let Ok(consumer) = stream.get_consumer(&name).await {
+            consumer
+        } else {
+            stream
+                .get_or_create_consumer(&name, {
+                    config.deliver_policy = deliver_policy;
+                    config.durable_name = Some(durable_consumer_name);
+                    config.filter_subjects =
+                        self.subject.split(',').map(|s| s.to_string()).collect();
+                    config
+                })
+                .await?
+        };
         Ok(consumer)
     }
 
