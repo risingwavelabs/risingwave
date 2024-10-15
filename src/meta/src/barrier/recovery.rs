@@ -534,11 +534,11 @@ impl GlobalBarrierManagerContext {
         let Ok(_guard) = self.scale_controller.reschedule_lock.try_write() else {
             return Err(anyhow!("scale_actors failed to acquire reschedule_lock").into());
         };
-      
+
         self.scale_controller.integrity_check().await?;
 
         info!("integrity check passed");
-      
+
         let mgr = &self.metadata_manager;
 
         debug!("start resetting actors distribution");
