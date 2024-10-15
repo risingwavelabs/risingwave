@@ -281,17 +281,9 @@ pub mod group_split {
     ) {
         let right_l0 = right_levels.l0;
 
-        let mut next_right_sub_level_id = left_levels
-            .l0
-            .sub_levels
-            .iter()
-            .map(|sub_level| sub_level.sub_level_id + 1)
-            .max()
-            .unwrap_or(
-                max_sub_level_id
-                    .map(|v| v + 1)
-                    .unwrap_or(FIRST_SUB_LEVEL_ID),
-            );
+        let mut next_right_sub_level_id = max_sub_level_id
+            .map(|v| v + 1)
+            .unwrap_or(FIRST_SUB_LEVEL_ID);
         let need_rewrite_right_sub_level_id = !left_levels.l0.sub_levels.is_empty();
 
         for mut right_sub_level in right_l0.sub_levels {
