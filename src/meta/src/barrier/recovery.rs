@@ -29,7 +29,7 @@ use risingwave_pb::stream_plan::{AddMutation, StreamActor};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, info, warn, Instrument};
+use tracing::{debug, error, info, warn, Instrument};
 
 use super::{CheckpointControl, TracedEpoch};
 use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
@@ -531,7 +531,21 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn scale_actors(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
+        let Ok(_guard) = self.scale_controller.reschedule_lock.try_write() else {
+            return Err(anyhow!("scale_actors failed to acquire reschedule_lock").into());
+        };
+
+        match self.scale_controller.integrity_check().await {
+            Ok(_) => {
+                info!("integrity check passed");
+            }
+            Err(_) => {
+                error!("integrity check failed");
+            }
+        }
+
         let mgr = &self.metadata_manager;
+
         debug!("start resetting actors distribution");
 
         let available_parallelism = active_nodes
