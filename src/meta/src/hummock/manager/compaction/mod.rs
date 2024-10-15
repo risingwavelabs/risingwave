@@ -828,6 +828,7 @@ impl HummockManager {
 
                     if self.env.opts.enable_dropped_column_reclaim {
                         // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
+                        // TODO #13952: support V2
                         compact_task.table_schemas = BTreeMap::default();
                     }
 
