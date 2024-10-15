@@ -2084,7 +2084,7 @@ mod tests {
                 },
             );
 
-            group_split::merge_levels(&mut left_levels, right_levels, None);
+            group_split::merge_levels(&mut left_levels, right_levels, Some(105));
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2102,7 +2102,7 @@ mod tests {
             let mut left_levels = left_levels.clone();
             let right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, right_levels, None);
+            group_split::merge_levels(&mut left_levels, right_levels, Some(105));
 
             assert!(left_levels.l0.sub_levels.len() == 6);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
