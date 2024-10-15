@@ -2,18 +2,19 @@
 
 # Exits as soon as any line fails.
 set -e
+export CARGO_MAKE_PRINT_TIME_SUMMARY=false
 
 SCRIPT_PATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
-cd "$SCRIPT_PATH/.." || exit 1
-# cwd is /scripts
+# SCRIPT_PATH is e2e_test/source_legacy/kafka/script/
+# cwd is e2e_test/source_legacy/kafka/
 
 echo "$SCRIPT_PATH"
+cd "$SCRIPT_PATH"
 
-source ../.risingwave/config/risedev-env
+source ../../../../.risingwave/config/risedev-env
 
 if [ "$1" == "compress" ]; then
   echo "Compress test_data/ into test_data.zip"
-  cd ./source
   zip_file=test_data.zip
   if [ -f "$zip_file" ]; then
     rm "$zip_file"
@@ -23,10 +24,8 @@ if [ "$1" == "compress" ]; then
 fi
 
 echo "--- Extract data for Kafka"
-cd ./source/
 mkdir -p ./test_data/ch_benchmark/
 unzip -o test_data.zip -d .
-cd ..
 
 echo "path:${SCRIPT_PATH}/test_data/**/*"
 
@@ -58,9 +57,9 @@ for filename in $kafka_data_files; do
     if [[ "$topic" = *bin ]]; then
         kcat -P -b "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" -t "$topic" "$filename"
     elif [[ "$topic" = *avro_json ]]; then
-        python3 source/schema_registry_producer.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "$filename" "topic" "avro"
+        python3 schema_registry_producer.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "$filename" "topic" "avro"
     elif [[ "$topic" = *json_schema ]]; then
-        python3 source/schema_registry_producer.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "$filename" "topic" "json"
+        python3 schema_registry_producer.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "$filename" "topic" "json"
     else
         cat "$filename" | kcat -P -K ^  -b "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" -t "$topic"
     fi
