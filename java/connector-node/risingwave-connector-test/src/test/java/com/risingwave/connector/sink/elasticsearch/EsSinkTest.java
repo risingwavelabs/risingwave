@@ -59,7 +59,7 @@ public class EsSinkTest {
                         .withDelimiter("$")
                         .withUsername(username)
                         .withPassword(password);
-        config.setConnector("elasticsearch");
+        config.setConnector("elasticsearch_v1");
         EsSink sink = new EsSink(config, getTestTableSchema());
         sink.write(
                 Iterators.forArray(

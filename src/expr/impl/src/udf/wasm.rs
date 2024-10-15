@@ -92,7 +92,7 @@ fn create_rust(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput> 
 
     let wasm_binary = std::thread::spawn(move || {
         let mut opts = arrow_udf_wasm::build::BuildOpts::default();
-        opts.arrow_udf_version = Some("0.3".to_string());
+        opts.arrow_udf_version = Some("0.5".to_string());
         opts.script = script;
         // use a fixed tempdir to reuse the build cache
         opts.tempdir = Some(std::env::temp_dir().join("risingwave-rust-udf"));

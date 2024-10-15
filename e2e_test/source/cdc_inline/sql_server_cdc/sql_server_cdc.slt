@@ -242,6 +242,7 @@ CREATE TABLE shared_orders_without_cdc (
     PRIMARY KEY (order_id)
 )  from mssql_source table 'dbo.orders_without_cdc';
 
+# use batch_size = 1 here to ensure not all the data is backfilled in one batch.
 statement ok
 CREATE TABLE shared_orders (
     order_id INT,
@@ -251,7 +252,9 @@ CREATE TABLE shared_orders (
     product_id INT,
     order_status SMALLINT,
     PRIMARY KEY (order_id)
-)  from mssql_source table 'dbo.orders';
+) WITH (
+    snapshot.batch_size = '1',
+) from mssql_source table 'dbo.orders';
 
 statement ok
 CREATE TABLE shared_single_type (*) from mssql_source table 'dbo.single_type';

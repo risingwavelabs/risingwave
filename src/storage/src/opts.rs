@@ -94,7 +94,7 @@ pub struct StorageOpts {
     pub data_file_cache_indexer_shards: usize,
     pub data_file_cache_compression: foyer::Compression,
     pub data_file_cache_flush_buffer_threshold_mb: usize,
-    pub data_file_cache_runtime_config: foyer::RuntimeConfig,
+    pub data_file_cache_runtime_config: foyer::RuntimeOptions,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
@@ -115,7 +115,7 @@ pub struct StorageOpts {
     pub meta_file_cache_indexer_shards: usize,
     pub meta_file_cache_compression: foyer::Compression,
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
-    pub meta_file_cache_runtime_config: foyer::RuntimeConfig,
+    pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
 
     /// The storage url for storing backups.
     pub backup_storage_url: String,
@@ -138,7 +138,10 @@ pub struct StorageOpts {
 
     pub compactor_concurrent_uploading_sst_count: Option<usize>,
 
+    pub compactor_max_overlap_sst_count: usize,
+
     pub object_store_config: ObjectStoreConfig,
+    pub time_travel_version_cache_capacity: u64,
 }
 
 impl Default for StorageOpts {
@@ -174,10 +177,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_cache_shard_num: s.meta_cache_shard_num,
             meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
-            max_cached_recent_versions_number: c
-                .storage
-                .max_cached_recent_versions_number
-                .unwrap_or(60),
+            max_cached_recent_versions_number: c.storage.max_cached_recent_versions_number,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
@@ -241,6 +241,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_concurrent_uploading_sst_count: c
                 .storage
                 .compactor_concurrent_uploading_sst_count,
+            time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
+            compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
         }
     }
 }

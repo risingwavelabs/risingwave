@@ -363,6 +363,8 @@ message TableFunction {
     JSONB_TO_RECORDSET = 17;
     // file scan
     FILE_SCAN = 19;
+    // postgres query
+    POSTGRES_QUERY = 20;
     // User defined table function
     USER_DEFINED = 100;
   }

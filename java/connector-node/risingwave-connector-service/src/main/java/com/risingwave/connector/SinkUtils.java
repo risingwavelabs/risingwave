@@ -39,8 +39,8 @@ public class SinkUtils {
                 return new FileSinkFactory();
             case "jdbc":
                 return new JDBCSinkFactory();
-            case "elasticsearch":
-            case "opensearch":
+            case "elasticsearch_v1":
+            case "opensearch_v1":
                 return new EsSinkFactory();
             case "cassandra":
                 return new CassandraFactory();

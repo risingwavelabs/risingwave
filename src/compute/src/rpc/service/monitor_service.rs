@@ -18,7 +18,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use foyer::HybridCache;
+use foyer::{HybridCache, TracingOptions};
 use itertools::Itertools;
 use prometheus::core::Collector;
 use risingwave_common::config::{MetricLevel, ServerConfig};
@@ -378,22 +378,28 @@ impl MonitorService for MonitorServiceImpl {
             } else {
                 cache.disable_tracing();
             }
-            let config = cache.tracing_config();
+            let mut options = TracingOptions::new();
             if let Some(threshold) = req.record_hybrid_insert_threshold_ms {
-                config.set_record_hybrid_insert_threshold(Duration::from_millis(threshold as _));
+                options = options
+                    .with_record_hybrid_insert_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_get_threshold_ms {
-                config.set_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
+                options =
+                    options.with_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
-                config.set_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
+                options = options
+                    .with_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
-                config.set_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
+                options = options
+                    .with_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
-                config.set_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+                options = options
+                    .with_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
             }
+            cache.update_tracing_options(options);
         }
 
         if let Some(cache) = &self.block_cache {
@@ -402,22 +408,28 @@ impl MonitorService for MonitorServiceImpl {
             } else {
                 cache.disable_tracing();
             }
-            let config = cache.tracing_config();
+            let mut options = TracingOptions::new();
             if let Some(threshold) = req.record_hybrid_insert_threshold_ms {
-                config.set_record_hybrid_insert_threshold(Duration::from_millis(threshold as _));
+                options = options
+                    .with_record_hybrid_insert_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_get_threshold_ms {
-                config.set_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
+                options =
+                    options.with_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
-                config.set_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
+                options = options
+                    .with_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
-                config.set_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
+                options = options
+                    .with_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
-                config.set_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+                options = options
+                    .with_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
             }
+            cache.update_tracing_options(options);
         }
 
         Ok(Response::new(TieredCacheTracingResponse::default()))

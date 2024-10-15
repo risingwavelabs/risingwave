@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::{CacheContext, HybridCacheBuilder};
+use foyer::{CacheContext, Engine, HybridCacheBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
@@ -63,14 +63,14 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
-        .storage()
+        .storage(Engine::Large)
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
         .with_shards(2)
-        .storage()
+        .storage(Engine::Large)
         .build()
         .await
         .unwrap();

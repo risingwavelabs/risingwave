@@ -29,6 +29,7 @@ use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use thiserror_ext::Construct;
+use tokio_postgres;
 use tonic::Status;
 
 use crate::worker_manager::worker_node_manager::FragmentId;
@@ -125,6 +126,13 @@ pub enum BatchError {
         #[from]
         #[backtrace]
         ParquetError,
+    ),
+
+    #[error(transparent)]
+    Postgres(
+        #[from]
+        #[backtrace]
+        tokio_postgres::Error,
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.

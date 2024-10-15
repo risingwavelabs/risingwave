@@ -146,6 +146,7 @@ impl ComputeNodeContext {
         let batch_metrics = Arc::new(BatchMetricsInner::new(
             env.task_manager().metrics(),
             env.executor_metrics(),
+            env.iceberg_scan_metrics(),
         ));
         Self {
             env,

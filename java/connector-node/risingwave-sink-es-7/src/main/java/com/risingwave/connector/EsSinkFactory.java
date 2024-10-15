@@ -74,7 +74,7 @@ public class EsSinkFactory implements SinkFactory {
 
         // 2. check connection
         try {
-            if (config.getConnector().equals("elasticsearch")) {
+            if (config.getConnector().equals("elasticsearch_v1")) {
                 ElasticRestHighLevelClientAdapter esClient =
                         new ElasticRestHighLevelClientAdapter(host, config);
                 if (!esClient.ping(org.elasticsearch.client.RequestOptions.DEFAULT)) {
@@ -83,7 +83,7 @@ public class EsSinkFactory implements SinkFactory {
                             .asRuntimeException();
                 }
                 esClient.close();
-            } else if (config.getConnector().equals("opensearch")) {
+            } else if (config.getConnector().equals("opensearch_v1")) {
                 OpensearchRestHighLevelClientAdapter opensearchClient =
                         new OpensearchRestHighLevelClientAdapter(host, config);
                 if (!opensearchClient.ping(org.opensearch.client.RequestOptions.DEFAULT)) {

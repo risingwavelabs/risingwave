@@ -38,12 +38,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             .sst_id_to_worker_id
             .get(&sst.object_id)
             .expect("valid worker_id");
-        tracing::debug!(
-            "Validating SST {} from worker {}, epoch {}",
-            sst.object_id,
-            worker_id,
-            task.epoch
-        );
+        tracing::debug!("Validating SST {} from worker {}", sst.object_id, worker_id,);
         let holder = match sstable_store.sstable(&sst, unused.borrow_mut()).await {
             Ok(holder) => holder,
             Err(_err) => {
@@ -100,12 +95,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
                 break;
             }
         }
-        tracing::debug!(
-            "Validated {} keys for SST {},  epoch {}",
-            key_counts,
-            sst.object_id,
-            task.epoch
-        );
+        tracing::debug!("Validated {} keys for SST {}", key_counts, sst.object_id,);
         iter.collect_local_statistic(&mut unused);
         unused.ignore();
     }

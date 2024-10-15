@@ -237,7 +237,9 @@ impl HummockStorage {
             write_limiter,
             compact_await_tree_reg: await_tree_reg,
             hummock_meta_client,
-            simple_time_travel_version_cache: Arc::new(SimpleTimeTravelVersionCache::new()),
+            simple_time_travel_version_cache: Arc::new(SimpleTimeTravelVersionCache::new(
+                options.time_travel_version_cache_capacity,
+            )),
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());

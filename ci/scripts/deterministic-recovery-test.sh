@@ -44,7 +44,7 @@ filter_stack_trace_for_all_logs() {
   done
 }
 
-trap filter_stack_trace_for_all_logs ERR
+# trap filter_stack_trace_for_all_logs ERR
 
 # NOTE(kwannoel): We must use `export` here, because the variables are not substituted
 # directly via bash subtitution. Instead, the `parallel` command substitutes the variables

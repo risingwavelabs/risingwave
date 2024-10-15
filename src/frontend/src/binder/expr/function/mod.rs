@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
@@ -320,6 +321,17 @@ impl Binder {
                 );
                 self.ensure_table_function_allowed()?;
                 return Ok(TableFunction::new_file_scan(args)?.into());
+            }
+            // `postgres_query` table function
+            if func_name.eq("postgres_query") {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+                return Ok(TableFunction::new_postgres_query(args)
+                    .context("postgres_query error")?
+                    .into());
             }
             // UDTF
             if let Some(ref udf) = udf

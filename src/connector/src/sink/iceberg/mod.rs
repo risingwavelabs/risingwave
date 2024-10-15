@@ -42,6 +42,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -416,7 +417,7 @@ pub struct IcebergWriter {
     inner_writer: IcebergWriterEnum,
     schema: SchemaRef,
     // See comments below
-    _metrics: IcebergWriterMetrics,
+    metrics: IcebergWriterMetrics,
 }
 
 pub struct IcebergWriterMetrics {
@@ -426,6 +427,8 @@ pub struct IcebergWriterMetrics {
     // We keep them here to let the guard cleans the labels from metrics registry when dropped
     _write_qps: LabelGuardedIntCounter<3>,
     _write_latency: LabelGuardedHistogram<3>,
+
+    write_bytes: LabelGuardedIntCounter<3>,
 }
 
 enum IcebergWriterEnum {
@@ -491,6 +494,10 @@ impl IcebergWriter {
             rolling_unflushed_data_file,
         ));
 
+        let write_bytes = GLOBAL_SINK_METRICS
+            .iceberg_write_bytes
+            .with_guarded_label_values(&metrics_labels);
+
         if let Some(extra_partition_col_idx) = extra_partition_col_idx {
             let partition_data_file_builder = builder_helper.precompute_partition_writer_builder(
                 data_file_builder.clone(),
@@ -507,9 +514,10 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
-                _metrics: IcebergWriterMetrics {
+                metrics: IcebergWriterMetrics {
                     _write_qps: write_qps,
                     _write_latency: write_latency,
+                    write_bytes,
                 },
             })
         } else {
@@ -527,9 +535,10 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
                 schema,
-                _metrics: IcebergWriterMetrics {
+                metrics: IcebergWriterMetrics {
                     _write_qps: write_qps,
                     _write_latency: write_latency,
+                    write_bytes,
                 },
             })
         }
@@ -567,6 +576,9 @@ impl IcebergWriter {
         let position_delete_cache_num = GLOBAL_SINK_METRICS
             .iceberg_position_delete_cache_num
             .with_guarded_label_values(&metrics_labels);
+        let write_bytes = GLOBAL_SINK_METRICS
+            .iceberg_write_bytes
+            .with_guarded_label_values(&metrics_labels);
 
         let data_file_builder = DataFileWriterBuilder::new(MonitoredBaseFileWriterBuilder::new(
             builder_helper
@@ -602,9 +614,10 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
-                _metrics: IcebergWriterMetrics {
+                metrics: IcebergWriterMetrics {
                     _write_qps: write_qps,
                     _write_latency: write_latency,
+                    write_bytes,
                 },
             })
         } else {
@@ -622,9 +635,10 @@ impl IcebergWriter {
             Ok(Self {
                 inner_writer: IcebergWriterEnum::Upsert(inner_writer),
                 schema,
-                _metrics: IcebergWriterMetrics {
+                metrics: IcebergWriterMetrics {
                     _write_qps: write_qps,
                     _write_latency: write_latency,
+                    write_bytes,
                 },
             })
         }
@@ -648,6 +662,7 @@ impl SinkWriter for IcebergWriter {
             return Ok(());
         }
 
+        let write_batch_size = chunk.estimated_heap_size();
         match &mut self.inner_writer {
             IcebergWriterEnum::AppendOnly(writer) => {
                 // filter chunk
@@ -678,6 +693,7 @@ impl SinkWriter for IcebergWriter {
                     .await?;
             }
         }
+        self.metrics.write_bytes.inc_by(write_batch_size as _);
         Ok(())
     }
 

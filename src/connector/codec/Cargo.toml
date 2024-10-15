@@ -46,7 +46,7 @@ hex = "0.4"
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [build-dependencies]
-prost-build = "0.12"
+prost-build = "0.13"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

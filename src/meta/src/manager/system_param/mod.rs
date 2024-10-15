@@ -68,14 +68,6 @@ impl SystemParamsManager {
             ));
         };
 
-        if params
-            .time_travel_retention_ms
-            .map(|r| r > 0)
-            .unwrap_or(false)
-        {
-            return Err(require_sql_meta_store_err().into());
-        }
-
         tracing::info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
 
