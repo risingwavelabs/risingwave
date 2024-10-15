@@ -2263,6 +2263,7 @@ mod tests {
                     },
                 ),
             )]),
+            max_sub_level_id: Some(101),
             ..Default::default()
         };
 
@@ -2458,7 +2459,7 @@ mod tests {
             right_l0.sub_levels.push(Level {
                 level_idx: 0,
                 table_infos: x,
-                sub_level_id: 101,
+                sub_level_id: 100,
                 total_file_size: 100,
                 level_type: LevelType::Overlapping,
                 ..Default::default()
@@ -2470,7 +2471,7 @@ mod tests {
                 ..Default::default()
             };
 
-            merge_levels(cg1, right_levels, None);
+            merge_levels(cg1, right_levels, version.max_sub_level_id);
         }
 
         {
