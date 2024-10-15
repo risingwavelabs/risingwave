@@ -17,19 +17,30 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalLimit, LogicalProject, PlanTreeNodeUnary};
+use super::{BoxedRule, Result, Rule};
+use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::PlanRef;
 
 pub struct LimitPushDownRule {}
 
 impl Rule for LimitPushDownRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let limit: &LogicalLimit = plan.as_logical_limit()?;
-        let project: LogicalProject = limit.input().as_logical_project()?.to_owned();
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let limit = plan.as_logical_limit();
+        if limit.is_none() {
+            return Ok(None);
+        }
+        let limit = limit.unwrap();
+
+        let input = limit.input();
+        let project = input.as_logical_project().to_owned();
+        if project.is_none() {
+            return Ok(None);
+        }
+        let project = project.unwrap();
+
         let input = project.input();
         let logical_limit = limit.clone_with_input(input);
-        Some(project.clone_with_input(logical_limit.into()).into())
+        Ok(Some(project.clone_with_input(logical_limit.into()).into()))
     }
 }
 

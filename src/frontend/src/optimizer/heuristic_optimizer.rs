@@ -16,11 +16,9 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt;
 
-use itertools::Itertools;
-
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::optimizer::rule::BoxedRule;
-use crate::optimizer::PlanRef;
+use crate::optimizer::{PlanRef, Result};
 #[cfg(debug_assertions)]
 use crate::Explain;
 
@@ -48,9 +46,9 @@ impl<'a> HeuristicOptimizer<'a> {
         }
     }
 
-    fn optimize_node(&mut self, mut plan: PlanRef) -> PlanRef {
+    fn optimize_node(&mut self, mut plan: PlanRef) -> Result<PlanRef> {
         for rule in self.rules {
-            if let Some(applied) = rule.apply(plan.clone()) {
+            if let Some(applied) = rule.apply(plan.clone())? {
                 #[cfg(debug_assertions)]
                 Self::check_equivalent_plan(rule.description(), &plan, &applied);
 
@@ -58,31 +56,31 @@ impl<'a> HeuristicOptimizer<'a> {
                 self.stats.count_rule(rule);
             }
         }
-        plan
+        Ok(plan)
     }
 
-    fn optimize_inputs(&mut self, plan: PlanRef) -> PlanRef {
+    fn optimize_inputs(&mut self, plan: PlanRef) -> Result<PlanRef> {
         let pre_applied = self.stats.total_applied();
         let inputs = plan
             .inputs()
             .into_iter()
             .map(|sub_tree| self.optimize(sub_tree))
-            .collect_vec();
+            .collect::<Result<Vec<_>>>()?;
         if pre_applied != self.stats.total_applied() {
-            plan.clone_with_inputs(&inputs)
+            Ok(plan.clone_with_inputs(&inputs))
         } else {
-            plan
+            Ok(plan)
         }
     }
 
-    pub fn optimize(&mut self, mut plan: PlanRef) -> PlanRef {
+    pub fn optimize(&mut self, mut plan: PlanRef) -> Result<PlanRef> {
         match self.apply_order {
             ApplyOrder::TopDown => {
-                plan = self.optimize_node(plan);
+                plan = self.optimize_node(plan)?;
                 self.optimize_inputs(plan)
             }
             ApplyOrder::BottomUp => {
-                plan = self.optimize_inputs(plan);
+                plan = self.optimize_inputs(plan)?;
                 self.optimize_node(plan)
             }
         }

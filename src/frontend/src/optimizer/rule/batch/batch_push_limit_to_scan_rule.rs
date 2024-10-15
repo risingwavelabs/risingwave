@@ -20,19 +20,29 @@
 use itertools::Itertools;
 
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{BatchSeqScan, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use crate::optimizer::{PlanRef, Result};
 
 pub struct BatchPushLimitToScanRule {}
 
 impl Rule for BatchPushLimitToScanRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let limit: &BatchLimit = plan.as_batch_limit()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let limit = plan.as_batch_limit();
+        if limit.is_none() {
+            return Ok(None);
+        }
+        let limit = limit.unwrap();
+
         let limit_input = limit.input();
-        let scan: &BatchSeqScan = limit_input.as_batch_seq_scan()?;
+        let scan = limit_input.as_batch_seq_scan();
+        if scan.is_none() {
+            return Ok(None);
+        }
+        let scan = scan.unwrap();
+
         if scan.limit().is_some() {
-            return None;
+            return Ok(None);
         }
         let pushed_limit = limit.limit() + limit.offset();
         let new_scan = BatchSeqScan::new_with_dist(
@@ -41,7 +51,7 @@ impl Rule for BatchPushLimitToScanRule {
             scan.scan_ranges().iter().cloned().collect_vec(),
             Some(pushed_limit),
         );
-        Some(limit.clone_with_input(new_scan.into()).into())
+        Ok(Some(limit.clone_with_input(new_scan.into()).into()))
     }
 }
 

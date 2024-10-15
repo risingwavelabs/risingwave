@@ -16,10 +16,8 @@ use itertools::Itertools;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{
-    LogicalApply, LogicalFilter, LogicalLimit, LogicalTopN, PlanTreeNodeUnary,
-};
+use super::{BoxedRule, Result, Rule};
+use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -47,12 +45,22 @@ use crate::utils::Condition;
 /// ```
 pub struct ApplyLimitTransposeRule {}
 impl Rule for ApplyLimitTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply: &LogicalApply = plan.as_logical_apply()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let apply = plan.as_logical_apply();
+        if apply.is_none() {
+            return Ok(None);
+        }
+        let apply = apply.unwrap();
+
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-        let logical_limit: &LogicalLimit = right.as_logical_limit()?;
+        let logical_limit = right.as_logical_limit();
+        if logical_limit.is_none() {
+            return Ok(None);
+        }
+        let logical_limit = logical_limit.unwrap();
+
         let limit_input = logical_limit.input();
         let limit = logical_limit.limit();
         let offset = logical_limit.offset();
@@ -60,7 +68,7 @@ impl Rule for ApplyLimitTransposeRule {
         let apply_left_len = left.schema().len();
 
         if max_one_row {
-            return None;
+            return Ok(None);
         }
 
         let new_apply = LogicalApply::create(
@@ -87,7 +95,7 @@ impl Rule for ApplyLimitTransposeRule {
         };
 
         let filter = LogicalFilter::create(new_topn.into(), on);
-        Some(filter)
+        Ok(Some(filter))
     }
 }
 

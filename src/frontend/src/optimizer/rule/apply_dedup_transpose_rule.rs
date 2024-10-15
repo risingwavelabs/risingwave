@@ -14,7 +14,7 @@
 
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::optimizer::plan_node::{LogicalApply, LogicalDedup, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -42,19 +42,29 @@ use crate::utils::Condition;
 /// ```
 pub struct ApplyDedupTransposeRule {}
 impl Rule for ApplyDedupTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply: &LogicalApply = plan.as_logical_apply()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let apply = plan.as_logical_apply();
+        if apply.is_none() {
+            return Ok(None);
+        }
+        let apply = apply.unwrap();
+
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-        let dedup: &LogicalDedup = right.as_logical_dedup()?;
+        let dedup = right.as_logical_dedup();
+        if dedup.is_none() {
+            return Ok(None);
+        }
+        let dedup = dedup.unwrap();
+
         let dedup_cols = dedup.dedup_cols();
         let dedup_input = dedup.input();
 
         let apply_left_len = left.schema().len();
 
         if max_one_row {
-            return None;
+            return Ok(None);
         }
 
         let new_apply = LogicalApply::create(
@@ -74,7 +84,7 @@ impl Rule for ApplyDedupTransposeRule {
         };
 
         let filter = LogicalFilter::create(new_dedup, on);
-        Some(filter)
+        Ok(Some(filter))
     }
 }
 

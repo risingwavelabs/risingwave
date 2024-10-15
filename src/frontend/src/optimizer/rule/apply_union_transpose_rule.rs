@@ -14,8 +14,8 @@
 
 use itertools::Itertools;
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalApply, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary};
+use super::{BoxedRule, Result, Rule};
+use crate::optimizer::plan_node::{PlanTreeNode, PlanTreeNodeBinary};
 use crate::optimizer::PlanRef;
 
 /// Transpose `LogicalApply` and `LogicalUnion`.
@@ -42,21 +42,30 @@ use crate::optimizer::PlanRef;
 
 pub struct ApplyUnionTransposeRule {}
 impl Rule for ApplyUnionTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply: &LogicalApply = plan.as_logical_apply()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let apply = plan.as_logical_apply();
+        if apply.is_none() {
+            return Ok(None);
+        }
+        let apply = apply.unwrap();
+
         if apply.max_one_row() {
-            return None;
+            return Ok(None);
         }
         let left = apply.left();
         let right = apply.right();
-        let union: &LogicalUnion = right.as_logical_union()?;
+        let union = right.as_logical_union();
+        if union.is_none() {
+            return Ok(None);
+        }
+        let union = union.unwrap();
 
         let new_inputs = union
             .inputs()
             .into_iter()
             .map(|input| apply.clone_with_left_right(left.clone(), input).into())
             .collect_vec();
-        Some(union.clone_with_inputs(&new_inputs))
+        Ok(Some(union.clone_with_inputs(&new_inputs)))
     }
 }
 

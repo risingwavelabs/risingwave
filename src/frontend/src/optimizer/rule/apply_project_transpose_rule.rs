@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ApplyOffsetRewriter, BoxedRule, Rule};
+use super::{ApplyOffsetRewriter, BoxedRule, Result, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{LogicalApply, LogicalProject};
 use crate::optimizer::PlanRef;
@@ -43,11 +43,21 @@ use crate::optimizer::PlanRef;
 /// ```
 pub struct ApplyProjectTransposeRule {}
 impl Rule for ApplyProjectTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply: &LogicalApply = plan.as_logical_apply()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let apply = plan.as_logical_apply();
+        if apply.is_none() {
+            return Ok(None);
+        }
+        let apply = apply.unwrap();
+
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
-        let project = right.as_logical_project()?;
+        let project = right.as_logical_project();
+        if project.is_none() {
+            return Ok(None);
+        }
+        let project = project.unwrap();
+
         assert_eq!(join_type, JoinType::Inner);
 
         // Insert all the columns of `LogicalApply`'s left at the beginning of the new
@@ -89,7 +99,7 @@ impl Rule for ApplyProjectTransposeRule {
         );
 
         let new_project = LogicalProject::create(new_apply, exprs);
-        Some(new_project)
+        Ok(Some(new_project))
     }
 }
 

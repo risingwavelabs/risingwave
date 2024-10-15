@@ -19,6 +19,7 @@ use risingwave_pb::plan_common::JoinType;
 use super::Rule;
 use crate::expr::{ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
+use crate::optimizer::Result;
 use crate::utils::IndexRewriter;
 
 /// Before this rule:
@@ -32,8 +33,12 @@ use crate::utils::IndexRewriter;
 pub struct JoinProjectTransposeRule {}
 
 impl Rule for JoinProjectTransposeRule {
-    fn apply(&self, plan: crate::PlanRef) -> Option<crate::PlanRef> {
-        let join = plan.as_logical_join()?;
+    fn apply(&self, plan: crate::PlanRef) -> Result<Option<crate::PlanRef>> {
+        let join = plan.as_logical_join();
+        if join.is_none() {
+            return Ok(None);
+        }
+        let join = join.unwrap();
 
         let (left, right, on, join_type, _) = join.clone().decompose();
 
@@ -143,7 +148,7 @@ impl Rule for JoinProjectTransposeRule {
 
         // No project will be pulled up
         if !has_new_left && !has_new_right {
-            return None;
+            return Ok(None);
         }
 
         let new_cond = on.rewrite_expr(&mut IndexRewriter::new(old_i2new_i));
@@ -157,7 +162,7 @@ impl Rule for JoinProjectTransposeRule {
             .collect_vec();
         let new_project = LogicalProject::new(new_join.into(), new_proj_exprs);
 
-        Some(new_project.into())
+        Ok(Some(new_project.into()))
     }
 }
 

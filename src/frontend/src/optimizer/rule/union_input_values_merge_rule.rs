@@ -12,25 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::LogicalValues;
 use crate::optimizer::{PlanRef, PlanTreeNode};
 
 pub struct UnionInputValuesMergeRule {}
 impl Rule for UnionInputValuesMergeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let union = plan.as_logical_union()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let union = plan.as_logical_union();
+        if union.is_none() {
+            return Ok(None);
+        }
+        let union = union.unwrap();
+
         // !union.all() is already handled by [`UnionToDistinctRule`]
         if !union.all() {
-            return None;
+            return Ok(None);
         }
 
         let mut rows = vec![];
         for v in union.inputs() {
-            rows.extend_from_slice(v.as_logical_values()?.rows());
+            let v = v.as_logical_values();
+            if v.is_none() {
+                return Ok(None);
+            }
+            let v = v.unwrap();
+            rows.extend_from_slice(v.rows());
         }
-        Some(LogicalValues::new(rows, union.schema().clone(), union.ctx()).into())
+        Ok(Some(
+            LogicalValues::new(rows, union.schema().clone(), union.ctx()).into(),
+        ))
     }
 }
 

@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::Type;
 
-use super::BoxedRule;
+use super::{BoxedRule, Result};
 use crate::expr::{align_types, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::optimizer::rule::Rule;
@@ -27,8 +27,13 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct PushCalculationOfJoinRule {}
 
 impl Rule for PushCalculationOfJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let join: &LogicalJoin = plan.as_logical_join()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let join = plan.as_logical_join();
+        if join.is_none() {
+            return Ok(None);
+        }
+        let join = join.unwrap();
+
         let (mut left, mut right, mut on, join_type, mut output_indices) = join.clone().decompose();
         let left_col_num = left.schema().len();
         let right_col_num = right.schema().len();
@@ -130,7 +135,9 @@ impl Rule for PushCalculationOfJoinRule {
             right = new_input(right, right_exprs_non_input_ref);
         }
 
-        Some(LogicalJoin::with_output_indices(left, right, join_type, on, output_indices).into())
+        Ok(Some(
+            LogicalJoin::with_output_indices(left, right, join_type, on, output_indices).into(),
+        ))
     }
 }
 

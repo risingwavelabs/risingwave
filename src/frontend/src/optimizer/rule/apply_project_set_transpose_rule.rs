@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ApplyOffsetRewriter, BoxedRule, Rule};
+use super::{ApplyOffsetRewriter, BoxedRule, Result, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalApply, LogicalProject, LogicalProjectSet};
@@ -46,11 +46,21 @@ use crate::optimizer::PlanRef;
 /// ```
 pub struct ApplyProjectSetTransposeRule {}
 impl Rule for ApplyProjectSetTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply: &LogicalApply = plan.as_logical_apply()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let apply = plan.as_logical_apply();
+        if apply.is_none() {
+            return Ok(None);
+        }
+        let apply = apply.unwrap();
+
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
-        let project_set: &LogicalProjectSet = right.as_logical_project_set()?;
+        let project_set = right.as_logical_project_set();
+        if project_set.is_none() {
+            return Ok(None);
+        }
+        let project_set = project_set.unwrap();
+
         let left_schema_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
 
@@ -84,7 +94,7 @@ impl Rule for ApplyProjectSetTransposeRule {
         if rewriter.refer_table_function {
             // The join on condition refers to the table function column of the `project_set` which
             // cannot be unnested.
-            return None;
+            return Ok(None);
         }
 
         let new_apply = LogicalApply::create(
@@ -106,7 +116,7 @@ impl Rule for ApplyProjectSetTransposeRule {
             .chain((left_schema_len + 1)..new_project_set.schema().len());
         let reorder_project = LogicalProject::with_out_col_idx(new_project_set, out_col_idxs);
 
-        Some(reorder_project.into())
+        Ok(Some(reorder_project.into()))
     }
 }
 

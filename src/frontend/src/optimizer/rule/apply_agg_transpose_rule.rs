@@ -16,10 +16,10 @@ use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ApplyOffsetRewriter, BoxedRule, Rule};
+use super::{ApplyOffsetRewriter, BoxedRule, Result, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::Agg;
-use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalFilter, LogicalProject};
+use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalProject};
 use crate::optimizer::PlanRef;
 use crate::utils::{Condition, IndexSet};
 
@@ -46,12 +46,22 @@ use crate::utils::{Condition, IndexSet};
 /// ```
 pub struct ApplyAggTransposeRule {}
 impl Rule for ApplyAggTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply: &LogicalApply = plan.as_logical_apply()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let apply = plan.as_logical_apply();
+        if apply.is_none() {
+            return Ok(None);
+        }
+        let apply = apply.unwrap();
+
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-        let agg: &LogicalAgg = right.as_logical_agg()?;
+        let agg = right.as_logical_agg();
+        if agg.is_none() {
+            return Ok(None);
+        }
+        let agg = agg.unwrap();
+
         let (mut agg_calls, agg_group_key, grouping_sets, agg_input, enable_two_phase) =
             agg.clone().decompose();
         assert!(grouping_sets.is_empty());
@@ -60,7 +70,7 @@ impl Rule for ApplyAggTransposeRule {
 
         if !is_scalar_agg && max_one_row {
             // We can only eliminate max_one_row for scalar aggregation.
-            return None;
+            return Ok(None);
         }
 
         let input = if is_scalar_agg {
@@ -200,7 +210,7 @@ impl Rule for ApplyAggTransposeRule {
         };
 
         let filter = LogicalFilter::create(group_agg, on);
-        Some(filter)
+        Ok(Some(filter))
     }
 }
 

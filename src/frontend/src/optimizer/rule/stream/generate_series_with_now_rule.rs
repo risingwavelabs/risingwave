@@ -18,16 +18,22 @@ use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::{generic, LogicalNow};
 use crate::optimizer::rule::{BoxedRule, Rule};
+use crate::optimizer::Result;
 use crate::PlanRef;
 
 pub struct GenerateSeriesWithNowRule {}
 impl Rule for GenerateSeriesWithNowRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
         let ctx = plan.ctx();
-        let table_func = plan.as_logical_table_function()?.table_function();
+        let table_func = plan.as_logical_table_function();
+        if table_func.is_none() {
+            return Ok(None);
+        }
+        let table_func = table_func.unwrap();
+        let table_func = table_func.table_function();
 
         if !table_func.args.iter().any(|arg| arg.has_now()) {
-            return None;
+            return Ok(None);
         }
 
         if !(table_func.function_type == PbTableFuncType::GenerateSeries
@@ -41,7 +47,7 @@ impl Rule for GenerateSeriesWithNowRule {
                 "`now()` is currently only supported in `generate_series(timestamptz, timestamptz, interval)` function as `stop`. \
                 You may not using it correctly. Please kindly check the document."
             );
-            return None;
+            return Ok(None);
         }
 
         let start_timestamp = ctx
@@ -65,17 +71,17 @@ impl Rule for GenerateSeriesWithNowRule {
             ctx.warn_to_user(
                 "When using `generate_series` with `now()`, the `start` and `step` must be non-NULL constants",
             );
-            return None;
+            return Ok(None);
         }
 
-        Some(
+        Ok(Some(
             LogicalNow::new(generic::Now::generate_series(
                 ctx,
                 start_timestamp.unwrap().into_timestamptz(),
                 interval.unwrap().into_interval(),
             ))
             .into(),
-        )
+        ))
     }
 }
 

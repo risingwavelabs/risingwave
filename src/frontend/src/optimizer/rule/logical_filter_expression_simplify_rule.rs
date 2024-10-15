@@ -18,6 +18,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::ScalarImpl;
 use risingwave_connector::source::DataType;
 
+use super::Result;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall};
 use crate::optimizer::plan_expr_visitor::strong::Strong;
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, PlanTreeNodeUnary};
@@ -36,8 +37,12 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
     ///
     /// NOTE: `e` should only contain at most a single column
     /// otherwise we will not conduct the optimization
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let filter: &LogicalFilter = plan.as_logical_filter()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let filter = plan.as_logical_filter();
+        if filter.is_none() {
+            return Ok(None);
+        }
+        let filter = filter.unwrap();
 
         // rewrite the entire condition first
         // i.e., the specific optimization that will apply to the entire condition
@@ -49,7 +54,7 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
 
         // then rewrite single expression via `rewrite_exprs`
         let mut expr_rewriter = ExpressionSimplifyRewriter {};
-        Some(filter.rewrite_exprs(&mut expr_rewriter))
+        Ok(Some(filter.rewrite_exprs(&mut expr_rewriter)))
     }
 }
 

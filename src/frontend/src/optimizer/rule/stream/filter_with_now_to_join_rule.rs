@@ -20,15 +20,19 @@ use crate::optimizer::plan_node::generic::{self, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
 use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use crate::optimizer::{PlanRef, Result};
 use crate::utils::Condition;
 
 /// Convert `LogicalFilter` with now in predicate to left-semi `LogicalJoin`
 /// Only applies to stream.
 pub struct FilterWithNowToJoinRule {}
 impl Rule for FilterWithNowToJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let filter: &LogicalFilter = plan.as_logical_filter()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let filter = plan.as_logical_filter();
+        if filter.is_none() {
+            return Ok(None);
+        }
+        let filter = filter.unwrap();
 
         let lhs_len = filter.base.schema().len();
 
@@ -56,7 +60,7 @@ impl Rule for FilterWithNowToJoinRule {
 
         // Ignore no now filter
         if now_filters.is_empty() {
-            return None;
+            return Ok(None);
         }
         let mut new_plan = plan.inputs()[0].clone();
 
@@ -84,7 +88,7 @@ impl Rule for FilterWithNowToJoinRule {
             .into();
         }
 
-        Some(new_plan)
+        Ok(Some(new_plan))
     }
 }
 

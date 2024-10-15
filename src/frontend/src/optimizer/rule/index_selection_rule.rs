@@ -60,7 +60,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::AsOf;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::catalog::IndexCatalog;
 use crate::expr::{
     to_conjunctions, to_disjunctions, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
@@ -90,11 +90,16 @@ const MAX_CONJUNCTION_SIZE: usize = 8;
 pub struct IndexSelectionRule {}
 
 impl Rule for IndexSelectionRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let logical_scan: &LogicalScan = plan.as_logical_scan()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let logical_scan = plan.as_logical_scan();
+        if logical_scan.is_none() {
+            return Ok(None);
+        }
+        let logical_scan = logical_scan.unwrap();
+
         let indexes = logical_scan.indexes();
         if indexes.is_empty() {
-            return None;
+            return Ok(None);
         }
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
         let primary_cost = min(
@@ -104,7 +109,7 @@ impl Rule for IndexSelectionRule {
 
         // If it is a primary lookup plan, avoid checking other indexes.
         if primary_cost.primary_lookup {
-            return None;
+            return Ok(None);
         }
 
         let mut final_plan: PlanRef = logical_scan.clone().into();
@@ -143,9 +148,9 @@ impl Rule for IndexSelectionRule {
         }
 
         if min_cost == primary_cost {
-            None
+            Ok(None)
         } else {
-            Some(final_plan)
+            Ok(Some(final_plan))
         }
     }
 }

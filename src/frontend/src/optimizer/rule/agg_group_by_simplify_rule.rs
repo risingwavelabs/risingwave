@@ -15,7 +15,7 @@
 use risingwave_expr::aggregate::PbAggKind;
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::expr::InputRef;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::utils::{Condition, IndexSet};
@@ -27,16 +27,20 @@ use crate::utils::{Condition, IndexSet};
 /// group by b, `first_value`(a), `first_value`(c),
 pub struct AggGroupBySimplifyRule {}
 impl Rule for AggGroupBySimplifyRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let agg: &LogicalAgg = plan.as_logical_agg()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let plan = plan.as_logical_agg();
+        if plan.is_none() {
+            return Ok(None);
+        }
+        let agg = plan.unwrap();
         let (agg_calls, group_key, grouping_sets, agg_input, _two_phase) = agg.clone().decompose();
         if !grouping_sets.is_empty() {
-            return None;
+            return Ok(None);
         }
         let functional_dependency = agg_input.functional_dependency();
         let group_key = group_key.to_vec();
         if !functional_dependency.is_key(&group_key) {
-            return None;
+            return Ok(None);
         }
         let minimized_group_key = functional_dependency.minimize_key(&group_key);
         if minimized_group_key.len() < group_key.len() {
@@ -77,9 +81,11 @@ impl Rule for AggGroupBySimplifyRule {
             }
             let new_agg = Agg::new(new_agg_calls, new_group_key, agg.input());
 
-            Some(LogicalProject::with_out_col_idx(new_agg.into(), out_fields.into_iter()).into())
+            Ok(Some(
+                LogicalProject::with_out_col_idx(new_agg.into(), out_fields.into_iter()).into(),
+            ))
         } else {
-            None
+            Ok(None)
         }
     }
 }

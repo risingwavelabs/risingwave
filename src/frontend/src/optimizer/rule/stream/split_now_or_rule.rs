@@ -17,7 +17,7 @@ use risingwave_common::types::DataType;
 use crate::expr::{ExprImpl, ExprType, FunctionCall};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalShare, LogicalUnion, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use crate::optimizer::{PlanRef, Result};
 
 /// Convert `LogicalFilter` with now or others predicates to a `UNION ALL`
 ///
@@ -43,18 +43,27 @@ use crate::optimizer::PlanRef;
 /// ```text
 pub struct SplitNowOrRule {}
 impl Rule for SplitNowOrRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let filter: &LogicalFilter = plan.as_logical_filter()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let filter = plan.as_logical_filter();
+        if filter.is_none() {
+            return Ok(None);
+        }
+        let filter = filter.unwrap();
+
         let input = filter.input();
 
         if filter.predicate().conjunctions.len() != 1 {
-            return None;
+            return Ok(None);
         }
 
-        let disjunctions = filter.predicate().conjunctions[0].as_or_disjunctions()?;
+        let disjunctions = filter.predicate().conjunctions[0].as_or_disjunctions();
+        if disjunctions.is_none() {
+            return Ok(None);
+        }
+        let disjunctions = disjunctions.unwrap();
 
         if disjunctions.len() < 2 {
-            return None;
+            return Ok(None);
         }
 
         let (now, others): (Vec<ExprImpl>, Vec<ExprImpl>) =
@@ -62,7 +71,7 @@ impl Rule for SplitNowOrRule {
 
         // Only support now in one arm of disjunctions
         if now.len() != 1 {
-            return None;
+            return Ok(None);
         }
 
         // A or B or C ... or Z
@@ -79,7 +88,7 @@ impl Rule for SplitNowOrRule {
         let filter1 = LogicalFilter::create_with_expr(share.clone(), arm1);
         let filter2 = LogicalFilter::create_with_expr(share.clone(), arm2);
         let union_all = LogicalUnion::create(true, vec![filter1, filter2]);
-        Some(union_all)
+        Ok(Some(union_all))
     }
 }
 

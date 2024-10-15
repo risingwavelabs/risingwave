@@ -494,7 +494,7 @@ impl ToBatch for LogicalScan {
 
         if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
-            if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
+            if let Some(applied) = index_selection_rule.apply(new.clone().into())? {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
                     return required_order.enforce_if_not_satisfies(scan.to_batch()?);

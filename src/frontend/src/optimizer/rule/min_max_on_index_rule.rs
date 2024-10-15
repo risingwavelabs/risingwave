@@ -25,7 +25,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
@@ -38,16 +38,21 @@ use crate::utils::{Condition, IndexSet};
 pub struct MinMaxOnIndexRule {}
 
 impl Rule for MinMaxOnIndexRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let logical_agg: &LogicalAgg = plan.as_logical_agg()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let logical_agg = plan.as_logical_agg();
+        if logical_agg.is_none() {
+            return Ok(None);
+        }
+        let logical_agg = logical_agg.unwrap();
+
         if !logical_agg.group_key().is_empty() {
-            return None;
+            return Ok(None);
         }
         let calls = logical_agg.agg_calls();
         if calls.is_empty() {
-            return None;
+            return Ok(None);
         }
-        let first_call = calls.iter().exactly_one().ok()?;
+        let first_call = calls.iter().exactly_one().unwrap();
 
         if matches!(
             first_call.agg_type,
@@ -56,14 +61,31 @@ impl Rule for MinMaxOnIndexRule {
             && first_call.filter.always_true()
             && first_call.order_by.is_empty()
         {
-            let logical_scan: LogicalScan = logical_agg.input().as_logical_scan()?.to_owned();
-            let kind = &calls.first()?.agg_type;
-            if !logical_scan.predicate().always_true() {
-                return None;
+            let input = logical_agg.input();
+            let logical_scan = input.as_logical_scan();
+            if logical_scan.is_none() {
+                return Ok(None);
             }
+            let logical_scan = logical_scan.unwrap().to_owned();
+
+            let first = calls.first();
+            if first.is_none() {
+                return Ok(None);
+            }
+            let first = first.unwrap();
+
+            let kind = &first.agg_type;
+            if !logical_scan.predicate().always_true() {
+                return Ok(None);
+            }
+            let inputs_first = first.inputs.first();
+            if inputs_first.is_none() {
+                return Ok(None);
+            }
+            let inputs_first = inputs_first.unwrap();
             let order = Order {
                 column_orders: vec![ColumnOrder::new(
-                    calls.first()?.inputs.first()?.index(),
+                    inputs_first.index(),
                     if matches!(kind, AggType::Builtin(PbAggKind::Min)) {
                         OrderType::ascending()
                     } else {
@@ -72,12 +94,12 @@ impl Rule for MinMaxOnIndexRule {
                 )],
             };
             if let Some(p) = self.try_on_index(logical_agg, logical_scan.clone(), &order) {
-                Some(p)
+                Ok(Some(p))
             } else {
-                self.try_on_pk(logical_agg, logical_scan, &order)
+                Ok(self.try_on_pk(logical_agg, logical_scan, &order))
             }
         } else {
-            None
+            Ok(None)
         }
     }
 }

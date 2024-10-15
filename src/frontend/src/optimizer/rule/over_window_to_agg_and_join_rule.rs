@@ -25,6 +25,7 @@ use crate::optimizer::plan_node::{
 use crate::utils::{Condition, GroupBy};
 use crate::PlanRef;
 pub struct OverWindowToAggAndJoinRule;
+use super::Result;
 
 impl OverWindowToAggAndJoinRule {
     pub fn create() -> Box<dyn Rule> {
@@ -33,15 +34,20 @@ impl OverWindowToAggAndJoinRule {
 }
 
 impl Rule for OverWindowToAggAndJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let over_window = plan.as_logical_over_window()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let over_window = plan.as_logical_over_window();
+        if over_window.is_none() {
+            return Ok(None);
+        }
+        let over_window = over_window.unwrap();
+
         let window_functions = over_window.window_functions();
         if window_functions.iter().any(|window| {
             !(window.order_by.is_empty()
                 && window.frame.bounds.start_is_unbounded()
                 && window.frame.bounds.end_is_unbounded())
         }) {
-            return None;
+            return Ok(None);
         }
         // This rule should be applied after OverWindowSplitByWindowRule.
         let group_exprs: Vec<ExprImpl> = window_functions[0]
@@ -59,11 +65,14 @@ impl Rule for OverWindowToAggAndJoinRule {
                     OrderBy::any(),
                     Condition::true_cond(),
                     vec![],
-                )
-                .ok()?;
+                );
+                if agg_call.is_err() {
+                    return Ok(None);
+                }
+                let agg_call = agg_call.unwrap();
                 select_exprs.push(agg_call.into());
             } else {
-                return None;
+                return Ok(None);
             }
         }
 
@@ -73,13 +82,17 @@ impl Rule for OverWindowToAggAndJoinRule {
             out_fields.push(input_len + group_exprs.len() + i);
         }
         let common_input = LogicalShare::create(over_window.input());
-        let (agg, ..) = LogicalAgg::create(
+        let agg_result = LogicalAgg::create(
             select_exprs,
             GroupBy::GroupKey(group_exprs),
             None,
             common_input.clone(),
-        )
-        .ok()?;
+        );
+        if agg_result.is_err() {
+            return Ok(None);
+        }
+        let (agg, ..) = agg_result.unwrap();
+
         let on_clause = window_functions[0].partition_by.iter().enumerate().fold(
             Condition::true_cond(),
             |on_clause, (idx, x)| {
@@ -96,12 +109,12 @@ impl Rule for OverWindowToAggAndJoinRule {
                 ))
             },
         );
-        Some(
+        Ok(Some(
             LogicalProject::with_out_col_idx(
                 LogicalJoin::new(common_input, agg, JoinType::Inner, on_clause).into(),
                 out_fields.into_iter(),
             )
             .into(),
-        )
+        ))
     }
 }

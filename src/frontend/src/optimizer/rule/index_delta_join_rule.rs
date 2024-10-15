@@ -17,16 +17,21 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::StreamScanType;
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 
 /// Use index scan and delta joins for supported queries.
 pub struct IndexDeltaJoinRule {}
 
 impl Rule for IndexDeltaJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let join = plan.as_stream_hash_join()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let join = plan.as_stream_hash_join();
+        if join.is_none() {
+            return Ok(None);
+        }
+        let join = join.unwrap();
+
         if join.eq_join_predicate().has_non_eq() || join.join_type() != JoinType::Inner {
-            return Some(plan);
+            return Ok(Some(plan));
         }
 
         /// FIXME: Exchanges still may exist after table scan, because table scan's distribution
@@ -42,10 +47,30 @@ impl Rule for IndexDeltaJoinRule {
             }
         }
 
-        let input_left_dyn = match_through_exchange(join.inputs()[0].clone())?;
-        let input_left = input_left_dyn.as_stream_table_scan()?;
-        let input_right_dyn = match_through_exchange(join.inputs()[1].clone())?;
-        let input_right = input_right_dyn.as_stream_table_scan()?;
+        let input_left_dyn = match_through_exchange(join.inputs()[0].clone());
+        if input_left_dyn.is_none() {
+            return Ok(None);
+        }
+        let input_left_dyn = input_left_dyn.unwrap();
+
+        let input_left = input_left_dyn.as_stream_table_scan();
+        if input_left.is_none() {
+            return Ok(None);
+        }
+        let input_left = input_left.unwrap();
+
+        let input_right_dyn = match_through_exchange(join.inputs()[1].clone());
+        if input_right_dyn.is_none() {
+            return Ok(None);
+        }
+        let input_right_dyn = input_right_dyn.unwrap();
+
+        let input_right = input_right_dyn.as_stream_table_scan();
+        if input_right.is_none() {
+            return Ok(None);
+        }
+        let input_right = input_right.unwrap();
+
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();
 
@@ -145,17 +170,17 @@ impl Rule for IndexDeltaJoinRule {
             {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
-                Some(
+                Ok(Some(
                     join.clone()
                         .into_delta_join()
                         .clone_with_left_right(left, right)
                         .into(),
-                )
+                ))
             } else {
-                Some(plan)
+                Ok(Some(plan))
             }
         } else {
-            Some(plan)
+            Ok(Some(plan))
         }
     }
 }

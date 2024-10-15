@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
 use crate::optimizer::PlanRef;
@@ -20,15 +20,20 @@ use crate::optimizer::PlanRef;
 /// Convert union to distinct + union all
 pub struct UnionToDistinctRule {}
 impl Rule for UnionToDistinctRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let union: &LogicalUnion = plan.as_logical_union()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let union = plan.as_logical_union();
+        if union.is_none() {
+            return Ok(None);
+        }
+        let union = union.unwrap();
+
         if !union.all() {
             let union_all = LogicalUnion::create(true, union.inputs().into_iter().collect());
             let distinct = Agg::new(vec![], (0..union.base.schema().len()).collect(), union_all)
                 .with_enable_two_phase(false);
-            Some(distinct.into())
+            Ok(Some(distinct.into()))
         } else {
-            None
+            Ok(None)
         }
     }
 }

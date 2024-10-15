@@ -14,7 +14,7 @@
 
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalHopWindow};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -42,15 +42,25 @@ use crate::utils::Condition;
 /// ```
 pub struct ApplyHopWindowTransposeRule {}
 impl Rule for ApplyHopWindowTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply: &LogicalApply = plan.as_logical_apply()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let apply = plan.as_logical_apply();
+        if apply.is_none() {
+            return Ok(None);
+        }
+        let apply = apply.unwrap();
+
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
-        let hop_window: &LogicalHopWindow = right.as_logical_hop_window()?;
+        let hop_window = right.as_logical_hop_window();
+        if hop_window.is_none() {
+            return Ok(None);
+        }
+        let hop_window = hop_window.unwrap();
+
         assert_eq!(join_type, JoinType::Inner);
 
         if !hop_window.output_indices_are_trivial() {
-            return None;
+            return Ok(None);
         }
 
         let (hop_window_input, time_col, window_slide, window_size, window_offset, _output_indices) =
@@ -59,7 +69,7 @@ impl Rule for ApplyHopWindowTransposeRule {
         let apply_left_len = left.schema().len() as isize;
 
         if max_one_row {
-            return None;
+            return Ok(None);
         }
 
         let new_apply = LogicalApply::create(
@@ -81,7 +91,7 @@ impl Rule for ApplyHopWindowTransposeRule {
         );
 
         let filter = LogicalFilter::create(new_hop_window, on);
-        Some(filter)
+        Ok(Some(filter))
     }
 }
 

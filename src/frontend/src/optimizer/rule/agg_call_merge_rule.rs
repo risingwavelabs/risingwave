@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary};
 use crate::PlanRef;
@@ -21,9 +21,12 @@ use crate::PlanRef;
 pub struct AggCallMergeRule {}
 
 impl Rule for AggCallMergeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let agg = plan.as_logical_agg()?;
-
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let plan = plan.as_logical_agg();
+        if plan.is_none() {
+            return Ok(None);
+        }
+        let agg = plan.unwrap();
         let calls = agg.agg_calls();
         let mut new_calls = Vec::with_capacity(calls.len());
         let mut out_fields = (0..agg.group_key().len()).collect::<Vec<_>>();
@@ -38,12 +41,14 @@ impl Rule for AggCallMergeRule {
 
         if calls.len() == new_calls.len() {
             // no change
-            None
+            Ok(None)
         } else {
             let new_agg = Agg::new(new_calls, agg.group_key().clone(), agg.input())
                 .with_enable_two_phase(agg.core().two_phase_agg_enabled())
                 .into();
-            Some(LogicalProject::with_out_col_idx(new_agg, out_fields.into_iter()).into())
+            Ok(Some(
+                LogicalProject::with_out_col_idx(new_agg, out_fields.into_iter()).into(),
+            ))
         }
     }
 }

@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
+use super::{BoxedRule, Result, Rule};
+use crate::optimizer::plan_node::PlanTreeNode;
 use crate::optimizer::PlanRef;
 
 pub struct UnionMergeRule {}
 impl Rule for UnionMergeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let top_union: &LogicalUnion = plan.as_logical_union()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let top_union = plan.as_logical_union();
+        if top_union.is_none() {
+            return Ok(None);
+        }
+        let top_union = top_union.unwrap();
+
         let top_all = top_union.all();
         let mut new_inputs = vec![];
         let mut has_merge = false;
@@ -35,9 +40,9 @@ impl Rule for UnionMergeRule {
         }
 
         if has_merge {
-            Some(top_union.clone_with_inputs(&new_inputs))
+            Ok(Some(top_union.clone_with_inputs(&new_inputs)))
         } else {
-            None
+            Ok(None)
         }
     }
 }

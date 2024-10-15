@@ -18,9 +18,9 @@ use std::str::from_utf8;
 use risingwave_common::types::ScalarImpl;
 use risingwave_connector::source::DataType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal};
-use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
+use crate::optimizer::plan_node::ExprRewritable;
 use crate::optimizer::PlanRef;
 
 /// `RewriteLikeExprRule` rewrites like expression, so that it can benefit from index selection.
@@ -29,17 +29,22 @@ use crate::optimizer::PlanRef;
 /// col like 'ABC%E' => col >= 'ABC' and col < 'ABD' and col like 'ABC%E'
 pub struct RewriteLikeExprRule {}
 impl Rule for RewriteLikeExprRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let filter: &LogicalFilter = plan.as_logical_filter()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let filter = plan.as_logical_filter();
+        if filter.is_none() {
+            return Ok(None);
+        }
+        let filter = filter.unwrap();
+
         if filter.predicate().conjunctions.iter().any(|expr| {
             let mut has_like = HasLikeExprVisitor { has: false };
             has_like.visit_expr(expr);
             has_like.has
         }) {
             let mut rewriter = LikeExprRewriter {};
-            Some(filter.rewrite_exprs(&mut rewriter))
+            Ok(Some(filter.rewrite_exprs(&mut rewriter)))
         } else {
-            None
+            Ok(None)
         }
     }
 }

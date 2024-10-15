@@ -12,23 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalApply, LogicalJoin};
+use super::{BoxedRule, Result, Rule};
+use crate::optimizer::plan_node::LogicalJoin;
 use crate::optimizer::PlanRef;
 
 /// Convert `LogicalApply` to `LogicalJoin` if it is uncorrelated and doesn't require max one row
 /// restriction.
 pub struct ApplyToJoinRule {}
 impl Rule for ApplyToJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply: &LogicalApply = plan.as_logical_apply()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let apply = plan.as_logical_apply();
+        if apply.is_none() {
+            return Ok(None);
+        }
+        let apply = apply.unwrap();
+
         let (left, right, on, join_type, _correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
 
         if !max_one_row && correlated_indices.is_empty() {
-            Some(LogicalJoin::new(left, right, join_type, on).into())
+            Ok(Some(LogicalJoin::new(left, right, join_type, on).into()))
         } else {
-            None
+            Ok(None)
         }
     }
 }

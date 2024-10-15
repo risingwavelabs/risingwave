@@ -19,7 +19,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_expr_visitor::Strong;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode, GenericPlanRef};
@@ -62,19 +62,24 @@ use crate::utils::{Condition, IndexSet};
 
 pub struct PullUpCorrelatedPredicateAggRule {}
 impl Rule for PullUpCorrelatedPredicateAggRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
         let top_filter = if let Some(top_filter) = plan.as_logical_filter() {
             top_filter.clone()
         } else {
             LogicalFilter::new(plan.clone(), Condition::true_cond())
         };
         let top_filter_input = top_filter.input();
-        let apply = top_filter_input.as_logical_apply()?;
+        let apply = top_filter_input.as_logical_apply();
+        if apply.is_none() {
+            return Ok(None);
+        }
+        let apply = apply.unwrap();
+
         let (apply_left, apply_right, apply_on, join_type, correlated_id, _, max_one_row) =
             apply.clone().decompose();
 
         if max_one_row {
-            return None;
+            return Ok(None);
         }
 
         let top_project = if let Some(project) = apply_right.as_logical_project() {
@@ -88,12 +93,17 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         let (top_proj_exprs, _) = top_project.clone().decompose();
 
         let input = top_project.input();
-        let agg: &LogicalAgg = input.as_logical_agg()?;
+        let agg = input.as_logical_agg();
+        if agg.is_none() {
+            return Ok(None);
+        }
+        let agg = agg.unwrap();
+
         let (agg_calls, group_key, grouping_sets, input, _enable_two_phase) =
             agg.clone().decompose();
         // It could be too restrictive to require the group key to be empty. We can relax this in the future if necessary.
         if !group_key.is_empty() {
-            return None;
+            return Ok(None);
         }
         assert!(grouping_sets.is_empty());
         let bottom_project = if let Some(project) = input.as_logical_project() {
@@ -106,7 +116,11 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         };
         let (mut bottom_proj_exprs, _) = bottom_project.clone().decompose();
         let bottom_project_input = bottom_project.input();
-        let bottom_filter: &LogicalFilter = bottom_project_input.as_logical_filter()?;
+        let bottom_filter = bottom_project_input.as_logical_filter();
+        if bottom_filter.is_none() {
+            return Ok(None);
+        }
+        let bottom_filter = bottom_filter.unwrap();
 
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
@@ -129,10 +143,10 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
                 if cor_input_ref.correlated_id() == correlated_id {
                     cor_eq_exprs.push((input_ref, cor_input_ref));
                 } else {
-                    return None;
+                    return Ok(None);
                 }
             } else {
-                return None;
+                return Ok(None);
             }
         }
         let cor_eq_exprs_len = cor_eq_exprs.len();
@@ -175,7 +189,7 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
 
             // If no null agg, bail out.
             if null_agg_pos.is_empty() {
-                return None;
+                return Ok(None);
             }
 
             // Try to prove that the expression is null-rejected by the top filter when not-count-aggs are null.
@@ -201,7 +215,7 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
                 .iter()
                 .any(|expr| !Strong::is_null(expr, top_proj_null_bitset.clone()))
             {
-                return None;
+                return Ok(None);
             }
         }
 
@@ -263,7 +277,7 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         let mut plan_correlated_id_finder = PlanCorrelatedIdFinder::default();
         plan_correlated_id_finder.visit(new_top_proj.clone());
         if plan_correlated_id_finder.contains(&correlated_id) {
-            return None;
+            return Ok(None);
         }
 
         // Merge these expressions with LogicalApply into LogicalJoin.
@@ -281,9 +295,9 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         .into();
 
         if top_filter.predicate().always_true() {
-            Some(new_join)
+            Ok(Some(new_join))
         } else {
-            Some(top_filter.clone_with_input(new_join).into())
+            Ok(Some(top_filter.clone_with_input(new_join).into()))
         }
     }
 }

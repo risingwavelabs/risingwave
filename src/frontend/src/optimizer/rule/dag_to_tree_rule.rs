@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::optimizer::plan_node::{LogicalShare, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
 
 pub struct DagToTreeRule {}
 impl Rule for DagToTreeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
         let mut inputs = plan.inputs();
         let mut has_share = false;
         for i in 0..inputs.len() {
@@ -30,9 +30,9 @@ impl Rule for DagToTreeRule {
         }
 
         if has_share {
-            Some(plan.clone_with_inputs(&inputs))
+            Ok(Some(plan.clone_with_inputs(&inputs)))
         } else {
-            None
+            Ok(None)
         }
     }
 }

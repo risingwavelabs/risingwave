@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::optimizer::plan_node::{LogicalApply, LogicalMaxOneRow};
 use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::PlanRef;
@@ -27,13 +27,18 @@ use crate::optimizer::PlanRef;
 /// after applying this rule.
 pub struct MaxOneRowEliminateRule {}
 impl Rule for MaxOneRowEliminateRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply: &LogicalApply = plan.as_logical_apply()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let apply = plan.as_logical_apply();
+        if apply.is_none() {
+            return Ok(None);
+        }
+        let apply = apply.unwrap();
+
         let (left, mut right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
 
         if !max_one_row {
-            return None;
+            return Ok(None);
         }
 
         if !right.max_one_row() {
@@ -41,7 +46,7 @@ impl Rule for MaxOneRowEliminateRule {
             debug_assert!(right.max_one_row());
         }
 
-        Some(LogicalApply::create(
+        Ok(Some(LogicalApply::create(
             left,
             right,
             join_type,
@@ -49,7 +54,7 @@ impl Rule for MaxOneRowEliminateRule {
             correlated_id,
             correlated_indices,
             false,
-        ))
+        )))
     }
 }
 

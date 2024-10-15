@@ -15,21 +15,29 @@
 use itertools::Itertools;
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, Result, Rule};
 use crate::utils::IndexSet;
 
 /// Merge [`LogicalAgg`] <- [`LogicalProject`] to [`LogicalAgg`].
 pub struct AggProjectMergeRule {}
 impl Rule for AggProjectMergeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let agg = plan.as_logical_agg()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let plan = plan.as_logical_agg();
+        if plan.is_none() {
+            return Ok(None);
+        }
+        let agg = plan.unwrap();
         let agg = agg.core().clone();
         assert!(agg.grouping_sets.is_empty());
         let old_input = agg.input.clone();
-        let proj = old_input.as_logical_project()?;
+        let proj = old_input.as_logical_project();
+        if proj.is_none() {
+            return Ok(None);
+        }
+        let proj = proj.unwrap();
         // only apply when the input proj is all input-ref
         if !proj.is_all_inputref() {
-            return None;
+            return Ok(None);
         }
         let proj_o2i = proj.o2i_col_mapping();
 
@@ -60,9 +68,11 @@ impl Rule for AggProjectMergeRule {
                     new_agg_group_keys_cardinality
                         ..new_agg_group_keys_cardinality + agg.agg_calls.len(),
                 );
-            Some(LogicalProject::with_out_col_idx(agg.into(), out_col_idx).into())
+            Ok(Some(
+                LogicalProject::with_out_col_idx(agg.into(), out_col_idx).into(),
+            ))
         } else {
-            Some(agg.into())
+            Ok(Some(agg.into()))
         }
     }
 }

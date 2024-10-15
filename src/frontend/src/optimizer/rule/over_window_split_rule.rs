@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 
-use super::Rule;
+use super::{Result, Rule};
 use crate::PlanRef;
 
 pub struct OverWindowSplitRule;
@@ -28,8 +28,13 @@ impl OverWindowSplitRule {
 }
 
 impl Rule for OverWindowSplitRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let over_window = plan.as_logical_over_window()?;
+    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+        let over_window = plan.as_logical_over_window();
+        if over_window.is_none() {
+            return Ok(None);
+        }
+        let over_window = over_window.unwrap();
+
         let mut rank_func_seq = 0;
         let groups: HashMap<_, _> = over_window
             .window_functions()
@@ -45,6 +50,8 @@ impl Rule for OverWindowSplitRule {
                 ((&func.order_by, &func.partition_by, func_seq), idx)
             })
             .into_group_map();
-        Some(over_window.split_with_rule(groups.into_values().sorted().collect()))
+        Ok(Some(
+            over_window.split_with_rule(groups.into_values().sorted().collect()),
+        ))
     }
 }
