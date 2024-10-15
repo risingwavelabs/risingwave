@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
@@ -23,9 +24,7 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{
     GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
 };
-use risingwave_hummock_sdk::{
-    CompactionGroupId, FrontendHummockVersionDelta, HummockEpoch, HummockVersionId,
-};
+use risingwave_hummock_sdk::{CompactionGroupId, FrontendHummockVersionDelta, HummockVersionId};
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionDeltas,
     HummockVersionStats, StateTableInfoDelta,
@@ -113,9 +112,8 @@ impl<'a> HummockVersionTransaction<'a> {
     /// Returns a duplicate delta, used by time travel.
     pub(super) fn pre_commit_epoch(
         &mut self,
-        committed_epoch: HummockEpoch,
-        tables_to_commit: &HashSet<TableId>,
-        new_compaction_group: Option<(CompactionGroupId, CompactionConfig)>,
+        tables_to_commit: &HashMap<TableId, u64>,
+        new_compaction_groups: HashMap<CompactionGroupId, Arc<CompactionConfig>>,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
         new_table_ids: &HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -125,7 +123,7 @@ impl<'a> HummockVersionTransaction<'a> {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
-        if let Some((compaction_group_id, compaction_group_config)) = new_compaction_group {
+        for (compaction_group_id, compaction_group_config) in new_compaction_groups {
             {
                 let group_deltas = &mut new_version_delta
                     .group_deltas
@@ -135,7 +133,7 @@ impl<'a> HummockVersionTransaction<'a> {
 
                 #[expect(deprecated)]
                 group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
-                    group_config: Some(compaction_group_config.clone()),
+                    group_config: Some((*compaction_group_config).clone()),
                     group_id: compaction_group_id,
                     parent_group_id: StaticCompactionGroupId::NewCompactionGroup
                         as CompactionGroupId,
@@ -149,18 +147,6 @@ impl<'a> HummockVersionTransaction<'a> {
 
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
-            let l0_sub_level_id = new_version_delta
-                .latest_version()
-                .levels
-                .get(&compaction_group_id)
-                .and_then(|levels| {
-                    levels
-                        .l0
-                        .sub_levels
-                        .last()
-                        .map(|level| level.sub_level_id + 1)
-                })
-                .unwrap_or(committed_epoch);
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
@@ -168,7 +154,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .group_deltas;
             let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
                 0,
-                l0_sub_level_id,
+                0,      // l0_sub_level_id will be generated during apply_version_delta
                 vec![], // default
                 inserted_table_infos,
                 0, // default
@@ -185,6 +171,7 @@ impl<'a> HummockVersionTransaction<'a> {
                     "newly added table exists previously: {:?}",
                     table_id
                 );
+                let committed_epoch = *tables_to_commit.get(table_id).expect("newly added table must exist in tables_to_commit");
                 delta.state_table_info_delta.insert(
                     *table_id,
                     StateTableInfoDelta {
@@ -194,7 +181,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 );
             }
 
-            for table_id in tables_to_commit {
+            for (table_id, committed_epoch) in tables_to_commit {
                 if new_table_ids.contains_key(table_id) {
                     continue;
                 }
@@ -206,7 +193,7 @@ impl<'a> HummockVersionTransaction<'a> {
                     .insert(
                         *table_id,
                         StateTableInfoDelta {
-                            committed_epoch,
+                            committed_epoch: *committed_epoch,
                             compaction_group_id: info.compaction_group_id,
                         }
                     )

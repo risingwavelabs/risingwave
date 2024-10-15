@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
+    HummockContextId, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
@@ -188,8 +188,7 @@ impl HummockManager {
 
     pub async fn commit_epoch_sanity_check(
         &self,
-        committed_epoch: HummockEpoch,
-        tables_to_commit: &HashSet<TableId>,
+        tables_to_commit: &HashMap<TableId, u64>,
         sstables: &[LocalSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
@@ -215,9 +214,9 @@ impl HummockManager {
         }
 
         // sanity check on monotonically increasing table committed epoch
-        for table_id in tables_to_commit {
+        for (table_id, committed_epoch) in tables_to_commit {
             if let Some(info) = current_version.state_table_info.info().get(table_id) {
-                if committed_epoch <= info.committed_epoch {
+                if *committed_epoch <= info.committed_epoch {
                     return Err(anyhow::anyhow!(
                         "table {} Epoch {} <= committed_epoch {}",
                         table_id,
@@ -264,7 +263,6 @@ impl HummockManager {
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {
                     sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context.clone(),
-                    epoch: committed_epoch,
                 }))
                 .is_err()
             {

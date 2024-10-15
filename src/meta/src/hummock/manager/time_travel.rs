@@ -383,8 +383,7 @@ impl HummockManager {
         delta: HummockVersionDelta,
         group_parents: &HashMap<CompactionGroupId, CompactionGroupId>,
         skip_sst_ids: &HashSet<HummockSstableId>,
-        tables_to_commit: impl Iterator<Item = (&TableId, &CompactionGroupId)>,
-        committed_epoch: u64,
+        tables_to_commit: impl Iterator<Item = (&TableId, &CompactionGroupId, u64)>,
     ) -> Result<Option<HashSet<HummockSstableId>>> {
         let select_groups = group_parents
             .iter()
@@ -421,7 +420,7 @@ impl HummockManager {
             Ok(count)
         }
 
-        for (table_id, cg_id) in tables_to_commit {
+        for (table_id, cg_id, committed_epoch) in tables_to_commit {
             if !select_groups.contains(cg_id) {
                 continue;
             }

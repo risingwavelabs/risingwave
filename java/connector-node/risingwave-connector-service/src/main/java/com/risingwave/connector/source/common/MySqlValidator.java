@@ -227,9 +227,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 }
             }
 
-            if (!isPrimaryKeyMatch(tableSchema, pkFields)) {
-                throw ValidatorUtils.invalidArgument("Primary key mismatch");
-            }
+            primaryKeyCheck(tableSchema, pkFields);
         }
     }
 
@@ -240,16 +238,24 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         }
     }
 
-    private boolean isPrimaryKeyMatch(TableSchema sourceSchema, Set<String> pkFields) {
+    private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields)
+            throws RuntimeException {
         if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
-            return false;
+            throw ValidatorUtils.invalidArgument(
+                    "Primary key mismatch: the SQL schema defines "
+                            + sourceSchema.getPrimaryKeys().size()
+                            + " primary key columns, but the source table in MySQL has "
+                            + pkFields.size()
+                            + " columns.");
         }
         for (var colName : sourceSchema.getPrimaryKeys()) {
             if (!pkFields.contains(colName.toLowerCase())) {
-                return false;
+                throw ValidatorUtils.invalidArgument(
+                        "Primary key mismatch: The primary key list of the source table in MySQL does not contain '"
+                                + colName
+                                + "'.");
             }
         }
-        return true;
     }
 
     private boolean isDataTypeCompatible(String mysqlDataType, Data.DataType.TypeName typeName) {
