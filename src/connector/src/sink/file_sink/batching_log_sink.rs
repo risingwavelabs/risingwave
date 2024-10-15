@@ -53,11 +53,14 @@ impl LogSinker for BatchingLogSinker {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
             if let LogStoreReadItem::UpdateVnodeBitmap(_) = &item {
                 match &state {
-                    LogConsumerState::BarrierReceived { .. } => {
+                    LogConsumerState::BarrierReceived { prev_epoch } => {
                         // we need to force to finish the batch here. Otherwise, there can be data loss because actor can be dropped and rebuilt during scaling.
                         if let Some(committed_chunk_id) = sink_writer.should_finish().await? {
-                            // When the chunk we need to truncate encounters an epoch increase, we need to truncate the barrier first.
-                            log_reader.truncate(TruncateOffset::Barrier { epoch: (epoch) })?;
+                            // If epoch increased, we first need to truncate the previous epoch.
+                            if epoch > *prev_epoch {
+                                log_reader
+                                    .truncate(TruncateOffset::Barrier { epoch: *prev_epoch })?;
+                            }
 
                             log_reader.truncate(TruncateOffset::Chunk {
                                 epoch: (epoch),
@@ -130,6 +133,10 @@ impl LogSinker for BatchingLogSinker {
                     // When the barrier arrives, call the writer's try_finish interface to check if the file write can be completed.
                     // If it is completed, which means the file is visible in the downstream file system, thentruncate the file in the log store; otherwise, do nothing.
                     if let Some(committed_chunk_id) = sink_writer.try_finish().await? {
+                        // If epoch increased, we first need to truncate the previous epoch.
+                        if epoch > prev_epoch {
+                            log_reader.truncate(TruncateOffset::Barrier { epoch: prev_epoch })?;
+                        }
                         log_reader.truncate(TruncateOffset::Chunk {
                             epoch: (epoch),
                             chunk_id: (committed_chunk_id),
