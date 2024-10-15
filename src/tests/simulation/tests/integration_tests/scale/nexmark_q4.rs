@@ -94,13 +94,6 @@ async fn nexmark_q4_common(
 
     sleep(Duration::from_secs(5)).await;
 
-    if recovery {
-        // Trigger recovery
-        cluster.kill_node(&KillOpts::ALL).await;
-
-        sleep(Duration::from_secs(5)).await;
-    }
-
     // 5~15s
     cluster.run(SELECT).await?.assert_result_ne(RESULT);
     cluster
@@ -117,6 +110,13 @@ async fn nexmark_q4_common(
         .await?;
 
     sleep(Duration::from_secs(20)).await;
+
+    if recovery {
+        // Trigger recovery
+        cluster.kill_node(&KillOpts::ALL).await;
+
+        sleep(Duration::from_secs(5)).await;
+    }
 
     // 25~35s
     cluster.run(SELECT).await?.assert_result_eq(RESULT);
