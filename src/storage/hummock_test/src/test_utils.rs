@@ -21,13 +21,13 @@ use risingwave_common_service::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 pub use risingwave_hummock_sdk::key::{gen_key_from_bytes, gen_key_from_str};
+use risingwave_meta::controller::cluster::ClusterControllerRef;
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_pb::catalog::{PbTable, Table};
-use risingwave_pb::common::WorkerNode;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::filter_key_extractor::{
@@ -51,15 +51,21 @@ use crate::mock_notification_client::get_notification_client_for_test;
 pub async fn prepare_first_valid_version(
     env: MetaSrvEnv,
     hummock_manager_ref: HummockManagerRef,
-    worker_node: WorkerNode,
+    cluster_controller_ref: ClusterControllerRef,
+    worker_id: i32,
 ) -> (
     PinnedVersion,
     UnboundedSender<HummockVersionUpdate>,
     UnboundedReceiver<HummockVersionUpdate>,
 ) {
     let (tx, mut rx) = unbounded_channel();
-    let notification_client =
-        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
+    let notification_client = get_notification_client_for_test(
+        env,
+        hummock_manager_ref.clone(),
+        cluster_controller_ref,
+        worker_id,
+    )
+    .await;
     let backup_manager = BackupReader::unused().await;
     let write_limiter = WriteLimiter::unused();
     let observer_manager = ObserverManager::new(
@@ -117,18 +123,23 @@ pub async fn with_hummock_storage_v2(
 ) -> (HummockStorage, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
 
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
+        get_notification_client_for_test(
+            env,
+            hummock_manager_ref.clone(),
+            cluster_ctl_ref,
+            worker_id as _,
+        )
+        .await,
     )
     .await
     .unwrap();
@@ -274,16 +285,20 @@ impl HummockTestEnv {
 pub async fn prepare_hummock_test_env() -> HummockTestEnv {
     let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
 
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
 
-    let notification_client =
-        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
+    let notification_client = get_notification_client_for_test(
+        env,
+        hummock_manager_ref.clone(),
+        cluster_ctl_ref,
+        worker_id as _,
+    )
+    .await;
 
     let storage = HummockStorage::for_test(
         hummock_options,

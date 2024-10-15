@@ -32,6 +32,7 @@ mod rw_hummock_meta_configs;
 mod rw_hummock_pinned_versions;
 mod rw_hummock_version;
 mod rw_hummock_version_deltas;
+mod rw_iceberg_all_files;
 mod rw_iceberg_files;
 mod rw_iceberg_snapshots;
 mod rw_indexes;

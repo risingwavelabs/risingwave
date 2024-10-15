@@ -87,21 +87,6 @@ impl MetaNodeService {
                     .arg("--sql-endpoint")
                     .arg("sqlite::memory:");
             }
-            MetaBackend::Etcd => {
-                let etcd_config = config.provide_etcd_backend.as_ref().unwrap();
-                assert!(!etcd_config.is_empty());
-                is_persistent_meta_store = true;
-
-                cmd.arg("--backend")
-                    .arg("etcd")
-                    .arg("--etcd-endpoints")
-                    .arg(
-                        etcd_config
-                            .iter()
-                            .map(|etcd| format!("{}:{}", etcd.address, etcd.port))
-                            .join(","),
-                    );
-            }
             MetaBackend::Sqlite => {
                 let sqlite_config = config.provide_sqlite_backend.as_ref().unwrap();
                 assert_eq!(sqlite_config.len(), 1);
@@ -216,7 +201,7 @@ impl MetaNodeService {
         }
         if is_persistent_meta_store && !is_persistent_backend {
             return Err(anyhow!(
-                "When using a persistent meta store (etcd), a persistent state store is required (e.g. minio, aws-s3, etc.)."
+                "When using a persistent meta store (sql), a persistent state store is required (e.g. minio, aws-s3, etc.)."
             ));
         }
 

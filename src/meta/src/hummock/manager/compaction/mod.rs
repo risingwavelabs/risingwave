@@ -62,7 +62,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 };
 use risingwave_pb::hummock::{
     compact_task, CompactTaskAssignment, CompactionConfig, PbCompactStatus,
-    PbCompactTaskAssignment, SubscribeCompactionEventRequest, TableOption, TableSchema,
+    PbCompactTaskAssignment, SubscribeCompactionEventRequest, TableOption,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -90,7 +90,7 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
-use crate::manager::{MetadataManager, META_NODE_ID};
+use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
 pub mod compaction_group_manager;
@@ -828,21 +828,8 @@ impl HummockManager {
 
                     if self.env.opts.enable_dropped_column_reclaim {
                         // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
-                        compact_task.table_schemas = match self.metadata_manager() {
-                            MetadataManager::V1(mgr) => mgr
-                                .catalog_manager
-                                .get_versioned_table_schemas(&compact_task.existing_table_ids)
-                                .await
-                                .into_iter()
-                                .map(|(table_id, column_ids)| {
-                                    (table_id, TableSchema { column_ids })
-                                })
-                                .collect(),
-                            MetadataManager::V2(_) => {
-                                // TODO #13952: support V2
-                                BTreeMap::default()
-                            }
-                        };
+                        // TODO #13952: support V2
+                        compact_task.table_schemas = BTreeMap::default();
                     }
 
                     compact_task_assignment.insert(
