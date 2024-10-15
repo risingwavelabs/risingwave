@@ -15,7 +15,7 @@
 use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_connector::source::ConnectorProperties;
+use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::IcebergScanNode;
 use risingwave_sqlparser::ast::AsOf;
@@ -34,10 +34,11 @@ use crate::optimizer::property::{Distribution, Order};
 pub struct BatchIcebergScan {
     pub base: PlanBase<Batch>,
     pub core: generic::Source,
+    iceberg_scan_type: IcebergScanType,
 }
 
 impl BatchIcebergScan {
-    pub fn new(core: generic::Source) -> Self {
+    pub fn new(core: generic::Source, iceberg_scan_type: IcebergScanType) -> Self {
         let base = PlanBase::new_batch_with_core(
             &core,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
@@ -45,7 +46,15 @@ impl BatchIcebergScan {
             Order::any(),
         );
 
-        Self { base, core }
+        Self {
+            base,
+            core,
+            iceberg_scan_type,
+        }
+    }
+
+    pub fn iceberg_scan_type(&self) -> IcebergScanType {
+        self.iceberg_scan_type
     }
 
     pub fn column_names(&self) -> Vec<&str> {
@@ -63,6 +72,7 @@ impl BatchIcebergScan {
         Self {
             base,
             core: self.core.clone(),
+            iceberg_scan_type: self.iceberg_scan_type,
         }
     }
 
@@ -79,6 +89,7 @@ impl Distill for BatchIcebergScan {
         let fields = vec![
             ("source", src),
             ("columns", column_names_pretty(self.schema())),
+            ("iceberg_scan_type", Pretty::debug(&self.iceberg_scan_type)),
         ];
         childless_record("BatchIcebergScan", fields)
     }
@@ -110,6 +121,7 @@ impl ToBatchPb for BatchIcebergScan {
             with_properties,
             split: vec![],
             secret_refs,
+            iceberg_scan_type: self.iceberg_scan_type as i32,
         })
     }
 }

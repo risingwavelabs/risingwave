@@ -42,6 +42,7 @@ use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batc
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
 };
+use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::plan_common::Field as PbField;
@@ -274,6 +275,12 @@ pub struct SourceFetchInfo {
     pub connector: ConnectorProperties,
     pub timebound: (Option<i64>, Option<i64>),
     pub as_of: Option<AsOf>,
+    pub iceberg_specific_info: Option<IcebergSpecificInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IcebergSpecificInfo {
+    pub iceberg_scan_type: IcebergScanType,
 }
 
 #[derive(Clone, Debug)]
@@ -367,9 +374,18 @@ impl SourceScanInfo {
                     }
                     None => None,
                 };
+                let iceberg_scan_type = fetch_info
+                    .iceberg_specific_info
+                    .ok_or_else(|| anyhow!("Missing iceberg specific info"))?
+                    .iceberg_scan_type;
 
                 let split_info = iceberg_enumerator
-                    .list_splits_batch(fetch_info.schema, time_travel_info, batch_parallelism)
+                    .list_splits_batch(
+                        fetch_info.schema,
+                        time_travel_info,
+                        batch_parallelism,
+                        iceberg_scan_type,
+                    )
                     .await?
                     .into_iter()
                     .map(SplitImpl::Iceberg)
@@ -1070,6 +1086,7 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: timestamp_bound,
                     as_of: None,
+                    iceberg_specific_info: None,
                 })));
             }
         } else if let Some(batch_iceberg_scan) = node.as_batch_iceberg_scan() {
@@ -1084,6 +1101,9 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: (None, None),
                     as_of,
+                    iceberg_specific_info: Some(IcebergSpecificInfo {
+                        iceberg_scan_type: batch_iceberg_scan.iceberg_scan_type(),
+                    }),
                 })));
             }
         } else if let Some(source_node) = node.as_batch_source() {
@@ -1099,6 +1119,7 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: (None, None),
                     as_of,
+                    iceberg_specific_info: None,
                 })));
             }
         }

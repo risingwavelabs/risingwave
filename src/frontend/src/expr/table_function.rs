@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
@@ -21,21 +21,13 @@ use risingwave_connector::source::iceberg::{create_parquet_stream_builder, list_
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
 use thiserror_ext::AsReport;
-use tokio::runtime::Runtime;
 use tokio_postgres;
 use tokio_postgres::types::Type as TokioPgType;
 
 use super::{infer_type, Expr, ExprImpl, ExprRewriter, Literal, RwResult};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::error::ErrorCode::BindError;
-
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .thread_name("rw-binder-ext-query")
-        .enable_all()
-        .build()
-        .expect("failed to build external system querying runtime")
-});
+use crate::utils::FRONTEND_RUNTIME;
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -154,7 +146,7 @@ impl TableFunction {
             {
                 let files = if eval_args[5].ends_with('/') {
                     let files = tokio::task::block_in_place(|| {
-                        RUNTIME.block_on(async {
+                        FRONTEND_RUNTIME.block_on(async {
                             let files = list_s3_directory(
                                 eval_args[2].clone(),
                                 eval_args[3].clone(),
@@ -180,7 +172,7 @@ impl TableFunction {
                 };
 
                 let schema = tokio::task::block_in_place(|| {
-                    RUNTIME.block_on(async {
+                    FRONTEND_RUNTIME.block_on(async {
                         let parquet_stream_builder = create_parquet_stream_builder(
                             eval_args[2].clone(),
                             eval_args[3].clone(),
@@ -280,7 +272,7 @@ impl TableFunction {
         #[cfg(not(madsim))]
         {
             let schema = tokio::task::block_in_place(|| {
-                RUNTIME.block_on(async {
+                FRONTEND_RUNTIME.block_on(async {
                     let (client, connection) = tokio_postgres::connect(
                         format!(
                             "host={} port={} user={} password={} dbname={}",

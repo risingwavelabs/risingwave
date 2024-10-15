@@ -12,26 +12,110 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplitEnumerator};
+use risingwave_common::catalog::ICEBERG_SEQUENCE_NUM_COLUMN_NAME;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
+use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalIcebergScan, LogicalSource};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::GenericPlanNode;
+use crate::optimizer::plan_node::{LogicalIcebergScan, LogicalJoin, LogicalSource};
 use crate::optimizer::PlanRef;
+use crate::utils::{Condition, FRONTEND_RUNTIME};
 
 pub struct SourceToIcebergScanRule {}
 impl Rule for SourceToIcebergScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let source: &LogicalSource = plan.as_logical_source()?;
-        // let s = if let ConnectorProperties::Iceberg(prop) =  
-        //             ConnectorProperties::extract(source.core.catalog.unwrap().with_properties.clone(), false)?{
-        //                 IcebergSplitEnumerator::new_inner(*prop, SourceEnumeratorContext::dummy().into())
-        //             }else{
-        //                 return None;
-        //             };
-        // let join_columns = s.get_all_delete_columns_name();
         if source.core.is_iceberg_connector() {
-            Some(LogicalIcebergScan::new(source).into())
+            let s = if let ConnectorProperties::Iceberg(prop) = ConnectorProperties::extract(
+                source
+                    .core
+                    .catalog
+                    .as_ref()
+                    .unwrap()
+                    .with_properties
+                    .clone(),
+                false,
+            )
+            .unwrap()
+            {
+                IcebergSplitEnumerator::new_inner(*prop, SourceEnumeratorContext::dummy().into())
+            } else {
+                return None;
+            };
+            let delete_column_names = std::thread::spawn(move || {
+                FRONTEND_RUNTIME
+                    .block_on(s.get_all_delete_column_names())
+                    .unwrap()
+            })
+            .join()
+            .unwrap();
+            // delete and data
+            // join: join == && seq_id > seq_id
+            let data_iceberg_scan = LogicalIcebergScan::new(source, IcebergScanType::DataScan);
+            let delete_iceberg_scan =
+                LogicalIcebergScan::new(source, IcebergScanType::EqualityDeleteScan);
+            let data_columns_len = data_iceberg_scan.core.schema().len();
+            let eq_join_expr = data_iceberg_scan
+                .core
+                .schema()
+                .fields()
+                .iter()
+                .zip_eq_fast(delete_iceberg_scan.core.schema().fields().iter())
+                .enumerate()
+                .filter_map(|(index, (data_column, delete_column))| {
+                    if delete_column_names.contains(&data_column.name) {
+                        let data_input_ref = InputRef {
+                            index,
+                            data_type: data_column.data_type(),
+                        };
+                        let delete_input_ref = InputRef {
+                            index: index + data_columns_len,
+                            data_type: delete_column.data_type(),
+                        };
+                        Some(
+                            FunctionCall::new(
+                                ExprType::Equal,
+                                vec![data_input_ref.into(), delete_input_ref.into()],
+                            )
+                            .unwrap()
+                            .into(),
+                        )
+                    } else if data_column.name.eq(ICEBERG_SEQUENCE_NUM_COLUMN_NAME) {
+                        let data_input_ref = InputRef {
+                            index,
+                            data_type: data_column.data_type(),
+                        };
+                        let delete_input_ref = InputRef {
+                            index: index + data_columns_len,
+                            data_type: delete_column.data_type(),
+                        };
+                        Some(
+                            FunctionCall::new(
+                                ExprType::LessThan,
+                                vec![data_input_ref.into(), delete_input_ref.into()],
+                            )
+                            .unwrap()
+                            .into(),
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<ExprImpl>>();
+            let on = Condition {
+                conjunctions: eq_join_expr,
+            };
+            let join = LogicalJoin::new(
+                data_iceberg_scan.into(),
+                delete_iceberg_scan.into(),
+                risingwave_pb::plan_common::JoinType::LeftAnti,
+                on,
+            );
+            Some(join.into())
         } else {
             None
         }
