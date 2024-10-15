@@ -49,18 +49,12 @@ pub mod stream;
 pub mod telemetry;
 
 pub use error::{MetaError, MetaResult};
-pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
+pub use rpc::{ElectionClient, ElectionMember};
 
 use crate::manager::MetaOpts;
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
-    Etcd {
-        endpoints: Vec<String>,
-        credentials: Option<(String, String)>,
-    },
     Mem,
-    Sql {
-        endpoint: String,
-    },
+    Sql { endpoint: String },
 }

@@ -19,7 +19,7 @@ use anyhow::{anyhow, Result};
 use inquire::Confirm;
 use itertools::Itertools;
 use regex::Regex;
-use risingwave_meta::manager::WorkerId;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::{GetClusterInfoResponse, PbWorkerReschedule};
 use serde::{Deserialize, Serialize};

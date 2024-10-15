@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use risingwave_meta::manager::SessionParamsManagerImpl;
+use risingwave_meta::controller::session_params::SessionParamsControllerRef;
 use risingwave_pb::meta::session_param_service_server::SessionParamService;
 use risingwave_pb::meta::{
     GetSessionParamsRequest, GetSessionParamsResponse, SetSessionParamRequest,
@@ -23,11 +23,11 @@ use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 pub struct SessionParamsServiceImpl {
-    session_params_manager: SessionParamsManagerImpl,
+    session_params_manager: SessionParamsControllerRef,
 }
 
 impl SessionParamsServiceImpl {
-    pub fn new(session_params_manager: SessionParamsManagerImpl) -> Self {
+    pub fn new(session_params_manager: SessionParamsControllerRef) -> Self {
         Self {
             session_params_manager,
         }
@@ -40,10 +40,7 @@ impl SessionParamService for SessionParamsServiceImpl {
         &self,
         _request: Request<GetSessionParamsRequest>,
     ) -> Result<Response<GetSessionParamsResponse>, Status> {
-        let params = match &self.session_params_manager {
-            SessionParamsManagerImpl::Kv(controller) => controller.get_params().await,
-            SessionParamsManagerImpl::Sql(manager) => manager.get_params().await,
-        };
+        let params = self.session_params_manager.get_params().await;
         let params_str = serde_json::to_string(&params).map_err(|e| {
             Status::internal(format!("Failed to parse session config: {}", e.as_report()))
         })?;
@@ -60,14 +57,10 @@ impl SessionParamService for SessionParamsServiceImpl {
         let req = request.into_inner();
         let req_param = req.get_param();
 
-        let param_value = match &self.session_params_manager {
-            SessionParamsManagerImpl::Kv(controller) => {
-                controller.set_param(req_param, req.value.clone()).await
-            }
-            SessionParamsManagerImpl::Sql(manager) => {
-                manager.set_param(req_param, req.value.clone()).await
-            }
-        };
+        let param_value = self
+            .session_params_manager
+            .set_param(req_param, req.value.clone())
+            .await;
 
         Ok(Response::new(SetSessionParamResponse {
             param: param_value?,

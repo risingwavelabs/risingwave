@@ -64,14 +64,6 @@ impl PrometheusGen {
             .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
             .join(",");
 
-        let etcd_targets = config
-            .provide_etcd
-            .as_ref()
-            .unwrap()
-            .iter()
-            .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
-            .join(",");
-
         let redpanda_targets = config
             .provide_redpanda
             .as_ref()
@@ -132,10 +124,6 @@ scrape_configs:
   - job_name: compactor
     static_configs:
       - targets: [{compactor_targets}]
-
-  - job_name: etcd
-    static_configs:
-      - targets: [{etcd_targets}]
 
   - job_name: frontend
     static_configs:
