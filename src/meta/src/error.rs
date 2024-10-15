@@ -125,6 +125,9 @@ pub enum MetaErrorInner {
     // Indicates that recovery was triggered manually.
     #[error("adhoc recovery triggered")]
     AdhocRecovery,
+
+    #[error("Integrity check failed")]
+    IntegrityCheckFailed,
 }
 
 impl MetaError {
