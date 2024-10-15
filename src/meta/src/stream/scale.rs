@@ -432,11 +432,10 @@ impl ScaleController {
     }
 
     pub async fn integrity_check(&self) -> MetaResult<()> {
-        let MetadataManager::V2(mgr) = &self.metadata_manager else {
-            return Ok(());
-        };
-
-        mgr.catalog_controller.integrity_check().await
+        self.metadata_manager
+            .catalog_controller
+            .integrity_check()
+            .await
     }
 
     /// Build the context for rescheduling and do some validation for the request.
