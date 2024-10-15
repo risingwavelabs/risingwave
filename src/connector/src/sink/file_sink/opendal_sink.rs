@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use bytes::BytesMut;
@@ -222,6 +222,8 @@ impl OpenDalSinkWriter {
     /// This method writes a chunk and update the `written_chunk_id`.
     pub async fn write_batch(&mut self, chunk: StreamChunk, chunk_id: usize) -> Result<()> {
         if self.sink_writer.is_none() {
+            assert!(self.written_chunk_id.is_none());
+            assert_eq!(self.current_bached_row_num, 0);
             self.create_sink_writer().await?;
         };
         self.append_only(chunk).await?;
@@ -251,7 +253,10 @@ impl OpenDalSinkWriter {
                     w.close().await?;
                 }
             };
-            return Ok(self.written_chunk_id);
+            let committed_chunk_id = self.written_chunk_id;
+            self.written_chunk_id = None;
+            self.current_bached_row_num = 0;
+            return Ok(committed_chunk_id);
         }
         Ok(None)
     }
@@ -273,27 +278,22 @@ impl OpenDalSinkWriter {
             || self.current_bached_row_num >= self.batching_strategy.max_row_count
     }
 
-    fn path_partition_prefix(&self) -> String {
-        match self.created_time.duration_since(UNIX_EPOCH) {
-            Ok(duration) => {
-                let datetime = Utc
-                    .timestamp_opt(duration.as_secs() as i64, 0)
-                    .single()
-                    .expect("Failed to convert timestamp to DateTime<Utc>")
-                    .with_timezone(&Utc);
-                let path_partition_prefix = self
-                    .batching_strategy
-                    .path_partition_prefix
-                    .as_ref()
-                    .unwrap_or(&PathPartitionPrefix::None);
-                match path_partition_prefix {
-                    PathPartitionPrefix::None => "".to_string(),
-                    PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
-                    PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
-                    PathPartitionPrefix::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
-                }
-            }
-            Err(_) => "Invalid time".to_string(),
+    fn path_partition_prefix(&self, duration: &Duration) -> String {
+        let datetime = Utc
+            .timestamp_opt(duration.as_secs() as i64, 0)
+            .single()
+            .expect("Failed to convert timestamp to DateTime<Utc>")
+            .with_timezone(&Utc);
+        let path_partition_prefix = self
+            .batching_strategy
+            .path_partition_prefix
+            .as_ref()
+            .unwrap_or(&PathPartitionPrefix::None);
+        match path_partition_prefix {
+            PathPartitionPrefix::None => "".to_string(),
+            PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
+            PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
+            PathPartitionPrefix::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
         }
     }
 
@@ -387,6 +387,11 @@ impl OpenDalSinkWriter {
             _ => unimplemented!(),
         };
 
+        let create_time = self
+            .created_time
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards");
+
         // With batching in place, the file writing process is decoupled from checkpoints.
         // The current file naming convention is as follows:
         // 1. A subdirectory is defined based on `path_partition_prefix` (e.g., by day、hour or month or none.).
@@ -398,29 +403,22 @@ impl OpenDalSinkWriter {
             EngineType::Fs => {
                 format!(
                     "{}{}_{}.{}",
-                    self.path_partition_prefix(),
+                    self.path_partition_prefix(&create_time,),
                     self.executor_id,
-                    self.created_time
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Time went backwards")
-                        .as_secs(),
+                    create_time.as_secs(),
                     suffix
                 )
             }
             _ => format!(
                 "{}/{}{}_{}.{}",
                 self.write_path,
-                self.path_partition_prefix(),
+                self.path_partition_prefix(&create_time),
                 self.executor_id,
-                self.created_time
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards")
-                    .as_secs(),
+                create_time.as_secs(),
                 suffix,
             ),
         };
 
-        tracing::info!("create new writer, file name: {:?}", object_name);
         Ok(self
             .operator
             .writer_with(&object_name)
@@ -442,14 +440,14 @@ impl OpenDalSinkWriter {
                         Some(props.build()),
                     )?,
                 ));
-                self.current_bached_row_num = 0;
-
-                self.created_time = SystemTime::now();
             }
             _ => {
                 self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
             }
         }
+        self.current_bached_row_num = 0;
+
+        self.created_time = SystemTime::now();
 
         Ok(())
     }
