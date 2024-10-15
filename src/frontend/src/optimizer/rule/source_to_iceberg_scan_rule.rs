@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplitEnumerator};
+use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
+
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{LogicalIcebergScan, LogicalSource};
 use crate::optimizer::PlanRef;
@@ -20,6 +23,13 @@ pub struct SourceToIcebergScanRule {}
 impl Rule for SourceToIcebergScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let source: &LogicalSource = plan.as_logical_source()?;
+        // let s = if let ConnectorProperties::Iceberg(prop) =  
+        //             ConnectorProperties::extract(source.core.catalog.unwrap().with_properties.clone(), false)?{
+        //                 IcebergSplitEnumerator::new_inner(*prop, SourceEnumeratorContext::dummy().into())
+        //             }else{
+        //                 return None;
+        //             };
+        // let join_columns = s.get_all_delete_columns_name();
         if source.core.is_iceberg_connector() {
             Some(LogicalIcebergScan::new(source).into())
         } else {

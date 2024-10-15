@@ -167,14 +167,22 @@ impl SplitEnumerator for IcebergSplitEnumerator {
 
     async fn new(
         properties: Self::Properties,
-        _context: SourceEnumeratorContextRef,
+        context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<Self> {
-        Ok(Self { config: properties })
+        Ok(Self::new_inner(properties, context))
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
         // Iceberg source does not support streaming queries
         Ok(vec![])
+    }
+}
+impl IcebergSplitEnumerator {
+    pub fn new_inner(
+        properties: IcebergProperties,
+        _context: SourceEnumeratorContextRef,
+    ) -> Self {
+        Self { config: properties }
     }
 }
 
@@ -184,29 +192,12 @@ pub enum IcebergTimeTravelInfo {
 }
 
 impl IcebergSplitEnumerator {
-    pub async fn list_splits_batch(
-        &self,
-        schema: Schema,
-        time_traval_info: Option<IcebergTimeTravelInfo>,
-        batch_parallelism: usize,
-    ) -> ConnectorResult<Vec<IcebergSplit>> {
-        if batch_parallelism == 0 {
-            bail!("Batch parallelism is 0. Cannot split the iceberg files.");
-        }
-
-        let table = self.config.load_table_v2().await?;
-
+    pub fn get_snapshot_id(table: &Table,
+        time_traval_info: Option<IcebergTimeTravelInfo>
+    ) -> ConnectorResult<Option<i64>> {
         let current_snapshot = table.metadata().current_snapshot();
         if current_snapshot.is_none() {
-            // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
-            return Ok(vec![IcebergSplit {
-                split_id: 0,
-                snapshot_id: 0,
-                table_meta: TableMetadataJsonStr::serialize(table.metadata()),
-                files: vec![],
-                equality_delete_files: vec![],
-                position_delete_files: vec![],
-            }]);
+            return Ok(None);
         }
 
         let snapshot_id = match time_traval_info {
@@ -243,6 +234,32 @@ impl IcebergSplitEnumerator {
                 current_snapshot.unwrap().snapshot_id()
             }
         };
+        Ok(Some(snapshot_id))
+    }
+
+    pub async fn list_splits_batch(
+        &self,
+        schema: Schema,
+        time_traval_info: Option<IcebergTimeTravelInfo>,
+        batch_parallelism: usize,
+    ) -> ConnectorResult<Vec<IcebergSplit>> {
+        if batch_parallelism == 0 {
+            bail!("Batch parallelism is 0. Cannot split the iceberg files.");
+        }
+        let table = self.config.load_table_v2().await?;
+        let snapshot_id = Self::get_snapshot_id(&table, time_traval_info)?;
+        if snapshot_id.is_none() {
+            // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
+            return Ok(vec![IcebergSplit {
+                split_id: 0,
+                snapshot_id: 0,
+                table_meta: TableMetadataJsonStr::serialize(table.metadata()),
+                files: vec![],
+                equality_delete_files: vec![],
+                position_delete_files: vec![],
+            }]);
+        }
+        let snapshot_id = snapshot_id.unwrap();
 
         let require_names = Self::get_require_field_names(&table, snapshot_id, &schema).await?;
 
@@ -316,6 +333,20 @@ impl IcebergSplitEnumerator {
         snapshot_id: i64,
         rw_schema: &Schema,
     ) -> ConnectorResult<Vec<String>> {
+        let delete_columns = Self::all_delete_columns_name(table, snapshot_id).await?;
+        let mut require_field_names: Vec<_> = rw_schema.names().to_vec();
+        // Add the delete columns to the required field names
+        for names in delete_columns {
+            if !require_field_names.contains(&names) {
+                require_field_names.push(names);
+            }
+        }
+        Ok(require_field_names)
+    }
+
+    pub async fn all_delete_columns_name(table: &Table,
+        snapshot_id: i64
+    ) -> ConnectorResult<Vec<String>> {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
@@ -342,14 +373,18 @@ impl IcebergSplitEnumerator {
                 None => bail!("Delete field id {} not found in schema", id),
             })
             .collect::<ConnectorResult<Vec<_>>>()?;
-        let mut require_field_names: Vec<_> = rw_schema.names().to_vec();
-        // Add the delete columns to the required field names
-        for names in delete_columns {
-            if !require_field_names.contains(&names) {
-                require_field_names.push(names);
-            }
+
+        Ok(delete_columns)
+    }
+
+    pub async fn get_all_delete_columns_name(&self) -> ConnectorResult<Vec<String>> {
+        let table = self.config.load_table_v2().await?;
+        let snapshot_id = Self::get_snapshot_id(&table, None)?;
+        if snapshot_id.is_none() {
+            return Ok(vec![]);
         }
-        Ok(require_field_names)
+        let snapshot_id = snapshot_id.unwrap();
+        Self::all_delete_columns_name(&table, snapshot_id).await
     }
 }
 

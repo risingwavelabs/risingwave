@@ -15,6 +15,7 @@
 use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_connector::source::ConnectorProperties;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::IcebergScanNode;
 use risingwave_sqlparser::ast::AsOf;
