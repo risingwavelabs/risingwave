@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::version::{
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, FrontendHummockVersionDelta, HummockEpoch, HummockVersionId,
+    FIRST_SUB_LEVEL_ID,
 };
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionDeltas,
@@ -160,7 +161,13 @@ impl<'a> HummockVersionTransaction<'a> {
                         .last()
                         .map(|level| level.sub_level_id + 1)
                 })
-                .unwrap_or(committed_epoch);
+                .unwrap_or(
+                    new_version_delta
+                        .latest_version()
+                        .max_sub_level_id
+                        .map(|id| id + 1)
+                        .unwrap_or(FIRST_SUB_LEVEL_ID),
+                );
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)

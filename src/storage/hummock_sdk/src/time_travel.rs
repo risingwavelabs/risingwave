@@ -124,6 +124,7 @@ impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockV
                 })
                 .collect(),
             state_table_info: version.state_table_info.clone(),
+            max_sub_level_id: version.max_sub_level_id,
         }
     }
 }

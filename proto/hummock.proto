@@ -189,6 +189,7 @@ message HummockVersion {
   map<uint32, TableWatermarks> table_watermarks = 5;
   map<uint32, TableChangeLog> table_change_logs = 6;
   map<uint32, StateTableInfo> state_table_info = 7;
+  optional uint64 max_sub_level_id = 8;
 }
 
 message HummockVersionDelta {

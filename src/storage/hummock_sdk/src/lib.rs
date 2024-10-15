@@ -130,6 +130,7 @@ impl Sub for HummockVersionId {
 
 pub const INVALID_VERSION_ID: HummockVersionId = HummockVersionId(0);
 pub const FIRST_VERSION_ID: HummockVersionId = HummockVersionId(1);
+pub const FIRST_SUB_LEVEL_ID: u64 = 1;
 pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
 pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
 pub const OBJECT_SUFFIX: &str = "data";

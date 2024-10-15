@@ -89,6 +89,8 @@ impl FrontendHummockVersion {
                 })
                 .collect(),
             state_table_info: self.state_table_info.to_protobuf(),
+            // max_sub_level_id is not expected to be used
+            max_sub_level_id: None,
         }
     }
 

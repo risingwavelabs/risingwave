@@ -224,6 +224,7 @@ pub struct HummockVersionCommon<T> {
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<T>>,
     pub state_table_info: HummockVersionStateTableInfo,
+    pub max_sub_level_id: Option<u64>,
 }
 
 pub type HummockVersion = HummockVersionCommon<SstableInfo>;
@@ -312,6 +313,21 @@ where
             state_table_info: HummockVersionStateTableInfo::from_protobuf(
                 &pb_version.state_table_info,
             ),
+            // The next_sub_level_id is expected to be None in Pb from previous kernel version.
+            // For backward compatibility, try to initialize next_sub_level_id with max(existing sub_level ids).
+            max_sub_level_id: pb_version.max_sub_level_id.or_else(|| {
+                pb_version
+                    .levels
+                    .values()
+                    .filter_map(|levels| {
+                        levels
+                            .l0
+                            .as_ref()
+                            .map(|l0| l0.sub_levels.iter().map(|s| s.sub_level_id).max())
+                    })
+                    .flatten()
+                    .max()
+            }),
         }
     }
 }
@@ -341,6 +357,7 @@ where
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
             state_table_info: version.state_table_info.to_protobuf(),
+            max_sub_level_id: version.max_sub_level_id,
         }
     }
 }
@@ -371,6 +388,7 @@ where
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
             state_table_info: version.state_table_info.to_protobuf(),
+            max_sub_level_id: version.max_sub_level_id,
         }
     }
 }
@@ -433,6 +451,7 @@ impl HummockVersion {
             table_watermarks: HashMap::new(),
             table_change_log: HashMap::new(),
             state_table_info: HummockVersionStateTableInfo::empty(),
+            max_sub_level_id: None,
         };
         for group_id in [
             StaticCompactionGroupId::StateDefault as CompactionGroupId,

@@ -61,7 +61,7 @@ pub mod group_split {
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels};
     use crate::sstable_info::SstableInfo;
-    use crate::{can_concat, HummockEpoch, KeyComparator};
+    use crate::{can_concat, HummockEpoch, KeyComparator, FIRST_SUB_LEVEL_ID};
 
     /// The split will follow the following rules:
     /// 1. Ssts with `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.right`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`].
@@ -274,24 +274,32 @@ pub mod group_split {
     }
 
     /// Merge the right levels into the left levels.
-    pub fn merge_levels(left_levels: &mut Levels, right_levels: Levels) {
+    pub fn merge_levels(
+        left_levels: &mut Levels,
+        right_levels: Levels,
+        max_sub_level_id: Option<u64>,
+    ) {
         let right_l0 = right_levels.l0;
 
-        let mut max_left_sub_level_id = left_levels
+        let mut next_right_sub_level_id = left_levels
             .l0
             .sub_levels
             .iter()
             .map(|sub_level| sub_level.sub_level_id + 1)
             .max()
-            .unwrap_or(0); // If there are no sub levels, the max sub level id is 0.
-        let need_rewrite_right_sub_level_id = max_left_sub_level_id != 0;
+            .unwrap_or(
+                max_sub_level_id
+                    .map(|v| v + 1)
+                    .unwrap_or(FIRST_SUB_LEVEL_ID),
+            );
+        let need_rewrite_right_sub_level_id = !left_levels.l0.sub_levels.is_empty();
 
         for mut right_sub_level in right_l0.sub_levels {
             // Rewrtie the sub level id of right sub level to avoid conflict with left sub levels. (conflict level type)
             // e.g. left sub levels: [0, 1, 2], right sub levels: [0, 1, 2], after rewrite, right sub levels: [3, 4, 5]
             if need_rewrite_right_sub_level_id {
-                right_sub_level.sub_level_id = max_left_sub_level_id;
-                max_left_sub_level_id += 1;
+                right_sub_level.sub_level_id = next_right_sub_level_id;
+                next_right_sub_level_id += 1;
             }
 
             insert_new_sub_level(

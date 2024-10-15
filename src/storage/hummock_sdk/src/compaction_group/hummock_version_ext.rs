@@ -759,6 +759,14 @@ impl HummockVersion {
             &version_delta.state_table_info_delta,
             &changed_table_info,
         );
+
+        // The max_sub_level_id may have been increased, e.g. during commit_epoch or merge_group.
+        // Recalculate it.
+        self.max_sub_level_id = self
+            .levels
+            .values()
+            .filter_map(|levels| levels.l0.sub_levels.iter().map(|s| s.sub_level_id).max())
+            .max();
     }
 
     pub fn apply_change_log_delta<T: Clone>(
@@ -878,7 +886,7 @@ impl HummockVersion {
             )
         });
 
-        group_split::merge_levels(left_levels, right_levels);
+        group_split::merge_levels(left_levels, right_levels, self.max_sub_level_id);
     }
 }
 
@@ -2027,7 +2035,7 @@ mod tests {
             let mut left_levels = Levels::default();
             let right_levels = Levels::default();
 
-            group_split::merge_levels(&mut left_levels, right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels, None);
         }
 
         {
@@ -2041,7 +2049,7 @@ mod tests {
             );
             let right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels, None);
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2066,7 +2074,7 @@ mod tests {
                 },
             );
 
-            group_split::merge_levels(&mut left_levels, right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels, None);
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2084,7 +2092,7 @@ mod tests {
             let mut left_levels = left_levels.clone();
             let right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels, None);
 
             assert!(left_levels.l0.sub_levels.len() == 6);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2454,7 +2462,7 @@ mod tests {
                 ..Default::default()
             };
 
-            merge_levels(cg1, right_levels);
+            merge_levels(cg1, right_levels, None);
         }
 
         {
