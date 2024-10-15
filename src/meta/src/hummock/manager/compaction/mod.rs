@@ -837,10 +837,10 @@ impl HummockManager {
                         .existing_table_ids
                         .iter()
                         .filter_map(|table_id| {
-                            let id = table_id.try_into().unwrap();
+                            let id = (*table_id).try_into().unwrap();
                             all_versioned_table_schemas.get(&id).map(|column_ids| {
                                 (
-                                    table_id,
+                                    *table_id,
                                     TableSchema {
                                         column_ids: column_ids.clone(),
                                     },
