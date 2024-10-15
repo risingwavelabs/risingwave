@@ -21,10 +21,10 @@ use std::time::Instant;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
 
-use crate::manager::WorkerId;
 use crate::rpc::metrics::MetaMetrics;
 
 #[derive(Debug)]

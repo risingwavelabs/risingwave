@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -38,7 +39,6 @@ use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo};
-use crate::manager::WorkerId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 

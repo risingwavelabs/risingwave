@@ -52,7 +52,7 @@ use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbRelation, PbRelationGro
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::sea_query::{Expr, SimpleExpr};
+use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
@@ -74,11 +74,24 @@ use crate::controller::utils::{
     resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
-use crate::stream::SourceManagerRef;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
+
+pub type Catalog = (
+    Vec<PbDatabase>,
+    Vec<PbSchema>,
+    Vec<PbTable>,
+    Vec<PbSource>,
+    Vec<PbSink>,
+    Vec<PbSubscription>,
+    Vec<PbIndex>,
+    Vec<PbView>,
+    Vec<PbFunction>,
+    Vec<PbConnection>,
+    Vec<PbSecret>,
+);
 
 pub type CatalogControllerRef = Arc<CatalogController>;
 
@@ -108,7 +121,7 @@ pub struct ReleaseContext {
 
 impl CatalogController {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env.meta_store().as_sql().clone();
+        let meta_store = env.meta_store();
         let catalog_controller = Self {
             env,
             inner: RwLock::new(CatalogControllerInner {
@@ -609,10 +622,21 @@ impl CatalogController {
     pub async fn clean_dirty_subscription(&self) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        let _res = Subscription::delete_many()
+
+        Object::delete_many()
             .filter(
-                subscription::Column::SubscriptionState
-                    .eq(Into::<i32>::into(SubscriptionState::Init)),
+                object::Column::ObjType.eq(ObjectType::Subscription).and(
+                    object::Column::Oid.not_in_subquery(
+                        Query::select()
+                            .column(subscription::Column::SubscriptionId)
+                            .from(Subscription)
+                            .and_where(
+                                subscription::Column::SubscriptionState
+                                    .eq(SubscriptionState::Created as i32),
+                            )
+                            .take(),
+                    ),
+                ),
             )
             .exec(&txn)
             .await?;
@@ -1150,8 +1174,7 @@ impl CatalogController {
     pub async fn create_source(
         &self,
         mut pb_source: PbSource,
-        source_manager_ref: Option<SourceManagerRef>,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(SourceId, NotificationVersion)> {
         let inner = self.inner.write().await;
         let owner_id = pb_source.owner as _;
         let txn = inner.db.begin().await?;
@@ -1174,17 +1197,11 @@ impl CatalogController {
             Some(pb_source.schema_id as _),
         )
         .await?;
-        pb_source.id = source_obj.oid as _;
+        let source_id = source_obj.oid;
+        pb_source.id = source_id as _;
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
 
-        if let Some(src_manager) = source_manager_ref {
-            let ret = src_manager.register_source(&pb_source).await;
-            if let Err(e) = ret {
-                txn.rollback().await?;
-                return Err(e);
-            }
-        }
         txn.commit().await?;
 
         let version = self
@@ -1193,7 +1210,7 @@ impl CatalogController {
                 PbRelationInfo::Source(pb_source),
             )
             .await;
-        Ok(version)
+        Ok((source_id, version))
     }
 
     pub async fn create_function(
@@ -3240,7 +3257,7 @@ impl CatalogControllerInner {
 
     /// `list_sources` return all sources and `CREATED` ones if contains any streaming jobs.
     async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
-        let source_objs = Source::find()
+        let mut source_objs = Source::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
@@ -3250,7 +3267,27 @@ impl CatalogControllerInner {
             )
             .all(&self.db)
             .await?;
-        // TODO: filter out inner connector source that are still under creating.
+
+        // filter out inner connector sources that are still under creating.
+        let created_table_ids: HashSet<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .join(JoinType::InnerJoin, table::Relation::Object1.def())
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .filter(
+                table::Column::OptionalAssociatedSourceId
+                    .is_not_null()
+                    .and(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
+            )
+            .into_tuple()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .collect();
+        source_objs.retain_mut(|(source, _)| {
+            source.optional_associated_table_id.is_none()
+                || created_table_ids.contains(&source.optional_associated_table_id.unwrap())
+        });
 
         Ok(source_objs
             .into_iter()
@@ -3419,7 +3456,6 @@ async fn update_internal_tables(
 }
 
 #[cfg(test)]
-#[cfg(not(madsim))]
 mod tests {
 
     use super::*;
@@ -3430,7 +3466,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_database = PbDatabase {
             name: "db1".to_string(),
             owner: TEST_OWNER_ID as _,
@@ -3462,7 +3498,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_schema = PbSchema {
             database_id: TEST_DATABASE_ID as _,
             name: "schema1".to_string(),
@@ -3495,7 +3531,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_view() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
@@ -3520,7 +3556,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let test_data_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
             ..Default::default()
@@ -3568,7 +3604,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_alter_relation_rename() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_source = PbSource {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
@@ -3583,7 +3619,7 @@ mod tests {
                 .to_string(),
             ..Default::default()
         };
-        mgr.create_source(pb_source, None).await?;
+        mgr.create_source(pb_source).await?;
         let source_id: SourceId = Source::find()
             .select_only()
             .column(source::Column::SourceId)
