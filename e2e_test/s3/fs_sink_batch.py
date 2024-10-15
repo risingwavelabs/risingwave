@@ -105,7 +105,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
     INSERT INTO t VALUES (100, 10);
     ''')
 
-    time.sleep(3)
+    time.sleep(10)
 
     cur.execute(f'select count(*) from test_sink_table')
     result = cur.fetchone()
