@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::{BitAnd, BitOrAssign};
 
 use itertools::Itertools;
-use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model_migration::{
@@ -499,7 +500,9 @@ impl CatalogController {
                         )
                     );
 
-                    let mut builder = BitmapBuilder::zeroed(fragment.vnode_count as _);
+                    let fragment_vnode_count = fragment.vnode_count as usize;
+
+                    let mut result_bitmap = Bitmap::zeros(fragment_vnode_count);
 
                     for actor_id in actor_ids {
                         let actor = &actor_map[actor_id];
@@ -515,16 +518,32 @@ impl CatalogController {
                         let bitmap =
                             Bitmap::from(actor.vnode_bitmap.as_ref().unwrap().to_protobuf());
 
-                        builder.append_bitmap(&bitmap);
-                    }
+                        crit_check_in_loop!(
+                            flag,
+                            result_bitmap.clone().bitand(&bitmap).count_ones() == 0,
+                            format!(
+                                "Fragment {fragment_id} actor {actor_id} has duplicate vnode_bitmap with other actor for hash distribution type, actor bitmap {bitmap:?}, other all bitmap {result_bitmap:?}",
+                            )
+                        );
 
-                    let bitmap = builder.finish();
+                        result_bitmap.bitor_assign(&bitmap);
+                    }
 
                     crit_check_in_loop!(
                         flag,
-                        bitmap.all(),
+                        result_bitmap.all(),
                         format!(
                             "Fragment {fragment_id} has incomplete vnode_bitmap for hash distribution type",
+                        )
+                    );
+
+                    let discovered_vnode_count = result_bitmap.count_ones();
+
+                    crit_check_in_loop!(
+                        flag,
+                        discovered_vnode_count == fragment_vnode_count,
+                        format!(
+                            "Fragment {fragment_id} has different vnode_count {fragment_vnode_count} with discovered vnode count {discovered_vnode_count} for hash distribution type",
                         )
                     );
                 }
