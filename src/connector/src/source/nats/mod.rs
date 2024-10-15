@@ -100,6 +100,9 @@ pub struct NatsProperties {
     #[serde(rename = "stream")]
     pub stream: String,
 
+    #[serde(rename = "durable_consumer_name")]
+    pub durable_consumer_name: String,
+
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
@@ -339,6 +342,7 @@ mod test {
             "consumer.num_replicas".to_string() => "3".to_string(),
             "consumer.memory_storage".to_string() => "true".to_string(),
             "consumer.backoff.sec".to_string() => "2,10,15".to_string(),
+            "durable_consumer_name".to_string() => "test_durable_consumer".to_string(),
 
         };
 
