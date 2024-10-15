@@ -235,7 +235,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("sled", Level::INFO)
             .with_target("cranelift", Level::INFO)
             .with_target("wasmtime", Level::INFO)
-            .with_target("sqlx", Level::WARN);
+            .with_target("sqlx", Level::WARN)
+            .with_target("opendal", Level::INFO)
+            .with_target("reqsign", Level::INFO);
 
         // For all other crates, apply default level depending on the deployment and `debug_assertions` flag.
         let default_level = match deployment {

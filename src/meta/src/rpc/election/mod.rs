@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod dummy;
-pub mod etcd;
 pub mod sql;
 
 use serde::Serialize;

@@ -53,7 +53,6 @@ cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=false
 
 ENABLE_MINIO=true
-ENABLE_ETCD=true
 
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=true

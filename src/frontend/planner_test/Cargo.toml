@@ -40,7 +40,7 @@ walkdir = "2"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-libtest-mimic = "0.7"
+libtest-mimic = "0.8"
 tempfile = "3"
 
 [lib]

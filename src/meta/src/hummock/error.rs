@@ -73,7 +73,7 @@ impl From<MetaStoreError> for Error {
                 // TODO: need more concrete error from meta store.
                 Error::Internal(anyhow::anyhow!("meta store transaction failed"))
             }
-            // TODO: Currently MetaStoreError::Internal is equivalent to EtcdError, which
+            // TODO: Currently MetaStoreError::Internal is equivalent to SqlError, which
             // includes both retryable and non-retryable. Need to expand MetaStoreError::Internal
             // to more detail meta_store errors.
             MetaStoreError::Internal(err) => Error::MetaStore(err),

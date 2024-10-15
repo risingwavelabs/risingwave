@@ -146,12 +146,11 @@ mod tests {
     use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
-    #[cfg(not(madsim))]
     async fn test_session_params() {
         use sea_orm::QueryFilter;
 
-        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
-        let meta_store = env.meta_store_ref().as_sql();
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref();
         let init_params = SessionConfig::default();
 
         // init system parameter controller as first launch.

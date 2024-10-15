@@ -19,7 +19,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use super::{MetaSrvEnv, SystemParamsManagerImpl};
+use super::MetaSrvEnv;
 use crate::MetaResult;
 
 impl MetaSrvEnv {
@@ -86,14 +86,7 @@ impl MetaSrvEnv {
                     // `license_key` system parameter is a test key but not an empty string.
                     let value = Some(content.trim().to_owned());
 
-                    let result = match &mgr {
-                        SystemParamsManagerImpl::Kv(mgr) => {
-                            mgr.set_param(LICENSE_KEY_KEY, value).await
-                        }
-                        SystemParamsManagerImpl::Sql(mgr) => {
-                            mgr.set_param(LICENSE_KEY_KEY, value).await
-                        }
-                    };
+                    let result = mgr.set_param(LICENSE_KEY_KEY, value).await;
 
                     if let Err(e) = result {
                         tracing::error!(

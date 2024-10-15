@@ -85,7 +85,6 @@ pub struct MetaTelemetryReport {
     base: TelemetryReportBase,
     node_count: NodeCount,
     streaming_job_count: u64,
-    // At this point, it will always be etcd, but we will enable telemetry when using memory.
     meta_backend: MetaBackend,
     rw_version: RwVersion,
     job_desc: Vec<MetaTelemetryJobDesc>,
@@ -119,7 +118,6 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
         let pb_report = risingwave_pb::telemetry::MetaReport {
             base: Some(self.base.into()),
             meta_backend: match self.meta_backend {
-                MetaBackend::Etcd => risingwave_pb::telemetry::MetaBackend::Etcd as i32,
                 MetaBackend::Mem => risingwave_pb::telemetry::MetaBackend::Memory as i32,
                 MetaBackend::Sql
                 | MetaBackend::Sqlite
@@ -165,19 +163,13 @@ impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
 #[derive(Clone)]
 pub struct MetaReportCreator {
     metadata_manager: MetadataManager,
-    meta_backend: MetaBackend,
     object_store_media_type: &'static str,
 }
 
 impl MetaReportCreator {
-    pub fn new(
-        metadata_manager: MetadataManager,
-        meta_backend: MetaBackend,
-        object_store_media_type: &'static str,
-    ) -> Self {
+    pub fn new(metadata_manager: MetadataManager, object_store_media_type: &'static str) -> Self {
         Self {
             metadata_manager,
-            meta_backend,
             object_store_media_type,
         }
     }
@@ -230,7 +222,7 @@ impl TelemetryReportCreator for MetaReportCreator {
                 compactor_count: *node_map.get(&WorkerType::Compactor).unwrap_or(&0),
             },
             streaming_job_count,
-            meta_backend: self.meta_backend,
+            meta_backend: MetaBackend::Sql,
             job_desc: stream_job_desc,
             cluster_type: telemetry_cluster_type_from_env_var(),
             object_store_media_type: self.object_store_media_type,
@@ -278,7 +270,7 @@ mod test {
                 compactor_count: 4,
             },
             streaming_job_count: 5,
-            meta_backend: MetaBackend::Etcd,
+            meta_backend: MetaBackend::Sql,
             rw_version: RwVersion {
                 version: "version".to_owned(),
                 git_sha: "git_sha".to_owned(),

@@ -39,7 +39,7 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 expect-test = "1"
-libtest-mimic = "0.7"
+libtest-mimic = "0.8"
 
 [[bin]]
 name = "sqlsmith"

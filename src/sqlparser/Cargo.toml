@@ -40,7 +40,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 anyhow = "1"
 console = "0.15"
-libtest-mimic = "0.7"
+libtest-mimic = "0.8"
 matches = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_with = "3"

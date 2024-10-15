@@ -29,6 +29,7 @@ use risingwave_connector::source::{
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
+use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
@@ -40,7 +41,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{MetadataManager, SourceId};
+use crate::manager::MetadataManager;
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
@@ -156,7 +157,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
             Arc::new(SourceEnumeratorContext {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
-                    source_id: self.source_id,
+                    source_id: self.source_id as u32,
                 },
             }),
         )
@@ -194,7 +195,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
             .with_guarded_label_values(&[source.id.to_string().as_str(), &source.name]);
 
         Ok(Self {
-            source_id: source.id,
+            source_id: source.id as SourceId,
             source_name: source.name.clone(),
             current_splits: splits,
             enumerator,
@@ -690,71 +691,50 @@ impl SourceManager {
             }
         }
 
-        let mut actor_splits = HashMap::new();
-        let mut source_fragments = HashMap::new();
-        let mut backfill_fragments = HashMap::new();
-
-        match &metadata_manager {
-            MetadataManager::V1(mgr) => {
-                for table_fragments in mgr
-                    .fragment_manager
-                    .get_fragment_read_guard()
-                    .await
-                    .table_fragments()
-                    .values()
-                {
-                    source_fragments.extend(table_fragments.stream_source_fragments());
-                    backfill_fragments.extend(table_fragments.source_backfill_fragments()?);
-                    actor_splits.extend(table_fragments.actor_splits.clone());
-                }
-            }
-            MetadataManager::V2(mgr) => {
-                source_fragments = mgr
-                    .catalog_controller
-                    .load_source_fragment_ids()
-                    .await?
-                    .into_iter()
-                    .map(|(source_id, fragment_ids)| {
-                        (
-                            source_id as SourceId,
-                            fragment_ids.into_iter().map(|id| id as _).collect(),
-                        )
-                    })
-                    .collect();
-                backfill_fragments = mgr
-                    .catalog_controller
-                    .load_backfill_fragment_ids()
-                    .await?
-                    .into_iter()
-                    .map(|(source_id, fragment_ids)| {
-                        (
-                            source_id as SourceId,
-                            fragment_ids
-                                .into_iter()
-                                .map(|(id, up_id)| (id as _, up_id as _))
-                                .collect(),
-                        )
-                    })
-                    .collect();
-                actor_splits = mgr
-                    .catalog_controller
-                    .load_actor_splits()
-                    .await?
-                    .into_iter()
-                    .map(|(actor_id, splits)| {
-                        (
-                            actor_id as ActorId,
-                            splits
-                                .to_protobuf()
-                                .splits
-                                .iter()
-                                .map(|split| SplitImpl::try_from(split).unwrap())
-                                .collect(),
-                        )
-                    })
-                    .collect();
-            }
-        }
+        let source_fragments = metadata_manager
+            .catalog_controller
+            .load_source_fragment_ids()
+            .await?
+            .into_iter()
+            .map(|(source_id, fragment_ids)| {
+                (
+                    source_id as SourceId,
+                    fragment_ids.into_iter().map(|id| id as _).collect(),
+                )
+            })
+            .collect();
+        let backfill_fragments = metadata_manager
+            .catalog_controller
+            .load_backfill_fragment_ids()
+            .await?
+            .into_iter()
+            .map(|(source_id, fragment_ids)| {
+                (
+                    source_id as SourceId,
+                    fragment_ids
+                        .into_iter()
+                        .map(|(id, up_id)| (id as _, up_id as _))
+                        .collect(),
+                )
+            })
+            .collect();
+        let actor_splits = metadata_manager
+            .catalog_controller
+            .load_actor_splits()
+            .await?
+            .into_iter()
+            .map(|(actor_id, splits)| {
+                (
+                    actor_id as ActorId,
+                    splits
+                        .to_protobuf()
+                        .splits
+                        .iter()
+                        .map(|split| SplitImpl::try_from(split).unwrap())
+                        .collect(),
+                )
+            })
+            .collect();
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,
@@ -1022,7 +1002,7 @@ impl SourceManager {
     /// create and register connector worker for source.
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         let mut core = self.core.lock().await;
-        if let Entry::Vacant(e) = core.managed_sources.entry(source.get_id()) {
+        if let Entry::Vacant(e) = core.managed_sources.entry(source.get_id() as _) {
             let handle = create_source_worker_handle(source, self.metrics.clone())
                 .await
                 .context("failed to create source worker")?;
@@ -1103,7 +1083,7 @@ impl SourceManager {
         });
 
         managed_sources.insert(
-            source_id,
+            source_id as SourceId,
             ConnectorSourceWorkerHandle {
                 handle,
                 sync_call_tx,

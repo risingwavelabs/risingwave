@@ -5,6 +5,8 @@ set -euo pipefail
 export RW_PREFIX=$PWD/.risingwave
 export PREFIX_BIN=$RW_PREFIX/bin
 export PREFIX_LOG=$RW_PREFIX/log
+export PREFIX_DATA=$RW_PREFIX/data
+export RW_SQLITE_DB=$PREFIX_DATA/metadata.db
 
 # NOTE(kwannoel): Compared to start_standalone below, we omitted the compactor-opts,
 # so it should not start.
@@ -16,8 +18,8 @@ start_standalone_without_compactor() {
         --advertise-addr 127.0.0.1:5690 \
         --dashboard-host 127.0.0.1:5691 \
         --prometheus-host 127.0.0.1:1250 \
-        --backend etcd \
-        --etcd-endpoints 127.0.0.1:2388 \
+        --backend sqlite \
+        --sql-endpoint ${RW_SQLITE_DB} \
         --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
         --data-directory hummock_001" \
      --compute-opts=" \
@@ -39,7 +41,6 @@ start_standalone_without_compactor() {
 
 # You can fill up this section by consulting
 # .risingwave/log/risedev.log, after calling `risedev d full`.
-# It is expected that minio, etcd will be started after this is called.
 start_standalone() {
   RUST_BACKTRACE=1 \
   "$PREFIX_BIN"/risingwave/standalone \
@@ -48,8 +49,8 @@ start_standalone() {
         --advertise-addr 127.0.0.1:5690 \
         --dashboard-host 127.0.0.1:5691 \
         --prometheus-host 127.0.0.1:1250 \
-        --backend etcd \
-        --etcd-endpoints 127.0.0.1:2388 \
+        --backend sqlite \
+        --sql-endpoint ${RW_SQLITE_DB} \
         --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
         --data-directory hummock_001" \
      --compute-opts=" \

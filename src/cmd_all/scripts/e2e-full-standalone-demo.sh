@@ -4,7 +4,6 @@
 # It includes the following components:
 # - RisingWave cluster
 # - Minio
-# - Etcd
 # - Kafka
 # - Connector
 # - Compactor

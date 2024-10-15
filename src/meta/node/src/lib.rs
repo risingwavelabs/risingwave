@@ -33,7 +33,7 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_meta::*;
 use risingwave_meta_service::*;
-pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
+pub use rpc::{ElectionClient, ElectionMember};
 use server::rpc_serve;
 pub use server::started::get as is_server_started;
 
@@ -51,7 +51,7 @@ pub struct MetaNodeOpts {
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// It will serve as a unique identifier in cluster
-    /// membership and leader election. Must be specified for etcd backend.
+    /// membership and leader election. Must be specified for meta backend.
     #[clap(long, env = "RW_ADVERTISE_ADDR", default_value = "127.0.0.1:5690")]
     pub advertise_addr: String,
 
@@ -62,21 +62,6 @@ pub struct MetaNodeOpts {
     /// Then the prometheus instance will poll the metrics from this address.
     #[clap(long, env = "RW_PROMETHEUS_HOST", alias = "prometheus-host")]
     pub prometheus_listener_addr: Option<String>,
-
-    #[clap(long, hide = true, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
-    pub etcd_endpoints: String,
-
-    /// Enable authentication with etcd. By default disabled.
-    #[clap(long, hide = true, env = "RW_ETCD_AUTH")]
-    pub etcd_auth: bool,
-
-    /// Username of etcd, required when --etcd-auth is enabled.
-    #[clap(long, hide = true, env = "RW_ETCD_USERNAME", default_value = "")]
-    pub etcd_username: String,
-
-    /// Password of etcd, required when --etcd-auth is enabled.
-    #[clap(long, hide = true, env = "RW_ETCD_PASSWORD", default_value = "")]
-    pub etcd_password: Secret<String>,
 
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
     #[clap(long, hide = true, env = "RW_SQL_ENDPOINT")]
@@ -247,20 +232,6 @@ pub fn start(
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
         let backend = match config.meta.backend {
-            MetaBackend::Etcd => MetaStoreBackend::Etcd {
-                endpoints: opts
-                    .etcd_endpoints
-                    .split(',')
-                    .map(|x| x.to_string())
-                    .collect(),
-                credentials: match opts.etcd_auth {
-                    true => Some((
-                        opts.etcd_username,
-                        opts.etcd_password.expose_secret().to_string(),
-                    )),
-                    false => None,
-                },
-            },
             MetaBackend::Mem => MetaStoreBackend::Mem,
             MetaBackend::Sql => MetaStoreBackend::Sql {
                 endpoint: opts

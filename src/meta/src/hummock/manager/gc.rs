@@ -274,29 +274,24 @@ impl HummockManager {
         *guard = new_now;
         drop(guard);
         // Persist now to maintain non-decreasing even after a meta node reboot.
-        if let Some(sql) = self.sql_store() {
-            let m = hummock_sequence::ActiveModel {
-                name: ActiveValue::Set(HUMMOCK_NOW.into()),
-                seq: ActiveValue::Set(new_now.try_into().unwrap()),
-            };
-            hummock_sequence::Entity::insert(m)
-                .on_conflict(
-                    OnConflict::column(hummock_sequence::Column::Name)
-                        .update_column(hummock_sequence::Column::Seq)
-                        .to_owned(),
-                )
-                .exec(&sql.conn)
-                .await?;
-        }
+        let m = hummock_sequence::ActiveModel {
+            name: ActiveValue::Set(HUMMOCK_NOW.into()),
+            seq: ActiveValue::Set(new_now.try_into().unwrap()),
+        };
+        hummock_sequence::Entity::insert(m)
+            .on_conflict(
+                OnConflict::column(hummock_sequence::Column::Name)
+                    .update_column(hummock_sequence::Column::Seq)
+                    .to_owned(),
+            )
+            .exec(&self.env.meta_store_ref().conn)
+            .await?;
         Ok(new_now)
     }
 
     pub(crate) async fn load_now(&self) -> Result<Option<u64>> {
-        let Some(sql) = self.sql_store() else {
-            return Ok(None);
-        };
         let now = hummock_sequence::Entity::find_by_id(HUMMOCK_NOW.to_string())
-            .one(&sql.conn)
+            .one(&self.env.meta_store_ref().conn)
             .await?
             .map(|m| m.seq.try_into().unwrap());
         Ok(now)
@@ -444,11 +439,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_gc() {
-        let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-        let context_id = worker_node.id;
+        let (_env, hummock_manager, _cluster_manager, worker_id) = setup_compute_env(80).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager.clone(),
-            worker_node.id,
+            worker_id as _,
         ));
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
@@ -461,7 +455,7 @@ mod tests {
             .await
             .unwrap());
 
-        let mut receiver = compactor_manager.add_compactor(context_id);
+        let mut receiver = compactor_manager.add_compactor(worker_id as _);
 
         assert!(hummock_manager
             .start_full_gc(

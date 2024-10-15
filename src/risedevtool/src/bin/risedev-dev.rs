@@ -127,18 +127,6 @@ fn task_main(
                 let mut task = risedev::ConfigureMinioTask::new(c.clone())?;
                 task.execute(&mut ctx)?;
             }
-            ServiceConfig::Etcd(c) => {
-                let mut ctx =
-                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = risedev::EtcdService::new(c.clone())?;
-                service.execute(&mut ctx)?;
-
-                // let mut task = risedev::EtcdReadyCheckTask::new(c.clone())?;
-                // TODO(chi): etcd will set its health check to success only after all nodes are
-                // connected and there's a leader, therefore we cannot do health check for now.
-                let mut task = risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
-                task.execute(&mut ctx)?;
-            }
             ServiceConfig::Sqlite(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());

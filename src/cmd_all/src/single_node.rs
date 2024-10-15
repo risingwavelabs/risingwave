@@ -71,7 +71,7 @@ impl SingleNodeOpts {
 /// 1. An option that will be forced to override by single-node deployment should not be here.
 ///    - e.g. `meta_addr` will be automatically set to localhost.
 /// 2. An option defined in the config file and hidden in the command-line help should not be here.
-///    - e.g. `etcd_endpoints` is encouraged to be set from config file or environment variables.
+///    - e.g. `sql_endpoint` is encouraged to be set from config file or environment variables.
 /// 3. An option that is only for cloud deployment should not be here.
 ///    - e.g. `proxy_rpc_endpoint` is used in cloud deployment only, and should not be used by open-source users.
 ///
@@ -172,7 +172,6 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
 
     // Set meta store for meta (if not set). It could be set by environment variables before this.
     let meta_backend_is_set = match meta_opts.backend {
-        Some(MetaBackend::Etcd) => !meta_opts.etcd_endpoints.is_empty(),
         Some(MetaBackend::Sql)
         | Some(MetaBackend::Sqlite)
         | Some(MetaBackend::Postgres)

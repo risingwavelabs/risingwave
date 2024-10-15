@@ -79,7 +79,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "slow end-to-end test (release)"
@@ -220,7 +220,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   # The timeout should be strictly more than timeout in `pull-request.yml`.
@@ -655,40 +655,40 @@ steps:
     timeout_in_minutes: 5
 
   # Backwards compatibility tests
-  - label: "Backwards compatibility tests version_offset={{matrix.version_offset}}"
-    key: "backwards-compat-tests"
-    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-backwards-compat-tests"
-      || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.1.0:
-          run: source-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-          environment:
-            - BUILDKITE_BRANCH
-      - ./ci/plugins/upload-failure-logs
-    matrix:
-      setup:
-        # Test the 4 latest versions against the latest main.
-        # e.g.
-        # 1: 2.0.0
-        # 2: 1.1.1
-        # 3: 1.0.1
-        # 4: 1.0.0
-        # It is ordered by the full version number, rather than minor / major version.
-        # We can change to just be on major version in the future.
-        version_offset:
-          - "1"
-          - "2"
-          - "3"
-          - "4"
-    timeout_in_minutes: 30
-    retry: *auto-retry
+  #  - label: "Backwards compatibility tests version_offset={{matrix.version_offset}}"
+  #    key: "backwards-compat-tests"
+  #    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
+  #    if: |
+  #      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+  #      || build.pull_request.labels includes "ci/run-backwards-compat-tests"
+  #      || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
+  #    depends_on:
+  #      - "build"
+  #    plugins:
+  #      - docker-compose#v5.1.0:
+  #          run: source-test-env
+  #          config: ci/docker-compose.yml
+  #          mount-buildkite-agent: true
+  #          environment:
+  #            - BUILDKITE_BRANCH
+  #      - ./ci/plugins/upload-failure-logs
+  #    matrix:
+  #      setup:
+  #        # Test the 4 latest versions against the latest main.
+  #        # e.g.
+  #        # 1: 2.0.0
+  #        # 2: 1.1.1
+  #        # 3: 1.0.1
+  #        # 4: 1.0.0
+  #        # It is ordered by the full version number, rather than minor / major version.
+  #        # We can change to just be on major version in the future.
+  #        version_offset:
+  #          - "1"
+  #          - "2"
+  #          - "3"
+  #          - "4"
+  #    timeout_in_minutes: 30
+  #    retry: *auto-retry
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"

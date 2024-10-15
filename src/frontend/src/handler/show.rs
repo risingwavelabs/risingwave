@@ -31,11 +31,12 @@ use risingwave_sqlparser::ast::{
     display_comma_separated, Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
 };
 
-use super::{fields_to_descriptors, PgResponseStream, RwPgResponse, RwPgResponseBuilderExt};
+use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
 use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
+use crate::session::cursor_manager::SubscriptionCursor;
 use crate::session::SessionImpl;
 
 pub fn get_columns_from_table(
@@ -247,6 +248,36 @@ struct ShowCreateObjectRow {
     create_sql: String,
 }
 
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowSubscriptionRow {
+    name: String,
+    retention_seconds: i64,
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowCursorRow {
+    session_id: String,
+    user: String,
+    host: String,
+    database: String,
+    cursor_name: String,
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowSubscriptionCursorRow {
+    session_id: String,
+    user: String,
+    host: String,
+    database: String,
+    cursor_name: String,
+    subscription_name: String,
+    state: String,
+    idle_duration_ms: i64,
+}
+
 /// Infer the row description for different show objects.
 pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
     fields_to_descriptors(match objects {
@@ -327,12 +358,20 @@ pub async fn handle_show_object(
             .iter_sink()
             .map(|t| t.name.clone())
             .collect(),
-        ShowObject::Subscription { schema } => catalog_reader
-            .read_guard()
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
-            .iter_subscription()
-            .map(|t| t.name.clone())
-            .collect(),
+        ShowObject::Subscription { schema } => {
+            let rows = catalog_reader
+                .read_guard()
+                .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+                .iter_subscription()
+                .map(|t| ShowSubscriptionRow {
+                    name: t.name.clone(),
+                    retention_seconds: t.retention_seconds as i64,
+                })
+                .collect_vec();
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .rows(rows)
+                .into());
+        }
         ShowObject::Secret { schema } => catalog_reader
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
@@ -483,20 +522,71 @@ pub async fn handle_show_object(
                 .into());
         }
         ShowObject::Cursor => {
-            let (rows, pg_descs) = session.get_cursor_manager().get_all_query_cursors().await;
+            let sessions = session
+                .env()
+                .sessions_map()
+                .read()
+                .values()
+                .cloned()
+                .collect_vec();
+            let mut rows = vec![];
+            for s in sessions {
+                let session_id = format!("{}", s.id().0);
+                let user = s.user_name().to_owned();
+                let host = format!("{}", s.peer_addr());
+                let database = s.database().to_owned();
+
+                s.get_cursor_manager()
+                    .iter_query_cursors(|cursor_name: &String, _| {
+                        rows.push(ShowCursorRow {
+                            session_id: session_id.clone(),
+                            user: user.clone(),
+                            host: host.clone(),
+                            database: database.clone(),
+                            cursor_name: cursor_name.to_owned(),
+                        });
+                    })
+                    .await;
+            }
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .row_cnt_opt(Some(rows.len() as i32))
-                .values(PgResponseStream::from(rows), pg_descs)
+                .rows(rows)
                 .into());
         }
         ShowObject::SubscriptionCursor => {
-            let (rows, pg_descs) = session
-                .get_cursor_manager()
-                .get_all_subscription_cursors()
-                .await;
+            let sessions = session
+                .env()
+                .sessions_map()
+                .read()
+                .values()
+                .cloned()
+                .collect_vec();
+            let mut rows = vec![];
+            for s in sessions {
+                let ssession_id = format!("{}", s.id().0);
+                let user = s.user_name().to_owned();
+                let host = format!("{}", s.peer_addr());
+                let database = s.database().to_owned();
+
+                s.get_cursor_manager()
+                    .iter_subscription_cursors(
+                        |cursor_name: &String, cursor: &SubscriptionCursor| {
+                            rows.push(ShowSubscriptionCursorRow {
+                                session_id: ssession_id.clone(),
+                                user: user.clone(),
+                                host: host.clone(),
+                                database: database.clone(),
+                                cursor_name: cursor_name.to_owned(),
+                                subscription_name: cursor.subscription_name().to_owned(),
+                                state: cursor.state_info_string(),
+                                idle_duration_ms: cursor.idle_duration().as_millis() as i64,
+                            });
+                        },
+                    )
+                    .await;
+            }
+
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .row_cnt_opt(Some(rows.len() as i32))
-                .values(PgResponseStream::from(rows), pg_descs)
+                .rows(rows)
                 .into());
         }
     };

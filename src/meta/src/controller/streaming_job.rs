@@ -30,7 +30,7 @@ use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
     streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType, DatabaseId,
-    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId,
+    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SinkId, SourceId,
     StreamNode, StreamingParallelism, TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
@@ -68,7 +68,7 @@ use crate::controller::utils::{
     rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{NotificationVersion, SinkId, StreamingJob};
+use crate::manager::{NotificationVersion, StreamingJob};
 use crate::model::{StreamContext, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
@@ -995,15 +995,13 @@ impl CatalogController {
         let mut table = table::ActiveModel::from(table);
         let mut incoming_sinks = table.incoming_sinks.as_ref().inner_ref().clone();
         if let Some(sink_id) = creating_sink_id {
-            debug_assert!(!incoming_sinks.contains(&(sink_id as i32)));
+            debug_assert!(!incoming_sinks.contains(&{ sink_id }));
             incoming_sinks.push(sink_id as _);
         }
 
         if let Some(sink_id) = dropping_sink_id {
-            let drained = incoming_sinks
-                .extract_if(|id| *id == sink_id as i32)
-                .collect_vec();
-            debug_assert_eq!(drained, vec![sink_id as i32]);
+            let drained = incoming_sinks.extract_if(|id| *id == sink_id).collect_vec();
+            debug_assert_eq!(drained, vec![sink_id]);
         }
 
         table.incoming_sinks = Set(incoming_sinks.into());

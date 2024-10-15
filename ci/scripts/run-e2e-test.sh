@@ -27,7 +27,6 @@ if [[ $mode == "standalone" ]]; then
 fi
 
 if [[ $mode == "single-node" ]]; then
-  export RUST_MIN_STACK=4194304
   source ci/scripts/single-node-utils.sh
 fi
 
@@ -37,7 +36,7 @@ cluster_start() {
     risedev clean-data
     risedev pre-start-dev
     start_standalone "$PREFIX_LOG"/standalone.log &
-    risedev dev standalone-minio-etcd
+    risedev dev standalone-minio-sqlite
   elif [[ $mode == "single-node" ]]; then
     mkdir -p "$PREFIX_LOG"
     risedev clean-data
@@ -257,7 +256,7 @@ if [[ "$mode" == "standalone" ]]; then
   risedev clean-data
   risedev pre-start-dev
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
-  risedev dev standalone-minio-etcd-compactor
+  risedev dev standalone-minio-sqlite-compactor
   wait_standalone
   if compactor_is_online
   then
@@ -274,7 +273,7 @@ if [[ "$mode" == "standalone" ]]; then
   risedev clean-data
   risedev pre-start-dev
   start_standalone "$PREFIX_LOG"/standalone.log &
-  risedev dev standalone-minio-etcd
+  risedev dev standalone-minio-sqlite
   wait_standalone
   if ! compactor_is_online
   then

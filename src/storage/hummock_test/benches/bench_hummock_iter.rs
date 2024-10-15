@@ -57,11 +57,11 @@ fn criterion_benchmark(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let batches = gen_interleave_shared_buffer_batch_iter(10000, 100);
     let hummock_options = Arc::new(default_opts_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) =
         runtime.block_on(setup_compute_env(8080));
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
 
     let global_hummock_storage = runtime.block_on(async {
@@ -70,7 +70,8 @@ fn criterion_benchmark(c: &mut Criterion) {
             hummock_options,
             sstable_store,
             meta_client.clone(),
-            get_notification_client_for_test(env, hummock_manager_ref, worker_node),
+            get_notification_client_for_test(env, hummock_manager_ref, cluster_ctl_ref, worker_id)
+                .await,
         )
         .await
         .unwrap()
