@@ -164,6 +164,9 @@ impl HummockManager {
             .iter()
             .filter(|object_id| !tracked_object_ids.contains(object_id))
             .collect_vec();
+        // This lock ensures that during commit_epoch or report_compact_tasks, where versioning lock is held,
+        // no new objects will be marked for deletion here.
+        let _versioning = self.versioning.read().await;
         self.delete_object_tracker
             .add(to_delete.iter().map(|id| **id));
         to_delete.len()
