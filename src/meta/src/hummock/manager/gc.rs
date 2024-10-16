@@ -22,11 +22,11 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_meta_model_migration::OnConflict;
-use risingwave_meta_model_v2::hummock_sequence;
 use risingwave_meta_model_v2::hummock_sequence::HUMMOCK_NOW;
+use risingwave_meta_model_v2::{hummock_gc_history, hummock_sequence};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::FullScanTask;
-use sea_orm::{ActiveValue, EntityTrait};
+use sea_orm::{ActiveValue, ConnectionTrait, DbBackend, EntityTrait, Set, Statement};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::commit_multi_var;
@@ -133,7 +133,7 @@ impl HummockManager {
     pub async fn extend_objects_to_delete_from_scan(
         &self,
         object_ids: &[HummockSstableObjectId],
-    ) -> usize {
+    ) -> Result<usize> {
         let tracked_object_ids: HashSet<HummockSstableObjectId> = {
             let versioning = self.versioning.read().await;
             let context_info = self.context_info.read().await;
@@ -163,10 +163,12 @@ impl HummockManager {
         let to_delete = object_ids
             .iter()
             .filter(|object_id| !tracked_object_ids.contains(object_id))
+            .copied()
             .collect_vec();
-        self.delete_object_tracker
-            .add(to_delete.iter().map(|id| **id));
-        to_delete.len()
+        let to_delete_num = to_delete.len();
+        self.write_gc_history(to_delete.iter().cloned()).await?;
+        self.delete_object_tracker.add(to_delete.into_iter());
+        Ok(to_delete_num)
     }
 
     /// Starts a full GC.
@@ -250,7 +252,7 @@ impl HummockManager {
             .collect_vec();
         let after_time_travel = object_ids.len();
         // filter by version
-        let selected_object_number = self.extend_objects_to_delete_from_scan(&object_ids).await;
+        let selected_object_number = self.extend_objects_to_delete_from_scan(&object_ids).await?;
         metrics
             .full_gc_selected_object_count
             .observe(selected_object_number as _);
@@ -321,6 +323,49 @@ impl HummockManager {
         if let Some(total_object_count) = paged_metrics.total_object_count.take() {
             self.metrics.total_object_count.set(total_object_count as _);
         }
+    }
+
+    async fn write_gc_history(
+        &self,
+        object_ids: impl Iterator<Item = HummockSstableObjectId>,
+    ) -> Result<()> {
+        let models = object_ids.map(|o| hummock_gc_history::ActiveModel {
+            object_id: Set(o.try_into().unwrap()),
+            created_at: Default::default(),
+        });
+        let db = &self.meta_store_ref().conn;
+        let gc_history_retention_sec = self.env.opts.min_sst_retention_time_sec * 2;
+        match db.get_database_backend() {
+            DbBackend::MySql => {
+                db.execute(Statement::from_string(
+                    sea_orm::DatabaseBackend::MySql,
+                    format!("DELETE FROM hummock_gc_history WHERE mark_delete_at < NOW() - INTERVAL {gc_history_retention_sec} SECOND;")
+                )).await?;
+            }
+            DbBackend::Postgres => {
+                db.execute(Statement::from_string(
+                    sea_orm::DatabaseBackend::Postgres,
+                    format!("DELETE FROM hummock_gc_history WHERE mark_delete_at < NOW() - INTERVAL '{gc_history_retention_sec} seconds'")
+                )).await?;
+            }
+            DbBackend::Sqlite => {
+                db.execute(Statement::from_string(
+                    sea_orm::DatabaseBackend::Postgres,
+                    format!("DELETE FROM hummock_gc_history WHERE mark_delete_at < datetime('now', '-{gc_history_retention_sec} seconds')")
+                )).await?;
+            }
+        }
+
+        hummock_gc_history::Entity::insert_many(models)
+            .on_conflict(
+                OnConflict::column(hummock_gc_history::Column::ObjectId)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .do_nothing()
+            .exec(db)
+            .await?;
+        Ok(())
     }
 }
 

@@ -22,6 +22,7 @@ mod m20240726_063833_auto_schema_change;
 mod m20240806_143329_add_rate_limit_to_source_catalog;
 mod m20240820_081248_add_time_travel_per_table_epoch;
 mod m20240911_083152_variable_vnode_count;
+mod m20241016_065621_hummock_gc_history;
 
 pub struct Migrator;
 
