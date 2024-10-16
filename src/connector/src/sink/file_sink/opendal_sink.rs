@@ -197,8 +197,6 @@ pub struct OpenDalSinkWriter {
     pub(crate) batching_strategy: BatchingStrategy,
     current_bached_row_num: usize,
     created_time: SystemTime,
-    // The `chunk_id` that has been written, which is used when truncating the log store.
-    written_chunk_id: Option<usize>,
 }
 
 /// The `FileWriterEnum` enum represents different types of file writers used for various sink
@@ -219,20 +217,18 @@ enum FileWriterEnum {
 
 /// Public interface exposed to `BatchingLogSinker`, used to write chunk and commit files.
 impl OpenDalSinkWriter {
-    /// This method writes a chunk and update the `written_chunk_id`.
-    pub async fn write_batch(&mut self, chunk: StreamChunk, chunk_id: usize) -> Result<()> {
+    /// This method writes a chunk.
+    pub async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.sink_writer.is_none() {
-            assert!(self.written_chunk_id.is_none());
             assert_eq!(self.current_bached_row_num, 0);
             self.create_sink_writer().await?;
         };
         self.append_only(chunk).await?;
-        self.written_chunk_id = Some(chunk_id);
         Ok(())
     }
 
-    /// This method close current writer, finish writing a file and returns the last `written_chunk_id` that has been written downstream.
-    pub async fn commit(&mut self) -> Result<Option<usize>> {
+    /// This method close current writer, finish writing a file and returns whether the commit is successful.
+    pub async fn commit(&mut self) -> Result<bool> {
         if let Some(sink_writer) = self.sink_writer.take() {
             match sink_writer {
                 FileWriterEnum::ParquetFileWriter(w) => {
@@ -253,20 +249,18 @@ impl OpenDalSinkWriter {
                     w.close().await?;
                 }
             };
-            let committed_chunk_id = self.written_chunk_id;
-            self.written_chunk_id = None;
             self.current_bached_row_num = 0;
-            return Ok(committed_chunk_id);
+            return Ok(true);
         }
-        Ok(None)
+        Ok(false)
     }
 
     // Try commit if the batching condition is met.
-    pub async fn try_commit(&mut self) -> Result<Option<usize>> {
+    pub async fn try_commit(&mut self) -> Result<bool> {
         if self.can_commit() {
             return self.commit().await;
         }
-        Ok(None)
+        Ok(false)
     }
 }
 
@@ -375,7 +369,6 @@ impl OpenDalSinkWriter {
             batching_strategy,
             current_bached_row_num: 0,
             created_time: SystemTime::now(),
-            written_chunk_id: None,
         })
     }
 
