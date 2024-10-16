@@ -152,6 +152,7 @@ pub(super) struct Calls {
     pub(super) end_is_unbounded: bool,
     /// Deduplicated indices of all arguments of all calls.
     pub(super) all_arg_indices: Vec<usize>,
+    pub(super) rank_funcs_only: bool,
 }
 
 impl Calls {
@@ -180,6 +181,8 @@ impl Calls {
             .dedup()
             .collect();
 
+        let rank_funcs_only = calls.iter().all(|call| call.kind.is_rank());
+
         Self {
             calls,
             super_rows_frame_bounds,
@@ -187,6 +190,7 @@ impl Calls {
             start_is_unbounded,
             end_is_unbounded,
             all_arg_indices,
+            rank_funcs_only,
         }
     }
 

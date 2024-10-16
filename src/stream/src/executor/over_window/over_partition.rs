@@ -395,8 +395,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         BTreeMap<StateKey, Record<OwnedRow>>,
         Option<RangeInclusive<StateKey>>,
     )> {
-        let input_schema_len = table.get_data_types().len() - self.calls.len();
         let calls = self.calls;
+        let input_schema_len = table.get_data_types().len() - calls.len();
+        let rank_funcs_only = calls.rank_funcs_only;
 
         // return values
         let mut part_changes = BTreeMap::new();
@@ -413,6 +414,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         let snapshot = part_with_delta.snapshot();
         let delta = part_with_delta.delta();
+        let last_delta_key = delta.last_key_value().map(|(k, _)| k);
 
         // Generate delete changes first, because deletes are skipped during iteration over
         // `part_with_delta` in the next step.
@@ -441,6 +443,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             assert!(first_curr_key.is_normal());
             assert!(last_curr_key.is_normal());
             assert!(last_frame_end.is_normal());
+
+            let last_delta_key = last_delta_key.unwrap();
 
             if let Some(accessed_range) = accessed_range.as_mut() {
                 let min_start = first_frame_start
@@ -504,12 +508,19 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 let (key, row) = curr_key_cursor
                     .key_value()
                     .expect("cursor must be valid until `last_curr_key`");
+                let mut should_continue = true;
+
                 let output = states.slide_no_evict_hint()?;
                 compute_count += 1;
 
                 let old_output = &row.as_inner()[input_schema_len..];
                 if !old_output.is_empty() && old_output == output {
                     same_output_count += 1;
+
+                    if rank_funcs_only && key >= last_delta_key {
+                        // there won't be any more changes after this point, we can stop early
+                        should_continue = false;
+                    }
                 }
 
                 let new_row = OwnedRow::new(
@@ -542,7 +553,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
                 curr_key_cursor.move_next();
 
-                key != last_curr_key
+                should_continue && key != last_curr_key
             } {}
         }
 
