@@ -49,11 +49,11 @@ use crate::test_utils::gen_key_from_bytes;
 #[cfg(feature = "sync_point")]
 #[serial]
 async fn test_syncpoints_sstable_object_id_manager() {
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_id) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     let sstable_object_id_manager =
         Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
@@ -115,11 +115,11 @@ async fn test_syncpoints_sstable_object_id_manager() {
 #[tokio::test]
 #[serial]
 async fn test_syncpoints_test_failpoints_fetch_ids() {
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_id) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     let sstable_object_id_manager =
         Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
@@ -231,17 +231,23 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .level0_tier_compact_file_number(1)
         .max_bytes_for_level_base(4096)
         .build();
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) =
         setup_compute_env_with_config(8080, config).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     let existing_table_id: u32 = 1;
 
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
-        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+        get_notification_client_for_test(
+            env,
+            hummock_manager_ref.clone(),
+            cluster_ctl_ref,
+            worker_id,
+        )
+        .await,
         &hummock_manager_ref,
         &[existing_table_id],
     )

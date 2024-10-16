@@ -357,8 +357,7 @@ impl HummockManagerService for HummockServiceImpl {
         } = request.into_inner();
 
         self.hummock_manager
-            .init_metadata_for_version_replay(tables, compaction_groups)
-            .await?;
+            .init_metadata_for_version_replay(tables, compaction_groups)?;
         Ok(Response::new(InitMetadataForReplayResponse {}))
     }
 

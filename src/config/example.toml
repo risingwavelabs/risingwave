@@ -142,6 +142,7 @@ shared_buffer_flush_ratio = 0.800000011920929
 shared_buffer_min_batch_flush_size_mb = 800
 imm_merge_threshold = 0
 write_conflict_detection_enabled = true
+max_cached_recent_versions_number = 60
 max_prefetch_block_number = 16
 disable_remote_compactor = false
 share_buffer_upload_concurrency = 8

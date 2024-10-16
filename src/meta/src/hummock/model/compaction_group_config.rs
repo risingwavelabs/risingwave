@@ -17,9 +17,6 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 
-use crate::hummock::model::HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME;
-use crate::model::{MetadataModel, MetadataModelResult};
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
     pub group_id: CompactionGroupId,
@@ -64,27 +61,6 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
             id: compaction_group.group_id,
             compaction_config: Some(compaction_group.compaction_config.as_ref().clone()),
         }
-    }
-}
-
-impl MetadataModel for CompactionGroup {
-    type KeyType = CompactionGroupId;
-    type PbType = risingwave_pb::hummock::CompactionGroup;
-
-    fn cf_name() -> String {
-        String::from(HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME)
-    }
-
-    fn to_protobuf(&self) -> Self::PbType {
-        self.into()
-    }
-
-    fn from_protobuf(prost: Self::PbType) -> Self {
-        (&prost).into()
-    }
-
-    fn key(&self) -> MetadataModelResult<Self::KeyType> {
-        Ok(self.group_id)
     }
 }
 
