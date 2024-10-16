@@ -1439,6 +1439,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-emrserverless"
+version = "1.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45a36c7e63b7c48a5495e8c5bb240baf52fd297a54bbc0472eb91edddd19768a"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 0.2.9",
+ "once_cell",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-glue"
 version = "1.66.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6278,7 +6301,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f8b7bff7bd7853be7733fc1db1203862878f92c1#f8b7bff7bd7853be7733fc1db1203862878f92c1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=67d434d9ab188770c1b598518d50745cd2a8a73b#67d434d9ab188770c1b598518d50745cd2a8a73b"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6323,7 +6346,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f8b7bff7bd7853be7733fc1db1203862878f92c1#f8b7bff7bd7853be7733fc1db1203862878f92c1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=67d434d9ab188770c1b598518d50745cd2a8a73b#67d434d9ab188770c1b598518d50745cd2a8a73b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6340,7 +6363,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f8b7bff7bd7853be7733fc1db1203862878f92c1#f8b7bff7bd7853be7733fc1db1203862878f92c1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=67d434d9ab188770c1b598518d50745cd2a8a73b#67d434d9ab188770c1b598518d50745cd2a8a73b"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6353,6 +6376,19 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tokio",
+ "typed-builder 0.20.0",
+ "uuid",
+]
+
+[[package]]
+name = "iceberg-catalog-sql"
+version = "0.3.0"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=67d434d9ab188770c1b598518d50745cd2a8a73b#67d434d9ab188770c1b598518d50745cd2a8a73b"
+dependencies = [
+ "async-trait",
+ "iceberg",
+ "serde_json",
+ "sqlx",
  "typed-builder 0.20.0",
  "uuid",
 ]
@@ -10924,6 +10960,7 @@ dependencies = [
  "aws-credential-types",
  "aws-msk-iam-sasl-signer",
  "aws-sdk-dynamodb",
+ "aws-sdk-emrserverless",
  "aws-sdk-glue",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
@@ -10937,6 +10974,7 @@ dependencies = [
  "bytes",
  "cfg-or-panic",
  "chrono",
+ "clap",
  "clickhouse",
  "criterion",
  "csv",
@@ -10959,6 +10997,7 @@ dependencies = [
  "iceberg",
  "iceberg-catalog-glue",
  "iceberg-catalog-rest",
+ "iceberg-catalog-sql",
  "icelake",
  "indexmap 2.6.0",
  "itertools 0.13.0",

@@ -17,11 +17,11 @@ use std::str::FromStr;
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum SinkDecouple {
     // default sink couple config of specific sink
-    #[default]
     Default,
     // enable sink decouple
     Enable,
     // disable sink decouple
+    #[default]
     Disable,
 }
 

@@ -27,6 +27,7 @@ aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
 aws-sdk-dynamodb = "1"
+aws-sdk-emrserverless = "1.47.0"
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
@@ -43,6 +44,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
+clap = { workspace = true }
 clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "d38c8b6391af098b724c114e5a4746aedab6ab8e", features = [
     "time",
 ] }
@@ -64,6 +66,7 @@ http = "0.2"
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
+iceberg-catalog-sql = { workspace = true }
 icelake = { workspace = true }
 indexmap = { version = "2.6.0", features = ["serde"] }
 itertools = { workspace = true }

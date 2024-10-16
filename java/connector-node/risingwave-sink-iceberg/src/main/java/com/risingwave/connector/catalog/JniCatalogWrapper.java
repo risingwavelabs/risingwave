@@ -97,6 +97,17 @@ public class JniCatalogWrapper {
     }
 
     /**
+     * Drop a table from the catalog.
+     *
+     * @param tableIdentifier The identifier of the table to drop.
+     * @return true if the table was dropped, false otherwise.
+     */
+    public boolean dropTable(String tableIdentifier) {
+        TableIdentifier id = TableIdentifier.parse(tableIdentifier);
+        return catalog.dropTable(id);
+    }
+
+    /**
      * Create JniCatalogWrapper instance.
      *
      * @param name Catalog name.

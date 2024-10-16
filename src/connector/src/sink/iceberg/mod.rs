@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod compaction;
 mod prometheus;
 
 use std::collections::{BTreeMap, HashMap};
@@ -49,6 +50,8 @@ use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
+use tokio::sync::{mpsc, oneshot};
+use tracing::warn;
 use with_options::WithOptions;
 
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
@@ -62,6 +65,7 @@ use super::{
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::sink::iceberg::compaction::spawn_compaction_client;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{
@@ -404,11 +408,14 @@ impl Sink for IcebergSink {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
+        let (commit_tx, finish_tx) = spawn_compaction_client(&self.config)?;
 
         Ok(IcebergSinkCommitter {
             catalog,
             table,
             partition_type,
+            commit_notifier: commit_tx,
+            _compact_task_guard: finish_tx,
         })
     }
 }
@@ -837,6 +844,8 @@ pub struct IcebergSinkCommitter {
     catalog: CatalogRef,
     table: Table,
     partition_type: Any,
+    commit_notifier: mpsc::UnboundedSender<()>,
+    _compact_task_guard: oneshot::Sender<()>,
 }
 
 #[async_trait::async_trait]
@@ -876,6 +885,10 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
             SinkError::Iceberg(anyhow!(err))
         })?;
+
+        if self.commit_notifier.send(()).is_err() {
+            warn!("failed to notify commit");
+        }
 
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
         Ok(())
@@ -1018,6 +1031,7 @@ mod test {
                 catalog_name: Some("demo".to_string()),
                 database_name: Some("demo_db".to_string()),
                 table_name: "demo_table".to_string(),
+                enable_config_load: None,
             },
             r#type: "upsert".to_string(),
             force_append_only: false,
