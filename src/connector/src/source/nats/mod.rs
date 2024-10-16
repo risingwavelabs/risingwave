@@ -17,15 +17,18 @@ pub mod source;
 pub mod split;
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::time::Duration;
 
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, ReplayPolicy};
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+use thiserror::Error;
 use with_options::WithOptions;
 
 use crate::connector_common::NatsCommon;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::nats::enumerator::NatsSplitEnumerator;
 use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::source::SourceProperties;
@@ -33,17 +36,29 @@ use crate::{
     deserialize_optional_string_seq_from_string, deserialize_optional_u64_seq_from_string,
 };
 
+#[derive(Debug, Clone, Error)]
+pub struct NatsJetStreamError(String);
+
+impl Display for NatsJetStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 pub const NATS_CONNECTOR: &str = "nats";
 
 pub struct AckPolicyWrapper;
 
 impl AckPolicyWrapper {
-    pub fn parse_str(s: &str) -> Result<AckPolicy, String> {
+    pub fn parse_str(s: &str) -> Result<AckPolicy, NatsJetStreamError> {
         match s {
             "none" => Ok(AckPolicy::None),
             "all" => Ok(AckPolicy::All),
             "explicit" => Ok(AckPolicy::Explicit),
-            _ => Err(format!("Invalid AckPolicy '{}'", s)),
+            _ => Err(NatsJetStreamError(format!(
+                "Invalid AckPolicy '{}', expect `none`, `all`, and `explicit`",
+                s
+            ))),
         }
     }
 }
@@ -51,11 +66,14 @@ impl AckPolicyWrapper {
 pub struct ReplayPolicyWrapper;
 
 impl ReplayPolicyWrapper {
-    pub fn parse_str(s: &str) -> Result<ReplayPolicy, String> {
+    pub fn parse_str(s: &str) -> Result<ReplayPolicy, NatsJetStreamError> {
         match s {
             "instant" => Ok(ReplayPolicy::Instant),
             "original" => Ok(ReplayPolicy::Original),
-            _ => Err(format!("Invalid ReplayPolicy '{}'", s)),
+            _ => Err(NatsJetStreamError(format!(
+                "Invalid ReplayPolicy '{}', expect `instant` and `original`",
+                s
+            ))),
         }
     }
 }
@@ -81,6 +99,9 @@ pub struct NatsProperties {
 
     #[serde(rename = "stream")]
     pub stream: String,
+
+    #[serde(rename = "durable_consumer_name")]
+    pub durable_consumer_name: String,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
@@ -257,6 +278,13 @@ impl NatsPropertiesConsumer {
             c.backoff = v.iter().map(|&x| Duration::from_secs(x)).collect()
         }
     }
+
+    pub fn get_ack_policy(&self) -> ConnectorResult<AckPolicy> {
+        match &self.ack_policy {
+            Some(policy) => Ok(AckPolicyWrapper::parse_str(policy).map_err(ConnectorError::from)?),
+            None => Ok(AckPolicy::None),
+        }
+    }
 }
 
 impl SourceProperties for NatsProperties {
@@ -314,6 +342,7 @@ mod test {
             "consumer.num_replicas".to_string() => "3".to_string(),
             "consumer.memory_storage".to_string() => "true".to_string(),
             "consumer.backoff.sec".to_string() => "2,10,15".to_string(),
+            "durable_consumer_name".to_string() => "test_durable_consumer".to_string(),
 
         };
 

@@ -431,6 +431,13 @@ impl ScaleController {
         }
     }
 
+    pub async fn integrity_check(&self) -> MetaResult<()> {
+        self.metadata_manager
+            .catalog_controller
+            .integrity_check()
+            .await
+    }
+
     /// Build the context for rescheduling and do some validation for the request.
     async fn build_reschedule_context(
         &self,

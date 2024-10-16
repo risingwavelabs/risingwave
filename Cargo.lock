@@ -1417,9 +1417,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-dynamodb"
-version = "1.49.0"
+version = "1.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab0ade000608877169533a54326badd6b5a707d2faf876cfc3976a7f9d7e5329"
+checksum = "f38c3122dd27386bf38745f67c9f2c2c47479157bc8a697a3fd97ff45e78dd34"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1440,9 +1440,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-glue"
-version = "1.23.0"
+version = "1.66.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c500adec7fa43df6405eed7984a2aadc1cc04569897e2689d4524e823e7a7297"
+checksum = "71423b1c319cb3e178c6eadf1a14a9b2c26e48cb8c86de8bf13bd3c396a62efd"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1462,9 +1462,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-kinesis"
-version = "1.18.0"
+version = "1.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83accbe1b477c73d9935f5024e87143822bfe9a2dc01c94643b8425258f1002e"
+checksum = "559fab877d728500a834adcbc7f4a8902db9c08475b688bbeb24afb97320bb58"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -8312,16 +8312,16 @@ dependencies = [
 
 [[package]]
 name = "opensearch"
-version = "2.2.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd2846759315751e04d8b45a0bdbd89ce442282ffb916cf54f6b0adf8df4b44c"
+checksum = "a62b025c3503d3d53eaba3b6f14adb955af9f69fc71141b4d030a4e5331f5d42"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.0",
  "bytes",
  "dyn-clone",
  "lazy_static",
  "percent-encoding",
- "reqwest 0.11.20",
+ "reqwest 0.12.4",
  "rustc_version 0.4.0",
  "serde",
  "serde_json",
@@ -10207,6 +10207,7 @@ version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "566cafdd92868e0939d3fb961bd0dc25fcfaaed179291093b3d43e6b3150ea10"
 dependencies = [
+ "async-compression",
  "base64 0.22.0",
  "bytes",
  "encoding_rs",
@@ -12517,9 +12518,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.7.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "976295e77ce332211c0d24d92c0e83e50f5c5f046d11082cea19f3df13a3562d"
+checksum = "16f1201b3c9a7ee8039bcadc17b7e605e2945b27eee7631788c1bd2b0643674b"
 
 [[package]]
 name = "rustls-webpki"

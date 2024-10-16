@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
-use super::GroupKey;
+use super::{AggStateCacheStats, GroupKey};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
@@ -129,11 +129,11 @@ impl AggState {
         storage: &AggStateStorage<impl StateStore>,
         func: &BoxedAggregateFunction,
         group_key: Option<&GroupKey>,
-    ) -> StreamExecutorResult<Datum> {
+    ) -> StreamExecutorResult<(Datum, AggStateCacheStats)> {
         match self {
             Self::Value(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::Value));
-                Ok(func.get_result(state).await?)
+                Ok((func.get_result(state).await?, AggStateCacheStats::default()))
             }
             Self::MaterializedInput(state) => {
                 let state_table = must_match!(

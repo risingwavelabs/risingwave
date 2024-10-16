@@ -62,7 +62,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 };
 use risingwave_pb::hummock::{
     compact_task, CompactTaskAssignment, CompactionConfig, PbCompactStatus,
-    PbCompactTaskAssignment, SubscribeCompactionEventRequest, TableOption,
+    PbCompactTaskAssignment, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -648,7 +648,15 @@ impl HummockManager {
         if deterministic_mode {
             version.disable_apply_to_txn();
         }
-
+        let all_versioned_table_schemas = if self.env.opts.enable_dropped_column_reclaim {
+            self.metadata_manager
+                .catalog_controller
+                .get_versioned_table_schemas()
+                .await
+                .map_err(|e| Error::Internal(e.into()))?
+        } else {
+            HashMap::default()
+        };
         let mut unschedule_groups = vec![];
         let mut trivial_tasks = vec![];
         let mut pick_tasks = vec![];
@@ -825,12 +833,21 @@ impl HummockManager {
                     compact_task.table_watermarks = version
                         .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
-
-                    if self.env.opts.enable_dropped_column_reclaim {
-                        // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
-                        // TODO #13952: support V2
-                        compact_task.table_schemas = BTreeMap::default();
-                    }
+                    compact_task.table_schemas = compact_task
+                        .existing_table_ids
+                        .iter()
+                        .filter_map(|table_id| {
+                            let id = (*table_id).try_into().unwrap();
+                            all_versioned_table_schemas.get(&id).map(|column_ids| {
+                                (
+                                    *table_id,
+                                    TableSchema {
+                                        column_ids: column_ids.clone(),
+                                    },
+                                )
+                            })
+                        })
+                        .collect();
 
                     compact_task_assignment.insert(
                         compact_task.task_id,

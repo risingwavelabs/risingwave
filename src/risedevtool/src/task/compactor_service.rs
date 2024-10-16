@@ -19,6 +19,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
+use super::risingwave_cmd;
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::{add_meta_node, add_tempo_endpoint, CompactorConfig, ExecuteContext, Task};
 
@@ -29,14 +30,6 @@ pub struct CompactorService {
 impl CompactorService {
     pub fn new(config: CompactorConfig) -> Result<Self> {
         Ok(Self { config })
-    }
-
-    fn compactor(&self) -> Result<Command> {
-        let prefix_bin = env::var("PREFIX_BIN")?;
-
-        Ok(Command::new(
-            Path::new(&prefix_bin).join("risingwave").join("compactor"),
-        ))
     }
 
     /// Apply command args according to config
@@ -74,7 +67,7 @@ impl Task for CompactorService {
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
 
-        let mut cmd = self.compactor()?;
+        let mut cmd = risingwave_cmd("compactor")?;
 
         if crate::util::is_enable_backtrace() {
             cmd.env("RUST_BACKTRACE", "1");

@@ -643,6 +643,9 @@ NatsProperties:
   - name: stream
     field_type: String
     required: true
+  - name: durable_consumer_name
+    field_type: String
+    required: true
 NexmarkProperties:
   fields:
   - name: nexmark.split.num
