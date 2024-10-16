@@ -97,7 +97,7 @@ impl<'de> Deserialize<'de> for HummockVersionId {
 }
 
 impl HummockVersionId {
-    pub const MAX: Self = Self(u64::MAX);
+    pub const MAX: Self = Self(i64::MAX as _);
 
     pub const fn new(id: u64) -> Self {
         Self(id)
@@ -305,6 +305,31 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
             .key_range
             .compare_right_with(&ssts[i].key_range.left)
             != Ordering::Less
+        {
+            return false;
+        }
+    }
+    true
+}
+
+pub fn full_key_can_concat(ssts: &[SstableInfo]) -> bool {
+    let len = ssts.len();
+    for i in 1..len {
+        let sst_1 = &ssts[i - 1];
+        let sst_2 = &ssts[i];
+
+        if sst_1.key_range.right_exclusive {
+            if sst_1
+                .key_range
+                .compare_right_with(&sst_2.key_range.left)
+                .is_gt()
+            {
+                return false;
+            }
+        } else if sst_1
+            .key_range
+            .compare_right_with(&sst_2.key_range.left)
+            .is_ge()
         {
             return false;
         }

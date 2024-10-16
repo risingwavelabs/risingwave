@@ -31,11 +31,7 @@ pub struct SimpleTimeTravelVersionCache {
 }
 
 impl SimpleTimeTravelVersionCache {
-    pub fn new() -> Self {
-        let capacity = std::env::var("RW_HUMMOCK_TIME_TRAVEL_CACHE_SIZE")
-            .unwrap_or_else(|_| "10".into())
-            .parse()
-            .unwrap();
+    pub fn new(capacity: u64) -> Self {
         let cache = Cache::builder().max_capacity(capacity).build();
         Self { cache }
     }
