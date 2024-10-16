@@ -1093,7 +1093,9 @@ impl UploaderData {
     fn min_uncommitted_sst_id(&self) -> Option<HummockSstableObjectId> {
         self.spilled_data
             .values()
-            .filter_map(|(s, _)| {
+            .map(|(s, _)| s)
+            .chain(self.syncing_data.values().flat_map(|s| s.uploaded.iter()))
+            .filter_map(|s| {
                 s.sstable_infos()
                     .iter()
                     .chain(s.old_value_sstable_infos())
