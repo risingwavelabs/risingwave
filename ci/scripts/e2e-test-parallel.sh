@@ -38,6 +38,7 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 echo "--- e2e, ci-3streaming-2serving-3fe, streaming"
 RUST_LOG=$RUST_LOG \
 risedev ci-start ci-3streaming-2serving-3fe
+risedev psql "${host_args[@]}" -d dev -c "ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 0"
 sqllogictest "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}" --label "parallel"
 
 kill_cluster

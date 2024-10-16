@@ -31,6 +31,7 @@ host_args=(-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567)
 echo "--- e2e, ci-3cn-3fe-opendal-fs-backend, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-3cn-3fe-opendal-fs-backend
+risedev psql "${host_args[@]}" -d dev -c "ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 0"
 sqllogictest "${host_args[@]}" -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-opendal-fs-backend-${profile}" --label "parallel"
 
 echo "--- Kill cluster Streaming"
