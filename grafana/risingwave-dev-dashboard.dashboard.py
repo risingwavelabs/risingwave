@@ -1287,6 +1287,10 @@ def section_streaming_actors(outer_panels):
                             "Agg cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                         panels.target(
+                            f"(sum(rate({metric('stream_agg_state_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_state_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Agg state cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
+                        ),
+                        panels.target(
                             f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
                             "Distinct agg cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
@@ -3935,6 +3939,34 @@ def section_iceberg_metrics(outer_panels):
                         panels.target(
                             f"{metric('iceberg_partition_num')}",
                             "{{sink_id}} {{sink_name}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Iceberg Write Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('iceberg_write_bytes')}) by (sink_name)",
+                            "write @ {{sink_name}}",
+                        ),
+                        panels.target(
+                            f"sum({metric('iceberg_write_bytes')})",
+                            "total write",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Iceberg Read Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('iceberg_read_bytes')}) by (table_name)",
+                            "read @ {{table_name}}",
+                        ),
+                        panels.target(
+                            f"sum({metric('nimtable_read_bytes')})",
+                            "total read",
                         ),
                     ],
                 ),
