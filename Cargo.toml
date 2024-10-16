@@ -143,7 +143,7 @@ icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "1783f8
 iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f8b7bff7bd7853be7733fc1db1203862878f92c1" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f8b7bff7bd7853be7733fc1db1203862878f92c1" }
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f8b7bff7bd7853be7733fc1db1203862878f92c1" }
-opendal = "0.49"
+opendal = "0.50"
 # used only by arrow-udf-flight
 arrow-flight = "53"
 arrow-udf-js = "0.5"
