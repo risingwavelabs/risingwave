@@ -256,6 +256,7 @@ if [[ "$mode" == "standalone" ]]; then
   mkdir -p "$PREFIX_LOG"
   risedev clean-data
   risedev pre-start-dev
+  wait_minio
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
   risedev dev standalone-minio-etcd-compactor
   wait_standalone
@@ -273,6 +274,7 @@ if [[ "$mode" == "standalone" ]]; then
   mkdir -p "$PREFIX_LOG"
   risedev clean-data
   risedev pre-start-dev
+  wait_minio
   start_standalone "$PREFIX_LOG"/standalone.log &
   risedev dev standalone-minio-etcd
   wait_standalone

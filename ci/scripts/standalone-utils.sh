@@ -99,6 +99,28 @@ wait_standalone() {
   fi
 }
 
+wait_minio() {
+  set +e
+  timeout 20s bash -c '
+    while true; do
+      echo "Polling every 1s for MinIO to be ready for 20s"
+      if curl -I http://127.0.0.1:9301/minio/health/live 2>/dev/null | grep -q "HTTP/1.1 200 OK"; then
+        exit 0;
+      else
+        sleep 1;
+      fi
+    done
+  '
+  STATUS=$?
+  set -e
+  if [[ $STATUS -ne 0 ]]; then
+    echo "MinIO failed to start with status: $STATUS"
+    exit 1
+  else
+    echo "MinIO is ready"
+  fi
+}
+
 restart_standalone() {
   stop_standalone
   start_standalone "$PREFIX_LOG"/standalone-restarted.log &
