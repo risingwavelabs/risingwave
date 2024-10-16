@@ -247,8 +247,8 @@ pub(super) struct OverPartitionStats {
     pub right_miss_count: u64,
 
     // stats for window function state computation
-    pub compute_count: u64,
-    pub same_result_count: u64,
+    pub accessed_entry_count: u64,
+    pub same_output_count: u64,
 }
 
 /// [`AffectedRange`] represents a range of keys that are affected by a delta.
@@ -425,8 +425,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     )> {
         let input_schema_len = table.get_data_types().len() - calls.len();
         let mut part_changes = BTreeMap::new();
-        let mut compute_count = 0;
-        let mut same_result_count = 0;
+        let mut accessed_entry_count = 0;
+        let mut same_output_count = 0;
 
         // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
         // into the cache.
@@ -507,6 +507,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                                 .into(),
                         );
                     }
+                    accessed_entry_count += 1;
                     cursor.move_next();
 
                     key != last_frame_end
@@ -529,10 +530,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                     .expect("cursor must be valid until `last_curr_key`");
                 let output = states.slide_no_evict_hint()?;
 
-                compute_count += 1;
                 let old_output = &row.as_inner()[input_schema_len..];
                 if !old_output.is_empty() && old_output == output {
-                    same_result_count += 1;
+                    same_output_count += 1;
                 }
 
                 let new_row = OwnedRow::new(
@@ -569,8 +569,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             } {}
         }
 
-        self.stats.compute_count += compute_count;
-        self.stats.same_result_count += same_result_count;
+        self.stats.accessed_entry_count += accessed_entry_count;
+        self.stats.same_output_count += same_output_count;
 
         Ok((part_changes, accessed_range))
     }
