@@ -13,6 +13,11 @@
   formatted_ast: 'CreateSchema { schema_name: ObjectName([Ident { value: "t", quote_style: None }]), if_not_exists: true, user_specified: None }'
 - input: CREATE OR REPLACE TABLE t (a INT)
   formatted_sql: CREATE OR REPLACE TABLE t (a INT)
+- input: CREATE OR REPLACE TABLE t (a CHAR AS)
+  error_msg: |-
+    sql parser error: expected an expression, found: )
+    LINE 1: CREATE OR REPLACE TABLE t (a CHAR AS)
+                                                ^
 - input: CREATE TABLE t (a INT, b INT) AS SELECT 1 AS b, 2 AS a
   formatted_sql: CREATE TABLE t (a INT, b INT) AS SELECT 1 AS b, 2 AS a
 - input: CREATE SOURCE src
