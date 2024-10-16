@@ -1175,8 +1175,7 @@ impl HummockManager {
                         .levels
                         .get(&compact_task.compaction_group_id)
                         .unwrap();
-                    let input_exist =
-                        group.check_input_sst_ids_exist(&input_level_ids, input_sst_ids);
+                    let input_exist = group.check_sst_ids_exist(&input_level_ids, input_sst_ids);
                     if !input_exist {
                         compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                         warn!(
