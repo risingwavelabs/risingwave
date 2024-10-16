@@ -12,12 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 
+use crate::util::is_env_set;
 use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig, TempoConfig};
+
+/// Get the command for starting the given component of RisingWave.
+pub fn risingwave_cmd(component: &str) -> Result<Command> {
+    let cmd = if is_env_set("USE_SYSTEM_RISINGWAVE") {
+        let mut cmd = Command::new("risingwave");
+        cmd.arg(component);
+        cmd
+    } else {
+        let prefix_bin = std::env::var("PREFIX_BIN")?;
+        let path = Path::new(&prefix_bin).join("risingwave").join(component);
+        Command::new(path)
+    };
+
+    Ok(cmd)
+}
 
 /// Add a meta node to the parameters.
 pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) -> Result<()> {
