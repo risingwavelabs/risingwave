@@ -109,6 +109,8 @@ pub struct StreamingMetrics {
     agg_distinct_cache_miss_count: LabelGuardedIntCounterVec<3>,
     agg_distinct_total_cache_count: LabelGuardedIntCounterVec<3>,
     agg_distinct_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    agg_state_cache_lookup_count: LabelGuardedIntCounterVec<3>,
+    agg_state_cache_miss_count: LabelGuardedIntCounterVec<3>,
 
     // Streaming TopN
     group_top_n_cache_miss_count: LabelGuardedIntCounterVec<3>,
@@ -544,6 +546,22 @@ impl StreamingMetrics {
         let agg_dirty_groups_heap_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_agg_dirty_groups_heap_size",
             "Total dirty group heap size in aggregation executor",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_state_cache_lookup_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_agg_state_cache_lookup_count",
+            "Aggregation executor state cache lookup count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_state_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_agg_state_cache_miss_count",
+            "Aggregation executor state cache miss count",
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
@@ -1052,6 +1070,8 @@ impl StreamingMetrics {
             agg_distinct_cache_miss_count,
             agg_distinct_total_cache_count,
             agg_distinct_cached_entry_count,
+            agg_state_cache_lookup_count,
+            agg_state_cache_miss_count,
             group_top_n_cache_miss_count,
             group_top_n_total_query_cache_count,
             group_top_n_cached_entry_count,
@@ -1313,6 +1333,12 @@ impl StreamingMetrics {
             agg_dirty_groups_heap_size: self
                 .agg_dirty_groups_heap_size
                 .with_guarded_label_values(label_list),
+            agg_state_cache_lookup_count: self
+                .agg_state_cache_lookup_count
+                .with_guarded_label_values(label_list),
+            agg_state_cache_miss_count: self
+                .agg_state_cache_miss_count
+                .with_guarded_label_values(label_list),
         }
     }
 
@@ -1510,6 +1536,8 @@ pub struct HashAggMetrics {
     pub agg_chunk_total_lookup_count: LabelGuardedIntCounter<3>,
     pub agg_dirty_groups_count: LabelGuardedIntGauge<3>,
     pub agg_dirty_groups_heap_size: LabelGuardedIntGauge<3>,
+    pub agg_state_cache_lookup_count: LabelGuardedIntCounter<3>,
+    pub agg_state_cache_miss_count: LabelGuardedIntCounter<3>,
 }
 
 pub struct AggDistinctDedupMetrics {
