@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fail::fail_point;
+use futures::{stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -22,7 +23,9 @@ use risingwave_hummock_sdk::{
     HummockContextId, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     INVALID_VERSION_ID,
 };
+use risingwave_meta_model_v2::hummock_gc_history;
 use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
+use sea_orm::{DatabaseConnection, EntityTrait};
 
 use crate::controller::SqlMetaStore;
 use crate::hummock::error::{Error, Result};
@@ -240,6 +243,8 @@ impl HummockManager {
                     .iter()
                     .map(|s| (s.sst_info.object_id, s.created_at)),
             )?;
+            let ids = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
+            check_gc_history(&self.meta_store_ref().conn, ids).await?;
         }
 
         async {
@@ -291,7 +296,10 @@ impl HummockManager {
             now,
             self.env.opts.min_sst_retention_time_sec,
             object_timestamps.iter().map(|(k, v)| (*k, *v)),
-        )
+        )?;
+        let ids = object_timestamps.iter().map(|(id, _)| *id).collect_vec();
+        check_gc_history(&self.meta_store_ref().conn, ids).await?;
+        Ok(())
     }
 }
 
@@ -307,6 +315,33 @@ fn check_sst_retention(
         }
     }
     Ok(())
+}
+
+async fn check_gc_history(
+    db: &DatabaseConnection,
+    // need IntoIterator to work around stream's "implementation of `std::iter::Iterator` is not general enough" error.
+    object_ids: impl IntoIterator<Item = HummockSstableObjectId>,
+) -> Result<()> {
+    let futures = object_ids.into_iter().map(|id| async move {
+        let id: risingwave_meta_model_v2::HummockSstableObjectId = id.try_into().unwrap();
+        hummock_gc_history::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .map_err(Error::from)
+    });
+    let res: Vec<_> = stream::iter(futures).buffer_unordered(10).collect().await;
+    let res: Result<Vec<_>> = res.into_iter().collect();
+    let expired_object_ids: Vec<_> = res?.into_iter().flatten().collect();
+    if expired_object_ids.is_empty() {
+        return Ok(());
+    }
+    tracing::error!(
+        ?expired_object_ids,
+        "new SSTs are rejected because they have already been GCed"
+    );
+    Err(Error::InvalidSst(
+        expired_object_ids[0].object_id as HummockSstableObjectId,
+    ))
 }
 
 // pin and unpin method
