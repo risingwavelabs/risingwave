@@ -18,7 +18,6 @@ mod status;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::ops::Bound::{Excluded, Unbounded};
-use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
@@ -30,7 +29,6 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::info;
 
-use crate::barrier::command::CommandContext;
 use crate::barrier::creating_job::barrier_control::CreatingStreamingJobBarrierControl;
 use crate::barrier::creating_job::status::{
     CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus,
@@ -38,6 +36,7 @@ use crate::barrier::creating_job::status::{
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
+use crate::barrier::state::BarrierInfo;
 use crate::barrier::{Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
@@ -89,7 +88,7 @@ impl CreatingStreamingJobControl {
             backfill_epoch,
             status: CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time: 0,
-                pending_commands: vec![],
+                pending_barriers: vec![],
                 version_stats: version_stat.clone(),
                 create_mview_tracker,
                 snapshot_backfill_actors,
@@ -176,9 +175,7 @@ impl CreatingStreamingJobControl {
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
         CreatingJobInjectBarrierInfo {
-            curr_epoch,
-            prev_epoch,
-            kind,
+            barrier_info,
             new_actors,
             mutation,
         }: CreatingJobInjectBarrierInfo,
@@ -186,32 +183,34 @@ impl CreatingStreamingJobControl {
         let node_to_collect = control_stream_manager.inject_barrier(
             Some(table_id),
             mutation,
-            (&curr_epoch, &prev_epoch),
-            &kind,
+            &barrier_info,
             pre_applied_graph_info,
             applied_graph_info,
             new_actors,
             vec![],
             vec![],
         )?;
-        barrier_control.enqueue_epoch(prev_epoch.value().0, node_to_collect, kind.is_checkpoint());
+        barrier_control.enqueue_epoch(
+            barrier_info.prev_epoch.value().0,
+            node_to_collect,
+            barrier_info.kind.is_checkpoint(),
+        );
         Ok(())
     }
 
     pub(super) fn on_new_command(
         &mut self,
         control_stream_manager: &mut ControlStreamManager,
-        command_ctx: &Arc<CommandContext>,
+        command: &Command,
+        barrier_info: &BarrierInfo,
     ) -> MetaResult<()> {
         let table_id = self.info.table_fragments.table_id();
-        let start_consume_upstream = if let Command::MergeSnapshotBackfillStreamingJobs(
-            jobs_to_merge,
-        ) = &command_ctx.command
-        {
-            jobs_to_merge.contains_key(&table_id)
-        } else {
-            false
-        };
+        let start_consume_upstream =
+            if let Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) = command {
+                jobs_to_merge.contains_key(&table_id)
+            } else {
+                false
+            };
         let progress_epoch =
             if let Some(max_collected_epoch) = self.barrier_control.max_collected_epoch() {
                 max(max_collected_epoch, self.backfill_epoch)
@@ -219,7 +218,7 @@ impl CreatingStreamingJobControl {
                 self.backfill_epoch
             };
         self.upstream_lag.set(
-            command_ctx
+            barrier_info
                 .prev_epoch
                 .value()
                 .0
@@ -227,7 +226,7 @@ impl CreatingStreamingJobControl {
         );
         match &mut self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot {
-                pending_commands,
+                pending_barriers,
                 prev_epoch_fake_physical_time,
                 pending_non_checkpoint_barriers,
                 initial_barrier_info,
@@ -242,9 +241,9 @@ impl CreatingStreamingJobControl {
                     prev_epoch_fake_physical_time,
                     pending_non_checkpoint_barriers,
                     initial_barrier_info,
-                    command_ctx.kind.is_checkpoint(),
+                    barrier_info.kind.is_checkpoint(),
                 );
-                pending_commands.push(command_ctx.clone());
+                pending_barriers.push(barrier_info.clone());
                 Self::inject_barrier(
                     self.info.table_fragments.table_id(),
                     control_stream_manager,
@@ -266,20 +265,18 @@ impl CreatingStreamingJobControl {
                         Some(graph_info)
                     },
                     CreatingJobInjectBarrierInfo {
-                        curr_epoch: command_ctx.curr_epoch.clone(),
-                        prev_epoch: command_ctx.prev_epoch.clone(),
-                        kind: command_ctx.kind.clone(),
+                        barrier_info: barrier_info.clone(),
                         new_actors: None,
                         mutation: None,
                     },
                 )?;
-                let prev_epoch = command_ctx.prev_epoch.value().0;
+                let prev_epoch = barrier_info.prev_epoch.value().0;
                 if start_consume_upstream {
                     info!(
                         table_id = self.info.table_fragments.table_id().table_id,
                         prev_epoch, "start consuming upstream"
                     );
-                    assert!(command_ctx.kind.is_checkpoint());
+                    assert!(barrier_info.kind.is_checkpoint());
                     self.status = CreatingStreamingJobStatus::Finishing(prev_epoch);
                 }
             }
