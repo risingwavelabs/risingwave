@@ -1,5 +1,8 @@
 control substitution on
 
+statement ok
+SET streaming_use_shared_source TO false;
+
 ############## Create kafka seed data
 
 statement ok
@@ -127,3 +130,6 @@ drop sink kafka_sink;
 
 statement ok
 drop table kafka_seed_data;
+
+statement ok
+SET streaming_use_shared_source TO true;
