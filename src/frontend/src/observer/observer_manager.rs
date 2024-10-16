@@ -245,6 +245,7 @@ impl FrontendObserverNode {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
+        tracing::trace!(?info, "handle catalog notification");
 
         let mut catalog_guard = self.catalog.write();
         match info {
