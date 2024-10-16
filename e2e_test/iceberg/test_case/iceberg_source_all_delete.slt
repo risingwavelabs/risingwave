@@ -49,6 +49,7 @@ WITH (
     table.name = 'test_all_delete',
 );
 
+system ok
 sleep 10s
 
 statement ok
@@ -57,6 +58,7 @@ DELETE FROM s1 where i3 > 4;
 statement ok
 flush
 
+system ok
 sleep 10s
 
 query I

@@ -49,6 +49,7 @@ WITH (
     table.name = 'test_position_delete',
 );
 
+system ok
 sleep 10s
 
 query I
