@@ -12,7 +12,7 @@ impl MigrationTrait for Migration {
                     .table(HummockGcHistory::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(HummockGcHistory::SstId)
+                        ColumnDef::new(HummockGcHistory::ObjectId)
                             .big_integer()
                             .not_null()
                             .primary_key(),
@@ -37,6 +37,6 @@ impl MigrationTrait for Migration {
 #[derive(DeriveIden)]
 enum HummockGcHistory {
     Table,
-    SstId,
+    ObjectId,
     MarkDeleteAt,
 }
