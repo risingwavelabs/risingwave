@@ -19,7 +19,7 @@ use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_meta_model_v2 as model_v2;
+use risingwave_meta_model as model;
 use risingwave_pb::hummock::PbHummockVersionDelta;
 use sea_orm::{DbErr, EntityTrait, QueryOrder, TransactionTrait};
 
@@ -83,8 +83,8 @@ impl MetaSnapshotV2Builder {
             )
             .await
             .map_err(map_db_err)?;
-        let version_deltas = model_v2::prelude::HummockVersionDelta::find()
-            .order_by_asc(model_v2::hummock_version_delta::Column::Id)
+        let version_deltas = model::prelude::HummockVersionDelta::find()
+            .order_by_asc(model::hummock_version_delta::Column::Id)
             .all(&txn)
             .await
             .map_err(map_db_err)?

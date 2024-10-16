@@ -20,8 +20,8 @@ use risingwave_common::config::{CompactionConfig, DefaultParallelism, ObjectStor
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::{bail, system_param};
+use risingwave_meta_model::prelude::Cluster;
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
-use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,

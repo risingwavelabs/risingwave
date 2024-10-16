@@ -36,7 +36,7 @@ use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};

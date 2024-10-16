@@ -10412,7 +10412,7 @@ dependencies = [
  "prost 0.13.1",
  "risingwave_common",
  "risingwave_hummock_sdk",
- "risingwave_meta_model_v2",
+ "risingwave_meta_model",
  "risingwave_object_store",
  "risingwave_pb",
  "serde",
@@ -11097,8 +11097,8 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_meta",
+ "risingwave_meta_model",
  "risingwave_meta_model_migration",
- "risingwave_meta_model_v2",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -11578,8 +11578,8 @@ dependencies = [
  "risingwave_hummock_sdk",
  "risingwave_license",
  "risingwave_meta_dashboard",
+ "risingwave_meta_model",
  "risingwave_meta_model_migration",
- "risingwave_meta_model_v2",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -11629,19 +11629,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "risingwave_meta_model_migration"
-version = "2.1.0-alpha"
-dependencies = [
- "async-std",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "risingwave_meta_model_v2"
+name = "risingwave_meta_model"
 version = "2.1.0-alpha"
 dependencies = [
  "prost 0.13.1",
@@ -11651,6 +11639,18 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "risingwave_meta_model_migration"
+version = "2.1.0-alpha"
+dependencies = [
+ "async-std",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -11704,7 +11704,7 @@ dependencies = [
  "risingwave_connector",
  "risingwave_hummock_sdk",
  "risingwave_meta",
- "risingwave_meta_model_v2",
+ "risingwave_meta_model",
  "risingwave_pb",
  "sea-orm",
  "serde_json",
