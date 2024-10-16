@@ -2473,12 +2473,15 @@ async fn test_merge_compaction_group_task_expired() {
         .await
         .unwrap();
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
-    let task = hummock_manager
+
+    // for task pending
+    let _task = hummock_manager
         .get_compact_task(compaction_group_id, &mut default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
 
+    // will cancel the task
     hummock_manager
         .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
         .await
@@ -2510,25 +2513,6 @@ async fn test_merge_compaction_group_task_expired() {
         vec![100]
     );
 
-    let task2 = hummock_manager
-        .get_compact_task(left_compaction_group_id, &mut default_compaction_selector())
-        .await
-        .unwrap();
-
-    // sst is pending by the task
-    assert!(task2.is_none());
-    let ret = hummock_manager
-        .report_compact_task(
-            task.task_id,
-            TaskStatus::Success,
-            vec![],
-            None,
-            HashMap::default(),
-        )
-        .await
-        .unwrap();
-    assert!(ret);
-
     let current_version_2 = hummock_manager.get_current_version().await;
     // The compaction task is cancelled or failed.
     assert_eq!(current_version_2, current_version);
@@ -2542,6 +2526,7 @@ async fn test_merge_compaction_group_task_expired() {
         .unwrap()
         .unwrap();
 
+    // will cancel the task2
     hummock_manager
         .merge_compaction_group(left_compaction_group_id, right_compaction_group_id)
         .await
