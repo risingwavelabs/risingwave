@@ -243,6 +243,90 @@ impl HummockManager {
                                             compaction_group_config.group_id(),
                                         )
                                     }
+
+                                    {
+                                        let compaction_group_count = hummock_manager
+                                            .compaction_group_manager
+                                            .read()
+                                            .await
+                                            .compaction_groups()
+                                            .len();
+
+                                        hummock_manager
+                                            .metrics
+                                            .compaction_group_count
+                                            .set(compaction_group_count as i64);
+
+                                        let group_infos = hummock_manager
+                                            .calculate_compaction_group_statistic()
+                                            .await;
+
+                                        let tables_throughput =
+                                            hummock_manager.history_table_throughput.read().clone();
+
+                                        let current_version_levels = &hummock_manager
+                                            .versioning
+                                            .read()
+                                            .await
+                                            .current_version
+                                            .levels;
+
+                                        for group_info in group_infos {
+                                            hummock_manager
+                                                .metrics
+                                                .compaction_group_size
+                                                .with_label_values(&[&group_info
+                                                    .group_id
+                                                    .to_string()])
+                                                .set(group_info.group_size as _);
+
+                                            println!(
+                                                "group {:?} group_size {:?} tables {:?}",
+                                                group_info.group_id,
+                                                group_info.group_id,
+                                                group_info.table_statistic.keys()
+                                            );
+
+                                            // accumulate the throughput of all tables in the group
+                                            let mut avg_throuput = 0;
+                                            for table_id in group_info.table_statistic.keys() {
+                                                if let Some(throuput) =
+                                                    tables_throughput.get(table_id)
+                                                {
+                                                    let table_avg_throughput =
+                                                        throuput.iter().sum::<u64>()
+                                                            / throuput.len() as u64;
+
+                                                    avg_throuput += table_avg_throughput;
+                                                }
+                                            }
+
+                                            hummock_manager
+                                                .metrics
+                                                .compaction_group_throughput
+                                                .with_label_values(&[&group_info
+                                                    .group_id
+                                                    .to_string()])
+                                                .set(avg_throuput as _);
+
+                                            if let Some(group_levels) =
+                                                current_version_levels.get(&group_info.group_id)
+                                            {
+                                                let file_count = group_levels.count_ssts();
+                                                println!(
+                                                    "group {:?} file_count {:?} avg_throuput {:?}",
+                                                    group_info.group_id, file_count, avg_throuput
+                                                );
+                                                hummock_manager
+                                                    .metrics
+                                                    .compaction_group_file_count
+                                                    .with_label_values(&[&group_info
+                                                        .group_id
+                                                        .to_string()])
+                                                    .set(file_count as _);
+                                            }
+                                        }
+                                    }
                                 }
 
                                 HummockTimerEvent::CompactionHeartBeatExpiredCheck => {

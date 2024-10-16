@@ -208,6 +208,11 @@ pub struct MetaMetrics {
     pub auto_schema_change_latency: LabelGuardedHistogramVec<2>,
 
     pub time_travel_version_replay_latency: Histogram,
+
+    pub compaction_group_count: IntGauge,
+    pub compaction_group_size: IntGaugeVec,
+    pub compaction_group_file_count: IntGaugeVec,
+    pub compaction_group_throughput: IntGaugeVec,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -750,6 +755,37 @@ impl MetaMetrics {
         let time_travel_version_replay_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let compaction_group_count = register_int_gauge_with_registry!(
+            "storage_compaction_group_count",
+            "The number of compaction groups",
+            registry,
+        )
+        .unwrap();
+
+        let compaction_group_size = register_int_gauge_vec_with_registry!(
+            "storage_compaction_group_size",
+            "The size of compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let compaction_group_file_count = register_int_gauge_vec_with_registry!(
+            "storage_compaction_group_file_count",
+            "The file count of compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let compaction_group_throughput = register_int_gauge_vec_with_registry!(
+            "storage_compaction_group_throughput",
+            "The throughput of compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -825,6 +861,10 @@ impl MetaMetrics {
             auto_schema_change_latency,
             merge_compaction_group_count,
             time_travel_version_replay_latency,
+            compaction_group_count,
+            compaction_group_size,
+            compaction_group_file_count,
+            compaction_group_throughput,
         }
     }
 

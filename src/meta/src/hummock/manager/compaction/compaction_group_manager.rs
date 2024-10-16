@@ -535,6 +535,10 @@ impl CompactionGroupManager {
     pub(crate) fn default_compaction_config(&self) -> Arc<CompactionConfig> {
         self.default_config.clone()
     }
+
+    pub(crate) fn compaction_groups(&self) -> &BTreeMap<CompactionGroupId, CompactionGroup> {
+        &self.compaction_groups
+    }
 }
 
 fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) {
