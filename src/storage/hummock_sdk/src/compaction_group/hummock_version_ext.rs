@@ -433,20 +433,13 @@ impl HummockVersion {
                 if insert_table_infos.is_empty() {
                     continue;
                 }
-                match group_split::get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
-                    Ok(idx) => {
-                        add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
-                    }
-                    Err(idx) => {
-                        insert_new_sub_level(
-                            target_l0,
-                            sub_level.sub_level_id,
-                            sub_level.level_type,
-                            insert_table_infos,
-                            Some(idx),
-                        );
-                    }
-                }
+
+                append_new_sub_level(
+                    target_l0,
+                    sub_level.sub_level_id,
+                    sub_level.level_type,
+                    insert_table_infos,
+                );
             }
         }
         for (idx, level) in parent_levels.levels.iter_mut().enumerate() {
@@ -678,12 +671,11 @@ impl HummockVersion {
                             "we should only add to L0 when we commit an epoch."
                         );
                         if !inserted_table_infos.is_empty() {
-                            insert_new_sub_level(
+                            append_new_sub_level(
                                 &mut levels.l0,
                                 next_l0_sub_level_id,
                                 PbLevelType::Overlapping,
                                 inserted_table_infos.clone(),
-                                None,
                             );
                             next_l0_sub_level_id += 1;
                         }
@@ -951,20 +943,13 @@ impl HummockVersionCommon<SstableInfo> {
                         l0.total_file_size -= sst_info.sst_size;
                         l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                     });
-                match group_split::get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
-                    Ok(idx) => {
-                        add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
-                    }
-                    Err(idx) => {
-                        insert_new_sub_level(
-                            target_l0,
-                            sub_level.sub_level_id,
-                            sub_level.level_type,
-                            insert_table_infos,
-                            Some(idx),
-                        );
-                    }
-                }
+
+                append_new_sub_level(
+                    target_l0,
+                    sub_level.sub_level_id,
+                    sub_level.level_type,
+                    insert_table_infos,
+                );
             }
         }
 
@@ -1291,19 +1276,14 @@ pub fn add_ssts_to_sub_level(
 }
 
 /// `None` value of `sub_level_insert_hint` means append.
-pub fn insert_new_sub_level(
+pub fn append_new_sub_level(
     l0: &mut OverlappingLevel,
     insert_sub_level_id: u64,
     level_type: PbLevelType,
     insert_table_infos: Vec<SstableInfo>,
-    sub_level_insert_hint: Option<usize>,
 ) {
-    if insert_sub_level_id == u64::MAX {
-        return;
-    }
-    let insert_pos = if let Some(insert_pos) = sub_level_insert_hint {
-        insert_pos
-    } else {
+    assert_ne!(0, insert_sub_level_id);
+    let insert_pos = {
         if let Some(newest_level) = l0.sub_levels.last() {
             assert!(
                 newest_level.sub_level_id < insert_sub_level_id,
@@ -1315,15 +1295,14 @@ pub fn insert_new_sub_level(
         }
         l0.sub_levels.len()
     };
+
     #[cfg(debug_assertions)]
     {
+        // target l0 sub level more than 1, check the order of sub level id
         if insert_pos > 0 {
             if let Some(smaller_level) = l0.sub_levels.get(insert_pos - 1) {
                 debug_assert!(smaller_level.sub_level_id < insert_sub_level_id);
             }
-        }
-        if let Some(larger_level) = l0.sub_levels.get(insert_pos) {
-            debug_assert!(larger_level.sub_level_id > insert_sub_level_id);
         }
     }
     // All files will be committed in one new Overlapping sub-level and become
