@@ -8312,16 +8312,16 @@ dependencies = [
 
 [[package]]
 name = "opensearch"
-version = "2.2.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd2846759315751e04d8b45a0bdbd89ce442282ffb916cf54f6b0adf8df4b44c"
+checksum = "a62b025c3503d3d53eaba3b6f14adb955af9f69fc71141b4d030a4e5331f5d42"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.0",
  "bytes",
  "dyn-clone",
  "lazy_static",
  "percent-encoding",
- "reqwest 0.11.20",
+ "reqwest 0.12.4",
  "rustc_version 0.4.0",
  "serde",
  "serde_json",
@@ -10207,6 +10207,7 @@ version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "566cafdd92868e0939d3fb961bd0dc25fcfaaed179291093b3d43e6b3150ea10"
 dependencies = [
+ "async-compression",
  "base64 0.22.0",
  "bytes",
  "encoding_rs",
