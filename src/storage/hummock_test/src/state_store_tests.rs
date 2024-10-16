@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
@@ -29,7 +29,7 @@ use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH, MAX_EP
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo, SyncResult};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
+use risingwave_meta::hummock::CommitEpochInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::change_log::test_utils::{
     apply_test_log_data, gen_test_data,
@@ -1384,10 +1384,9 @@ async fn test_replicated_local_hummock_storage() {
             sstables: vec![],
             new_table_watermarks: Default::default(),
             sst_to_context: Default::default(),
-            new_table_fragment_info: NewTableFragmentInfo::None,
+            new_table_fragment_infos: vec![],
             change_log_delta: Default::default(),
-            committed_epoch: epoch0,
-            tables_to_commit: HashSet::from_iter([TEST_TABLE_ID]),
+            tables_to_commit: HashMap::from_iter([(TEST_TABLE_ID, epoch0)]),
         })
         .await
         .unwrap();
