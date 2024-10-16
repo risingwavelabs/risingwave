@@ -245,8 +245,7 @@ pub struct ExternalTableConfig {
     pub ssl_root_cert: Option<String>,
 
     /// `encrypt` specifies whether connect to SQL Server using SSL.
-    /// Choices include `true`, `false`.
-    /// This field is optional.
+    /// Only "true" means using SSL. All other values are treated as "false".
     #[serde(rename = "database.encrypt", default = "Default::default")]
     pub encrypt: String,
 }
