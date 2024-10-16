@@ -14,7 +14,7 @@
 
 use async_trait::async_trait;
 use risingwave_common::system_param::LICENSE_KEY_KEY;
-use risingwave_meta::manager::SystemParamsManagerImpl;
+use risingwave_meta::controller::system_param::SystemParamsControllerRef;
 use risingwave_pb::meta::system_params_service_server::SystemParamsService;
 use risingwave_pb::meta::{
     GetSystemParamsRequest, GetSystemParamsResponse, SetSystemParamRequest, SetSystemParamResponse,
@@ -22,14 +22,17 @@ use risingwave_pb::meta::{
 use tonic::{Request, Response, Status};
 
 pub struct SystemParamsServiceImpl {
-    system_params_manager: SystemParamsManagerImpl,
+    system_params_manager: SystemParamsControllerRef,
 
     /// Whether the license key is managed by license key file, i.e., `--license-key-path` is set.
     managed_license_key: bool,
 }
 
 impl SystemParamsServiceImpl {
-    pub fn new(system_params_manager: SystemParamsManagerImpl, managed_license_key: bool) -> Self {
+    pub fn new(
+        system_params_manager: SystemParamsControllerRef,
+        managed_license_key: bool,
+    ) -> Self {
         Self {
             system_params_manager,
             managed_license_key,
@@ -43,10 +46,7 @@ impl SystemParamsService for SystemParamsServiceImpl {
         &self,
         _request: Request<GetSystemParamsRequest>,
     ) -> Result<Response<GetSystemParamsResponse>, Status> {
-        let params = match &self.system_params_manager {
-            SystemParamsManagerImpl::Kv(mgr) => mgr.get_pb_params().await,
-            SystemParamsManagerImpl::Sql(mgr) => mgr.get_pb_params().await,
-        };
+        let params = self.system_params_manager.get_pb_params().await;
 
         Ok(Response::new(GetSystemParamsResponse {
             params: Some(params),
@@ -69,10 +69,10 @@ impl SystemParamsService for SystemParamsServiceImpl {
             ));
         }
 
-        let params = match &self.system_params_manager {
-            SystemParamsManagerImpl::Kv(mgr) => mgr.set_param(&req.param, req.value).await?,
-            SystemParamsManagerImpl::Sql(mgr) => mgr.set_param(&req.param, req.value).await?,
-        };
+        let params = self
+            .system_params_manager
+            .set_param(&req.param, req.value)
+            .await?;
 
         Ok(Response::new(SetSystemParamResponse {
             params: Some(params),

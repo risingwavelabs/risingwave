@@ -203,7 +203,7 @@ impl BackfillStage {
         vis
     }
 
-    /// Updates backfill states and returns whether the row from upstream `SourceExecutor` is visible.
+    /// Updates backfill states and returns whether the row backfilled from external system is visible.
     fn handle_backfill_row(&mut self, split_id: &str, offset: &str) -> bool {
         let state = self.states.get_mut(split_id).unwrap();
         match state {
