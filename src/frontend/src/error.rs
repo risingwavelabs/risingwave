@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::convert::Infallible;
+use core::ops::FromResidual;
+
 use risingwave_batch::error::BatchError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NoFunction, NotImplemented};
@@ -252,5 +255,28 @@ impl From<BoxedError> for RwError {
         // This is essentially expanded from `anyhow::anyhow!(e)`.
         let e = anyhow::__private::kind::BoxedKind::anyhow_kind(&e).new(e);
         ErrorCode::Uncategorized(e).into()
+    }
+}
+
+
+/// Result when applying an optimization rule.
+enum OResult<T> {
+    /// Successfully optimized the input.
+    Ok(T),
+    /// The current rule is not applicable to the input.
+    /// The caller may try other rules.
+    NotApplicable,
+    /// There was an unrecoverable error while applying the rule.
+    /// The caller should stop trying other rules and report the error.
+    Err(RwError),
+}
+
+/// `?` on an `Option<_>`.
+impl<T> FromResidual<Option<Infallible>> for OResult<T> {
+    fn from_residual(residual: Option<Infallible>) -> Self {
+        match residual {
+            Some(r) => r,
+            None => Self::NotApplicable,
+        }
     }
 }
