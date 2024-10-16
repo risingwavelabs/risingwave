@@ -206,14 +206,22 @@ pub async fn print_version_delta_in_archive(
 }
 
 fn match_delta(delta: &DeltaType, sst_id: HummockSstableObjectId) -> bool {
-    let DeltaType::IntraLevel(delta) = delta else {
-        return false;
-    };
-    delta
-        .inserted_table_infos
-        .iter()
-        .any(|sst| sst.sst_id == sst_id)
-        || delta.removed_table_ids.iter().any(|sst| *sst == sst_id)
+    match delta {
+        DeltaType::GroupConstruct(_) | DeltaType::GroupDestroy(_) | DeltaType::GroupMerge(_) => {
+            false
+        }
+        DeltaType::IntraLevel(delta) => {
+            delta
+                .inserted_table_infos
+                .iter()
+                .any(|sst| sst.sst_id == sst_id)
+                || delta.removed_table_ids.iter().any(|sst| *sst == sst_id)
+        }
+        DeltaType::NewL0SubLevel(delta) => delta
+            .inserted_table_infos
+            .iter()
+            .any(|sst| sst.sst_id == sst_id),
+    }
 }
 
 fn print_delta(delta: &DeltaType) {
