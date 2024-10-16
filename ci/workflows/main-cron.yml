@@ -1151,12 +1151,6 @@ steps:
     command: |
       bash -c 'echo test && exit -1'
 
-  # Notification test.
-  - key: "test-notify-2"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
-    command: |
-      bash -c 'echo test && exit -1'
-
   - wait: true
     continue_on_failure: true
     allow_dependency_failure: true
