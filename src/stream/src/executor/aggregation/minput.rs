@@ -30,7 +30,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
-use super::GroupKey;
+use super::{AggStateCacheStats, GroupKey};
 use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -160,6 +160,7 @@ impl MaterializedInputState {
     }
 
     /// Apply a chunk of data to the state cache.
+    /// This method should never involve any state table operations.
     pub fn apply_chunk(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()> {
         self.cache.apply_batch(
             chunk,
@@ -171,13 +172,19 @@ impl MaterializedInputState {
     }
 
     /// Get the output of the state.
+    /// We may need to read from the state table into the cache to get the output.
     pub async fn get_output(
         &mut self,
         state_table: &StateTable<impl StateStore>,
         group_key: Option<&GroupKey>,
         func: &BoxedAggregateFunction,
-    ) -> StreamExecutorResult<Datum> {
+    ) -> StreamExecutorResult<(Datum, AggStateCacheStats)> {
+        let mut stats = AggStateCacheStats::default();
+        stats.agg_state_cache_lookup_count += 1;
+
         if !self.cache.is_synced() {
+            stats.agg_state_cache_miss_count += 1;
+
             let mut cache_filler = self.cache.begin_syncing();
             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
                 &(Bound::Unbounded, Bound::Unbounded);
@@ -220,7 +227,7 @@ impl MaterializedInputState {
         if self.output_first_value {
             // special case for `min`, `max`, `first_value` and `last_value`
             // take the first value from the cache
-            Ok(self.cache.output_first())
+            Ok((self.cache.output_first(), stats))
         } else {
             const CHUNK_SIZE: usize = 1024;
             let chunks = self.cache.output_batches(CHUNK_SIZE).collect_vec();
@@ -228,8 +235,19 @@ impl MaterializedInputState {
             for chunk in chunks {
                 func.update(&mut state, &chunk).await?;
             }
-            Ok(func.get_result(&state).await?)
+            Ok((func.get_result(&state).await?, stats))
         }
+    }
+
+    #[cfg(test)]
+    async fn get_output_no_stats(
+        &mut self,
+        state_table: &StateTable<impl StateStore>,
+        group_key: Option<&GroupKey>,
+        func: &BoxedAggregateFunction,
+    ) -> StreamExecutorResult<Datum> {
+        let (res, _stats) = self.get_output(state_table, group_key, func).await?;
+        Ok(res)
     }
 }
 
@@ -404,7 +422,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(3i32.into()));
         }
 
@@ -422,7 +442,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(2i32.into()));
         }
 
@@ -438,7 +460,9 @@ mod tests {
                 &input_schema,
             )
             .unwrap();
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(2i32.into()));
         }
 
@@ -504,7 +528,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(8i32.into()));
         }
 
@@ -522,7 +548,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(9i32.into()));
         }
 
@@ -539,7 +567,9 @@ mod tests {
             )
             .unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(9i32.into()));
         }
 
@@ -650,12 +680,12 @@ mod tests {
             table_2.commit(epoch).await.unwrap();
 
             let out1 = state_1
-                .get_output(&table_1, group_key.as_ref(), &agg1)
+                .get_output_no_stats(&table_1, group_key.as_ref(), &agg1)
                 .await?;
             assert_eq!(out1, Some("a".into()));
 
             let out2 = state_2
-                .get_output(&table_2, group_key.as_ref(), &agg2)
+                .get_output_no_stats(&table_2, group_key.as_ref(), &agg2)
                 .await?;
             assert_eq!(out2, Some(9i32.into()));
         }
@@ -722,7 +752,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(5i32.into()));
         }
 
@@ -740,7 +772,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(8i32.into()));
         }
 
@@ -757,7 +791,9 @@ mod tests {
             )
             .unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(8i32.into()));
         }
 
@@ -837,7 +873,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(min_value.into()));
         }
 
@@ -864,7 +902,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(min_value.into()));
         }
 
@@ -926,7 +966,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(4i32.into()));
         }
 
@@ -946,7 +988,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(12i32.into()));
         }
 
@@ -968,7 +1012,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some(12i32.into()));
         }
 
@@ -1040,7 +1086,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some("c,a".into()));
         }
 
@@ -1057,7 +1105,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res, Some("d_c,a+e".into()));
         }
 
@@ -1124,7 +1174,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res.unwrap().as_list(), &ListValue::from_iter([2, 1]));
         }
 
@@ -1141,7 +1193,9 @@ mod tests {
             epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
-            let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
+            let res = state
+                .get_output_no_stats(&table, group_key.as_ref(), &agg)
+                .await?;
             assert_eq!(res.unwrap().as_list(), &ListValue::from_iter([2, 2, 0, 1]));
         }
 

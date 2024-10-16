@@ -196,10 +196,11 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 .update_without_old_value(encoded_states);
 
             // Retrieve modified states and put the changes into the builders.
-            vars.agg_group
+            let (change, _stats) = vars
+                .agg_group
                 .build_change(&this.storages, &this.agg_funcs)
-                .await?
-                .map(|change| change.to_stream_chunk(&this.info.schema.data_types()))
+                .await?;
+            change.map(|change| change.to_stream_chunk(&this.info.schema.data_types()))
         } else {
             // No state is changed.
             None
@@ -241,21 +242,22 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         yield Message::Barrier(barrier);
 
+        // This will fetch previous agg states from the intermediate state table.
+        let (agg_group, _stats) = AggGroup::create(
+            this.version,
+            None,
+            &this.agg_calls,
+            &this.agg_funcs,
+            &this.storages,
+            &this.intermediate_state_table,
+            &this.input_pk_indices,
+            this.row_count_index,
+            this.extreme_cache_size,
+            &this.input_schema,
+        )
+        .await?;
         let mut vars = ExecutionVars {
-            // This will fetch previous agg states from the intermediate state table.
-            agg_group: AggGroup::create(
-                this.version,
-                None,
-                &this.agg_calls,
-                &this.agg_funcs,
-                &this.storages,
-                &this.intermediate_state_table,
-                &this.input_pk_indices,
-                this.row_count_index,
-                this.extreme_cache_size,
-                &this.input_schema,
-            )
-            .await?,
+            agg_group,
             distinct_dedup,
             state_changed: false,
         };

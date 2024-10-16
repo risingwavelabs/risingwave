@@ -1172,6 +1172,10 @@ def section_streaming_actors(outer_panels):
                             "Agg cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                         panels.target(
+                            f"(sum(rate({metric('stream_agg_state_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_state_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Agg state cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
+                        ),
+                        panels.target(
                             f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
                             "Distinct agg cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
