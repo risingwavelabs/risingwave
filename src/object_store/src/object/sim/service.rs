@@ -57,7 +57,7 @@ fn get_obj_meta(path: &str, obj: &Bytes) -> Result<ObjectMetadata> {
         last_modified: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(ObjectError::internal)?
-            .as_secs_f64(),
+            .as_secs_f64() as u64,
         total_size: obj.len(),
     })
 }

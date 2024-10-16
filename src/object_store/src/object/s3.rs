@@ -520,7 +520,7 @@ impl ObjectStore for S3ObjectStore {
             last_modified: resp
                 .last_modified()
                 .expect("last_modified required")
-                .as_secs_f64(),
+                .as_secs_f64() as u64,
             total_size: resp.content_length.unwrap_or_default() as usize,
         })
     }
@@ -1031,8 +1031,8 @@ impl Stream for S3ObjectIter {
                             key: obj.key().expect("key required").to_owned(),
                             last_modified: obj
                                 .last_modified()
-                                .map(|l| l.as_secs_f64())
-                                .unwrap_or(0f64),
+                                .map(|l| l.as_secs_f64() as u64)
+                                .unwrap_or(0u64),
                             total_size: obj.size().unwrap_or_default() as usize,
                         })
                         .collect_vec();

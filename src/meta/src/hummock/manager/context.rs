@@ -15,12 +15,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fail::fail_point;
+use futures::{stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    INVALID_VERSION_ID,
+    get_sst_data_path, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
+    LocalSstableInfo, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
 
@@ -133,6 +135,26 @@ impl HummockManager {
     pub async fn get_min_pinned_version_id(&self) -> HummockVersionId {
         self.context_info.read().await.min_pinned_version_id()
     }
+
+    async fn get_objects_created_at(
+        &self,
+        // need IntoIterator to work around stream's "implementation of `std::iter::Iterator` is not general enough" error.
+        object_ids: impl IntoIterator<Item = HummockSstableObjectId>,
+    ) -> Result<HashMap<HummockSstableObjectId, u64>> {
+        let futures = object_ids.into_iter().map(|object_id| async move {
+            let system_params = self.env.system_params_reader().await;
+            let obj_prefix = self
+                .object_store
+                .get_object_prefix(object_id, system_params.use_new_object_prefix_strategy());
+            let data_dir = system_params.data_directory();
+            let path = get_sst_data_path(data_dir, &obj_prefix, object_id);
+            let metadata = self.object_store.metadata(&path).await?;
+            Ok::<(HummockSstableObjectId, u64), Error>((object_id, metadata.last_modified))
+        });
+        let res: Vec<_> = stream::iter(futures).buffer_unordered(100).collect().await;
+        let res: Result<HashMap<_, _>> = res.into_iter().collect();
+        res
+    }
 }
 
 impl ContextInfo {
@@ -234,12 +256,12 @@ impl HummockManager {
         if !sstables.is_empty() {
             // sanity check to ensure SSTs to commit have not been full GCed yet.
             let now = self.now().await?;
+            let ids = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
+            let id_to_ts = self.get_objects_created_at(ids).await?;
             check_sst_retention(
                 now,
                 self.env.opts.min_sst_retention_time_sec,
-                sstables
-                    .iter()
-                    .map(|s| (s.sst_info.object_id, s.created_at)),
+                id_to_ts.into_iter(),
             )?;
         }
 
@@ -289,10 +311,12 @@ impl HummockManager {
             return Ok(());
         }
         let now = self.now().await?;
+        let ids = object_timestamps.iter().map(|(id, _)| *id).collect_vec();
+        let id_to_ts = self.get_objects_created_at(ids).await?;
         check_sst_retention(
             now,
             self.env.opts.min_sst_retention_time_sec,
-            object_timestamps.iter().map(|(k, v)| (*k, *v)),
+            id_to_ts.into_iter(),
         )
     }
 }

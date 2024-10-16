@@ -77,12 +77,12 @@ async fn test_full_scan() {
     let object_store_list_result = vec![
         ObjectMetadata {
             key: sstable_store.get_sst_data_path(1),
-            last_modified: now_ts.sub(Duration::from_secs(7200)).as_secs_f64(),
+            last_modified: now_ts.sub(Duration::from_secs(7200)).as_secs_f64() as u64,
             total_size: 128,
         },
         ObjectMetadata {
             key: sstable_store.get_sst_data_path(2),
-            last_modified: now_ts.sub(Duration::from_secs(3600)).as_secs_f64(),
+            last_modified: now_ts.sub(Duration::from_secs(3600)).as_secs_f64() as u64,
             total_size: 128,
         },
     ];

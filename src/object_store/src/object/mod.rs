@@ -60,7 +60,7 @@ pub struct ObjectMetadata {
     // Full path
     pub key: String,
     // Seconds since unix epoch.
-    pub last_modified: f64,
+    pub last_modified: u64,
     pub total_size: usize,
 }
 

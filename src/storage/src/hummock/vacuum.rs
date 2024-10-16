@@ -75,7 +75,7 @@ impl Vacuum {
                             next_start_after = Some(o.key.clone());
                             tracing::debug!(next_start_after, "set next start after");
                         }
-                        if o.last_modified < full_scan_task.sst_retention_watermark as f64 {
+                        if o.last_modified < full_scan_task.sst_retention_watermark {
                             Some(Ok(SstableStore::get_object_id_from_path(&o.key)))
                         } else {
                             None

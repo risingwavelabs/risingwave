@@ -206,8 +206,8 @@ impl ObjectStore for OpendalObjectStore {
         let opendal_metadata = self.op.stat(path).await?;
         let key = path.to_string();
         let last_modified = match opendal_metadata.last_modified() {
-            Some(t) => t.timestamp() as f64,
-            None => 0_f64,
+            Some(t) => t.timestamp().try_into().unwrap(),
+            None => 0u64,
         };
 
         let total_size = opendal_metadata.content_length() as usize;
@@ -253,8 +253,8 @@ impl ObjectStore for OpendalObjectStore {
                     let key = object.path().to_string();
                     let om = object.metadata();
                     let last_modified = match om.last_modified() {
-                        Some(t) => t.timestamp() as f64,
-                        None => 0_f64,
+                        Some(t) => t.timestamp().try_into().unwrap(),
+                        None => 0_u64,
                     };
                     let total_size = om.content_length() as usize;
                     let metadata = ObjectMetadata {

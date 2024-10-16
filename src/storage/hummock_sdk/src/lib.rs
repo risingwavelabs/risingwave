@@ -407,6 +407,28 @@ impl EpochWithGap {
     }
 }
 
+pub fn get_sst_data_path(
+    path_prefix: &str,
+    obj_prefix: &str,
+    object_id: HummockSstableObjectId,
+) -> String {
+    let mut path = String::with_capacity(
+        path_prefix.len()
+            + "/".len()
+            + obj_prefix.len()
+            + HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH
+            + ".".len()
+            + OBJECT_SUFFIX.len(),
+    );
+    path.push_str(path_prefix);
+    path.push('/');
+    path.push_str(obj_prefix);
+    path.push_str(&object_id.to_string());
+    path.push('.');
+    path.push_str(OBJECT_SUFFIX);
+    path
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
