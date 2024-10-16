@@ -168,16 +168,9 @@ impl StreamCdcTableScan {
         // We need to pass the id of upstream source job here
         let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
 
-        // split the table name from the qualified table name, e.g. `database_name.table_name`
-        let (_, cdc_table_name) = self
-            .core
-            .cdc_table_desc
-            .external_table_name
-            .split_once('.')
-            .unwrap();
-
-        // jsonb filter expr: payload->'source'->>'table' = <cdc_table_name>
-        let filter_expr = Self::build_cdc_filter_expr(cdc_table_name);
+        // filter upstream source chunk by the value of `_rw_table_name` column
+        let filter_expr =
+            Self::build_cdc_filter_expr(self.core.cdc_table_desc.external_table_name.as_str());
 
         let filter_operator_id = self.core.ctx.next_plan_node_id();
         // The filter node receive chunks in `(payload, _rw_offset, _rw_table_name)` schema
@@ -273,28 +266,13 @@ impl StreamCdcTableScan {
         })
     }
 
+    // The filter node receive input chunks in `(payload, _rw_offset, _rw_table_name)` schema
     pub fn build_cdc_filter_expr(cdc_table_name: &str) -> ExprImpl {
-        // jsonb filter expr: payload->'source'->>'table' = <cdc_table_name>
+        // filter by the `_rw_table_name` column
         FunctionCall::new(
             ExprType::Equal,
             vec![
-                FunctionCall::new(
-                    ExprType::JsonbAccessStr,
-                    vec![
-                        FunctionCall::new(
-                            ExprType::JsonbAccess,
-                            vec![
-                                InputRef::new(0, DataType::Jsonb).into(),
-                                ExprImpl::literal_varchar("source".into()),
-                            ],
-                        )
-                        .unwrap()
-                        .into(),
-                        ExprImpl::literal_varchar("table".into()),
-                    ],
-                )
-                .unwrap()
-                .into(),
+                InputRef::new(2, DataType::Varchar).into(),
                 ExprImpl::literal_varchar(cdc_table_name.into()),
             ],
         )
@@ -334,22 +312,27 @@ mod tests {
     async fn test_cdc_filter_expr() {
         let t1_json = JsonbVal::from_str(r#"{ "before": null, "after": { "v": 111, "v2": 222.2 }, "source": { "version": "2.2.0.Alpha3", "connector": "mysql", "name": "dbserver1", "ts_ms": 1678428689000, "snapshot": "false", "db": "inventory", "sequence": null, "table": "t1", "server_id": 223344, "gtid": null, "file": "mysql-bin.000003", "pos": 774, "row": 0, "thread": 8, "query": null }, "op": "c", "ts_ms": 1678428689389, "transaction": null }"#).unwrap();
         let t2_json = JsonbVal::from_str(r#"{ "before": null, "after": { "v": 333, "v2": 666.6 }, "source": { "version": "2.2.0.Alpha3", "connector": "mysql", "name": "dbserver1", "ts_ms": 1678428689000, "snapshot": "false", "db": "inventory", "sequence": null, "table": "t2", "server_id": 223344, "gtid": null, "file": "mysql-bin.000003", "pos": 884, "row": 0, "thread": 8, "query": null }, "op": "c", "ts_ms": 1678428689389, "transaction": null }"#).unwrap();
+
+        // NOTES: transaction metadata column expects to be filtered out before going to cdc filter
         let trx_json = JsonbVal::from_str(r#"{"data_collections": null, "event_count": null, "id": "35319:3962662584", "status": "BEGIN", "ts_ms": 1704263537068}"#).unwrap();
         let row1 = OwnedRow::new(vec![
             Some(t1_json.into()),
             Some(r#"{"file": "1.binlog", "pos": 100}"#.into()),
+            Some("public.t2".into()),
         ]);
         let row2 = OwnedRow::new(vec![
             Some(t2_json.into()),
             Some(r#"{"file": "2.binlog", "pos": 100}"#.into()),
+            Some("abs.t2".into()),
         ]);
 
         let row3 = OwnedRow::new(vec![
             Some(trx_json.into()),
             Some(r#"{"file": "3.binlog", "pos": 100}"#.into()),
+            Some("public.t2".into()),
         ]);
 
-        let filter_expr = StreamCdcTableScan::build_cdc_filter_expr("t1");
+        let filter_expr = StreamCdcTableScan::build_cdc_filter_expr("public.t2");
         assert_eq!(
             filter_expr.eval_row(&row1).await.unwrap(),
             Some(ScalarImpl::Bool(true))
@@ -358,6 +341,9 @@ mod tests {
             filter_expr.eval_row(&row2).await.unwrap(),
             Some(ScalarImpl::Bool(false))
         );
-        assert_eq!(filter_expr.eval_row(&row3).await.unwrap(), None)
+        assert_eq!(
+            filter_expr.eval_row(&row3).await.unwrap(),
+            Some(ScalarImpl::Bool(true))
+        )
     }
 }
