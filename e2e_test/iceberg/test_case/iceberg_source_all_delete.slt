@@ -35,8 +35,6 @@ flush
 statement ok
 DELETE FROM s1 WHERE i1 < 3;
 
-sleep 10s
-
 statement ok
 CREATE SOURCE iceberg_t1_source
 WITH (
@@ -51,13 +49,15 @@ WITH (
     table.name = 'test_all_delete',
 );
 
+sleep 10s
+
 statement ok
 DELETE FROM s1 where i3 > 4;
 
 statement ok
 flush
 
-sleep 15s
+sleep 10s
 
 query I
 select * from iceberg_t1_source order by i1 limit 5;
