@@ -167,6 +167,9 @@ impl HummockManager {
             .collect_vec();
         let to_delete_num = to_delete.len();
         self.write_gc_history(to_delete.iter().cloned()).await?;
+        // This lock ensures that during commit_epoch or report_compact_tasks, where versioning lock is held,
+        // no new objects will be marked for deletion here.
+        let _versioning = self.versioning.read().await;
         self.delete_object_tracker.add(to_delete.into_iter());
         Ok(to_delete_num)
     }
