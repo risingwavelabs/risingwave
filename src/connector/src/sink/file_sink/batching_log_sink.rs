@@ -41,8 +41,11 @@ impl LogSinker for BatchingLogSinker {
             /// Mark that the log consumer is not initialized yet
             Uninitialized,
 
-            /// Mark that a new epoch has begun.
-            EpochBegun { curr_epoch: u64 },
+            /// Mark that a new epoch has begun, and store the max_uncommitted_epoch for cross-barrier batching
+            EpochBegun {
+                curr_epoch: u64,
+                max_uncommitted_epoch: Option<u64>,
+            },
 
             /// Mark that the consumer has just received a barrier
             BarrierReceived { prev_epoch: u64 },
@@ -55,17 +58,12 @@ impl LogSinker for BatchingLogSinker {
                 match &state {
                     LogConsumerState::BarrierReceived { prev_epoch } => {
                         // we need to force to finish the batch here. Otherwise, there can be data loss because actor can be dropped and rebuilt during scaling.
-                        if let Some(committed_chunk_id) = sink_writer.commit().await? {
+                        if (sink_writer.try_commit().await?).is_some() {
                             // If epoch increased, we first need to truncate the previous epoch.
                             if epoch > *prev_epoch {
                                 log_reader
                                     .truncate(TruncateOffset::Barrier { epoch: *prev_epoch })?;
                             }
-
-                            log_reader.truncate(TruncateOffset::Chunk {
-                                epoch: (epoch),
-                                chunk_id: (committed_chunk_id),
-                            })?
                         };
                     }
                     _ => unreachable!(
@@ -74,20 +72,28 @@ impl LogSinker for BatchingLogSinker {
                         state
                     ),
                 }
+                continue;
             }
             // begin_epoch when not previously began
             state = match state {
-                LogConsumerState::Uninitialized => {
-                    LogConsumerState::EpochBegun { curr_epoch: epoch }
-                }
-                LogConsumerState::EpochBegun { curr_epoch } => {
+                LogConsumerState::Uninitialized => LogConsumerState::EpochBegun {
+                    curr_epoch: epoch,
+                    max_uncommitted_epoch: None,
+                },
+                LogConsumerState::EpochBegun {
+                    curr_epoch,
+                    max_uncommitted_epoch,
+                } => {
                     assert!(
                         epoch >= curr_epoch,
                         "new epoch {} should not be below the current epoch {}",
                         epoch,
                         curr_epoch
                     );
-                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                    LogConsumerState::EpochBegun {
+                        curr_epoch: epoch,
+                        max_uncommitted_epoch,
+                    }
                 }
                 LogConsumerState::BarrierReceived { prev_epoch } => {
                     assert!(
@@ -96,7 +102,10 @@ impl LogSinker for BatchingLogSinker {
                         epoch,
                         prev_epoch
                     );
-                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                    LogConsumerState::EpochBegun {
+                        curr_epoch: epoch,
+                        max_uncommitted_epoch: Some(prev_epoch),
+                    }
                 }
             };
             match item {
@@ -109,6 +118,20 @@ impl LogSinker for BatchingLogSinker {
                         // The file has been successfully written and is now visible to downstream consumers.
                         // Truncate the file to remove the specified `chunk_id` and any preceding content.
                         Ok(Some(chunk_id)) => {
+                            // If epoch increased, we first need to truncate the previous epoch.
+                            if let Some(max_uncommitted_epoch) = match state {
+                                LogConsumerState::EpochBegun {
+                                    curr_epoch: _,
+                                    max_uncommitted_epoch,
+                                } => max_uncommitted_epoch,
+                                _ => unreachable!("epoch must have begun before handling barrier"),
+                            } {
+                                assert!(epoch > max_uncommitted_epoch);
+                                log_reader.truncate(TruncateOffset::Barrier {
+                                    epoch: max_uncommitted_epoch,
+                                })?;
+                            };
+
                             log_reader.truncate(TruncateOffset::Chunk {
                                 epoch: (epoch),
                                 chunk_id: (chunk_id),
@@ -120,22 +143,18 @@ impl LogSinker for BatchingLogSinker {
                 }
                 LogStoreReadItem::Barrier { is_checkpoint: _ } => {
                     let prev_epoch = match state {
-                        LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
+                        LogConsumerState::EpochBegun {
+                            curr_epoch,
+                            max_uncommitted_epoch: _,
+                        } => curr_epoch,
                         _ => unreachable!("epoch must have begun before handling barrier"),
                     };
 
                     // The current sink specifies a batching strategy, which means that sink decoupling is enabled; therefore, there is no need to forcibly write to the file when the checkpoint barrier arrives.
                     // When the barrier arrives, call the writer's try_finish interface to check if the file write can be completed.
                     // If it is completed, which means the file is visible in the downstream file system, thentruncate the file in the log store; otherwise, do nothing.
-                    if let Some(committed_chunk_id) = sink_writer.try_commit().await? {
-                        // If epoch increased, we first need to truncate the previous epoch.
-                        if epoch > prev_epoch {
-                            log_reader.truncate(TruncateOffset::Barrier { epoch: prev_epoch })?;
-                        }
-                        log_reader.truncate(TruncateOffset::Chunk {
-                            epoch: (epoch),
-                            chunk_id: (committed_chunk_id),
-                        })?
+                    if (sink_writer.try_commit().await?).is_some() {
+                        log_reader.truncate(TruncateOffset::Barrier { epoch: prev_epoch })?;
                     };
 
                     state = LogConsumerState::BarrierReceived { prev_epoch }
