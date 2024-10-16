@@ -419,6 +419,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 .over_window_accessed_entry_count
                 .inc_by(stats.accessed_entry_count);
             metrics
+                .over_window_compute_count
+                .inc_by(stats.compute_count);
+            metrics
                 .over_window_same_output_count
                 .inc_by(stats.same_output_count);
 

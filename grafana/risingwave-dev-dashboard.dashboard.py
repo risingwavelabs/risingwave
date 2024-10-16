@@ -1329,6 +1329,10 @@ def section_streaming_actors(outer_panels: Panels):
                             "accessed entry count - table {{table_id}} fragment {{fragment_id}}",
                         ),
                         panels.target(
+                            f"sum(rate({table_metric('stream_over_window_compute_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "compute count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
                             f"sum(rate({table_metric('stream_over_window_same_output_count')}[$__rate_interval])) by (table_id, fragment_id)",
                             "same output count - table {{table_id}} fragment {{fragment_id}}",
                         ),

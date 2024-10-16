@@ -248,6 +248,7 @@ pub(super) struct OverPartitionStats {
 
     // stats for window function state computation
     pub accessed_entry_count: u64,
+    pub compute_count: u64,
     pub same_output_count: u64,
 }
 
@@ -426,6 +427,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let input_schema_len = table.get_data_types().len() - calls.len();
         let mut part_changes = BTreeMap::new();
         let mut accessed_entry_count = 0;
+        let mut compute_count = 0;
         let mut same_output_count = 0;
 
         // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
@@ -529,6 +531,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                     .key_value()
                     .expect("cursor must be valid until `last_curr_key`");
                 let output = states.slide_no_evict_hint()?;
+                compute_count += 1;
 
                 let old_output = &row.as_inner()[input_schema_len..];
                 if !old_output.is_empty() && old_output == output {
@@ -570,6 +573,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
 
         self.stats.accessed_entry_count += accessed_entry_count;
+        self.stats.compute_count += compute_count;
         self.stats.same_output_count += same_output_count;
 
         Ok((part_changes, accessed_range))
