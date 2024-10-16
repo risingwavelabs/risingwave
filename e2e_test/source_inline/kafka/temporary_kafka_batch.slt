@@ -72,6 +72,8 @@ t
 t
 
 # wait a new epoch, in case now() is small
+sleep 1s
+
 statement ok
 flush
 
