@@ -416,11 +416,11 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 .over_window_range_cache_right_miss_count
                 .inc_by(stats.right_miss_count);
             metrics
-                .over_window_compute_count
-                .inc_by(stats.compute_count);
+                .over_window_accessed_entry_count
+                .inc_by(stats.accessed_entry_count);
             metrics
-                .over_window_same_result_count
-                .inc_by(stats.same_result_count);
+                .over_window_same_output_count
+                .inc_by(stats.same_output_count);
 
             // Update recently accessed range for later shrinking cache.
             if !this.cache_policy.is_full()
