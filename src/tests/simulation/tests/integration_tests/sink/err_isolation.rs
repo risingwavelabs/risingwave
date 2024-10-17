@@ -58,9 +58,54 @@ async fn test_sink_decouple_err_isolation() -> Result<()> {
         test_source.create_stream_count.load(Relaxed)
     );
 
+    let result = session
+        .run("select * from rw_event_logs where event_type = 'SINK_FAIL'")
+        .await?;
+    assert!(!result.is_empty());
+    println!("Sink fail event: {:?}", result);
+
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     test_sink.store.check_simple_result(&test_source.id_list)?;
     assert!(test_sink.store.inner().checkpoint_count > 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_sink_error_event_logs() -> Result<()> {
+    let mut cluster = start_sink_test_cluster().await?;
+
+    let source_parallelism = 6;
+
+    let test_sink = SimulationTestSink::register_new();
+    test_sink.set_err_rate(1.0);
+    let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
+
+    let mut session = cluster.start_session();
+
+    session.run("set streaming_parallelism = 6").await?;
+    session.run("set sink_decouple = true").await?;
+    session.run(CREATE_SOURCE).await?;
+    session.run(CREATE_SINK).await?;
+    assert_eq!(6, test_sink.parallelism_counter.load(Relaxed));
+
+    test_sink.store.wait_for_err(1).await?;
+
+    session.run(DROP_SINK).await?;
+    session.run(DROP_SOURCE).await?;
+
+    // Due to sink failure isolation, source stream should not be recreated
+    assert_eq!(
+        source_parallelism,
+        test_source.create_stream_count.load(Relaxed)
+    );
+
+    // Sink error should be recorded in rw_event_logs
+    let result = session
+        .run("select * from rw_event_logs where event_type = 'SINK_FAIL'")
+        .await?;
+    assert!(!result.is_empty());
+    println!("Sink fail event logs: {:?}", result);
 
     Ok(())
 }
