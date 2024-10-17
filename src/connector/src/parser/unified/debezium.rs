@@ -121,10 +121,10 @@ pub fn parse_transaction_meta(
                     return Ok(TransactionControl::Begin { id: tx_id.into() });
                 }
                 ConnectorProperties::MysqlCdc(_) => {
-                    return Ok(TransactionControl::Begin { id: id.into() })
+                    return Ok(TransactionControl::Begin { id: id.into() });
                 }
                 ConnectorProperties::SqlServerCdc(_) => {
-                    return Ok(TransactionControl::Begin { id: id.into() })
+                    return Ok(TransactionControl::Begin { id: id.into() });
                 }
                 _ => {}
             },
@@ -134,10 +134,10 @@ pub fn parse_transaction_meta(
                     return Ok(TransactionControl::Commit { id: tx_id.into() });
                 }
                 ConnectorProperties::MysqlCdc(_) => {
-                    return Ok(TransactionControl::Commit { id: id.into() })
+                    return Ok(TransactionControl::Commit { id: id.into() });
                 }
                 ConnectorProperties::SqlServerCdc(_) => {
-                    return Ok(TransactionControl::Commit { id: id.into() })
+                    return Ok(TransactionControl::Commit { id: id.into() });
                 }
                 _ => {}
             },
@@ -233,34 +233,39 @@ pub fn parse_schema_change(
                     // handle default value expression, currently we only support constant expression
                     let column_desc = match col.access_object_field("defaultValueExpression") {
                         Some(default_val_expr_str) if !default_val_expr_str.is_jsonb_null() => {
-                            let value_text: String;
+                            let value_text: Option<String>;
+                            let default_val_expr_str = default_val_expr_str.as_str().unwrap();
                             match *connector_props {
                                 ConnectorProperties::PostgresCdc(_) => {
                                     // default value of non-number data type will be stored as
                                     // "'value'::type"
-                                    value_text = default_val_expr_str
-                                        .as_str()
-                                        .unwrap()
+                                    match default_val_expr_str
                                         .split("::")
                                         .map(|s| s.trim_matches('\''))
                                         .next()
-                                        .expect("default value expression")
-                                        .to_string();
+                                    {
+                                        None => {
+                                            value_text = None;
+                                        }
+                                        Some(val_text) => {
+                                            value_text = Some(val_text.to_string());
+                                        }
+                                    }
                                 }
                                 ConnectorProperties::MysqlCdc(_) => {
                                     // mysql timestamp is mapped to timestamptz, we use UTC timezone to
                                     // interpret its value
-                                    let val_str = default_val_expr_str.as_str().unwrap();
                                     if data_type == DataType::Timestamptz {
-                                        value_text = timestamp_val_to_timestamptz(val_str).map_err(|err| {
+                                        value_text = Some(timestamp_val_to_timestamptz(default_val_expr_str).map_err(|err| {
                                             tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
                                             AccessError::TypeError {
                                                 expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
                                                 got: data_type.to_string(),
                                                 value: val_str.to_string(),
-                                            }})?;
+                                            }
+                                        })?);
                                     } else {
-                                        value_text = val_str.to_string();
+                                        value_text = Some(default_val_expr_str.to_string());
                                     }
                                 }
                                 _ => {
@@ -268,23 +273,30 @@ pub fn parse_schema_change(
                                 }
                             }
 
-                            let snapshot_value: Datum = Some(
+                            let snapshot_value: Datum = value_text.map(|value_text| {
                                 ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
                                     |err| {
                                         tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to parse default value expression");
                                         AccessError::TypeError {
-                                        expected: "constant expression".into(),
-                                        got: data_type.to_string(),
-                                        value: value_text,
-                                    }},
-                                )?,
-                            );
-                            ColumnDesc::named_with_default_value(
-                                name,
-                                ColumnId::placeholder(),
-                                data_type,
-                                snapshot_value,
-                            )
+                                            expected: "constant expression".into(),
+                                            got: data_type.to_string(),
+                                            value: value_text,
+                                        }
+                                    },
+                                )?
+                            });
+
+                            if snapshot_value.is_none() {
+                                tracing::warn!(target: "auto_schema_change", "failed to parse default value expression: {}", default_val_expr_str);
+                                ColumnDesc::named(name, ColumnId::placeholder(), data_type)
+                            } else {
+                                ColumnDesc::named_with_default_value(
+                                    name,
+                                    ColumnId::placeholder(),
+                                    data_type,
+                                    snapshot_value,
+                                )
+                            }
                         }
                         _ => ColumnDesc::named(name, ColumnId::placeholder(), data_type),
                     };
@@ -446,7 +458,7 @@ where
             {
                 match op {
                     DEBEZIUM_READ_OP | DEBEZIUM_CREATE_OP | DEBEZIUM_UPDATE_OP => {
-                        return Ok(ChangeEventOperation::Upsert)
+                        return Ok(ChangeEventOperation::Upsert);
                     }
                     DEBEZIUM_DELETE_OP => return Ok(ChangeEventOperation::Delete),
                     _ => (),
@@ -520,6 +532,7 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
     };
     Ok(id)
 }
+
 impl<A> MongoJsonAccess<A> {
     pub fn new(accessor: A) -> Self {
         Self { accessor }
