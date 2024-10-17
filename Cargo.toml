@@ -228,8 +228,8 @@ risingwave_mem_table_spill_test = { path = "./src/stream/spill_test" }
 risingwave_meta = { path = "./src/meta" }
 risingwave_meta_dashboard = { path = "./src/meta/dashboard" }
 risingwave_meta_service = { path = "./src/meta/service" }
-risingwave_meta_model_migration = { path = "src/meta/model/migration" }
 risingwave_meta_model = { path = "src/meta/model" }
+risingwave_meta_model_migration = { path = "src/meta/model/migration" }
 risingwave_meta_node = { path = "./src/meta/node" }
 risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
