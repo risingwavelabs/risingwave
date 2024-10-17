@@ -22,7 +22,7 @@ use risingwave_common::hash::ActorMapping;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
-use risingwave_meta_model_v2::{ObjectId, WorkerId};
+use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
@@ -1116,7 +1116,7 @@ impl CommandContext {
                 // Apply the split changes in source manager.
                 self.barrier_manager_context
                     .source_manager
-                    .drop_source_fragments(std::slice::from_ref(old_table_fragments))
+                    .drop_source_fragments_vec(std::slice::from_ref(old_table_fragments))
                     .await;
                 let source_fragments = new_table_fragments.stream_source_fragments();
                 // XXX: is it possible to have backfill fragments here?

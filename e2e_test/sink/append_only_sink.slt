@@ -26,6 +26,32 @@ statement error unsupported sink type invalid
 create sink invalid_connector from t with (connector = 'invalid');
 
 statement ok
+set sink_decouple=false;
+
+statement error
+CREATE SINK file_sink
+FROM
+  t
+WITH
+(
+  connector = 's3',
+  s3.region_name = 'test',
+  s3.bucket_name = 'test',
+  s3.path = '',
+  s3.file_type = 'parquet',
+  type = 'append-only',
+  force_append_only='true'
+) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Sink error
+  2: config error
+  3: File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.
+
+
+statement ok
 drop sink s1
 
 statement ok

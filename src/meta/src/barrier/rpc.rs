@@ -26,7 +26,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};

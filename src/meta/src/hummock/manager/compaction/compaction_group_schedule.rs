@@ -20,11 +20,14 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::compact_task::ReportTask;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::compaction_group::{
     group_split, StateTableId, StaticCompactionGroupId,
 };
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
 use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
     CompatibilityVersion, PbGroupConstruct, PbGroupMerge, PbStateTableInfoDelta,
@@ -256,8 +259,33 @@ impl HummockManager {
 
         // Instead of handling DeltaType::GroupConstruct for time travel, simply enforce a version snapshot.
         versioning.mark_next_time_travel_version_snapshot();
+
+        // cancel tasks
+        let mut canceled_tasks = vec![];
+        // after merge, all tasks in right_group_id should be canceled
+        // Failure of cancel does not cause correctness problems, the report task will have better interception, and the operation here is designed to free up compactor compute resources more quickly.
+        let compact_task_assignments =
+            compaction_guard.get_compact_task_assignments_by_group_id(right_group_id);
+        compact_task_assignments
+            .into_iter()
+            .for_each(|task_assignment| {
+                if let Some(task) = task_assignment.compact_task.as_ref() {
+                    assert_eq!(task.compaction_group_id, right_group_id);
+                    canceled_tasks.push(ReportTask {
+                        task_id: task.task_id,
+                        task_status: TaskStatus::ManualCanceled,
+                        table_stats_change: HashMap::default(),
+                        sorted_output_ssts: vec![],
+                        object_timestamps: HashMap::default(),
+                    });
+                }
+            });
+
         drop(versioning_guard);
         drop(compaction_guard);
+        if !canceled_tasks.is_empty() {
+            self.report_compact_tasks(canceled_tasks).await?;
+        }
 
         self.metrics
             .merge_compaction_group_count
@@ -452,8 +480,47 @@ impl HummockManager {
         }
         // Instead of handling DeltaType::GroupConstruct for time travel, simply enforce a version snapshot.
         versioning.mark_next_time_travel_version_snapshot();
+
+        // The expired compact tasks will be canceled.
+        // Failure of cancel does not cause correctness problems, the report task will have better interception, and the operation here is designed to free up compactor compute resources more quickly.
+        let mut canceled_tasks = vec![];
+        let compact_task_assignments =
+            compaction_guard.get_compact_task_assignments_by_group_id(parent_group_id);
+        let levels = versioning
+            .current_version
+            .get_compaction_group_levels(parent_group_id);
+        compact_task_assignments
+            .into_iter()
+            .for_each(|task_assignment| {
+                if let Some(task) = task_assignment.compact_task.as_ref() {
+                    let input_sst_ids: HashSet<u64> = task
+                        .input_ssts
+                        .iter()
+                        .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
+                        .collect();
+                    let input_level_ids: Vec<u32> = task
+                        .input_ssts
+                        .iter()
+                        .map(|level| level.level_idx)
+                        .collect();
+                    let need_cancel = !levels.check_sst_ids_exist(&input_level_ids, input_sst_ids);
+                    if need_cancel {
+                        canceled_tasks.push(ReportTask {
+                            task_id: task.task_id,
+                            task_status: TaskStatus::ManualCanceled,
+                            table_stats_change: HashMap::default(),
+                            sorted_output_ssts: vec![],
+                            object_timestamps: HashMap::default(),
+                        });
+                    }
+                }
+            });
+
         drop(versioning_guard);
         drop(compaction_guard);
+        if !canceled_tasks.is_empty() {
+            self.report_compact_tasks(canceled_tasks).await?;
+        }
 
         self.metrics
             .split_compaction_group_count

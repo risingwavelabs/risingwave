@@ -1200,16 +1200,16 @@ impl HummockManager {
                         .levels
                         .get(&compact_task.compaction_group_id)
                         .unwrap();
-                    let input_exist =
-                        group.check_input_sst_id_exist(&input_level_ids, input_sst_ids);
-
+                    let input_exist = group.check_sst_ids_exist(&input_level_ids, input_sst_ids);
                     if !input_exist {
-                        // if group changes, the data of sstable may stale.
                         compact_task.task_status = TaskStatus::InputOutdatedCanceled;
-                        false
-                    } else {
-                        true
+                        warn!(
+                            "The task may be expired because of group split, task:\n {:?}",
+                            compact_task_to_string(&compact_task)
+                        );
                     }
+
+                    input_exist
                 }
             } else {
                 false

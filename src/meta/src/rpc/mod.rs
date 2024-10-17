@@ -14,7 +14,6 @@
 
 pub mod cloud_provider;
 pub mod ddl_controller;
-mod ddl_controller_v2;
 pub mod election;
 pub mod intercept;
 pub mod metrics;
