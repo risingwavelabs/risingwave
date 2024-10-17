@@ -396,16 +396,17 @@ impl Cluster {
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
-        let file = NamedTempFile::new().unwrap();
-        let file_path = format!("{}", file.path().display());
-        tracing::info!(?file_path, "sqlite_file_path");
-        if std::fs::exists(&file_path).unwrap() {
+        let file_path = PathBuf::from(format!("{}", handle.seed()));
+        let file_path_display = file_path.display().to_string();
+        let file = NamedTempFile::new_in(file_path).unwrap();
+        tracing::info!(file_path = ?file_path_display, "sqlite_file_path");
+        if std::fs::exists(&file_path_display).unwrap() {
             panic!(
                 "sqlite file already exists and used by other cluster: {}",
-                file_path
+                file_path_display,
             )
         }
-        let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path);
+        let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path_display);
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
 
         // meta node
