@@ -424,8 +424,8 @@ message Table {
   //   because the vnode count of each fragment (then internal tables) is determined
   //   by the meta service.
   // - The table is created in older versions where variable vnode count is not
-  //   supported, in which case a default value of 256 should be used.
-  //   Use `VnodeCountCompat::vnode_count` to access it.
+  //   supported, in which case a default value of 256 (or 1 for singleton) should
+  //   be used. Use `VnodeCountCompat::vnode_count` to access it.
   //
   // Please note that this field is not intended to describe the expected vnode count
   // for a streaming job. Instead, refer to `stream_plan.StreamFragmentGraph.max_parallelism`.
