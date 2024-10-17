@@ -82,22 +82,6 @@ impl ContextInfo {
 }
 
 impl Versioning {
-    /// Marks all objects <= `min_pinned_version_id` for deletion.
-    pub(super) fn mark_objects_for_deletion(
-        &self,
-        context_info: &ContextInfo,
-        delete_object_tracker: &DeleteObjectTracker,
-    ) {
-        let min_pinned_version_id = context_info.min_pinned_version_id();
-        delete_object_tracker.add(
-            self.checkpoint
-                .stale_objects
-                .iter()
-                .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
-                .flat_map(|(_, stale_objects)| stale_objects.id.iter().cloned()),
-        );
-    }
-
     pub(super) fn mark_next_time_travel_version_snapshot(&mut self) {
         self.time_travel_snapshot_interval_counter = u64::MAX;
     }
