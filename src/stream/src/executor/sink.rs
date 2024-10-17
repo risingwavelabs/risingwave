@@ -22,6 +22,7 @@ use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::{LabelGuardedIntGauge, GLOBAL_ERROR_METRICS};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::dispatch_sink;
@@ -292,14 +293,21 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         #[for_await]
         for msg in input {
+            tracing::info!("sink_exec_epoch_msg");
             match msg? {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
+                    tracing::info!("sink_exec_epoch_chunk");
                     assert!(!is_paused, "Should not receive any data after pause");
                     log_writer.write_chunk(chunk.clone()).await?;
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
+                    tracing::info!(
+                        "sink_exec_epoch: {:?},curr {:?}",
+                        barrier.epoch,
+                        Epoch(barrier.epoch.curr).as_timestamptz()
+                    );
                     log_writer
                         .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                         .await?;
@@ -355,6 +363,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         sink_chunk_buffer_size_metrics.set(chunk_buffer.estimated_size() as i64);
                     }
                     Message::Barrier(barrier) => {
+                        tracing::info!("sink_exec_epoch add log: {:?}", barrier.epoch);
                         let chunks = mem::take(&mut chunk_buffer).into_inner();
                         let chunks = if need_advance_delete {
                             let mut delete_chunks = vec![];
