@@ -16,8 +16,8 @@ use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::plan_common::JoinType;
 
+use super::super::OResult;
 use super::Rule;
-use crate::error::OResult;
 use crate::expr::{ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::utils::IndexRewriter;

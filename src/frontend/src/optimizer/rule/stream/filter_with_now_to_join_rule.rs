@@ -15,7 +15,7 @@
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
-use crate::error::OResult;
+use super::super::OResult;
 use crate::expr::{ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};

@@ -495,7 +495,7 @@ impl ToBatch for LogicalScan {
         if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
             match index_selection_rule.apply(new.clone().into()) {
-                crate::error::OResult::Ok(applied) => {
+                super::super::OResult::Ok(applied) => {
                     if let Some(scan) = applied.as_logical_scan() {
                         // covering index
                         return required_order.enforce_if_not_satisfies(scan.to_batch()?);
@@ -508,14 +508,14 @@ impl ToBatch for LogicalScan {
                         unreachable!();
                     }
                 }
-                crate::error::OResult::NotApplicable => {
+                super::super::OResult::NotApplicable => {
                     // Try to make use of index if it satisfies the required order
                     if let Some(plan_ref) = new.use_index_scan_if_order_is_satisfied(required_order)
                     {
                         return plan_ref;
                     }
                 }
-                crate::error::OResult::Err(e) => return Err(e),
+                super::super::OResult::Err(e) => return Err(e),
             }
         }
         new.to_batch_inner_with_required(required_order)

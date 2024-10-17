@@ -15,7 +15,7 @@
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 
-use crate::error::OResult;
+use super::super::OResult;
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::{generic, LogicalNow};
 use crate::optimizer::rule::{BoxedRule, Rule};

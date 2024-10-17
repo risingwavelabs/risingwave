@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::error::OResult;
+use super::super::OResult;
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_expr_visitor::InputRefCounter;
 use crate::optimizer::plan_node::{generic, PlanTreeNodeUnary, StreamProject};

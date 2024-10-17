@@ -49,15 +49,15 @@ impl<'a> HeuristicOptimizer<'a> {
     fn optimize_node(&mut self, mut plan: PlanRef) -> Result<PlanRef> {
         for rule in self.rules {
             match rule.apply(plan.clone()) {
-                crate::error::OResult::Ok(applied) => {
+                super::OResult::Ok(applied) => {
                     #[cfg(debug_assertions)]
                     Self::check_equivalent_plan(rule.description(), &plan, &applied);
 
                     plan = applied;
                     self.stats.count_rule(rule);
                 }
-                crate::error::OResult::NotApplicable => {}
-                crate::error::OResult::Err(e) => return Err(e),
+                super::OResult::NotApplicable => {}
+                super::OResult::Err(e) => return Err(e),
             }
         }
         Ok(plan)

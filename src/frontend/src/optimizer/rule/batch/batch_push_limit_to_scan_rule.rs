@@ -19,7 +19,7 @@
 
 use itertools::Itertools;
 
-use crate::error::OResult;
+use super::super::OResult;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};

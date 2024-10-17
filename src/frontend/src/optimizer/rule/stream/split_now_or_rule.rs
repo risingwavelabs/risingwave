@@ -14,7 +14,7 @@
 
 use risingwave_common::types::DataType;
 
-use crate::error::OResult;
+use super::super::OResult;
 use crate::expr::{ExprImpl, ExprType, FunctionCall};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalShare, LogicalUnion, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};

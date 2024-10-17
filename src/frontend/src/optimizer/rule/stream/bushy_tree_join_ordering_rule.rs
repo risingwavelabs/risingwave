@@ -15,8 +15,8 @@
 use thiserror_ext::AsReport;
 
 use super::super::super::plan_node::*;
+use super::super::super::OResult;
 use super::super::Rule;
-use crate::error::OResult;
 use crate::optimizer::rule::BoxedRule;
 
 /// Reorders a multi join into a bushy tree shape join tree with a minimal height.

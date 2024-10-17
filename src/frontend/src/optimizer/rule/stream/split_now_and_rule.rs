@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::error::OResult;
+use super::super::OResult;
 use crate::optimizer::plan_node::{LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;

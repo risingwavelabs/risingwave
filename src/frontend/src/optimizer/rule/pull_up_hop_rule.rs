@@ -15,8 +15,8 @@
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::plan_common::JoinType;
 
+use super::super::OResult;
 use super::{BoxedRule, Rule};
-use crate::error::OResult;
 use crate::optimizer::plan_node::{LogicalHopWindow, LogicalJoin};
 use crate::utils::IndexRewriter;
 
