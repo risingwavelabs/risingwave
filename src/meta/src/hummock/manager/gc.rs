@@ -18,6 +18,7 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::time::{Duration, SystemTime};
 
+use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -26,11 +27,14 @@ use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
 use risingwave_meta_model_migration::OnConflict;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::FullScanTask;
+use risingwave_pb::stream_service::GetMinUncommittedSstIdRequest;
+use risingwave_rpc_client::StreamClientPool;
 use sea_orm::{ActiveValue, EntityTrait};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
+use crate::manager::MetadataManager;
 use crate::model::BTreeMapTransaction;
 
 #[derive(Default)]
@@ -164,6 +168,9 @@ impl HummockManager {
             .iter()
             .filter(|object_id| !tracked_object_ids.contains(object_id))
             .collect_vec();
+        // This lock ensures that during commit_epoch or report_compact_tasks, where versioning lock is held,
+        // no new objects will be marked for deletion here.
+        let _versioning = self.versioning.read().await;
         self.delete_object_tracker
             .add(to_delete.iter().map(|id| **id));
         to_delete.len()
@@ -226,6 +233,12 @@ impl HummockManager {
         object_ids: Vec<HummockSstableObjectId>,
         next_start_after: Option<String>,
     ) -> Result<usize> {
+        // It's crucial to collect_min_uncommitted_sst_id (i.e. `min_sst_id`) only after LIST object store (i.e. `object_ids`).
+        // Because after getting `min_sst_id`, new compute nodes may join and generate new uncommitted SSTs that are not covered by `min_sst_id`.
+        // By getting `min_sst_id` after `object_ids`, it's ensured `object_ids` won't include any SSTs from those new compute nodes.
+        let min_sst_id =
+            collect_min_uncommitted_sst_id(&self.metadata_manager, self.env.stream_client_pool())
+                .await?;
         self.full_gc_state.set_next_start_after(next_start_after);
         if object_ids.is_empty() {
             tracing::info!("SST full scan returns no SSTs.");
@@ -243,6 +256,12 @@ impl HummockManager {
         self.metrics
             .time_travel_object_count
             .set(pinned_object_ids.len() as _);
+        // filter by SST id watermark, i.e. minimum id of uncommitted SSTs reported by compute nodes.
+        let object_ids = object_ids
+            .into_iter()
+            .filter(|id| *id < min_sst_id)
+            .collect_vec();
+        let after_min_sst_id = object_ids.len();
         // filter by time travel archive
         let object_ids = object_ids
             .into_iter()
@@ -250,12 +269,18 @@ impl HummockManager {
             .collect_vec();
         let after_time_travel = object_ids.len();
         // filter by version
-        let selected_object_number = self.extend_objects_to_delete_from_scan(&object_ids).await;
+        let after_version = self.extend_objects_to_delete_from_scan(&object_ids).await;
         metrics
             .full_gc_selected_object_count
-            .observe(selected_object_number as _);
-        tracing::info!("Object full scan returns {candidate_object_number} objects. {after_time_travel} remains after filtered by time travel archives. {selected_object_number} remains after filtered by hummock version.");
-        Ok(selected_object_number)
+            .observe(after_version as _);
+        tracing::info!(
+            candidate_object_number,
+            after_min_sst_id,
+            after_time_travel,
+            after_version,
+            "complete full gc"
+        );
+        Ok(after_version)
     }
 
     pub async fn now(&self) -> Result<u64> {
@@ -322,6 +347,30 @@ impl HummockManager {
             self.metrics.total_object_count.set(total_object_count as _);
         }
     }
+}
+
+async fn collect_min_uncommitted_sst_id(
+    metadata_manager: &MetadataManager,
+    client_pool: &StreamClientPool,
+) -> Result<HummockSstableObjectId> {
+    let futures = metadata_manager
+        .list_active_streaming_compute_nodes()
+        .await
+        .map_err(|err| Error::MetaStore(err.into()))?
+        .into_iter()
+        .map(|worker_node| async move {
+            let client = client_pool.get(&worker_node).await?;
+            let request = GetMinUncommittedSstIdRequest {};
+            client.get_min_uncommitted_sst_id(request).await
+        });
+    let min_watermark = try_join_all(futures)
+        .await
+        .map_err(|err| Error::Internal(err.into()))?
+        .into_iter()
+        .map(|resp| resp.min_uncommitted_sst_id)
+        .min()
+        .unwrap_or(HummockSstableObjectId::MAX);
+    Ok(min_watermark)
 }
 
 pub struct FullGcState {
