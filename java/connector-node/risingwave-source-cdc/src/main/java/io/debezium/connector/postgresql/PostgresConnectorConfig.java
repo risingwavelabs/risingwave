@@ -1256,7 +1256,7 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                             UNAVAILABLE_VALUE_PLACEHOLDER,
                             LOGICAL_DECODING_MESSAGE_PREFIX_INCLUDE_LIST,
                             LOGICAL_DECODING_MESSAGE_PREFIX_EXCLUDE_LIST)
-                    // .excluding(INCLUDE_SCHEMA_CHANGES)
+                    // .excluding(INCLUDE_SCHEMA_CHANGES)  // patched code
                     .create();
 
     /** The set of {@link Field}s defined as part of this configuration. */
