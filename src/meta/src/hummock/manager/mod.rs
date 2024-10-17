@@ -31,22 +31,21 @@ use risingwave_meta_model_v2::{
     hummock_version_stats,
 };
 use risingwave_pb::hummock::{
-    HummockPinnedVersion, HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
+    HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
     SubscribeCompactionEventRequest,
 };
-use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState};
+use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState, PagedMetrics};
 use crate::hummock::CompactorManagerRef;
-use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager};
-use crate::model::{ClusterId, MetadataModel, MetadataModelError};
+use crate::manager::{MetaSrvEnv, MetadataManager};
+use crate::model::{ClusterId, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
 
 mod context;
@@ -110,15 +109,17 @@ pub struct HummockManager {
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
     full_gc_state: FullGcState,
+    /// Gather metrics that require accumulation across multiple operations.
+    /// For example, to get the total number of objects in object store, multiple LISTs are required because a single LIST can visit at most `full_gc_object_limit` objects.
+    paged_metrics: parking_lot::Mutex<PagedMetrics>,
     now: Mutex<u64>,
+    inflight_time_travel_query: Semaphore,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
 
-use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::meta::relation::RelationInfo;
 
 macro_rules! start_measure_real_process_timer {
     ($hummock_mgr:expr, $func_name:literal) => {
@@ -131,6 +132,7 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
+use crate::controller::SqlMetaStore;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
@@ -160,8 +162,8 @@ impl HummockManager {
     #[cfg(any(test, feature = "test"))]
     pub(super) async fn with_config(
         env: MetaSrvEnv,
-        cluster_manager: crate::manager::ClusterManagerRef,
-        fragment_manager: crate::manager::FragmentManagerRef,
+        cluster_controller: crate::controller::cluster::ClusterControllerRef,
+        catalog_controller: crate::controller::catalog::CatalogControllerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         config: risingwave_pb::hummock::CompactionConfig,
@@ -170,13 +172,10 @@ impl HummockManager {
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> HummockManagerRef {
-        use crate::manager::CatalogManager;
         let compaction_group_manager = CompactionGroupManager::new_with_config(&env, config)
             .await
             .unwrap();
-        let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
-        let metadata_manager =
-            MetadataManager::new_v1(cluster_manager, catalog_manager, fragment_manager);
+        let metadata_manager = MetadataManager::new(cluster_controller, catalog_controller);
         Self::new_impl(
             env,
             metadata_manager,
@@ -245,6 +244,7 @@ impl HummockManager {
         let version_archive_dir = version_archive_dir(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let full_gc_object_limit = env.opts.full_gc_object_limit;
+        let inflight_time_travel_query = env.opts.max_inflight_time_travel_query;
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -281,7 +281,9 @@ impl HummockManager {
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
             full_gc_state: FullGcState::new(Some(full_gc_object_limit)),
+            paged_metrics: parking_lot::Mutex::new(PagedMetrics::new()),
             now: Mutex::new(0),
+            inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
@@ -293,7 +295,7 @@ impl HummockManager {
         Ok(instance)
     }
 
-    fn meta_store_ref(&self) -> &MetaStoreImpl {
+    fn meta_store_ref(&self) -> &SqlMetaStore {
         self.env.meta_store_ref()
     }
 
@@ -322,69 +324,44 @@ impl HummockManager {
     ) -> Result<()> {
         use sea_orm::EntityTrait;
         let meta_store = self.meta_store_ref();
-        let compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus> = match &meta_store {
-            MetaStoreImpl::Kv(meta_store) => CompactStatus::list(meta_store)
-                .await?
-                .into_iter()
-                .map(|cg| (cg.compaction_group_id(), cg))
-                .collect(),
-            MetaStoreImpl::Sql(sql_meta_store) => compaction_status::Entity::find()
-                .all(&sql_meta_store.conn)
+        let compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus> =
+            compaction_status::Entity::find()
+                .all(&meta_store.conn)
                 .await
                 .map_err(MetadataModelError::from)?
                 .into_iter()
                 .map(|m| (m.compaction_group_id as CompactionGroupId, m.into()))
-                .collect(),
-        };
+                .collect();
         if !compaction_statuses.is_empty() {
             compaction_guard.compaction_statuses = compaction_statuses;
         }
 
-        compaction_guard.compact_task_assignment = match &meta_store {
-            MetaStoreImpl::Kv(meta_store) => PbCompactTaskAssignment::list(meta_store)
-                .await?
-                .into_iter()
-                .map(|assigned| (assigned.key().unwrap(), assigned))
-                .collect(),
-            MetaStoreImpl::Sql(sql_meta_store) => compaction_task::Entity::find()
-                .all(&sql_meta_store.conn)
+        compaction_guard.compact_task_assignment = compaction_task::Entity::find()
+            .all(&meta_store.conn)
+            .await
+            .map_err(MetadataModelError::from)?
+            .into_iter()
+            .map(|m| {
+                (
+                    m.id as HummockCompactionTaskId,
+                    PbCompactTaskAssignment::from(m),
+                )
+            })
+            .collect();
+
+        let hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta> =
+            hummock_version_delta::Entity::find()
+                .all(&meta_store.conn)
                 .await
                 .map_err(MetadataModelError::from)?
                 .into_iter()
                 .map(|m| {
                     (
-                        m.id as HummockCompactionTaskId,
-                        PbCompactTaskAssignment::from(m),
+                        HummockVersionId::new(m.id as _),
+                        HummockVersionDelta::from_persisted_protobuf(&m.into()),
                     )
                 })
-                .collect(),
-        };
-
-        let hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta> =
-            match &meta_store {
-                MetaStoreImpl::Kv(meta_store) => HummockVersionDelta::list(meta_store)
-                    .await?
-                    .into_iter()
-                    .map(|version_delta| (version_delta.id, version_delta))
-                    .collect(),
-                MetaStoreImpl::Sql(sql_meta_store) => {
-                    use risingwave_pb::hummock::PbHummockVersionDelta;
-                    hummock_version_delta::Entity::find()
-                        .all(&sql_meta_store.conn)
-                        .await
-                        .map_err(MetadataModelError::from)?
-                        .into_iter()
-                        .map(|m| {
-                            (
-                                HummockVersionId::new(m.id as _),
-                                HummockVersionDelta::from_persisted_protobuf(
-                                    &PbHummockVersionDelta::from(m),
-                                ),
-                            )
-                        })
-                        .collect()
-                }
-            };
+                .collect();
 
         let checkpoint = self.try_read_checkpoint().await?;
         let mut redo_state = if let Some(c) = checkpoint {
@@ -410,40 +387,27 @@ impl HummockManager {
                 redo_state.apply_version_delta(version_delta);
             }
         }
-        versioning_guard.version_stats = match &meta_store {
-            MetaStoreImpl::Kv(meta_store) => HummockVersionStats::list(meta_store)
-                .await?
-                .into_iter()
-                .next(),
-            MetaStoreImpl::Sql(sql_meta_store) => hummock_version_stats::Entity::find()
-                .one(&sql_meta_store.conn)
-                .await
-                .map_err(MetadataModelError::from)?
-                .map(HummockVersionStats::from),
-        }
-        .unwrap_or_else(|| HummockVersionStats {
-            // version_stats.hummock_version_id is always 0 in meta store.
-            hummock_version_id: 0,
-            ..Default::default()
-        });
+        versioning_guard.version_stats = hummock_version_stats::Entity::find()
+            .one(&meta_store.conn)
+            .await
+            .map_err(MetadataModelError::from)?
+            .map(HummockVersionStats::from)
+            .unwrap_or_else(|| HummockVersionStats {
+                // version_stats.hummock_version_id is always 0 in meta store.
+                hummock_version_id: 0,
+                ..Default::default()
+            });
 
         versioning_guard.current_version = redo_state;
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
-        context_info.pinned_versions = match &meta_store {
-            MetaStoreImpl::Kv(meta_store) => HummockPinnedVersion::list(meta_store)
-                .await?
-                .into_iter()
-                .map(|p| (p.context_id, p))
-                .collect(),
-            MetaStoreImpl::Sql(sql_meta_store) => hummock_pinned_version::Entity::find()
-                .all(&sql_meta_store.conn)
-                .await
-                .map_err(MetadataModelError::from)?
-                .into_iter()
-                .map(|m| (m.context_id as HummockContextId, m.into()))
-                .collect(),
-        };
+        context_info.pinned_versions = hummock_pinned_version::Entity::find()
+            .all(&meta_store.conn)
+            .await
+            .map_err(MetadataModelError::from)?
+            .into_iter()
+            .map(|m| (m.context_id as HummockContextId, m.into()))
+            .collect();
 
         self.delete_object_tracker.clear();
         // Not delete stale objects when archive or time travel is enabled
@@ -460,56 +424,12 @@ impl HummockManager {
         Ok(())
     }
 
-    pub async fn init_metadata_for_version_replay(
+    pub fn init_metadata_for_version_replay(
         &self,
-        table_catalogs: Vec<Table>,
-        compaction_groups: Vec<PbCompactionGroupInfo>,
+        _table_catalogs: Vec<Table>,
+        _compaction_groups: Vec<PbCompactionGroupInfo>,
     ) -> Result<()> {
-        for table in &table_catalogs {
-            table.insert(self.env.meta_store().as_kv()).await?;
-        }
-        for group in &compaction_groups {
-            assert!(
-                group.id == StaticCompactionGroupId::NewCompactionGroup as u64
-                    || (group.id >= StaticCompactionGroupId::StateDefault as u64
-                    && group.id <= StaticCompactionGroupId::MaterializedView as u64),
-                "compaction group id should be either NewCompactionGroup to create new one, or predefined static ones."
-            );
-        }
-
-        let mut compaction_group_manager = self.compaction_group_manager.write().await;
-        let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
-        for group in &compaction_groups {
-            let mut pairs = vec![];
-            for table_id in group.member_table_ids.clone() {
-                pairs.push((table_id as StateTableId, group.id));
-            }
-            let group_config = group.compaction_config.clone().unwrap();
-            compaction_groups_txn.create_compaction_groups(group.id, Arc::new(group_config));
-
-            self.register_table_ids_for_test(&pairs).await?;
-            tracing::info!("Registered table ids {:?}", pairs);
-        }
-
-        commit_multi_var!(self.meta_store_ref(), compaction_groups_txn)?;
-
-        // Notify that tables have created
-        for table in table_catalogs {
-            self.env
-                .notification_manager()
-                .notify_hummock_relation_info(Operation::Add, RelationInfo::Table(table.clone()))
-                .await;
-            self.env
-                .notification_manager()
-                .notify_compactor_relation_info(Operation::Add, RelationInfo::Table(table))
-                .await;
-        }
-
-        tracing::info!("Inited compaction groups:");
-        for group in compaction_groups {
-            tracing::info!("{:?}", group);
-        }
-        Ok(())
+        unimplemented!("kv meta store is deprecated");
     }
 
     /// Replay a version delta to current hummock version.

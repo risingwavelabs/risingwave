@@ -38,7 +38,7 @@ cluster_start() {
     risedev clean-data
     risedev pre-start-dev
     start_standalone "$PREFIX_LOG"/standalone.log &
-    risedev dev standalone-minio-etcd
+    risedev dev standalone-minio-sqlite
   elif [[ $mode == "single-node" ]]; then
     mkdir -p "$PREFIX_LOG"
     risedev clean-data
@@ -68,18 +68,17 @@ cluster_stop() {
 download_and_prepare_rw "$profile" common
 
 sudo apt install sqlite3 -y
-for meta_store_type in "etcd" "sql"; do
-  echo "--- e2e, ci-meta-backup-test-${meta_store_type}"
-  test_root="src/storage/backup/integration_tests"
-  BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
-  BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
-  BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
-  RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
-  RW_META_ADDR="http://127.0.0.1:5690" \
-  RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-  META_STORE_TYPE="${meta_store_type}" \
-  RW_SQLITE_DB=".risingwave/data/sqlite/metadata.db" \
-  bash "${test_root}/run_all.sh"
-  echo "--- Kill cluster"
-  risedev kill
-done
+
+echo "--- e2e, ci-meta-backup-test"
+test_root="src/storage/backup/integration_tests"
+BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
+BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
+BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
+RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
+RW_META_ADDR="http://127.0.0.1:5690" \
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+META_STORE_TYPE="sql" \
+RW_SQLITE_DB=".risingwave/data/sqlite/metadata.db" \
+bash "${test_root}/run_all.sh"
+echo "--- Kill cluster"
+risedev kill

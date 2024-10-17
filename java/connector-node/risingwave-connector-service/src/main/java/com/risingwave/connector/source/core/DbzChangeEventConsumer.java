@@ -235,6 +235,7 @@ public class DbzChangeEventConsumer
                         // - PG: topicPrefix.schemaName.tableName
                         // - MySQL: topicPrefix.databaseName.tableName
                         // - Mongo: topicPrefix.databaseName.collectionName
+                        // - SQL Server: topicPrefix.databaseName.schemaName.tableName
                         // We can extract the full table name from the topic
                         var fullTableName =
                                 record.topic().substring(record.topic().indexOf('.') + 1);

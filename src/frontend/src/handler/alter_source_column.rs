@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::max_column_id;
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
 use risingwave_sqlparser::ast::{
@@ -59,11 +60,15 @@ pub async fn handle_alter_source_column(
     };
 
     if catalog.associated_table_id.is_some() {
-        Err(ErrorCode::NotSupported(
+        return Err(ErrorCode::NotSupported(
             "alter table with connector with ALTER SOURCE statement".to_string(),
             "try to use ALTER TABLE instead".to_string(),
-        ))?
+        )
+        .into());
     };
+    if catalog.info.is_shared() {
+        bail_not_implemented!(issue = 16003, "alter shared source");
+    }
 
     // Currently only allow source without schema registry
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;

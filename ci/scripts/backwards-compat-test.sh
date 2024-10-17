@@ -72,7 +72,6 @@ cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=true
 
 ENABLE_MINIO=true
-ENABLE_ETCD=true
 
 # Whether to build or directly fetch binary from release.
 ENABLE_BUILD_RUST=$ENABLE_BUILD

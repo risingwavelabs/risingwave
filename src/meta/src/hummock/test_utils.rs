@@ -31,12 +31,15 @@ use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableIn
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_meta_model_v2::WorkerId;
+use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_rpc_client::HummockMetaClient;
 
+use crate::controller::catalog::CatalogController;
+use crate::controller::cluster::{ClusterController, ClusterControllerRef};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{default_compaction_selector, LocalSelectorStatistic};
 use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionSelectorContext};
@@ -44,7 +47,7 @@ use crate::hummock::level_handler::LevelHandler;
 pub use crate::hummock::manager::CommitEpochInfo;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
-use crate::manager::{ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv};
+use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 
 pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
@@ -291,7 +294,12 @@ pub fn get_sorted_committed_object_ids(
 pub async fn setup_compute_env_with_config(
     port: i32,
     config: CompactionConfig,
-) -> (MetaSrvEnv, HummockManagerRef, ClusterManagerRef, WorkerNode) {
+) -> (
+    MetaSrvEnv,
+    HummockManagerRef,
+    ClusterControllerRef,
+    WorkerId,
+) {
     setup_compute_env_with_metric(port, config, None).await
 }
 
@@ -299,14 +307,19 @@ pub async fn setup_compute_env_with_metric(
     port: i32,
     config: CompactionConfig,
     meta_metric: Option<MetaMetrics>,
-) -> (MetaSrvEnv, HummockManagerRef, ClusterManagerRef, WorkerNode) {
+) -> (
+    MetaSrvEnv,
+    HummockManagerRef,
+    ClusterControllerRef,
+    WorkerId,
+) {
     let env = MetaSrvEnv::for_test().await;
-    let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), Duration::from_secs(1))
+    let cluster_ctl = Arc::new(
+        ClusterController::new(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
+    let catalog_ctl = Arc::new(CatalogController::new(env.clone()).await.unwrap());
 
     let compactor_manager = Arc::new(CompactorManager::for_test());
 
@@ -315,8 +328,8 @@ pub async fn setup_compute_env_with_metric(
 
     let hummock_manager = HummockManager::with_config(
         env.clone(),
-        cluster_manager.clone(),
-        fragment_manager,
+        cluster_ctl.clone(),
+        catalog_ctl,
         Arc::new(meta_metric.unwrap_or_default()),
         compactor_manager,
         config,
@@ -328,8 +341,8 @@ pub async fn setup_compute_env_with_metric(
         port,
     };
     let fake_parallelism = 4;
-    let worker_node = cluster_manager
-        .add_worker_node(
+    let worker_id = cluster_ctl
+        .add_worker(
             WorkerType::ComputeNode,
             fake_host_address,
             Property {
@@ -343,12 +356,17 @@ pub async fn setup_compute_env_with_metric(
         )
         .await
         .unwrap();
-    (env, hummock_manager, cluster_manager, worker_node)
+    (env, hummock_manager, cluster_ctl, worker_id)
 }
 
 pub async fn setup_compute_env(
     port: i32,
-) -> (MetaSrvEnv, HummockManagerRef, ClusterManagerRef, WorkerNode) {
+) -> (
+    MetaSrvEnv,
+    HummockManagerRef,
+    ClusterControllerRef,
+    WorkerId,
+) {
     let config = CompactionConfigBuilder::new()
         .level0_tier_compact_file_number(1)
         .level0_max_compact_file_number(130)

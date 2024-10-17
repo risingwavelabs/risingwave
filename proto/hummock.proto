@@ -528,7 +528,6 @@ message ReportCompactionTaskResponse {
 message ValidationTask {
   repeated SstableInfo sst_infos = 1;
   map<uint64, uint32> sst_id_to_worker_id = 2;
-  uint64 epoch = 3;
 }
 
 // Delete SSTs in object store
@@ -577,7 +576,10 @@ message ReportFullScanTaskRequest {
   uint64 total_object_count = 2;
   // Total size of objects before filtered by conditions specified by FullScanTask.
   uint64 total_object_size = 3;
+  // Start key of the next page.
   optional string next_start_after = 4;
+  // Start key of this page.
+  optional string start_after = 5;
 }
 
 message ReportFullScanTaskResponse {
@@ -677,6 +679,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 max_l0_compact_level_count = 18;
       uint64 sst_allowed_trivial_move_min_size = 19;
       uint32 split_weight_by_vnode = 20;
+      bool disable_auto_group_scheduling = 21;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -874,6 +877,9 @@ message CompactionConfig {
 
   // The limitation of base level trivial move sst size
   optional uint64 sst_allowed_trivial_move_min_size = 22;
+
+  // The limitation of auto group scheduling
+  optional bool disable_auto_group_scheduling = 23;
 }
 
 message TableStats {
