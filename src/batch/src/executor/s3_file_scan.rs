@@ -109,7 +109,7 @@ impl S3FileScanExecutor {
 
             #[for_await]
             for record_batch in record_batch_stream {
-                let record_batch = record_batch.map_err(BatchError::Parquet)?;
+                let record_batch = record_batch?;
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
                 debug_assert_eq!(chunk.data_types(), self.schema.data_types());
                 yield chunk;

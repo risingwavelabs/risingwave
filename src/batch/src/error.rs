@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub use anyhow::anyhow;
 use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::BoxedError;
+use risingwave_common::error::{def_anyhow_newtype, def_anyhow_variant, BoxedError};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_dml::error::DmlError;
@@ -115,24 +115,10 @@ pub enum BatchError {
     ),
 
     #[error(transparent)]
-    Iceberg(
+    ExternalSystemError(
         #[from]
         #[backtrace]
-        iceberg::Error,
-    ),
-
-    #[error(transparent)]
-    Parquet(
-        #[from]
-        #[backtrace]
-        ParquetError,
-    ),
-
-    #[error(transparent)]
-    Postgres(
-        #[from]
-        #[backtrace]
-        tokio_postgres::Error,
+        BatchExternalSystemError,
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.
@@ -199,4 +185,14 @@ impl From<ConnectorError> for BatchError {
     fn from(value: ConnectorError) -> Self {
         Self::Connector(value.into())
     }
+}
+
+// Define a external system error
+def_anyhow_variant! {
+    pub BatchExternalSystemError,
+    BatchError ExternalSystemError,
+
+    tokio_postgres::Error => "Postgres Batch Query Error",
+    iceberg::Error => "Iceberg Batch Query Error",
+    ParquetError => "Parquet Batch Query Error",
 }
