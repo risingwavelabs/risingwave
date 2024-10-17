@@ -393,6 +393,8 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compaction_group_size_threshold")]
     pub compaction_group_size_threshold: f64,
 
+    // During group scheduling, the configured `*_throughput_ratio` is used to determine if the sample exceeds the threshold.
+    // Use `*_statistic_window_times` to check if the split and merge conditions are met.
     /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
     #[serde(default = "default::meta::table_statistic_high_write_throughput_ratio")]
     pub table_statistic_high_write_throughput_ratio: f64,
@@ -401,6 +403,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::table_statistic_low_write_throughput_ratio")]
     pub table_statistic_low_write_throughput_ratio: f64,
 
+    // Hummock control the number of samples kept in memory by configuring `table_info_statistic_history_times`.
+    // Hummock also control the number of samples to be judged during group scheduling by `split_group_statistic_window_times` and `merge_group_statistic_window_times`.
+    // For example, if `table_info_statistic_history_times` = 240 and `split_group_statistic_window_times` = 60, then only the last 60 samples will be considered, and so on.
     /// The window times of table statistic history for split compaction group.
     #[serde(default = "default::meta::split_group_statistic_window_times")]
     pub split_group_statistic_window_times: usize,
