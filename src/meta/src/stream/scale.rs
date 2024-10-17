@@ -30,7 +30,7 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_meta_model_v2::{actor, fragment, ObjectId, StreamingParallelism, WorkerId};
+use risingwave_meta_model::{actor, fragment, ObjectId, StreamingParallelism, WorkerId};
 use risingwave_pb::common::{PbActorLocation, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -498,7 +498,7 @@ impl ScaleController {
             fragment_state: &mut HashMap<FragmentId, State>,
             fragment_to_table: &mut HashMap<FragmentId, TableId>,
             mgr: &MetadataManager,
-            fragment_ids: Vec<risingwave_meta_model_v2::FragmentId>,
+            fragment_ids: Vec<risingwave_meta_model::FragmentId>,
         ) -> Result<(), MetaError> {
             let RescheduleWorkingSet {
                 fragments,
@@ -513,7 +513,7 @@ impl ScaleController {
                 .await?;
 
             let mut fragment_actors: HashMap<
-                risingwave_meta_model_v2::FragmentId,
+                risingwave_meta_model::FragmentId,
                 Vec<CustomActorInfo>,
             > = HashMap::new();
 
@@ -1843,7 +1843,7 @@ impl ScaleController {
         // index for fragment_id -> [actor_id]
         let mut fragment_actor_id_map = HashMap::new();
 
-        async fn build_index_v2(
+        async fn build_index(
             no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
             fragment_distribution_map: &mut HashMap<
@@ -1870,7 +1870,7 @@ impl ScaleController {
 
             for (fragment_id, downstreams) in fragment_downstreams {
                 for (downstream_fragment_id, dispatcher_type) in downstreams {
-                    if let risingwave_meta_model_v2::actor_dispatcher::DispatcherType::NoShuffle =
+                    if let risingwave_meta_model::actor_dispatcher::DispatcherType::NoShuffle =
                         dispatcher_type
                     {
                         no_shuffle_source_fragment_ids.insert(fragment_id as FragmentId);
@@ -1910,7 +1910,7 @@ impl ScaleController {
             .map(|id| *id as ObjectId)
             .collect();
 
-        build_index_v2(
+        build_index(
             &mut no_shuffle_source_fragment_ids,
             &mut no_shuffle_target_fragment_ids,
             &mut fragment_distribution_map,

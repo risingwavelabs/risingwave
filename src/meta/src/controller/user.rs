@@ -16,9 +16,9 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG};
-use risingwave_meta_model_v2::prelude::{Object, User, UserPrivilege};
-use risingwave_meta_model_v2::user_privilege::Action;
-use risingwave_meta_model_v2::{object, user, user_privilege, AuthInfo, PrivilegeId, UserId};
+use risingwave_meta_model::prelude::{Object, User, UserPrivilege};
+use risingwave_meta_model::user_privilege::Action;
+use risingwave_meta_model::{object, user, user_privilege, AuthInfo, PrivilegeId, UserId};
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
@@ -469,7 +469,7 @@ impl CatalogController {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_meta_model_v2::DatabaseId;
+    use risingwave_meta_model::DatabaseId;
     use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 
     use super::*;

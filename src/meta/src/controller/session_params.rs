@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::session_config::{SessionConfig, SessionConfigError};
-use risingwave_meta_model_v2::prelude::SessionParameter;
-use risingwave_meta_model_v2::session_parameter;
+use risingwave_meta_model::prelude::SessionParameter;
+use risingwave_meta_model::session_parameter;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SetSessionParamRequest;
 use sea_orm::ActiveValue::Set;

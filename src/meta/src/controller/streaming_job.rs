@@ -19,15 +19,15 @@ use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::{bail, current_cluster_version};
-use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
-use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::{
+use risingwave_meta_model::actor::ActorStatus;
+use risingwave_meta_model::actor_dispatcher::DispatcherType;
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::{
     Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
     StreamingJob as StreamingJobModel, Table,
 };
-use risingwave_meta_model_v2::table::TableType;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
     streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType, DatabaseId,
     ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SinkId, SourceId,
@@ -1648,10 +1648,9 @@ impl CatalogController {
 
                     // Only hash dispatcher needs mapping
                     if dispatcher.dispatcher_type.as_ref() == &DispatcherType::Hash {
-                        dispatcher.hash_mapping =
-                            Set(upstream_dispatcher_mapping.as_ref().map(|m| {
-                                risingwave_meta_model_v2::ActorMapping::from(&m.to_protobuf())
-                            }));
+                        dispatcher.hash_mapping = Set(upstream_dispatcher_mapping
+                            .as_ref()
+                            .map(|m| risingwave_meta_model::ActorMapping::from(&m.to_protobuf())));
                     }
 
                     let mut new_downstream_actor_ids =

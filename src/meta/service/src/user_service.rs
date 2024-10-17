@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model_v2::UserId;
+use risingwave_meta_model::UserId;
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_server::UserService;

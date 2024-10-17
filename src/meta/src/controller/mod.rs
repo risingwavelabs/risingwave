@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::{
     connection, database, function, index, object, schema, secret, sink, source, subscription,
     table, view,
 };

@@ -23,7 +23,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorId, ActorMapping, WorkerSlotId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
