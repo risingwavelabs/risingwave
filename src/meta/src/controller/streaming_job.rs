@@ -367,21 +367,12 @@ impl CatalogController {
         Ok(table_id_map)
     }
 
-    pub async fn pre_notify_relations_for_mv(
-        &self,
-        job: &StreamingJob,
-        internal_tables: &[PbTable],
-    ) -> MetaResult<()> {
-        let StreamingJob::MaterializedView(table) = job else {
-            return Ok(());
-        };
-
-        let tables = std::iter::once(table).chain(internal_tables);
-
+    pub async fn pre_notify_internal_tables(&self, internal_tables: &[PbTable]) -> MetaResult<()> {
         self.notify_frontend(
             Operation::Add,
             Info::RelationGroup(RelationGroup {
-                relations: tables
+                relations: internal_tables
+                    .iter()
                     .map(|table| Relation {
                         relation_info: Some(RelationInfo::Table(table.clone())),
                     })

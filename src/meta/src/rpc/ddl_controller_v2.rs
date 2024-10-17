@@ -191,12 +191,14 @@ impl DdlController {
         let streaming_job = &ctx.streaming_job;
         let internal_tables = ctx.internal_tables();
 
-        // Now that all fields in `streaming_job` and `internal_tables` are initialized,
+        // Now that all fields in `internal_tables` are initialized,
         // we can notify frontend for these relations.
-        self.metadata_manager
-            .catalog_controller
-            .pre_notify_relations_for_mv(streaming_job, &internal_tables)
-            .await?;
+        if streaming_job.is_materialized_view() {
+            self.metadata_manager
+                .catalog_controller
+                .pre_notify_internal_tables(&internal_tables)
+                .await?;
+        }
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
