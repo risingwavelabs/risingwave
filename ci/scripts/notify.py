@@ -116,6 +116,8 @@ def get_failed_tests(get_test_status, test_map):
             failed_test_map[test] = test_map[test]
         elif test_status == "passed":
             print(f"{test} passed with outcome: {test_status}")
+        elif test_status is None or test_status == "":
+            print(f"{test} no outcome, skipping")
         else:
             print(f"{test} failed with unknown outcome: {test_status}")
             failed_test_map[test] = test_map[test]
