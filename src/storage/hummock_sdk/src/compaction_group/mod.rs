@@ -53,7 +53,7 @@ pub mod group_split {
     use risingwave_common::hash::VirtualNode;
     use risingwave_pb::hummock::PbLevelType;
 
-    use super::hummock_version_ext::insert_new_sub_level;
+    use super::hummock_version_ext::append_new_sub_level;
     use super::StateTableId;
     use crate::key::{FullKey, TableKey};
     use crate::key_range::KeyRange;
@@ -292,12 +292,11 @@ pub mod group_split {
                 max_left_sub_level_id += 1;
             }
 
-            insert_new_sub_level(
+            append_new_sub_level(
                 &mut left_levels.l0,
                 right_sub_level.sub_level_id,
                 right_sub_level.level_type,
                 right_sub_level.table_infos,
-                None,
             );
         }
 
