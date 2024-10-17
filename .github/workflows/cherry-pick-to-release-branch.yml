@@ -18,7 +18,6 @@ jobs:
       - name: Get release branches
         id: get-release-branches
         run: |
-          echo "${{ toJson(github.event) }}"
           if [[ ${{ github.event.action }} == 'labeled' ]]; then
             echo "branches=[\"$(echo ${{ github.event.label.name }} | cut -d '-' -f 4-)\"]" >> "$GITHUB_OUTPUT"
           else
