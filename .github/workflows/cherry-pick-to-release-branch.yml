@@ -6,68 +6,41 @@ on:
     types: ["closed", "labeled"]
 
 jobs:
-  release_pull_request_1_9:
-    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-release-1.9')  &&  github.event.pull_request.merged == true"
+  get-release-branches:
+    if: |
+      github.event.pull_request.merged &&
+      ((github.event.action == 'labeled' && startsWith(github.event.label.name, 'need-cherry-pick')) ||
+      (github.event.action == 'closed' && contains(toJson(github.event.pull_request.labels), 'need-cherry-pick')))
     runs-on: ubuntu-latest
-    name: release_pull_request
+    outputs:
+      branches: ${{ steps.get-release-branches.outputs.branches }}
+    steps:
+      - name: Get release branches
+        id: get-release-branches
+        run: |
+          if [[ ${{ github.event.action }} == 'labeled' ]]; then
+            echo "branches=[\"$(echo ${{ github.event.label.name }} | cut -d '-' -f 4-)\"]" >> "$GITHUB_OUTPUT"
+          else
+            labels='${{ toJson(github.event.pull_request.labels) }}'
+            echo branches=$(echo "$labels" | jq -r '.[] | select(.name | contains("need-cherry-pick")).name' | cut -d '-' -f 4- | jq --raw-input . | jq --slurp . -c) >> "$GITHUB_OUTPUT"
+          fi
+
+  release_pull_request:
+    needs:
+      - get-release-branches
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        branch: ${{ fromJson(needs.get-release-branches.outputs.branches) }}
     steps:
       - name: checkout
         uses: actions/checkout@v1
       - name: Create PR to branch
         uses: risingwavelabs/github-action-cherry-pick@master
         with:
-          pr_branch: 'release-1.9'
+          pr_branch: ${{ matrix.branch }}
           pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking \#{0} onto branch release-1.9', github.event.number) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  release_pull_request_1_10:
-    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-release-1.10')  &&  github.event.pull_request.merged == true"
-    runs-on: ubuntu-latest
-    name: release_pull_request
-    steps:
-      - name: checkout
-        uses: actions/checkout@v1
-      - name: Create PR to branch
-        uses: risingwavelabs/github-action-cherry-pick@master
-        with:
-          pr_branch: 'release-1.10'
-          pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking \#{0} onto branch release-1.10', github.event.number) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
-  release_pull_request_2_0:
-    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-release-2.0')  &&  github.event.pull_request.merged == true"
-    runs-on: ubuntu-latest
-    name: release_pull_request
-    steps:
-      - name: checkout
-        uses: actions/checkout@v1
-      - name: Create PR to branch
-        uses: risingwavelabs/github-action-cherry-pick@master
-        with:
-          pr_branch: 'release-2.0'
-          pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking \#{0} onto branch release-2.0', github.event.number) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  release_pull_request_2_1:
-    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-release-2.1')  &&  github.event.pull_request.merged == true"
-    runs-on: ubuntu-latest
-    name: release_pull_request
-    steps:
-      - name: checkout
-        uses: actions/checkout@v1
-      - name: Create PR to branch
-        uses: risingwavelabs/github-action-cherry-pick@master
-        with:
-          pr_branch: 'release-2.1'
-          pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking \#{0} onto branch release-2.1', github.event.number) }}
+          pr_body: ${{ format('Cherry picking \#{0} onto branch {1}', github.event.number, matrix.branch) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
