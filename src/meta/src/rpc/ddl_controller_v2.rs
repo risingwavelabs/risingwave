@@ -147,11 +147,14 @@ impl DdlController {
         streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
 
         // create internal table catalogs and refill table id.
-        let internal_tables = fragment_graph.internal_tables().into_values().collect_vec();
+        let incomplete_internal_tables = fragment_graph
+            .incomplete_internal_tables()
+            .into_values()
+            .collect_vec();
         let table_id_map = self
             .metadata_manager
             .catalog_controller
-            .create_internal_table_catalog(&streaming_job, internal_tables)
+            .create_internal_table_catalog(&streaming_job, incomplete_internal_tables)
             .await?;
         fragment_graph.refill_internal_table_ids(table_id_map);
 
@@ -186,6 +189,16 @@ impl DdlController {
             .await?;
 
         let streaming_job = &ctx.streaming_job;
+        let internal_tables = ctx.internal_tables();
+
+        // Now that all fields in `internal_tables` are initialized,
+        // we can notify frontend for these relations.
+        if streaming_job.is_materialized_view() {
+            self.metadata_manager
+                .catalog_controller
+                .pre_notify_internal_tables(&internal_tables)
+                .await?;
+        }
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {

@@ -1013,7 +1013,6 @@ impl DdlController {
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
-        let internal_tables = fragment_graph.internal_tables();
         let expr_context = stream_ctx.to_expr_context();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
@@ -1096,6 +1095,7 @@ impl DdlController {
             table_parallelism,
             max_parallelism.get(),
         );
+        let internal_tables = table_fragments.internal_tables();
 
         if let Some(mview_fragment) = table_fragments.mview_fragment() {
             stream_job.set_table_vnode_count(mview_fragment.vnode_count());
