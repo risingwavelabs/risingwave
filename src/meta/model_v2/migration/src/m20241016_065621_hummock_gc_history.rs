@@ -24,7 +24,17 @@ impl MigrationTrait for Migration {
                     )
                     .to_owned(),
             )
-            .await
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .table(HummockGcHistory::Table)
+                    .name("idx_hummock_gc_history_mark_delete_at")
+                    .col(HummockGcHistory::MarkDeleteAt)
+                    .to_owned(),
+            )
+            .await?;
+        Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
