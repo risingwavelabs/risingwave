@@ -43,8 +43,6 @@ use risingwave_meta_model_v2::{
     ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
     SubscriptionId, TableId, UserId, ViewId,
 };
-use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
-use risingwave_pb::catalog::connection::PrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
@@ -66,7 +64,6 @@ use risingwave_pb::stream_plan::{
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
-use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
@@ -76,7 +73,6 @@ use crate::manager::{
     DdlType, LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
-use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     create_source_worker_handle, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
@@ -185,7 +181,6 @@ pub struct DdlController {
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
 
-    aws_client: Arc<Option<AwsEc2Client>>,
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
 }
@@ -255,7 +250,6 @@ impl DdlController {
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
-        aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -264,7 +258,6 @@ impl DdlController {
             stream_manager,
             source_manager,
             barrier_manager,
-            aws_client,
             creating_streaming_job_permits,
         }
     }
@@ -546,21 +539,6 @@ impl DdlController {
             .catalog_controller
             .drop_secret(secret_id as _)
             .await
-    }
-
-    pub(crate) async fn delete_vpc_endpoint(&self, svc: &PrivateLinkService) -> MetaResult<()> {
-        // delete AWS vpc endpoint
-        if svc.get_provider()? == PbPrivateLinkProvider::Aws {
-            if let Some(aws_cli) = self.aws_client.as_ref() {
-                aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
-            } else {
-                warn!(
-                    "AWS client is not initialized, skip deleting vpc endpoint {}",
-                    svc.endpoint_id
-                );
-            }
-        }
-        Ok(())
     }
 
     async fn create_subscription(

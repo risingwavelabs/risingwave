@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod cloud_provider;
 pub mod ddl_controller;
 mod ddl_controller_v2;
 pub mod election;

@@ -25,13 +25,14 @@ use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use thiserror_ext::AsReport;
 
 use crate::controller::catalog::ReleaseContext;
+use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION};
 use crate::model::StreamContext;
 use crate::rpc::ddl_controller::{
     fill_table_stream_graph_info, DdlController, DropMode, ReplaceTableInfo,
 };
 use crate::stream::{validate_sink, StreamFragmentGraph};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 impl DdlController {
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
@@ -273,8 +274,11 @@ impl DdlController {
                     .catalog_controller
                     .drop_connection(object_id)
                     .await?;
-                if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
-                    self.delete_vpc_endpoint(svc).await?;
+                if let Some(connection::Info::PrivateLinkService(_)) = &conn.info {
+                    return Err(MetaError::from(MetaErrorInner::Deprecated(
+                        "CREATE CONNECTION to Private Link".to_string(),
+                        "RisingWave Cloud Portal".to_string(),
+                    )));
                 }
                 return Ok(version);
             }
@@ -386,21 +390,11 @@ impl DdlController {
             streaming_job_ids,
             state_table_ids,
             source_ids,
-            connections,
             source_fragments,
             removed_actors,
             removed_fragments,
+            ..
         } = release_ctx;
-
-        // delete vpc endpoints.
-        for conn in connections {
-            let _ = self
-                .delete_vpc_endpoint(&conn.to_protobuf())
-                .await
-                .inspect_err(|err| {
-                    tracing::warn!(err = ?err.as_report(), "failed to delete vpc endpoint");
-                });
-        }
 
         // unregister sources.
         self.source_manager

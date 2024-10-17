@@ -32,9 +32,9 @@ use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SecretId, SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId,
-    TableId, UserId, ViewId,
+    FunctionId, I32Array, IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkId,
+    SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId,
+    ViewId,
 };
 use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
@@ -109,7 +109,8 @@ pub struct ReleaseContext {
     /// Dropped source list, need to unregister from source manager.
     pub(crate) source_ids: Vec<SourceId>,
     /// Dropped connection list, need to delete from vpc endpoints.
-    pub(crate) connections: Vec<PrivateLinkService>,
+    #[allow(dead_code)]
+    pub(crate) connections: Vec<ConnectionId>,
 
     /// Dropped fragments that are fetching data from the target source.
     pub(crate) source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
@@ -367,7 +368,7 @@ impl CatalogController {
             .all(&txn)
             .await?
             .into_iter()
-            .map(|conn| conn.info)
+            .map(|conn| conn.connection_id)
             .collect_vec();
 
         // Find affect users with privileges on the database and the objects in the database.
