@@ -211,7 +211,7 @@ impl From<PbTable> for ActiveModel {
         let handle_pk_conflict_behavior = pb_table.handle_pk_conflict_behavior();
 
         // `PbTable` here should be sourced from the wire, not from persistence.
-        // An unset `maybe_vnode_count` field should be treated as `NotSet`, instead of calling
+        // A placeholder `maybe_vnode_count` field should be treated as `NotSet`, instead of calling
         // the compatibility code.
         let vnode_count = pb_table
             .vnode_count_inner()
