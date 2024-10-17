@@ -50,8 +50,12 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
         var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
         var user = userProps.get(DbzConnectorConfig.USER);
         var password = userProps.get(DbzConnectorConfig.PASSWORD);
+        var encrypt =
+                Boolean.parseBoolean(
+                        userProps.getOrDefault(DbzConnectorConfig.SQL_SERVER_ENCRYPT, "false"));
 
         var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.SQL_SERVER, dbHost, dbPort, dbName);
+        jdbcUrl = jdbcUrl + ";encrypt=" + encrypt + ";trustServerCertificate=true";
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
 
         this.dbName = dbName;
