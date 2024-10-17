@@ -271,21 +271,14 @@ impl HummockManager {
                                     }
 
                                     {
-                                        let compaction_group_count = hummock_manager
-                                            .compaction_group_manager
-                                            .read()
-                                            .await
-                                            .compaction_groups()
-                                            .len();
-
+                                        let group_infos = hummock_manager
+                                            .calculate_compaction_group_statistic()
+                                            .await;
+                                        let compaction_group_count = group_infos.len();
                                         hummock_manager
                                             .metrics
                                             .compaction_group_count
                                             .set(compaction_group_count as i64);
-
-                                        let group_infos = hummock_manager
-                                            .calculate_compaction_group_statistic()
-                                            .await;
 
                                         let tables_throughput =
                                             hummock_manager.history_table_throughput.read().clone();
@@ -305,14 +298,6 @@ impl HummockManager {
                                                     .group_id
                                                     .to_string()])
                                                 .set(group_info.group_size as _);
-
-                                            println!(
-                                                "group {:?} group_size {:?} tables {:?}",
-                                                group_info.group_id,
-                                                group_info.group_id,
-                                                group_info.table_statistic.keys()
-                                            );
-
                                             // accumulate the throughput of all tables in the group
                                             let mut avg_throuput = 0;
                                             for table_id in group_info.table_statistic.keys() {
@@ -339,10 +324,6 @@ impl HummockManager {
                                                 current_version_levels.get(&group_info.group_id)
                                             {
                                                 let file_count = group_levels.count_ssts();
-                                                println!(
-                                                    "group {:?} file_count {:?} avg_throuput {:?}",
-                                                    group_info.group_id, file_count, avg_throuput
-                                                );
                                                 hummock_manager
                                                     .metrics
                                                     .compaction_group_file_count
@@ -551,7 +532,7 @@ impl HummockManager {
     /// Try to schedule a compaction `split` for the given compaction groups.
     /// The `split` will be triggered if the following conditions are met:
     /// 1. `state table throughput`: If the table is in a high throughput state and it belongs to a multi table group, then an attempt will be made to split the table into separate compaction groups to increase its throughput and reduce the impact on write amplification.
-    /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `compaction_group_size_threshold`
+    /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `split_group_size_ratio`
     async fn on_handle_schedule_group_split(&self) {
         let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
@@ -571,26 +552,14 @@ impl HummockManager {
             table_ids.iter().next().cloned()
         });
 
-        for group in &group_infos {
+        for group in group_infos {
             if group.table_statistic.len() == 1 {
                 // no need to handle the separate compaciton group
                 continue;
             }
 
-            let compaction_group_config = {
-                let compaction_group_manager = self.compaction_group_manager.read().await;
-                compaction_group_manager
-                    .try_get_compaction_group_config(group.group_id)
-                    .unwrap()
-            };
-
-            self.try_split_compaction_group(
-                &table_write_throughput,
-                checkpoint_secs,
-                group,
-                compaction_group_config,
-            )
-            .await;
+            self.try_split_compaction_group(&table_write_throughput, checkpoint_secs, group)
+                .await;
         }
     }
 
@@ -620,13 +589,12 @@ impl HummockManager {
             params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
         let created_tables = match self.metadata_manager.get_created_table_ids().await {
-            Ok(created_tables) => created_tables,
+            Ok(created_tables) => HashSet::from_iter(created_tables),
             Err(err) => {
                 tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
                 return;
             }
         };
-        let created_tables: HashSet<u32> = HashSet::from_iter(created_tables);
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         // sort by first table id for deterministic merge order
@@ -650,28 +618,11 @@ impl HummockManager {
         while left < right && right < group_count {
             let group = &group_infos[left];
             let next_group = &group_infos[right];
-
-            let group_config = {
-                let compaction_group_manager = self.compaction_group_manager.read().await;
-                compaction_group_manager
-                    .try_get_compaction_group_config(group.group_id)
-                    .unwrap()
-            };
-
-            let next_group_config = {
-                let compaction_group_manager = self.compaction_group_manager.read().await;
-                compaction_group_manager
-                    .try_get_compaction_group_config(next_group.group_id)
-                    .unwrap()
-            };
-
             match self
                 .try_merge_compaction_group(
                     &table_write_throughput,
                     group,
-                    group_config,
                     next_group,
-                    next_group_config,
                     checkpoint_secs,
                     &created_tables,
                 )

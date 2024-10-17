@@ -113,14 +113,6 @@ pub fn summarize_group_deltas(
     }
 }
 
-#[derive(Clone, Default)]
-pub struct TableGroupInfo {
-    pub group_id: CompactionGroupId,
-    pub group_size: u64,
-    pub table_statistic: HashMap<StateTableId, u64>,
-    pub split_by_table: bool,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct SstDeltaInfo {
     pub insert_sst_level: u32,

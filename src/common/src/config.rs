@@ -301,12 +301,6 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    #[serde(
-        default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
-        alias = "periodic_split_compact_group_interval_sec"
-    )]
-    pub periodic_scheduling_compaction_group_split_interval_sec: u64,
-
     #[serde(default = "default::meta::move_table_size_limit")]
     #[deprecated]
     pub move_table_size_limit: u64,
@@ -366,16 +360,6 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::hybrid_partition_vnode_count")]
     pub hybrid_partition_vnode_count: u32,
 
-    /// The threshold of table size in one compact task to decide whether to partition one table into `hybrid_partition_vnode_count` parts, which belongs to default group and materialized view group.
-    /// Set it max value of 64-bit number to disable this feature.
-    #[serde(default = "default::meta::compact_task_table_size_partition_threshold_low")]
-    pub compact_task_table_size_partition_threshold_low: u64,
-
-    /// The threshold of table size in one compact task to decide whether to partition one table into `partition_vnode_count` parts, which belongs to default group and materialized view group.
-    /// Set it max value of 64-bit number to disable this feature.
-    #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
-    pub compact_task_table_size_partition_threshold_high: u64,
-
     #[serde(default = "default::meta::event_log_enabled")]
     pub event_log_enabled: bool,
     /// Keeps the latest N events per channel.
@@ -389,30 +373,50 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
 
-    /// Whether to split the compaction group when the size of the group exceeds the threshold.
-    #[serde(default = "default::meta::compaction_group_size_threshold")]
-    pub compaction_group_size_threshold: f64,
+    /// The size of table throughput statistics sample.
+    #[serde(default = "default::meta::table_stat_sample_size")]
+    pub table_stat_sample_size: usize,
+
+    /// Whether to split the compaction group when the size of the group exceeds the `compaction_group_config.max_estimated_group_size() * split_group_size_ratio`.
+    #[serde(default = "default::meta::split_group_size_ratio")]
+    pub split_group_size_ratio: f64,
 
     // During group scheduling, the configured `*_throughput_ratio` is used to determine if the sample exceeds the threshold.
     // Use `*_statistic_window_times` to check if the split and merge conditions are met.
     /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
-    #[serde(default = "default::meta::table_statistic_high_write_throughput_ratio")]
-    pub table_statistic_high_write_throughput_ratio: f64,
+    #[serde(default = "default::meta::table_stat_high_write_throughput_ratio_for_split")]
+    pub table_stat_high_write_throughput_ratio_for_split: f64,
 
     /// To merge the compaction group when the low throughput statistics of the group exceeds the threshold.
-    #[serde(default = "default::meta::table_statistic_low_write_throughput_ratio")]
-    pub table_statistic_low_write_throughput_ratio: f64,
+    #[serde(default = "default::meta::table_stat_low_write_throughput_ratio_for_merge")]
+    pub table_stat_low_write_throughput_ratio_for_merge: f64,
 
-    // Hummock control the number of samples kept in memory by configuring `table_info_statistic_history_times`.
-    // Hummock also control the number of samples to be judged during group scheduling by `split_group_statistic_window_times` and `merge_group_statistic_window_times`.
-    // For example, if `table_info_statistic_history_times` = 240 and `split_group_statistic_window_times` = 60, then only the last 60 samples will be considered, and so on.
+    // Hummock control the number of samples kept in memory by configuring `table_stat_sample_size`.
+    // Hummock also control the number of samples to be judged during group scheduling by `table_stat_sample_size_for_split` and `table_stat_sample_size_for_merge`.
+    // For example, if `table_stat_sample_size` = 240 and `table_stat_sample_size_for_split` = 60, then only the last 60 samples will be considered, and so on.
     /// The window times of table statistic history for split compaction group.
-    #[serde(default = "default::meta::split_group_statistic_window_times")]
-    pub split_group_statistic_window_times: usize,
+    #[serde(default = "default::meta::table_stat_sample_size_for_split")]
+    pub table_stat_sample_size_for_split: usize,
 
     /// The window times of table statistic history for merge compaction group.
-    #[serde(default = "default::meta::merge_group_statistic_window_times")]
-    pub merge_group_statistic_window_times: usize,
+    #[serde(default = "default::meta::table_stat_sample_size_for_merge")]
+    pub table_stat_sample_size_for_merge: usize,
+
+    /// The threshold of table size in one compact task to decide whether to partition one table into `hybrid_partition_vnode_count` parts, which belongs to default group and materialized view group.
+    /// Set it max value of 64-bit number to disable this feature.
+    #[serde(default = "default::meta::compact_task_table_size_partition_threshold_low")]
+    pub compact_task_table_size_partition_threshold_low: u64,
+
+    /// The threshold of table size in one compact task to decide whether to partition one table into `partition_vnode_count` parts, which belongs to default group and materialized view group.
+    /// Set it max value of 64-bit number to disable this feature.
+    #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
+    pub compact_task_table_size_partition_threshold_high: u64,
+
+    #[serde(
+        default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
+        alias = "periodic_split_compact_group_interval_sec"
+    )]
+    pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
@@ -821,10 +825,6 @@ pub struct StorageConfig {
     pub compactor_fast_max_compact_task_size: u64,
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
-
-    /// The window size of table info statistic history.
-    #[serde(default = "default::storage::table_info_statistic_history_times")]
-    pub table_info_statistic_history_times: usize,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1536,28 +1536,32 @@ pub mod default {
             false
         }
 
-        pub fn compaction_group_size_threshold() -> f64 {
+        pub fn split_group_size_ratio() -> f64 {
             0.9
         }
 
-        pub fn table_statistic_high_write_throughput_ratio() -> f64 {
+        pub fn table_stat_high_write_throughput_ratio_for_split() -> f64 {
             0.5
         }
 
-        pub fn table_statistic_low_write_throughput_ratio() -> f64 {
+        pub fn table_stat_low_write_throughput_ratio_for_merge() -> f64 {
             0.7
         }
 
-        pub fn split_group_statistic_window_times() -> usize {
+        pub fn table_stat_sample_size_for_split() -> usize {
             60
         }
 
-        pub fn merge_group_statistic_window_times() -> usize {
+        pub fn table_stat_sample_size_for_merge() -> usize {
             240
         }
 
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
+        }
+
+        pub fn table_stat_sample_size() -> usize {
+            240
         }
     }
 
@@ -1753,10 +1757,6 @@ pub mod default {
 
         pub fn compactor_max_overlap_sst_count() -> usize {
             64
-        }
-
-        pub fn table_info_statistic_history_times() -> usize {
-            240
         }
 
         pub fn block_file_cache_flush_buffer_threshold_mb() -> usize {

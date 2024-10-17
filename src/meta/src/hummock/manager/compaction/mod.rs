@@ -42,6 +42,7 @@ use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -88,6 +89,7 @@ use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{
     build_compact_task_level_type_metrics_label, trigger_local_table_stat, trigger_sst_stat,
 };
+use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
 use crate::manager::META_NODE_ID;
@@ -1667,4 +1669,12 @@ impl Compaction {
             })
             .collect()
     }
+}
+
+#[derive(Clone, Default)]
+pub struct CompactionGroupStatistic {
+    pub group_id: CompactionGroupId,
+    pub group_size: u64,
+    pub table_statistic: HashMap<StateTableId, u64>,
+    pub compaction_group_config: CompactionGroup,
 }

@@ -382,7 +382,11 @@ impl HummockManagerService for HummockServiceImpl {
             .move_state_tables_to_dedicated_compaction_group(
                 req.group_id,
                 &req.table_ids,
-                req.partition_vnode_count,
+                if req.partition_vnode_count > 0 {
+                    Some(req.partition_vnode_count)
+                } else {
+                    None
+                },
             )
             .await?
             .0;

@@ -19,9 +19,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, TableGroupInfo,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::version::GroupDelta;
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -34,6 +32,7 @@ use risingwave_pb::hummock::{
 use sea_orm::EntityTrait;
 use tokio::sync::OnceCell;
 
+use super::CompactionGroupStatistic;
 use crate::hummock::compaction::compaction_config::{
     validate_compaction_config, CompactionConfigBuilder,
 };
@@ -418,13 +417,14 @@ impl HummockManager {
         results
     }
 
-    pub async fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
+    pub async fn calculate_compaction_group_statistic(&self) -> Vec<CompactionGroupStatistic> {
         let mut infos = vec![];
         {
             let versioning_guard = self.versioning.read().await;
+            let manager = self.compaction_group_manager.read().await;
             let version = &versioning_guard.current_version;
             for group_id in version.levels.keys() {
-                let mut group_info = TableGroupInfo {
+                let mut group_info = CompactionGroupStatistic {
                     group_id: *group_id,
                     ..Default::default()
                 };
@@ -443,16 +443,12 @@ impl HummockManager {
                     group_info
                         .table_statistic
                         .insert(table_id.table_id, table_size);
+                    group_info.compaction_group_config =
+                        manager.try_get_compaction_group_config(*group_id).unwrap();
                 }
                 infos.push(group_info);
             }
         };
-        let manager = self.compaction_group_manager.read().await;
-        for info in &mut infos {
-            if let Some(group) = manager.compaction_groups.get(&info.group_id) {
-                info.split_by_table = group.compaction_config.split_by_state_table;
-            }
-        }
         infos
     }
 
@@ -524,10 +520,6 @@ impl CompactionGroupManager {
     /// Tries to get compaction group config for `compaction_group_id`.
     pub(crate) fn default_compaction_config(&self) -> Arc<CompactionConfig> {
         self.default_config.clone()
-    }
-
-    pub(crate) fn compaction_groups(&self) -> &BTreeMap<CompactionGroupId, CompactionGroup> {
-        &self.compaction_groups
     }
 }
 

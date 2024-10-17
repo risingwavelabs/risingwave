@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -20,7 +20,6 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::TableGroupInfo;
 use risingwave_hummock_sdk::compaction_group::{
     group_split, StateTableId, StaticCompactionGroupId,
 };
@@ -32,11 +31,11 @@ use risingwave_pb::hummock::{
 };
 use thiserror_ext::AsReport;
 
+use super::CompactionGroupStatistic;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::{commit_multi_var, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
-use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 
 impl HummockManager {
@@ -74,6 +73,36 @@ impl HummockManager {
         debug_assert!(!member_table_ids_2.is_empty());
         assert!(member_table_ids_1.is_sorted());
         assert!(member_table_ids_2.is_sorted());
+
+        let created_tables = match self.metadata_manager.get_created_table_ids().await {
+            Ok(created_tables) => HashSet::from_iter(created_tables),
+            Err(err) => {
+                tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
+                return Err(Error::CompactionGroup(format!(
+                    "merge group_1 {} group_2 {} failed to fetch created table ids",
+                    group_1, group_2
+                )));
+            }
+        };
+
+        fn contains_creating_table(
+            table_ids: &Vec<TableId>,
+            created_tables: &HashSet<u32>,
+        ) -> bool {
+            table_ids
+                .iter()
+                .any(|table_id| !created_tables.contains(&table_id.table_id()))
+        }
+
+        // do not merge the compaction group which is creating
+        if contains_creating_table(&member_table_ids_1, &created_tables)
+            || contains_creating_table(&member_table_ids_2, &created_tables)
+        {
+            return Err(Error::CompactionGroup(format!(
+                "Not Merge creating group {} next_group {} member_table_ids_1 {:?} member_table_ids_2 {:?}",
+                group_1, group_2, member_table_ids_1, member_table_ids_2
+            )));
+        }
 
         // Make sure `member_table_ids_1` is smaller than `member_table_ids_2`
         let (left_group_id, right_group_id) =
@@ -257,7 +286,7 @@ impl HummockManager {
         split_table_ids: &[StateTableId],
         table_id_to_split: StateTableId,
         vnode_to_split: VirtualNode,
-        partition_vnode_count: u32,
+        partition_vnode_count: Option<u32>,
     ) -> Result<Vec<(CompactionGroupId, Vec<StateTableId>)>> {
         let mut result = vec![];
         let compaction_guard = self.compaction.write().await;
@@ -278,9 +307,12 @@ impl HummockManager {
         let member_table_ids = versioning
             .current_version
             .state_table_info
-            .compaction_group_member_table_ids(parent_group_id);
+            .compaction_group_member_table_ids(parent_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect::<BTreeSet<_>>();
 
-        if !member_table_ids.contains(&TableId::new(table_id_to_split)) {
+        if !member_table_ids.contains(&table_id_to_split) {
             return Err(Error::CompactionGroup(format!(
                 "table {} doesn't in group {}",
                 table_id_to_split, parent_group_id
@@ -290,10 +322,13 @@ impl HummockManager {
         let split_full_key = group_split::build_split_full_key(table_id_to_split, vnode_to_split);
 
         // change to vec for partition
-        let table_ids = member_table_ids
-            .iter()
-            .map(|table_id| table_id.table_id)
-            .collect_vec();
+        let table_ids = member_table_ids.into_iter().collect_vec();
+        if table_ids == split_table_ids {
+            return Err(Error::CompactionGroup(format!(
+                "invalid split attempt for group {}: all member tables are moved",
+                parent_group_id
+            )));
+        }
         // avoid decode split_key when caller is aware of the table_id and vnode
         let (table_ids_left, table_ids_right) =
             group_split::split_table_ids_with_table_id_and_vnode(
@@ -395,7 +430,10 @@ impl HummockManager {
             // The target `table_ids` might be split to an existing group, so we need to try to update its config
             for (cg_id, table_ids) in &result {
                 // check the split_tables had been place to the dedicated compaction group
-                if table_ids.len() == 1 && table_ids == split_table_ids {
+                if let Some(partition_vnode_count) = partition_vnode_count
+                    && table_ids.len() == 1
+                    && table_ids == split_table_ids
+                {
                     if let Err(err) = compaction_groups_txn.update_compaction_config(
                         &[*cg_id],
                         &[MutableConfig::SplitWeightByVnode(partition_vnode_count)],
@@ -431,7 +469,7 @@ impl HummockManager {
         &self,
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
-        partition_vnode_count: u32,
+        partition_vnode_count: Option<u32>,
     ) -> Result<(
         CompactionGroupId,
         BTreeMap<CompactionGroupId, Vec<StateTableId>>,
@@ -553,10 +591,10 @@ impl HummockManager {
         &self,
         table_write_throughput: &HashMap<u32, VecDeque<u64>>,
         checkpoint_secs: u64,
-        group: &TableGroupInfo,
-        compaction_group_config: CompactionGroup,
+        group: CompactionGroupStatistic,
     ) {
-        if compaction_group_config
+        if group
+            .compaction_group_config
             .compaction_config
             .disable_auto_group_scheduling
             .unwrap_or(false)
@@ -576,8 +614,7 @@ impl HummockManager {
         }
 
         // split the huge group to multiple groups
-        self.try_split_huge_compaction_group(group, compaction_group_config)
-            .await;
+        self.try_split_huge_compaction_group(group).await;
     }
 
     /// Try to move the high throughput table to a dedicated compaction group.
@@ -594,7 +631,7 @@ impl HummockManager {
         }
 
         let window_size =
-            self.env.opts.split_group_statistic_window_times / (checkpoint_secs as usize);
+            self.env.opts.table_stat_sample_size_for_split / (checkpoint_secs as usize);
         let table_throughput = table_write_throughput.get(table_id).unwrap();
         if table_throughput.len() < window_size {
             return;
@@ -605,7 +642,9 @@ impl HummockManager {
             checkpoint_secs,
             window_size,
             self.env.opts.table_high_write_throughput_threshold,
-            self.env.opts.table_statistic_high_write_throughput_ratio,
+            self.env
+                .opts
+                .table_stat_high_write_throughput_ratio_for_split,
         );
 
         // do not split a table to dedicated compaction group if it is not high write throughput
@@ -617,7 +656,7 @@ impl HummockManager {
             .move_state_tables_to_dedicated_compaction_group(
                 parent_group_id,
                 &[*table_id],
-                self.env.opts.partition_vnode_count,
+                Some(self.env.opts.partition_vnode_count),
             )
             .await;
         match ret {
@@ -635,13 +674,9 @@ impl HummockManager {
         }
     }
 
-    pub async fn try_split_huge_compaction_group(
-        &self,
-        group: &TableGroupInfo,
-        compaction_group_config: CompactionGroup,
-    ) {
-        let group_max_size = (compaction_group_config.max_estimated_group_size() as f64
-            * self.env.opts.compaction_group_size_threshold) as u64;
+    pub async fn try_split_huge_compaction_group(&self, group: CompactionGroupStatistic) {
+        let group_max_size = (group.compaction_group_config.max_estimated_group_size() as f64
+            * self.env.opts.split_group_size_ratio) as u64;
         let is_huge_hybrid_group =
             group.group_size > group_max_size && group.table_statistic.len() > 1; // avoid split single table group
         if is_huge_hybrid_group {
@@ -658,7 +693,7 @@ impl HummockManager {
                         .move_state_tables_to_dedicated_compaction_group(
                             group.group_id,
                             &table_ids,
-                            0,
+                            None,
                         )
                         .await;
                     match ret {
@@ -680,6 +715,8 @@ impl HummockManager {
                                 table_ids,
                                 group.group_id
                             );
+
+                            return;
                         }
                     }
                 }
@@ -690,10 +727,8 @@ impl HummockManager {
     pub async fn try_merge_compaction_group(
         &self,
         table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-        group: &TableGroupInfo,
-        group_config: CompactionGroup,
-        next_group: &TableGroupInfo,
-        _next_group_config: CompactionGroup,
+        group: &CompactionGroupStatistic,
+        next_group: &CompactionGroupStatistic,
         checkpoint_secs: u64,
         created_tables: &HashSet<u32>,
     ) -> Result<()> {
@@ -701,7 +736,10 @@ impl HummockManager {
         if group.group_id == StaticCompactionGroupId::StateDefault as u64
             && next_group.group_id == StaticCompactionGroupId::MaterializedView as u64
         {
-            return Ok(());
+            return Err(Error::CompactionGroup(format!(
+                "group-{} and group-{} are both StaticCompactionGroupId",
+                group.group_id, next_group.group_id
+            )));
         }
 
         if group.table_statistic.is_empty() || next_group.table_statistic.is_empty() {
@@ -721,7 +759,7 @@ impl HummockManager {
 
         // do not merge high throughput group
         let window_size =
-            self.env.opts.merge_group_statistic_window_times / (checkpoint_secs as usize);
+            self.env.opts.table_stat_sample_size_for_merge / (checkpoint_secs as usize);
 
         // merge the group which is low write throughput
         if !check_is_low_write_throughput_compaction_group(
@@ -730,7 +768,9 @@ impl HummockManager {
             window_size,
             self.env.opts.table_low_write_throughput_threshold,
             group,
-            self.env.opts.table_statistic_low_write_throughput_ratio,
+            self.env
+                .opts
+                .table_stat_low_write_throughput_ratio_for_merge,
         ) {
             return Err(Error::CompactionGroup(format!(
                 "Not Merge high throughput group {} next_group {}",
@@ -738,8 +778,8 @@ impl HummockManager {
             )));
         }
 
-        let size_limit = (group_config.max_estimated_group_size() as f64
-            * self.env.opts.compaction_group_size_threshold) as u64;
+        let size_limit = (group.compaction_group_config.max_estimated_group_size() as f64
+            * self.env.opts.split_group_size_ratio) as u64;
 
         if (group.group_size + next_group.group_size) > size_limit {
             return Err(Error::CompactionGroup(format!(
@@ -761,7 +801,9 @@ impl HummockManager {
             window_size,
             self.env.opts.table_low_write_throughput_threshold,
             next_group,
-            self.env.opts.table_statistic_low_write_throughput_ratio,
+            self.env
+                .opts
+                .table_stat_low_write_throughput_ratio_for_merge,
         ) {
             return Err(Error::CompactionGroup(format!(
                 "Not Merge high throughput group {} next group {}",
@@ -849,7 +891,7 @@ fn check_is_low_write_throughput_compaction_group(
     checkpoint_secs: u64,
     window_size: usize,
     threshold: u64,
-    group: &TableGroupInfo,
+    group: &CompactionGroupStatistic,
     low_write_throughput_ratio: f64,
 ) -> bool {
     // check table exists
@@ -878,7 +920,7 @@ fn check_is_low_write_throughput_compaction_group(
 }
 
 fn check_is_creating_compaction_group(
-    group: &TableGroupInfo,
+    group: &CompactionGroupStatistic,
     created_tables: &HashSet<u32>,
 ) -> bool {
     group

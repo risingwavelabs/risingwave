@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct CompactionGroup {
     pub group_id: CompactionGroupId,
     pub compaction_config: Arc<CompactionConfig>,

@@ -428,15 +428,15 @@ pub fn start(
                     .developer
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
-                compaction_group_size_threshold: config.meta.compaction_group_size_threshold,
-                table_statistic_high_write_throughput_ratio: config
+                split_group_size_ratio: config.meta.split_group_size_ratio,
+                table_stat_high_write_throughput_ratio_for_split: config
                     .meta
-                    .table_statistic_high_write_throughput_ratio,
-                table_statistic_low_write_throughput_ratio: config
+                    .table_stat_high_write_throughput_ratio_for_split,
+                table_stat_low_write_throughput_ratio_for_merge: config
                     .meta
-                    .table_statistic_low_write_throughput_ratio,
-                split_group_statistic_window_times: config.meta.split_group_statistic_window_times,
-                merge_group_statistic_window_times: config.meta.merge_group_statistic_window_times,
+                    .table_stat_low_write_throughput_ratio_for_merge,
+                table_stat_sample_size_for_split: config.meta.table_stat_sample_size_for_split,
+                table_stat_sample_size_for_merge: config.meta.table_stat_sample_size_for_merge,
                 object_store_config: config.storage.object_store,
                 max_trivial_move_task_count_per_loop: config
                     .meta
@@ -445,9 +445,7 @@ pub fn start(
                 max_get_task_probe_times: config.meta.developer.max_get_task_probe_times,
                 secret_store_private_key,
                 temp_secret_file_dir: opts.temp_secret_file_dir,
-                table_info_statistic_history_times: config
-                    .storage
-                    .table_info_statistic_history_times,
+                table_stat_sample_size: config.meta.table_stat_sample_size,
                 actor_cnt_per_worker_parallelism_hard_limit: config
                     .meta
                     .developer

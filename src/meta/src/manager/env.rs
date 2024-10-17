@@ -211,19 +211,19 @@ pub struct MetaOpts {
     pub enable_dropped_column_reclaim: bool,
 
     /// Whether to split the compaction group when the size of the group exceeds the threshold.
-    pub compaction_group_size_threshold: f64,
+    pub split_group_size_ratio: f64,
 
     /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
-    pub table_statistic_high_write_throughput_ratio: f64,
+    pub table_stat_high_write_throughput_ratio_for_split: f64,
 
     /// To merge the compaction group when the low throughput statistics of the group exceeds the threshold.
-    pub table_statistic_low_write_throughput_ratio: f64,
+    pub table_stat_low_write_throughput_ratio_for_merge: f64,
 
     /// The window times of table statistic history for split compaction group.
-    pub split_group_statistic_window_times: usize,
+    pub table_stat_sample_size_for_split: usize,
 
     /// The window times of table statistic history for merge compaction group.
-    pub merge_group_statistic_window_times: usize,
+    pub table_stat_sample_size_for_merge: usize,
 
     /// The configuration of the object store
     pub object_store_config: ObjectStoreConfig,
@@ -244,7 +244,7 @@ pub struct MetaOpts {
     /// The path of the temp secret file directory.
     pub temp_secret_file_dir: String,
 
-    pub table_info_statistic_history_times: usize,
+    pub table_stat_sample_size: usize,
 
     // Cluster limits
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
@@ -313,14 +313,14 @@ impl MetaOpts {
             max_get_task_probe_times: 5,
             secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
             temp_secret_file_dir: "./secrets".to_string(),
-            table_info_statistic_history_times: 240,
+            table_stat_sample_size: 240,
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
-            compaction_group_size_threshold: 0.9,
-            table_statistic_high_write_throughput_ratio: 0.5,
-            table_statistic_low_write_throughput_ratio: 0.7,
-            split_group_statistic_window_times: 240,
-            merge_group_statistic_window_times: 240,
+            split_group_size_ratio: 0.9,
+            table_stat_high_write_throughput_ratio_for_split: 0.5,
+            table_stat_low_write_throughput_ratio_for_merge: 0.7,
+            table_stat_sample_size_for_split: 240,
+            table_stat_sample_size_for_merge: 240,
             periodic_scheduling_compaction_group_merge_interval_sec: 60 * 10,
             license_key_path: None,
         }
