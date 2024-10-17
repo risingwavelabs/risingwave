@@ -72,6 +72,8 @@ pub trait StreamingUploader: Send {
     async fn finish(self) -> ObjectResult<()>;
 
     fn get_memory_usage(&self) -> u64;
+
+    fn get_path(&self) -> &str;
 }
 
 /// The implementation must be thread-safe.
@@ -415,6 +417,10 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
 
         // duration metrics is collected and reported inside the specific implementation of the streaming uploader.
         self.object_store_metrics
+            .object_size_bytes
+            .with_label_values(&[self.inner.get_path()])
+            .add(data_len as i64);
+        self.object_store_metrics
             .write_bytes
             .inc_by(data_len as u64);
         self.object_store_metrics
@@ -580,6 +586,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let media_type = self.media_type();
 
         self.object_store_metrics
+            .object_size_bytes
+            .with_label_values(&[&path])
+            .set(obj.len() as i64);
+        self.object_store_metrics
             .write_bytes
             .inc_by(obj.len() as u64);
         self.object_store_metrics
@@ -632,6 +642,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
+        if res.is_ok() {
+            self.object_store_metrics
+                .object_size_bytes
+                .with_label_values(&[&path])
+                .set(0);
+        }
 
         Ok(MonitoredStreamingUploader::new(
             res?,
@@ -759,6 +776,14 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
+        if let Ok(obj_data) = res.as_ref() {
+            self.object_store_metrics
+                .object_size_bytes
+                .with_label_values(&[&path])
+                .set(obj_data.total_size as i64);
+        }
+
         res
     }
 
@@ -790,6 +815,14 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
+        if res.is_ok() {
+            self.object_store_metrics
+                .object_size_bytes
+                .with_label_values(&[&path])
+                .set(0);
+        }
+
         res
     }
 
@@ -821,6 +854,16 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
+        if res.is_ok() {
+            for path in paths {
+                self.object_store_metrics
+                    .object_size_bytes
+                    .with_label_values(&[&path])
+                    .set(0);
+            }
+        }
+
         res
     }
 

@@ -317,6 +317,7 @@ impl Execute for OpendalStreamingUploaderExecute {
 
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct OpendalStreamingUploader {
+    path: String,
     writer: Writer,
     /// Buffer for data. It will store at least `UPLOAD_BUFFER_SIZE` bytes of data before wrapping itself
     /// into a stream and upload to object store as a part.
@@ -363,6 +364,7 @@ impl OpendalStreamingUploader {
             .executor(Executor::with(monitored_execute))
             .await?;
         Ok(Self {
+            path,
             writer,
             buf: vec![],
             not_uploaded_len: 0,
@@ -425,6 +427,10 @@ impl StreamingUploader for OpendalStreamingUploader {
 
     fn get_memory_usage(&self) -> u64 {
         Self::UPLOAD_BUFFER_SIZE as u64
+    }
+
+    fn get_path(&self) -> &str {
+        &self.path
     }
 }
 

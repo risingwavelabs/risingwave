@@ -398,6 +398,10 @@ impl StreamingUploader for S3StreamingUploader {
     fn get_memory_usage(&self) -> u64 {
         self.part_size as u64
     }
+
+    fn get_path(&self) -> &str {
+        &self.key
+    }
 }
 
 fn get_upload_body(data: Vec<Bytes>) -> ByteStream {

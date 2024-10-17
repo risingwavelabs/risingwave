@@ -14,11 +14,11 @@
 
 use std::sync::LazyLock;
 
-use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
+use prometheus::core::{AtomicI64, AtomicU64, GenericCounter, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_counter_with_registry, HistogramVec,
-    Registry,
+    register_int_counter_vec_with_registry, register_int_counter_with_registry,
+    register_int_gauge_vec_with_registry, HistogramVec, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -27,6 +27,7 @@ pub static GLOBAL_OBJECT_STORE_METRICS: LazyLock<ObjectStoreMetrics> =
 
 #[derive(Clone)]
 pub struct ObjectStoreMetrics {
+    pub object_size_bytes: GenericGaugeVec<AtomicI64>,
     pub write_bytes: GenericCounter<AtomicU64>,
     pub read_bytes: GenericCounter<AtomicU64>,
     pub operation_latency: HistogramVec,
@@ -37,6 +38,13 @@ pub struct ObjectStoreMetrics {
 
 impl ObjectStoreMetrics {
     fn new(registry: &Registry) -> Self {
+        let object_size_bytes = register_int_gauge_vec_with_registry!(
+            "object_store_object_size_bytes",
+            "Total object size in bytes.",
+            &["object_path"],
+            registry
+        )
+        .unwrap();
         let read_bytes = register_int_counter_with_registry!(
             "object_store_read_bytes",
             "Total bytes of requests read from object store",
@@ -98,6 +106,7 @@ impl ObjectStoreMetrics {
         .unwrap();
 
         Self {
+            object_size_bytes,
             write_bytes,
             read_bytes,
             operation_latency,
