@@ -567,6 +567,8 @@ impl TableFragments {
     }
 
     /// Retrieve the internal tables map of the whole graph.
+    ///
+    /// See also [`crate::stream::StreamFragmentGraph::incomplete_internal_tables`].
     pub fn internal_tables(&self) -> BTreeMap<u32, Table> {
         let mut tables = BTreeMap::new();
         for fragment in self.fragments.values() {

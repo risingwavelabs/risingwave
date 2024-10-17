@@ -333,6 +333,10 @@ impl CatalogController {
         Ok(())
     }
 
+    /// Create catalogs for internal tables. Some of the fields in the given arguments are
+    /// placeholders will be updated later in `prepare_streaming_job`.
+    ///
+    /// Returns a mapping from the temporary table id to the actual global table id.
     pub async fn create_internal_table_catalog(
         &self,
         job: &StreamingJob,
@@ -367,6 +371,8 @@ impl CatalogController {
         Ok(table_id_map)
     }
 
+    /// Notify frontend about the given internal tables before the streaming job finishes creating.
+    /// Should only be called for materialized views.
     pub async fn pre_notify_internal_tables(&self, internal_tables: &[PbTable]) -> MetaResult<()> {
         self.notify_frontend(
             Operation::Add,
