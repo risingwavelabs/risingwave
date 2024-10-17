@@ -26,6 +26,8 @@ pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
 
+use std::future::IntoFuture;
+
 pub use base::{UPSTREAM_SOURCE_KEY, *};
 pub(crate) use common::*;
 use google_cloud_pubsub::subscription::Subscription;
@@ -40,12 +42,14 @@ mod manager;
 pub mod reader;
 pub mod test_source;
 
+use async_nats::jetstream::consumer::AckPolicy as JetStreamAckPolicy;
+use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
 use thiserror_ext::AsReport;
 
 pub use crate::source::filesystem::opendal_source::{
-    GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
 };
 pub use crate::source::filesystem::S3_CONNECTOR;
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
@@ -77,6 +81,7 @@ pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool 
 pub enum WaitCheckpointTask {
     CommitCdcOffset(Option<(SplitId, String)>),
     AckPubsubMessage(Subscription, Vec<ArrayRef>),
+    AckNatsJetStream(JetStreamContext, Vec<ArrayRef>, JetStreamAckPolicy),
 }
 
 impl WaitCheckpointTask {
@@ -122,6 +127,49 @@ impl WaitCheckpointTask {
                     }
                 }
                 ack(&subscription, ack_ids).await;
+            }
+            WaitCheckpointTask::AckNatsJetStream(
+                ref context,
+                reply_subjects_arrs,
+                ref ack_policy,
+            ) => {
+                async fn ack(context: &JetStreamContext, reply_subject: String) {
+                    match context.publish(reply_subject.clone(), "".into()).await {
+                        Err(e) => {
+                            tracing::error!(error = %e.as_report(), subject = ?reply_subject, "failed to ack NATS JetStream message");
+                        }
+                        Ok(ack_future) => {
+                            if let Err(e) = ack_future.into_future().await {
+                                tracing::error!(error = %e.as_report(), subject = ?reply_subject, "failed to ack NATS JetStream message");
+                            }
+                        }
+                    }
+                }
+
+                let reply_subjects = reply_subjects_arrs
+                    .iter()
+                    .flat_map(|arr| {
+                        arr.as_utf8()
+                            .iter()
+                            .flatten()
+                            .map(|s| s.to_string())
+                            .collect::<Vec<String>>()
+                    })
+                    .collect::<Vec<String>>();
+
+                match ack_policy {
+                    JetStreamAckPolicy::None => (),
+                    JetStreamAckPolicy::Explicit => {
+                        for reply_subject in reply_subjects {
+                            ack(context, reply_subject).await;
+                        }
+                    }
+                    JetStreamAckPolicy::All => {
+                        if let Some(reply_subject) = reply_subjects.last() {
+                            ack(context, reply_subject.clone()).await;
+                        }
+                    }
+                }
             }
         }
     }

@@ -468,7 +468,6 @@ impl CatalogController {
 }
 
 #[cfg(test)]
-#[cfg(not(madsim))]
 mod tests {
     use risingwave_meta_model_v2::DatabaseId;
     use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -506,7 +505,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_user_and_privilege() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         mgr.create_user(make_test_user("test_user_1")).await?;
         mgr.create_user(make_test_user("test_user_2")).await?;
         let user_1 = mgr.get_user_by_name("test_user_1").await?;

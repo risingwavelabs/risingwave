@@ -35,7 +35,9 @@ use super::doris_starrocks_connector::{
     HeaderBuilder, InserterInner, InserterInnerBuilder, DORIS_DELETE_SIGN, DORIS_SUCCESS_STATUS,
     POOL_IDLE_TIMEOUT,
 };
-use super::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use super::{
+    Result, SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+};
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
@@ -188,6 +190,9 @@ impl DorisSink {
             risingwave_common::types::DataType::Int256 => {
                 Err(SinkError::Doris("doris can not support Int256".to_string()))
             }
+            risingwave_common::types::DataType::Map(_) => {
+                Err(SinkError::Doris("doris can not support Map".to_string()))
+            }
         }
     }
 }
@@ -206,7 +211,7 @@ impl Sink for DorisSink {
             self.is_append_only,
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
     }
 
     async fn validate(&self) -> Result<()> {

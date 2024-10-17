@@ -19,9 +19,9 @@
 //! See expr/impl/src/udf for the implementations.
 
 use anyhow::{bail, Context, Result};
-use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
+use risingwave_common::array::arrow::arrow_array_udf::{ArrayRef, BooleanArray, RecordBatch};
 use risingwave_common::types::DataType;
 
 /// The global registry of UDF implementations.

@@ -28,10 +28,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use foyer::HybridCacheBuilder;
+use foyer::{Engine, HybridCacheBuilder};
 use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, StorageConfig,
+    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
@@ -46,7 +46,6 @@ use risingwave_storage::filter_key_extractor::{
 use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
-use serde::{Deserialize, Serialize};
 
 // use a large offset to avoid collision with real sstables
 const SST_OFFSET: u64 = 2147383647000;
@@ -116,14 +115,14 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     let meta_cache = HybridCacheBuilder::new()
         .memory(storage_opts.meta_cache_capacity_mb * (1 << 20))
         .with_shards(storage_opts.meta_cache_shard_num)
-        .storage()
+        .storage(Engine::Large)
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(storage_opts.block_cache_capacity_mb * (1 << 20))
         .with_shards(storage_opts.block_cache_shard_num)
-        .storage()
+        .storage(Engine::Large)
         .build()
         .await
         .unwrap();
@@ -141,21 +140,25 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     }));
 
     let (hummock_meta_client, notification_client, notifier) = {
-        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        let (env, hummock_manager_ref, cluster_controller_ref, worker_id) =
             setup_compute_env(8080).await;
         let notifier = env.notification_manager_ref();
 
+        let worker_node = cluster_controller_ref
+            .get_worker_by_id(worker_id)
+            .await
+            .unwrap()
+            .unwrap();
+
         let notification_client = match r.operation {
-            Operation::MetaMessage(resp) => {
-                get_replay_notification_client(env, worker_node.clone(), resp)
-            }
+            Operation::MetaMessage(resp) => get_replay_notification_client(env, worker_node, resp),
             _ => panic!("unexpected operation, found {:?}", r.operation),
         };
 
         (
             Arc::new(MockHummockMetaClient::with_sst_offset(
                 hummock_manager_ref,
-                worker_node.id,
+                worker_id as _,
                 SST_OFFSET,
             )),
             notification_client,
@@ -182,9 +185,4 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     let replay_interface = GlobalReplayImpl::new(storage, notifier);
 
     Ok(replay_interface)
-}
-
-#[derive(Serialize, Deserialize, Default)]
-struct ReplayConfig {
-    storage: StorageConfig,
 }

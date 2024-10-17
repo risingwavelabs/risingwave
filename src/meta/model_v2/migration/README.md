@@ -9,9 +9,11 @@
 > **DO NOT** modify already published migration files.
 
 ## How to run the migrator CLI
+
 - Generate a new migration file, a database endpoint is required but not used.
+  Run this command in this directory, not project root.
     ```sh
-    export DATABASE_URL=sqlite::memory:; cargo run -- generate MIGRATION_NAME
+    DATABASE_URL=sqlite::memory: cargo run -- generate MIGRATION_NAME
     ```
 - Apply all pending migrations for test purposes, change `DATABASE_URL` to the actual database endpoint.
     ```sh
@@ -48,3 +50,7 @@
     ```sh
     cargo run -- status
     ```
+
+## Adding a migration
+
+- Add a new column to some catalogs. You can checkout the migration [m20240617_070131_index_column_properties.rs](src/m20240617_070131_index_column_properties.rs) as a reference.

@@ -25,21 +25,20 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_license::LicenseManager;
 use risingwave_meta_model_v2::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model_v2::worker::{WorkerStatus, WorkerType};
 use risingwave_meta_model_v2::{worker, worker_property, TransactionId, WorkerId};
 use risingwave_pb::common::worker_node::{PbProperty, PbResource, PbState};
 use risingwave_pb::common::{HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
-use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use sea_orm::prelude::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -47,9 +46,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
-use crate::manager::{
-    LocalNotification, MetaSrvEnv, StreamingClusterInfo, WorkerKey, META_NODE_ID,
-};
+use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey, META_NODE_ID};
 use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
 
@@ -84,6 +81,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
+                internal_rpc_host_addr: p.internal_rpc_host_addr.clone().unwrap_or_default(),
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: info.2.resource,
@@ -96,7 +94,7 @@ impl From<WorkerInfo> for PbWorkerNode {
 impl ClusterController {
     pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
         let inner = ClusterControllerInner::new(
-            env.meta_store().as_sql().conn.clone(),
+            env.meta_store_ref().conn.clone(),
             env.opts.disable_automatic_parallelism_control,
         )
         .await?;
@@ -196,16 +194,12 @@ impl ClusterController {
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(
-        &self,
-        worker_id: WorkerId,
-        info: Vec<heartbeat_request::extra_info::Info>,
-    ) -> MetaResult<()> {
+    pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
         self.inner
             .write()
             .await
-            .heartbeat(worker_id, self.max_heartbeat_interval, info)
+            .heartbeat(worker_id, self.max_heartbeat_interval)
     }
 
     pub fn start_heartbeat_checker(
@@ -385,6 +379,26 @@ impl ClusterController {
     }
 }
 
+/// The cluster info used for scheduling a streaming job.
+#[derive(Debug, Clone)]
+pub struct StreamingClusterInfo {
+    /// All **active** compute nodes in the cluster.
+    pub worker_nodes: HashMap<u32, WorkerNode>,
+
+    /// All unschedulable compute nodes in the cluster.
+    pub unschedulable_workers: HashSet<u32>,
+}
+
+// Encapsulating the use of parallelism
+impl StreamingClusterInfo {
+    pub fn parallelism(&self) -> usize {
+        self.worker_nodes
+            .values()
+            .map(|worker| worker.parallelism as usize)
+            .sum()
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct WorkerExtraInfo {
     // Volatile values updated by meta node as follows.
@@ -392,10 +406,6 @@ pub struct WorkerExtraInfo {
     // Unix timestamp that the worker will expire at.
     expire_at: Option<u64>,
     started_at: Option<u64>,
-    // Monotonic increasing id since meta node bootstrap.
-    pub(crate) info_version_id: u64,
-    // GC watermark.
-    pub(crate) hummock_gc_watermark: Option<HummockSstableObjectId>,
     resource: Option<PbResource>,
 }
 
@@ -414,30 +424,6 @@ impl WorkerExtraInfo {
 
     fn update_started_at(&mut self) {
         self.started_at = Some(timestamp_now_sec());
-    }
-
-    fn update_hummock_info(&mut self, info: Vec<heartbeat_request::extra_info::Info>) {
-        self.info_version_id += 1;
-        for i in info {
-            match i {
-                heartbeat_request::extra_info::Info::HummockGcWatermark(watermark) => {
-                    self.hummock_gc_watermark = Some(watermark);
-                }
-            }
-        }
-    }
-}
-
-// TODO: remove this when we deprecate model v1.
-impl From<crate::model::Worker> for WorkerExtraInfo {
-    fn from(worker: crate::model::Worker) -> Self {
-        Self {
-            expire_at: Some(worker.expire_at),
-            started_at: worker.started_at,
-            info_version_id: worker.info_version_id,
-            hummock_gc_watermark: worker.hummock_gc_watermark,
-            resource: worker.resource,
-        }
     }
 }
 
@@ -541,10 +527,7 @@ impl ClusterControllerInner {
             info.expire_at = Some(expire);
             Ok(())
         } else {
-            Err(MetaError::invalid_worker(
-                worker_id as u32,
-                "worker not found",
-            ))
+            Err(MetaError::invalid_worker(worker_id, "worker not found"))
         }
     }
 
@@ -558,10 +541,7 @@ impl ClusterControllerInner {
             info.update_started_at();
             Ok(())
         } else {
-            Err(MetaError::invalid_worker(
-                worker_id as u32,
-                "worker not found",
-            ))
+            Err(MetaError::invalid_worker(worker_id, "worker not found"))
         }
     }
 
@@ -569,7 +549,7 @@ impl ClusterControllerInner {
         self.worker_extra_info
             .get(&worker_id)
             .cloned()
-            .ok_or_else(|| MetaError::invalid_worker(worker_id as u32, "worker not found"))
+            .ok_or_else(|| MetaError::invalid_worker(worker_id, "worker not found"))
     }
 
     fn apply_transaction_id(&self, r#type: PbWorkerType) -> MetaResult<Option<TransactionId>> {
@@ -581,6 +561,43 @@ impl ClusterControllerInner {
         }
     }
 
+    /// Check if the total CPU cores in the cluster exceed the license limit, after counting the
+    /// newly joined compute node.
+    pub async fn check_cpu_core_limit_on_newly_joined_compute_node(
+        &self,
+        txn: &DatabaseTransaction,
+        host_address: &HostAddress,
+        resource: &PbResource,
+    ) -> MetaResult<()> {
+        let this = resource.total_cpu_cores;
+
+        let other_worker_ids: Vec<WorkerId> = Worker::find()
+            .filter(
+                (worker::Column::Host
+                    .eq(host_address.host.clone())
+                    .and(worker::Column::Port.eq(host_address.port)))
+                .not()
+                .and(worker::Column::WorkerType.eq(WorkerType::ComputeNode)),
+            )
+            .select_only()
+            .column(worker::Column::WorkerId)
+            .into_tuple()
+            .all(txn)
+            .await?;
+
+        let others = other_worker_ids
+            .into_iter()
+            .flat_map(|id| self.worker_extra_info.get(&id))
+            .flat_map(|info| info.resource.as_ref().map(|r| r.total_cpu_cores))
+            .sum::<u64>();
+
+        LicenseManager::get()
+            .check_cpu_core_limit(this + others)
+            .map_err(anyhow::Error::from)?;
+
+        Ok(())
+    }
+
     pub async fn add_worker(
         &mut self,
         r#type: PbWorkerType,
@@ -590,6 +607,11 @@ impl ClusterControllerInner {
         ttl: Duration,
     ) -> MetaResult<WorkerId> {
         let txn = self.db.begin().await?;
+
+        if let PbWorkerType::ComputeNode = r#type {
+            self.check_cpu_core_limit_on_newly_joined_compute_node(&txn, &host_address, &resource)
+                .await?;
+        }
 
         let worker = Worker::find()
             .filter(
@@ -652,6 +674,23 @@ impl ClusterControllerInner {
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
+            } else if worker.worker_type == WorkerType::Frontend && property.is_none() {
+                let worker_property = worker_property::ActiveModel {
+                    worker_id: Set(worker.worker_id),
+                    parallelism: Set(add_property
+                        .worker_node_parallelism
+                        .try_into()
+                        .expect("invalid parallelism")),
+                    is_streaming: Set(add_property.is_streaming),
+                    is_serving: Set(add_property.is_serving),
+                    is_unschedulable: Set(add_property.is_unschedulable),
+                    internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
+                };
+                WorkerProperty::insert(worker_property).exec(&txn).await?;
+                txn.commit().await?;
+                self.update_worker_ttl(worker.worker_id, ttl)?;
+                self.update_resource_and_started_at(worker.worker_id, resource)?;
+                Ok(worker.worker_id)
             } else {
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
@@ -670,7 +709,7 @@ impl ClusterControllerInner {
         };
         let insert_res = Worker::insert(worker).exec(&txn).await?;
         let worker_id = insert_res.last_insert_id as WorkerId;
-        if r#type == PbWorkerType::ComputeNode {
+        if r#type == PbWorkerType::ComputeNode || r#type == PbWorkerType::Frontend {
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
                 parallelism: Set(add_property
@@ -680,6 +719,7 @@ impl ClusterControllerInner {
                 is_streaming: Set(add_property.is_streaming),
                 is_serving: Set(add_property.is_serving),
                 is_unschedulable: Set(add_property.is_unschedulable),
+                internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }
@@ -759,21 +799,12 @@ impl ClusterControllerInner {
         Ok(WorkerInfo(worker, property, extra_info).into())
     }
 
-    pub fn heartbeat(
-        &mut self,
-        worker_id: WorkerId,
-        ttl: Duration,
-        info: Vec<heartbeat_request::extra_info::Info>,
-    ) -> MetaResult<()> {
+    pub fn heartbeat(&mut self, worker_id: WorkerId, ttl: Duration) -> MetaResult<()> {
         if let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) {
             worker_info.update_ttl(ttl);
-            worker_info.update_hummock_info(info);
             Ok(())
         } else {
-            Err(MetaError::invalid_worker(
-                worker_id as u32,
-                "worker not found",
-            ))
+            Err(MetaError::invalid_worker(worker_id, "worker not found"))
         }
     }
 
@@ -901,7 +932,6 @@ impl ClusterControllerInner {
 }
 
 #[cfg(test)]
-#[cfg(not(madsim))]
 mod tests {
     use super::*;
 
@@ -916,7 +946,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cluster_controller() -> MetaResult<()> {
-        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
+        let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
         let parallelism_num = 4_usize;
@@ -926,6 +956,7 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
+            internal_rpc_host_addr: "".to_string(),
         };
         let hosts = mock_worker_hosts_for_test(worker_count);
         let mut worker_ids = vec![];
@@ -1004,7 +1035,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_schedulability() -> MetaResult<()> {
-        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
+        let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
         let host = HostAddress {
@@ -1016,6 +1047,7 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
+            internal_rpc_host_addr: "".to_string(),
         };
         let worker_id = cluster_ctl
             .add_worker(

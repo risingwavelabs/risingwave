@@ -12,28 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
+use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
+use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret};
+use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret, Table};
+use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
+use risingwave_pb::meta::event_log;
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{ConnectionId, MetaSrvEnv, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{
     DdlCommand, DdlController, DropMode, ReplaceTableInfo, StreamingJobId,
@@ -49,6 +59,7 @@ pub struct DdlServiceImpl {
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     aws_client: Arc<Option<AwsEc2Client>>,
+    meta_metrics: Arc<MetaMetrics>,
 }
 
 impl DdlServiceImpl {
@@ -61,6 +72,7 @@ impl DdlServiceImpl {
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
+        meta_metrics: Arc<MetaMetrics>,
     ) -> Self {
         let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(
@@ -78,6 +90,7 @@ impl DdlServiceImpl {
             ddl_controller,
             aws_client: aws_cli_ref,
             sink_manager,
+            meta_metrics,
         }
     }
 
@@ -134,7 +147,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropDatabase(database_id))
+            .run_command(DdlCommand::DropDatabase(database_id as _))
             .await?;
 
         Ok(Response::new(DropDatabaseResponse {
@@ -172,7 +185,7 @@ impl DdlService for DdlServiceImpl {
         let secret_id = req.get_secret_id();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSecret(secret_id))
+            .run_command(DdlCommand::DropSecret(secret_id as _))
             .await?;
 
         Ok(Response::new(DropSecretResponse { version }))
@@ -203,7 +216,7 @@ impl DdlService for DdlServiceImpl {
         let schema_id = req.get_schema_id();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSchema(schema_id))
+            .run_command(DdlCommand::DropSchema(schema_id as _))
             .await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
@@ -227,7 +240,7 @@ impl DdlService for DdlServiceImpl {
             None => {
                 let version = self
                     .ddl_controller
-                    .run_command(DdlCommand::CreateSource(source))
+                    .run_command(DdlCommand::CreateSourceWithoutStreamingJob(source))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
@@ -263,7 +276,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSource(source_id, drop_mode))
+            .run_command(DdlCommand::DropSource(source_id as _, drop_mode))
             .await?;
 
         Ok(Response::new(DropSourceResponse {
@@ -322,7 +335,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
         let command = DdlCommand::DropStreamingJob(
-            StreamingJobId::Sink(sink_id),
+            StreamingJobId::Sink(sink_id as _),
             drop_mode,
             request
                 .affected_table_change
@@ -368,7 +381,7 @@ impl DdlService for DdlServiceImpl {
         let subscription_id = request.subscription_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
-        let command = DdlCommand::DropSubscription(subscription_id, drop_mode);
+        let command = DdlCommand::DropSubscription(subscription_id as _, drop_mode);
 
         let version = self.ddl_controller.run_command(command).await?;
 
@@ -419,7 +432,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::MaterializedView(table_id),
+                StreamingJobId::MaterializedView(table_id as _),
                 drop_mode,
                 None,
             ))
@@ -471,7 +484,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::Index(index_id),
+                StreamingJobId::Index(index_id as _),
                 drop_mode,
                 None,
             ))
@@ -509,7 +522,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropFunction(request.function_id))
+            .run_command(DdlCommand::DropFunction(request.function_id as _))
             .await?;
 
         Ok(Response::new(DropFunctionResponse {
@@ -557,7 +570,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id), table_id),
+                StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id as _), table_id as _),
                 drop_mode,
                 None,
             ))
@@ -596,7 +609,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropView(view_id, drop_mode))
+            .run_command(DdlCommand::DropView(view_id as _, drop_mode))
             .await?;
         Ok(Response::new(DropViewResponse {
             status: None,
@@ -608,10 +621,11 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<RisectlListStateTablesRequest>,
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
-        let tables = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_tables().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_all_state_tables().await?,
-        };
+        let tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_all_state_tables()
+            .await?;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 
@@ -639,30 +653,11 @@ impl DdlService for DdlServiceImpl {
         request: Request<GetTableRequest>,
     ) -> Result<Response<GetTableResponse>, Status> {
         let req = request.into_inner();
-        let table = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let database = mgr
-                    .catalog_manager
-                    .list_databases()
-                    .await
-                    .into_iter()
-                    .find(|db| db.name == req.database_name);
-                if let Some(db) = database {
-                    mgr.catalog_manager
-                        .list_tables()
-                        .await
-                        .into_iter()
-                        .find(|t| t.name == req.table_name && t.database_id == db.id)
-                } else {
-                    None
-                }
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .get_table_by_name(&req.database_name, &req.table_name)
-                    .await?
-            }
-        };
+        let table = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_by_name(&req.database_name, &req.table_name)
+            .await?;
 
         Ok(Response::new(GetTableResponse { table }))
     }
@@ -682,6 +677,7 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    /// Only support add column for now.
     async fn alter_source(
         &self,
         request: Request<AlterSourceRequest>,
@@ -704,7 +700,7 @@ impl DdlService for DdlServiceImpl {
         let AlterOwnerRequest { object, owner_id } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterObjectOwner(object.unwrap(), owner_id))
+            .run_command(DdlCommand::AlterObjectOwner(object.unwrap(), owner_id as _))
             .await?;
         Ok(Response::new(AlterOwnerResponse {
             status: None,
@@ -722,7 +718,10 @@ impl DdlService for DdlServiceImpl {
         } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterSetSchema(object.unwrap(), new_schema_id))
+            .run_command(DdlCommand::AlterSetSchema(
+                object.unwrap(),
+                new_schema_id as _,
+            ))
             .await?;
         Ok(Response::new(AlterSetSchemaResponse {
             status: None,
@@ -812,10 +811,11 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<ListConnectionsRequest>,
     ) -> Result<Response<ListConnectionsResponse>, Status> {
-        let conns = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_connections().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_connections().await?,
-        };
+        let conns = self
+            .metadata_manager
+            .catalog_controller
+            .list_connections()
+            .await?;
 
         Ok(Response::new(ListConnectionsResponse {
             connections: conns,
@@ -830,7 +830,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(req.connection_id))
+            .run_command(DdlCommand::DropConnection(req.connection_id as _))
             .await?;
 
         Ok(Response::new(DropConnectionResponse {
@@ -868,25 +868,18 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<GetTablesRequest>,
     ) -> Result<Response<GetTablesResponse>, Status> {
-        let ret = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                mgr.catalog_manager
-                    .get_tables(&request.into_inner().table_ids)
-                    .await
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .get_table_by_ids(
-                        request
-                            .into_inner()
-                            .table_ids
-                            .into_iter()
-                            .map(|id| id as _)
-                            .collect(),
-                    )
-                    .await?
-            }
-        };
+        let ret = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_by_ids(
+                request
+                    .into_inner()
+                    .table_ids
+                    .into_iter()
+                    .map(|id| id as _)
+                    .collect(),
+            )
+            .await?;
 
         let mut tables = HashMap::default();
         for table in ret {
@@ -907,7 +900,7 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
 
         let table_id = req.get_table_id();
-        let parallelism = req.get_parallelism()?.clone();
+        let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
 
         self.ddl_controller
@@ -916,22 +909,192 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(AlterParallelismResponse {}))
     }
+
+    /// Auto schema change for cdc sources,
+    /// called by the source parser when a schema change is detected.
+    async fn auto_schema_change(
+        &self,
+        request: Request<AutoSchemaChangeRequest>,
+    ) -> Result<Response<AutoSchemaChangeResponse>, Status> {
+        let req = request.into_inner();
+
+        // randomly select a frontend worker to get the replace table plan
+        let workers = self
+            .metadata_manager
+            .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
+            .await?;
+        let worker = workers
+            .choose(&mut thread_rng())
+            .ok_or_else(|| MetaError::from(anyhow!("no frontend worker available")))?;
+
+        let client = self
+            .env
+            .frontend_client_pool()
+            .get(worker)
+            .await
+            .map_err(MetaError::from)?;
+
+        let Some(schema_change) = req.schema_change else {
+            return Err(Status::invalid_argument(
+                "schema change message is required",
+            ));
+        };
+
+        for table_change in schema_change.table_changes {
+            // get the table catalog corresponding to the cdc table
+            let tables: Vec<Table> = self
+                .metadata_manager
+                .get_table_catalog_by_cdc_table_id(&table_change.cdc_table_id)
+                .await?;
+
+            for table in tables {
+                // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
+                // is a subset of the other.
+                let original_columns: HashSet<(String, DataType)> =
+                    HashSet::from_iter(table.columns.iter().map(|col| {
+                        let col = ColumnCatalog::from(col.clone());
+                        let data_type = col.data_type().clone();
+                        (col.column_desc.name, data_type)
+                    }));
+                let new_columns: HashSet<(String, DataType)> =
+                    HashSet::from_iter(table_change.columns.iter().map(|col| {
+                        let col = ColumnCatalog::from(col.clone());
+                        let data_type = col.data_type().clone();
+                        (col.column_desc.name, data_type)
+                    }));
+
+                if !(original_columns.is_subset(&new_columns)
+                    || original_columns.is_superset(&new_columns))
+                {
+                    tracing::warn!(target: "auto_schema_change",
+                                    table_id = table.id,
+                                    cdc_table_id = table.cdc_table_id,
+                                    upstraem_ddl = table_change.upstream_ddl,
+                                    original_columns = ?original_columns,
+                                    new_columns = ?new_columns,
+                                    "New columns should be a subset or superset of the original columns, since only `ADD COLUMN` and `DROP COLUMN` is supported");
+                    return Err(Status::invalid_argument(
+                        "New columns should be a subset or superset of the original columns",
+                    ));
+                }
+                // skip the schema change if there is no change to original columns
+                if original_columns == new_columns {
+                    tracing::warn!(target: "auto_schema_change",
+                                   table_id = table.id,
+                                   cdc_table_id = table.cdc_table_id,
+                                   upstraem_ddl = table_change.upstream_ddl,
+                                    original_columns = ?original_columns,
+                                    new_columns = ?new_columns,
+                                   "No change to columns, skipping the schema change");
+                    continue;
+                }
+
+                let latency_timer = self
+                    .meta_metrics
+                    .auto_schema_change_latency
+                    .with_guarded_label_values(&[&table.id.to_string(), &table.name])
+                    .start_timer();
+                // send a request to the frontend to get the ReplaceTablePlan
+                // will retry with exponential backoff if the request fails
+                let resp = client
+                    .get_table_replace_plan(GetTableReplacePlanRequest {
+                        database_id: table.database_id,
+                        owner: table.owner,
+                        table_name: table.name.clone(),
+                        table_change: Some(table_change.clone()),
+                    })
+                    .await;
+
+                match resp {
+                    Ok(resp) => {
+                        let resp = resp.into_inner();
+                        if let Some(plan) = resp.replace_plan {
+                            plan.table.as_ref().inspect(|t| {
+                                tracing::info!(
+                                    target: "auto_schema_change",
+                                    table_id = t.id,
+                                    cdc_table_id = t.cdc_table_id,
+                                    upstraem_ddl = table_change.upstream_ddl,
+                                    "Start the replace config change")
+                            });
+                            // start the schema change procedure
+                            let replace_res = self
+                                .ddl_controller
+                                .run_command(DdlCommand::ReplaceTable(
+                                    Self::extract_replace_table_info(plan),
+                                ))
+                                .await;
+
+                            match replace_res {
+                                Ok(_) => {
+                                    tracing::info!(
+                                        target: "auto_schema_change",
+                                        table_id = table.id,
+                                        cdc_table_id = table.cdc_table_id,
+                                        "Table replaced success");
+
+                                    self.meta_metrics
+                                        .auto_schema_change_success_cnt
+                                        .with_guarded_label_values(&[
+                                            &table.id.to_string(),
+                                            &table.name,
+                                        ])
+                                        .inc();
+                                    latency_timer.observe_duration();
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        target: "auto_schema_change",
+                                        error = %e.as_report(),
+                                        table_id = table.id,
+                                        cdc_table_id = table.cdc_table_id,
+                                        upstraem_ddl = table_change.upstream_ddl,
+                                        "failed to replace the table",
+                                    );
+                                    add_auto_schema_change_fail_event_log(
+                                        &self.meta_metrics,
+                                        table.id,
+                                        table.name.clone(),
+                                        table_change.cdc_table_id.clone(),
+                                        table_change.upstream_ddl.clone(),
+                                        &self.env.event_log_manager_ref(),
+                                    );
+                                }
+                            };
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            target: "auto_schema_change",
+                            error = %e.as_report(),
+                            table_id = table.id,
+                            cdc_table_id = table.cdc_table_id,
+                            "failed to get replace table plan",
+                        );
+                        add_auto_schema_change_fail_event_log(
+                            &self.meta_metrics,
+                            table.id,
+                            table.name.clone(),
+                            table_change.cdc_table_id.clone(),
+                            table_change.upstream_ddl.clone(),
+                            &self.env.event_log_manager_ref(),
+                        );
+                    }
+                };
+            }
+        }
+
+        Ok(Response::new(AutoSchemaChangeResponse {}))
+    }
 }
 
 impl DdlServiceImpl {
-    async fn validate_connection(&self, connection_id: ConnectionId) -> MetaResult<()> {
-        let connection = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                mgr.catalog_manager
-                    .get_connection_by_id(connection_id)
-                    .await?
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .get_connection_by_id(connection_id as _)
-                    .await?
-            }
-        };
+    async fn validate_connection(&self, connection_id: u32) -> MetaResult<()> {
+        let connection = self
+            .metadata_manager
+            .catalog_controller
+            .get_connection_by_id(connection_id as _)
+            .await?;
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info {
             // skip all checks for mock connection
             if svc.get_provider()? == PrivateLinkProvider::Mock {
@@ -950,4 +1113,25 @@ impl DdlServiceImpl {
         }
         Ok(())
     }
+}
+
+fn add_auto_schema_change_fail_event_log(
+    meta_metrics: &Arc<MetaMetrics>,
+    table_id: u32,
+    table_name: String,
+    cdc_table_id: String,
+    upstream_ddl: String,
+    event_log_manager: &EventLogManagerRef,
+) {
+    meta_metrics
+        .auto_schema_change_failure_cnt
+        .with_guarded_label_values(&[&table_id.to_string(), &table_name])
+        .inc();
+    let event = event_log::EventAutoSchemaChangeFail {
+        table_id,
+        table_name,
+        cdc_table_id,
+        upstream_ddl,
+    };
+    event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
 }

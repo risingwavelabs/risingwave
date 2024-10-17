@@ -15,12 +15,17 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+auto_impl = "1"
 bytes = "1"
+cfg-or-panic = "0.2"
 clap = { workspace = true }
 easy-ext = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-http = "0.2"
-hyper = { version = "0.14", features = ["client"] }                           # used by tonic
+http = "1"
+http-02 = { package = "http", version = "0.2" }
+hyper = { version = "1" }
+hyper-014 = { package = "hyper", version = "0.14", features = ["client"] }
+hyper-util = { version = "0.1", features = ["client-legacy"] }
 hytra = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
@@ -32,15 +37,15 @@ serde = { version = "1", features = ["derive"] }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 tonic = { workspace = true }
+tower-layer = "0.3.2"
+tower-service = "0.3.2"
 tracing = "0.1"
 tracing-subscriber = "0.3.17"
 
 [target.'cfg(not(madsim))'.dependencies]
-http-body = "0.4.5"
-tower-layer = "0.3.2"
-tower-service = "0.3.2"
+http-body = "1"
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.16", default-features = false }
+procfs = { version = "0.17", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]

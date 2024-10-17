@@ -32,6 +32,7 @@ use std::any::type_name;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::iter::repeat;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -42,17 +43,19 @@ use futures::{Stream, StreamExt};
 use moka::future::Cache;
 use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::heartbeat_request::extra_info;
+use risingwave_pb::common::{WorkerNode, WorkerType};
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
 
 pub mod error;
+
 use error::Result;
+
 mod compactor_client;
 mod compute_client;
 mod connector_client;
+mod frontend_client;
 mod hummock_meta_client;
 mod meta_client;
 mod sink_coordinate_client;
@@ -61,7 +64,8 @@ mod tracing;
 
 pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
-pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
+pub use connector_client::{SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
+pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
 pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use rw_futures_util::await_future_with_monitor_error_stream;
@@ -127,7 +131,16 @@ where
     /// Gets the RPC client for the given node. If the connection is not established, a
     /// new client will be created and returned.
     pub async fn get(&self, node: &WorkerNode) -> Result<S> {
-        let addr: HostAddr = node.get_host().unwrap().into();
+        let addr = if node.get_type().unwrap() == WorkerType::Frontend {
+            let prop = node
+                .property
+                .as_ref()
+                .expect("frontend node property is missing");
+            HostAddr::from_str(prop.internal_rpc_host_addr.as_str())?
+        } else {
+            node.get_host().unwrap().into()
+        };
+
         self.get_by_addr(addr).await
     }
 
@@ -151,15 +164,6 @@ where
         self.clients.invalidate_all()
     }
 }
-
-/// `ExtraInfoSource` is used by heartbeat worker to pull extra info that needs to be piggybacked.
-#[async_trait::async_trait]
-pub trait ExtraInfoSource: Send + Sync {
-    /// None means the info is not available at the moment.
-    async fn get_extra_info(&self) -> Option<extra_info::Info>;
-}
-
-pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
 
 #[macro_export]
 macro_rules! stream_rpc_client_method_impl {

@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{
-    check_missing_params, derive_missing_fields, set_system_param,
+    check_missing_params, default, derive_missing_fields, set_system_param,
 };
 use risingwave_common::{for_all_params, key_of};
 use risingwave_meta_model_v2::prelude::SystemParameter;
@@ -31,7 +31,6 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrai
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::info;
 
 use crate::controller::SqlMetaStore;
 use crate::manager::{LocalNotification, NotificationManagerRef};
@@ -60,7 +59,7 @@ macro_rules! impl_system_params_from_db {
                 match model.name.as_str() {
                     $(
                         key_of!($field) => {
-                            params.$field = Some(model.value.parse::<$type>().unwrap());
+                            params.$field = Some(model.value.parse::<$type>().unwrap().into());
                             false
                         }
                     )*
@@ -133,6 +132,18 @@ for_all_params!(impl_system_params_from_db);
 for_all_params!(impl_merge_params);
 for_all_params!(impl_system_params_to_models);
 
+fn apply_hard_code_override(params: &mut PbSystemParams) {
+    if params
+        .time_travel_retention_ms
+        .map(|v| v == 0)
+        .unwrap_or(true)
+    {
+        let default_v = default::time_travel_retention_ms();
+        tracing::info!("time_travel_retention_ms has been overridden to {default_v}");
+        params.time_travel_retention_ms = Some(default_v);
+    }
+}
+
 impl SystemParamsController {
     pub async fn new(
         sql_meta_store: SqlMetaStore,
@@ -141,11 +152,10 @@ impl SystemParamsController {
     ) -> MetaResult<Self> {
         let db = sql_meta_store.conn;
         let params = SystemParameter::find().all(&db).await?;
-        let params = merge_params(system_params_from_db(params)?, init_params);
-
-        info!("system parameters: {:?}", params);
+        let mut params = merge_params(system_params_from_db(params)?, init_params);
+        apply_hard_code_override(&mut params);
+        tracing::info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
-
         let ctl = Self {
             db,
             notification_manager,
@@ -265,10 +275,9 @@ mod tests {
     use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
-    #[cfg(not(madsim))]
     async fn test_system_params() {
-        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
-        let meta_store = env.meta_store().as_sql().clone();
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store();
         let init_params = system_params_for_test();
 
         // init system parameter controller as first launch.

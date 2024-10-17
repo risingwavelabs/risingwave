@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Sub;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::{StreamExt, TryStreamExt};
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -35,7 +33,7 @@ impl Vacuum {
         sstable_store: SstableStoreRef,
         sstable_object_ids: &[u64],
     ) -> HummockResult<()> {
-        tracing::info!("Try to vacuum SSTs {:?}", sstable_object_ids);
+        tracing::info!("try to vacuum SSTs {:?}", sstable_object_ids);
         sstable_store.delete_list(sstable_object_ids).await?;
         Ok(())
     }
@@ -46,10 +44,10 @@ impl Vacuum {
     ) -> bool {
         match hummock_meta_client.report_vacuum_task(vacuum_task).await {
             Ok(_) => {
-                tracing::info!("Finished vacuuming SSTs");
+                tracing::info!("vacuuming SSTs succeeded");
             }
             Err(e) => {
-                tracing::warn!(error = %e.as_report(), "Failed to report vacuum task");
+                tracing::warn!(error = %e.as_report(), "failed to report vacuum task");
                 return false;
             }
         }
@@ -59,22 +57,25 @@ impl Vacuum {
     pub async fn full_scan_inner(
         full_scan_task: FullScanTask,
         metadata_iter: ObjectMetadataIter,
-    ) -> HummockResult<(Vec<HummockSstableObjectId>, u64, u64)> {
-        let timestamp_watermark = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .sub(Duration::from_secs(full_scan_task.sst_retention_time_sec))
-            .as_secs_f64();
-
+    ) -> HummockResult<(Vec<HummockSstableObjectId>, u64, u64, Option<String>)> {
         let mut total_object_count = 0;
         let mut total_object_size = 0;
+        let mut next_start_after: Option<String> = None;
         let filtered = metadata_iter
             .filter_map(|r| {
                 let result = match r {
                     Ok(o) => {
                         total_object_count += 1;
                         total_object_size += o.total_size;
-                        if o.last_modified < timestamp_watermark {
+                        // Determine if the LIST has been truncated.
+                        // A false positives would at most cost one additional LIST later.
+                        if let Some(limit) = full_scan_task.limit
+                            && limit == total_object_count
+                        {
+                            next_start_after = Some(o.key.clone());
+                            tracing::debug!(next_start_after, "set next start after");
+                        }
+                        if o.last_modified < full_scan_task.sst_retention_watermark as f64 {
                             Some(Ok(SstableStore::get_object_id_from_path(&o.key)))
                         } else {
                             None
@@ -88,8 +89,9 @@ impl Vacuum {
             .await?;
         Ok((
             filtered,
-            total_object_count as u64,
+            total_object_count,
             total_object_size as u64,
+            next_start_after,
         ))
     }
 
@@ -97,14 +99,20 @@ impl Vacuum {
     pub async fn handle_full_scan_task(
         full_scan_task: FullScanTask,
         sstable_store: SstableStoreRef,
-    ) -> HummockResult<(Vec<HummockSstableObjectId>, u64, u64)> {
+    ) -> HummockResult<(Vec<HummockSstableObjectId>, u64, u64, Option<String>)> {
         tracing::info!(
-            timestamp = full_scan_task.sst_retention_time_sec,
+            sst_retention_watermark = full_scan_task.sst_retention_watermark,
             prefix = full_scan_task.prefix.as_ref().unwrap_or(&String::from("")),
-            "Try to full scan SSTs"
+            start_after = full_scan_task.start_after,
+            limit = full_scan_task.limit,
+            "try to full scan SSTs"
         );
         let metadata_iter = sstable_store
-            .list_object_metadata_from_object_store(full_scan_task.prefix.clone())
+            .list_object_metadata_from_object_store(
+                full_scan_task.prefix.clone(),
+                full_scan_task.start_after.clone(),
+                full_scan_task.limit.map(|i| i as usize),
+            )
             .await?;
         Vacuum::full_scan_inner(full_scan_task, metadata_iter).await
     }
@@ -113,24 +121,33 @@ impl Vacuum {
         filtered_object_ids: Vec<u64>,
         unfiltered_count: u64,
         unfiltered_size: u64,
+        start_after: Option<String>,
+        next_start_after: Option<String>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> bool {
-        tracing::info!("Try to report full scan task",);
         tracing::info!(
-            "filtered_object_ids length =  {}, unfiltered_count = {}, unfiltered_size = {}",
-            filtered_object_ids.len(),
+            filtered_object_ids_len = filtered_object_ids.len(),
             unfiltered_count,
-            unfiltered_size
+            unfiltered_size,
+            start_after,
+            next_start_after,
+            "try to report full scan task"
         );
         match hummock_meta_client
-            .report_full_scan_task(filtered_object_ids, unfiltered_count, unfiltered_size)
+            .report_full_scan_task(
+                filtered_object_ids,
+                unfiltered_count,
+                unfiltered_size,
+                start_after,
+                next_start_after,
+            )
             .await
         {
             Ok(_) => {
-                tracing::info!("Finished full scan SSTs");
+                tracing::info!("full scan SSTs succeeded");
             }
             Err(e) => {
-                tracing::warn!(error = %e.as_report(), "Failed to report full scan task");
+                tracing::warn!(error = %e.as_report(), "failed to report full scan task");
                 return false;
             }
         }

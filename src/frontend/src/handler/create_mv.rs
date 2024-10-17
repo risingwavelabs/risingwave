@@ -20,7 +20,6 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
@@ -38,6 +37,7 @@ use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
+use crate::utils::ordinal;
 
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
@@ -204,6 +204,9 @@ pub async fn handle_create_mv_bound(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
+    // Check cluster limits
+    session.check_cluster_limits().await?;
+
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         name.clone(),
         StatementType::CREATE_MATERIALIZED_VIEW,
@@ -239,18 +242,7 @@ It only indicates the physical clustering of the data, which may improve the per
             emit_mode,
         )?;
 
-        let context = plan.plan_base().ctx().clone();
-        let mut graph = build_graph(plan)?;
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
-        // Set the timezone for the stream context
-        let ctx = graph.ctx.as_mut().unwrap();
-        ctx.timezone = context.get_session_timezone();
+        let graph = build_graph(plan)?;
 
         (table, graph)
     };
@@ -276,20 +268,6 @@ It only indicates the physical clustering of the data, which may improve the per
     Ok(PgResponse::empty_result(
         StatementType::CREATE_MATERIALIZED_VIEW,
     ))
-}
-
-fn ordinal(i: usize) -> String {
-    let s = i.to_string();
-    let suffix = if s.ends_with('1') && !s.ends_with("11") {
-        "st"
-    } else if s.ends_with('2') && !s.ends_with("12") {
-        "nd"
-    } else if s.ends_with('3') && !s.ends_with("13") {
-        "rd"
-    } else {
-        "th"
-    };
-    s + suffix
 }
 
 #[cfg(test)]

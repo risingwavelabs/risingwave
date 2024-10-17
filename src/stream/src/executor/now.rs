@@ -301,6 +301,7 @@ mod tests {
     use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
     use super::*;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::test_utils::StreamExecutorTestExt;
 
     #[tokio::test]
@@ -638,12 +639,10 @@ mod tests {
     ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
         let table_id = TableId::new(1);
         let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamptz)];
-        let state_table = StateTable::new_without_distribution(
+        let state_table = StateTable::from_table_catalog(
+            &gen_pbtable(table_id, column_descs, vec![], vec![], 0),
             state_store.clone(),
-            table_id,
-            column_descs,
-            vec![],
-            vec![],
+            None,
         )
         .await;
 

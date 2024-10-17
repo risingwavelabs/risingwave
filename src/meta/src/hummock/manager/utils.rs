@@ -19,35 +19,17 @@ macro_rules! commit_multi_var {
     ($meta_store:expr, $($val_txn:expr),*) => {
         {
             async {
-                use crate::model::{InMemValTransaction, ValTransaction};
-                match &$meta_store {
-                    $crate::manager::MetaStoreImpl::Kv(meta_store) => {
-                        use crate::storage::Transaction;
-                        use crate::storage::meta_store::MetaStore;
-                        let mut txn = Transaction::default();
-                        $(
-                            $val_txn.apply_to_txn(&mut txn).await?;
-                        )*
-                        meta_store.txn(txn).await?;
-                        $(
-                            $val_txn.commit();
-                        )*
-                        Result::Ok(())
-                    }
-                    crate::manager::MetaStoreImpl::Sql(sql_meta_store) => {
-                        use sea_orm::TransactionTrait;
-                        use crate::model::MetadataModelError;
-                        let mut txn = sql_meta_store.conn.begin().await.map_err(MetadataModelError::from)?;
-                        $(
-                            $val_txn.apply_to_txn(&mut txn).await?;
-                        )*
-                        txn.commit().await.map_err(MetadataModelError::from)?;
-                        $(
-                            $val_txn.commit();
-                        )*
-                        Result::Ok(())
-                    }
-                }
+                use crate::model::{MetadataModelError, InMemValTransaction, ValTransaction};
+                use sea_orm::TransactionTrait;
+                let mut txn = $meta_store.conn.begin().await.map_err(MetadataModelError::from)?;
+                $(
+                    $val_txn.apply_to_txn(&mut txn).await?;
+                )*
+                txn.commit().await.map_err(MetadataModelError::from)?;
+                $(
+                    $val_txn.commit();
+                )*
+                Result::Ok(())
             }.await
         }
     };
@@ -97,14 +79,12 @@ impl HummockManager {
             let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
             let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
             let pinned_versions_copy = context_info_guard.pinned_versions.clone();
-            let pinned_snapshots_copy = context_info_guard.pinned_snapshots.clone();
             let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
             let version_stats_copy = versioning_guard.version_stats.clone();
             ((
                 compact_statuses_copy,
                 compact_task_assignment_copy,
                 pinned_versions_copy,
-                pinned_snapshots_copy,
                 hummock_version_deltas_copy,
                 version_stats_copy,
             ),)

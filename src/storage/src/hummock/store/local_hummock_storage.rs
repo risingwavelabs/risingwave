@@ -25,7 +25,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
+use risingwave_hummock_sdk::EpochWithGap;
 use tracing::{warn, Instrument};
 
 use super::version::{StagingData, VersionUpdate};
@@ -37,6 +37,7 @@ use crate::hummock::iterator::{
     Backward, BackwardUserIterator, ConcatIteratorInner, Forward, HummockIteratorUnion,
     IteratorFactory, MergeIterator, UserIterator,
 };
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferBatchOldValues, SharedBufferItem,
     SharedBufferValue,
@@ -48,8 +49,8 @@ use crate::hummock::utils::{
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{
-    BackwardSstableIterator, MemoryLimiter, SstableIterator, SstableIteratorReadOptions,
-    SstableStoreRef,
+    BackwardSstableIterator, HummockError, MemoryLimiter, SstableIterator,
+    SstableIteratorReadOptions, SstableStoreRef,
 };
 use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
@@ -96,7 +97,7 @@ pub struct LocalHummockStorage {
 
     write_limiter: WriteLimiterRef,
 
-    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
 
     mem_table_spill_threshold: usize,
 }
@@ -135,7 +136,7 @@ impl LocalHummockStorage {
     }
 
     pub async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
-        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
+        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch, self.table_id).await
     }
 
     pub async fn iter_flushed(
@@ -495,7 +496,9 @@ impl LocalStateStore for LocalHummockStorage {
                     instance_id: self.instance_id(),
                     init_epoch: options.epoch.curr,
                 })
-                .expect("should succeed");
+                .map_err(|_| {
+                    HummockError::other("failed to send InitEpoch. maybe shutting down")
+                })?;
         }
         Ok(())
     }
@@ -528,14 +531,17 @@ impl LocalStateStore for LocalHummockStorage {
                 });
             }
         }
-        if !self.is_replicated {
-            self.event_sender
+        if !self.is_replicated
+            && self
+                .event_sender
                 .send(HummockEvent::LocalSealEpoch {
                     instance_id: self.instance_id(),
                     next_epoch,
                     opts,
                 })
-                .expect("should be able to send");
+                .is_err()
+        {
+            warn!("failed to send LocalSealEpoch. maybe shutting down");
         }
     }
 
@@ -624,7 +630,9 @@ impl LocalHummockStorage {
             if !self.is_replicated {
                 self.event_sender
                     .send(HummockEvent::ImmToUploader { instance_id, imm })
-                    .unwrap();
+                    .map_err(|_| {
+                        HummockError::other("failed to send imm to uploader. maybe shutting down")
+                    })?;
             }
             imm_size
         } else {
@@ -651,7 +659,7 @@ impl LocalHummockStorage {
         memory_limiter: Arc<MemoryLimiter>,
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
-        version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+        version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
         mem_table_spill_threshold: usize,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();

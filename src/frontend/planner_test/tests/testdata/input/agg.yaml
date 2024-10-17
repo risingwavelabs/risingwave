@@ -758,7 +758,7 @@
 - name: enable two phase aggregation with simple agg should have two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
-    SET RW_ENABLE_TWO_PHASE_AGG=true;
+    SET ENABLE_TWO_PHASE_AGG=true;
     create table t(v1 int, v2 int);
     select min(v1), sum(v2) from t;
   expected_outputs:
@@ -767,7 +767,7 @@
 - name: disable two phase aggregation with simple agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
-    SET RW_ENABLE_TWO_PHASE_AGG=false;
+    SET ENABLE_TWO_PHASE_AGG=false;
     create table t(v1 int, v2 int);
     select min(v1), sum(v2) from t;
   expected_outputs:
@@ -1013,6 +1013,7 @@
     SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t;
   expected_outputs:
     - logical_plan
+    - batch_plan
     - stream_plan
 - name: test simple approx_percentile with other simple aggs
   sql: |
@@ -1020,6 +1021,7 @@
     SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1), sum(v1) from t;
   expected_outputs:
     - logical_plan
+    - batch_plan
     - stream_plan
 - name: test simple approx_percentile with other simple aggs (sum, count)
   sql: |
@@ -1027,6 +1029,7 @@
     SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1), sum(v1) as s2, count(v1) from t;
   expected_outputs:
     - logical_plan
+    - batch_plan
     - stream_plan
 - name: test simple approx_percentile with duplicate approx_percentile
   sql: |
@@ -1041,13 +1044,23 @@
     SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v2) as y from t;
   expected_outputs:
     - logical_plan
+    - batch_plan
     - stream_plan
 - name: test simple approx_percentile with different approx_percentile interleaved with stateless simple aggs
   sql: |
     CREATE TABLE t (v1 int, v2 int);
-    SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, count(*), sum(v2) as s2, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v2) as y from t;
+    SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, count(*), sum(v2) + approx_percentile(0.9, 0.01) WITHIN GROUP (order by v2) as y from t;
   expected_outputs:
     - logical_plan
+    - batch_plan
+    - stream_plan
+- name: test simple approx_percentile with duplicated approx_percentile interleaved with stateless simple aggs
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, count(*), sum(v2) + approx_percentile(0.5, 0.01) WITHIN GROUP (order by v2) as y from t;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
     - stream_plan
 - name: test simple approx_percentile with descending order
   sql: |
@@ -1055,4 +1068,54 @@
     SELECT sum(v1) as s1, approx_percentile(0.2, 0.01) WITHIN GROUP (order by v1 desc) from t;
   expected_outputs:
     - logical_plan
+    - batch_plan
     - stream_plan
+- name: test simple approx_percentile with different approx_percentile interleaved with stateless + stateful simple aggs
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, count(*), max(v2) as m2, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v2) as y from t;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_plan
+- name: test hash approx_percentile
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t group by v2;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_plan
+- name: test approx_percentile hash_agg forced should use single phase agg
+  sql: |
+    SET RW_FORCE_TWO_PHASE_AGG=true;
+    create table t (v1 int, grp_col int);
+    select approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t group by grp_col;
+  expected_outputs:
+    - stream_error
+- name: test approx percentile with default relative_error
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_plan
+- name: test approx percentile with invalid relative_error
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.0) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - binder_error
+- name: test approx percentile with invalid relative_error 0.0
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.0) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - binder_error
+- name: test approx percentile with invalid relative_error 1.0 with group by.
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT approx_percentile(0.0, 1.0) WITHIN GROUP (order by v1) from t group by v2;
+  expected_outputs:
+    - binder_error

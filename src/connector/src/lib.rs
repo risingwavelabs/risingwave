@@ -19,8 +19,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(lint_reasons)]
-#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
@@ -76,27 +74,6 @@ where
     })
 }
 
-pub(crate) fn deserialize_optional_u64_from_string<'de, D>(
-    deserializer: D,
-) -> Result<Option<u64>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let s: String = de::Deserialize::deserialize(deserializer)?;
-    if s.is_empty() {
-        Ok(None)
-    } else {
-        s.parse()
-            .map_err(|_| {
-                de::Error::invalid_value(
-                    de::Unexpected::Str(&s),
-                    &"integer greater than or equal to 0",
-                )
-            })
-            .map(Some)
-    }
-}
-
 pub(crate) fn deserialize_optional_string_seq_from_string<'de, D>(
     deserializer: D,
 ) -> std::result::Result<Option<Vec<String>>, D::Error>
@@ -108,6 +85,25 @@ where
         let s = s.to_ascii_lowercase();
         let s = s.split(',').map(|s| s.trim().to_owned()).collect();
         Ok(Some(s))
+    } else {
+        Ok(None)
+    }
+}
+
+pub(crate) fn deserialize_optional_u64_seq_from_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<u64>>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let numbers = s
+            .split(',')
+            .map(|s| s.trim().parse())
+            .collect::<Result<Vec<u64>, _>>()
+            .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(&s), &"invalid number"));
+        Ok(Some(numbers?))
     } else {
         Ok(None)
     }
@@ -126,6 +122,28 @@ where
             de::Unexpected::Str(&s),
             &"true or false",
         )),
+    }
+}
+
+pub(crate) fn deserialize_optional_bool_from_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<bool>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let s = s.to_ascii_lowercase();
+        match s.as_str() {
+            "true" => Ok(Some(true)),
+            "false" => Ok(Some(false)),
+            _ => Err(de::Error::invalid_value(
+                de::Unexpected::Str(&s),
+                &"true or false",
+            )),
+        }
+    } else {
+        Ok(None)
     }
 }
 

@@ -144,7 +144,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     ) -> StreamExecutorResult<()> {
         if states.is_empty() {
             // TODO should be a clear Error Code
-            bail!("states require not null");
+            bail!("states should not be null");
         } else {
             for split in states {
                 self.set_complete(split.id(), split.encode_to_json())

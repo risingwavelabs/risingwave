@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::common::WorkerNode;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 
-use crate::barrier::info::InflightActorInfo;
-use crate::barrier::{Command, TracedEpoch};
+use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
+use crate::barrier::{Command, CreateStreamingJobType, TracedEpoch};
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
 pub struct BarrierManagerState {
@@ -24,10 +24,12 @@ pub struct BarrierManagerState {
     ///
     /// There's no need to persist this field. On recovery, we will restore this from the latest
     /// committed snapshot in `HummockManager`.
-    in_flight_prev_epoch: TracedEpoch,
+    in_flight_prev_epoch: Option<TracedEpoch>,
 
     /// Inflight running actors info.
-    pub(crate) inflight_actor_infos: InflightActorInfo,
+    pub(crate) inflight_graph_info: InflightGraphInfo,
+
+    pub(crate) inflight_subscription_info: InflightSubscriptionInfo,
 
     /// Whether the cluster is paused and the reason.
     paused_reason: Option<PausedReason>,
@@ -35,13 +37,15 @@ pub struct BarrierManagerState {
 
 impl BarrierManagerState {
     pub fn new(
-        in_flight_prev_epoch: TracedEpoch,
-        inflight_actor_infos: InflightActorInfo,
+        in_flight_prev_epoch: Option<TracedEpoch>,
+        inflight_graph_info: InflightGraphInfo,
+        inflight_subscription_info: InflightSubscriptionInfo,
         paused_reason: Option<PausedReason>,
     ) -> Self {
         Self {
             in_flight_prev_epoch,
-            inflight_actor_infos,
+            inflight_graph_info,
+            inflight_subscription_info,
             paused_reason,
         }
     }
@@ -57,29 +61,55 @@ impl BarrierManagerState {
         }
     }
 
-    pub fn in_flight_prev_epoch(&self) -> &TracedEpoch {
-        &self.in_flight_prev_epoch
+    pub fn in_flight_prev_epoch(&self) -> Option<&TracedEpoch> {
+        self.in_flight_prev_epoch.as_ref()
     }
 
     /// Returns the epoch pair for the next barrier, and updates the state.
-    pub fn next_epoch_pair(&mut self) -> (TracedEpoch, TracedEpoch) {
-        let prev_epoch = self.in_flight_prev_epoch.clone();
+    pub fn next_epoch_pair(&mut self, command: &Command) -> Option<(TracedEpoch, TracedEpoch)> {
+        if self.inflight_graph_info.is_empty()
+            && !matches!(&command, Command::CreateStreamingJob { .. })
+        {
+            return None;
+        };
+        let in_flight_prev_epoch = self
+            .in_flight_prev_epoch
+            .get_or_insert_with(|| TracedEpoch::new(Epoch::now()));
+        let prev_epoch = in_flight_prev_epoch.clone();
         let next_epoch = prev_epoch.next();
-        self.in_flight_prev_epoch = next_epoch.clone();
-        (prev_epoch, next_epoch)
-    }
-
-    pub fn resolve_worker_nodes(&mut self, nodes: impl IntoIterator<Item = WorkerNode>) {
-        self.inflight_actor_infos.resolve_worker_nodes(nodes);
+        *in_flight_prev_epoch = next_epoch.clone();
+        Some((prev_epoch, next_epoch))
     }
 
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
-    pub fn apply_command(&mut self, command: &Command) -> InflightActorInfo {
-        self.inflight_actor_infos.pre_apply(command);
-        let info = self.inflight_actor_infos.clone();
-        self.inflight_actor_infos.post_apply(command);
+    pub fn apply_command(
+        &mut self,
+        command: &Command,
+    ) -> (InflightGraphInfo, InflightSubscriptionInfo) {
+        // update the fragment_infos outside pre_apply
+        let fragment_changes = if let Command::CreateStreamingJob {
+            job_type: CreateStreamingJobType::SnapshotBackfill(_),
+            ..
+        } = command
+        {
+            None
+        } else if let Some(fragment_changes) = command.fragment_changes() {
+            self.inflight_graph_info.pre_apply(&fragment_changes);
+            Some(fragment_changes)
+        } else {
+            None
+        };
+        self.inflight_subscription_info.pre_apply(command);
 
-        info
+        let info = self.inflight_graph_info.clone();
+        let subscription_info = self.inflight_subscription_info.clone();
+
+        if let Some(fragment_changes) = fragment_changes {
+            self.inflight_graph_info.post_apply(&fragment_changes);
+        }
+        self.inflight_subscription_info.post_apply(command);
+
+        (info, subscription_info)
     }
 }

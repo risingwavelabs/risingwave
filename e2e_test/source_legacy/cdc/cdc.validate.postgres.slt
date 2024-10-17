@@ -1,0 +1,264 @@
+# CDC Postgres source validate test
+control substitution on
+
+# invalid username
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'posres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+
+# invalid password
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'otgres',
+ database.name = 'cdc_test',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+# invalid table name
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ table.name = 'shipment',
+ slot.name = 'shipments'
+);
+
+
+# invalid primary key
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (order_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+
+# column name mismatch
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  orderid INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+# column data type mismatch
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id real,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+# format & encode provided and match with debezium json, this is okay
+statement ok
+explain create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+) format debezium encode json;
+
+# format & encode provided but mismatch with debezium json, this is not allowed
+statement error Row format for CDC connectors should be either omitted or set to `FORMAT DEBEZIUM ENCODE JSON`
+create table shipments (
+  shipment_id INTEGER,
+  order_id real,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+) format canal encode csv;
+
+statement ok
+explain create table numeric_to_rw_int256 (
+  id int,
+  num rw_int256,
+  PRIMARY KEY (id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'numeric_table',
+ slot.name = 'numeric_to_rw_int256'
+);
+
+statement ok
+explain create table numeric_to_varchar (
+  id int,
+  num varchar,
+  PRIMARY KEY (id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'numeric_table',
+ slot.name = 'numeric_to_varchar'
+);
+
+statement ok
+explain create table enum_to_varchar (
+  id int,
+  current_mood varchar,
+  PRIMARY KEY (id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ table.name = 'enum_table',
+ slot.name = 'enum_to_varchar'
+);
+
+# generated column
+statement ok
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+  generated_c INTEGER AS shipment_id + order_id,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+statement ok
+drop table shipments;
+
+statement error Table 'partitioned_timestamp_table' has partitions, which requires publication 'rw_publication_pubviaroot_false' to be created with `publish_via_partition_root = true`.
+CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
+  c_int int,
+  c_boolean boolean,
+  c_timestamp timestamp,
+  PRIMARY KEY (c_int, c_timestamp)
+) WITH (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ schema.name = 'public',
+ table.name = 'partitioned_timestamp_table',
+ publication.name = 'rw_publication_pubviaroot_false',
+ slot.name = 'my_slot_partition'
+);

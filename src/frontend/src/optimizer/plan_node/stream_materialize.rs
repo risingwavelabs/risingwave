@@ -33,7 +33,7 @@ use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::error::Result;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::plan_has_backfill_leaf_nodes;
+use crate::optimizer::plan_node::utils::plan_can_use_backgronud_ddl;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -88,7 +88,7 @@ impl StreamMaterialize {
 
         let create_type = if matches!(table_type, TableType::MaterializedView)
             && input.ctx().session_ctx().config().background_ddl()
-            && plan_has_backfill_leaf_nodes(&input)
+            && plan_can_use_backgronud_ddl(&input)
         {
             CreateType::Background
         } else {
@@ -133,10 +133,11 @@ impl StreamMaterialize {
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
         retention_seconds: Option<NonZeroU32>,
+        cdc_table_id: Option<String>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
-        let table = Self::derive_table_catalog(
+        let mut table = Self::derive_table_catalog(
             input.clone(),
             name,
             user_order_by,
@@ -152,6 +153,8 @@ impl StreamMaterialize {
             retention_seconds,
             CreateType::Foreground,
         )?;
+
+        table.cdc_table_id = cdc_table_id;
 
         Ok(Self::new(input, table))
     }
@@ -279,6 +282,8 @@ impl StreamMaterialize {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
+            cdc_table_id: None,
+            vnode_count: None, // will be filled in by the meta service later
         })
     }
 

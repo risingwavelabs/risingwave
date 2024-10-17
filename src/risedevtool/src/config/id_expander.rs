@@ -36,7 +36,7 @@ impl IdExpander {
                     .ok_or_else(|| anyhow!("Id isn't a string: {:?}", item))?;
                 ids.push(id.to_string());
             } else {
-                return Err(anyhow!("Not an hashmap: {:?}", item));
+                return Err(anyhow!("Not a hashmap: {:?}", item));
             }
         }
         Ok(Self { ids })

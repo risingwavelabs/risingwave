@@ -65,6 +65,12 @@ impl CompactionConfigBuilder {
                 tombstone_reclaim_ratio: compaction_config::tombstone_reclaim_ratio(),
                 enable_emergency_picker: compaction_config::enable_emergency_picker(),
                 max_l0_compact_level_count: Some(compaction_config::max_l0_compact_level_count()),
+                sst_allowed_trivial_move_min_size: Some(
+                    compaction_config::sst_allowed_trivial_move_min_size(),
+                ),
+                disable_auto_group_scheduling: Some(
+                    compaction_config::disable_auto_group_scheduling(),
+                ),
             },
         }
     }
@@ -154,4 +160,5 @@ builder_field! {
     level0_sub_level_compact_level_count: u32,
     level0_overlapping_sub_level_compact_level_count: u32,
     tombstone_reclaim_ratio: u32,
+    sst_allowed_trivial_move_min_size: Option<u64>,
 }

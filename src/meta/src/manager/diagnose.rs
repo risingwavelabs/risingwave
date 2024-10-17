@@ -34,8 +34,8 @@ use serde_json::json;
 use thiserror_ext::AsReport;
 
 use crate::hummock::HummockManagerRef;
-use crate::manager::event_log::EventLogMangerRef;
-use crate::manager::{MetadataManager, MetadataManagerV2};
+use crate::manager::event_log::EventLogManagerRef;
+use crate::manager::MetadataManager;
 use crate::MetaResult;
 
 pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
@@ -43,7 +43,7 @@ pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
 pub struct DiagnoseCommand {
     metadata_manager: MetadataManager,
     hummock_manger: HummockManagerRef,
-    event_log_manager: EventLogMangerRef,
+    event_log_manager: EventLogManagerRef,
     prometheus_client: Option<prometheus_http_query::Client>,
     prometheus_selector: String,
 }
@@ -52,7 +52,7 @@ impl DiagnoseCommand {
     pub fn new(
         metadata_manager: MetadataManager,
         hummock_manger: HummockManagerRef,
-        event_log_manager: EventLogMangerRef,
+        event_log_manager: EventLogManagerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
         prometheus_selector: String,
     ) -> Self {
@@ -90,78 +90,22 @@ impl DiagnoseCommand {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn write_catalog(&self, s: &mut String) {
-        match &self.metadata_manager {
-            MetadataManager::V1(_) => self.write_catalog_v1(s).await,
-            MetadataManager::V2(mgr) => {
-                self.write_catalog_v2(s).await;
-                let _ = self.write_table_definition(mgr, s).await.inspect_err(|e| {
-                    tracing::warn!(
-                        error = e.to_report_string(),
-                        "failed to display table definition"
-                    )
-                });
-            }
-        }
+        self.write_catalog_inner(s).await;
+        let _ = self.write_table_definition(s).await.inspect_err(|e| {
+            tracing::warn!(
+                error = e.to_report_string(),
+                "failed to display table definition"
+            )
+        });
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn write_catalog_v1(&self, s: &mut String) {
-        let mgr = self.metadata_manager.as_v1_ref();
-        let _ = writeln!(s, "number of fragment: {}", self.fragment_num().await);
-        let _ = writeln!(s, "number of actor: {}", self.actor_num().await);
-        let _ = writeln!(
-            s,
-            "number of source: {}",
-            mgr.catalog_manager.source_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of table: {}",
-            mgr.catalog_manager.table_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of materialized view: {}",
-            mgr.catalog_manager.materialized_view_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of sink: {}",
-            mgr.catalog_manager.sink_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of index: {}",
-            mgr.catalog_manager.index_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of function: {}",
-            mgr.catalog_manager.function_count().await
-        );
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn fragment_num(&self) -> usize {
-        let mgr = self.metadata_manager.as_v1_ref();
-        let core = mgr.fragment_manager.get_fragment_read_guard().await;
-        core.table_fragments().len()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn actor_num(&self) -> usize {
-        let mgr = self.metadata_manager.as_v1_ref();
-        let core = mgr.fragment_manager.get_fragment_read_guard().await;
-        core.table_fragments()
-            .values()
-            .map(|t| t.actor_status.len())
-            .sum()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn write_catalog_v2(&self, s: &mut String) {
-        let mgr = self.metadata_manager.as_v2_ref();
-        let guard = mgr.catalog_controller.get_inner_read_guard().await;
+    async fn write_catalog_inner(&self, s: &mut String) {
+        let guard = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
         let stat = match guard.stats().await {
             Ok(stat) => stat,
             Err(err) => {
@@ -259,7 +203,7 @@ impl DiagnoseCommand {
                 {
                     None
                 } else {
-                    match worker_actor_count.get(&worker_node.id) {
+                    match worker_actor_count.get(&(worker_node.id as _)) {
                         None => Some(0),
                         Some(c) => Some(*c),
                     }
@@ -414,10 +358,8 @@ impl DiagnoseCommand {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn write_storage(&self, s: &mut String) {
-        let version = self.hummock_manger.get_current_version().await;
         let mut sst_num = 0;
         let mut sst_total_file_size = 0;
-        let compaction_group_num = version.levels.len();
         let back_pressured_compaction_groups = self
             .hummock_manger
             .write_limits()
@@ -470,32 +412,41 @@ impl DiagnoseCommand {
 
         let top_k = 10;
         let mut top_tombstone_delete_sst = BinaryHeap::with_capacity(top_k);
-        for compaction_group in version.levels.values() {
-            let mut visit_level = |level: &Level| {
-                sst_num += level.table_infos.len();
-                sst_total_file_size += level.table_infos.iter().map(|t| t.file_size).sum::<u64>();
-                for sst in &level.table_infos {
-                    if sst.total_key_count == 0 {
-                        continue;
-                    }
-                    let tombstone_delete_ratio = sst.stale_key_count * 10000 / sst.total_key_count;
-                    let e = SstableSort {
-                        compaction_group_id: compaction_group.group_id,
-                        sst_id: sst.sst_id,
-                        delete_ratio: tombstone_delete_ratio,
+        let compaction_group_num = self
+            .hummock_manger
+            .on_current_version(|version| {
+                for compaction_group in version.levels.values() {
+                    let mut visit_level = |level: &Level| {
+                        sst_num += level.table_infos.len();
+                        sst_total_file_size +=
+                            level.table_infos.iter().map(|t| t.sst_size).sum::<u64>();
+                        for sst in &level.table_infos {
+                            if sst.total_key_count == 0 {
+                                continue;
+                            }
+                            let tombstone_delete_ratio =
+                                sst.stale_key_count * 10000 / sst.total_key_count;
+                            let e = SstableSort {
+                                compaction_group_id: compaction_group.group_id,
+                                sst_id: sst.sst_id,
+                                delete_ratio: tombstone_delete_ratio,
+                            };
+                            top_k_sstables(top_k, &mut top_tombstone_delete_sst, e);
+                        }
                     };
-                    top_k_sstables(top_k, &mut top_tombstone_delete_sst, e);
+                    let l0 = &compaction_group.l0;
+                    // FIXME: why chaining levels iter leads to segmentation fault?
+                    for level in &l0.sub_levels {
+                        visit_level(level);
+                    }
+                    for level in &compaction_group.levels {
+                        visit_level(level);
+                    }
                 }
-            };
-            let l0 = &compaction_group.l0;
-            // FIXME: why chaining levels iter leads to segmentation fault?
-            for level in &l0.sub_levels {
-                visit_level(level);
-            }
-            for level in &compaction_group.levels {
-                visit_level(level);
-            }
-        }
+                version.levels.len()
+            })
+            .await;
+
         let _ = writeln!(s, "number of SSTables: {sst_num}");
         let _ = writeln!(s, "total size of SSTables (byte): {sst_total_file_size}");
         let _ = writeln!(s, "number of compaction groups: {compaction_group_num}");
@@ -677,40 +628,41 @@ impl DiagnoseCommand {
         write!(s, "{}", all.output()).unwrap();
     }
 
-    async fn write_table_definition(
-        &self,
-        mgr: &MetadataManagerV2,
-        s: &mut String,
-    ) -> MetaResult<()> {
-        let sources = mgr
+    async fn write_table_definition(&self, s: &mut String) -> MetaResult<()> {
+        let sources = self
+            .metadata_manager
             .catalog_controller
             .list_sources()
             .await?
             .into_iter()
             .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
             .collect::<BTreeMap<_, _>>();
-        let tables = mgr
+        let tables = self
+            .metadata_manager
             .catalog_controller
             .list_tables_by_type(TableType::Table)
             .await?
             .into_iter()
             .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
             .collect::<BTreeMap<_, _>>();
-        let mvs = mgr
+        let mvs = self
+            .metadata_manager
             .catalog_controller
             .list_tables_by_type(TableType::MaterializedView)
             .await?
             .into_iter()
             .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
             .collect::<BTreeMap<_, _>>();
-        let indexes = mgr
+        let indexes = self
+            .metadata_manager
             .catalog_controller
             .list_tables_by_type(TableType::Index)
             .await?
             .into_iter()
             .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
             .collect::<BTreeMap<_, _>>();
-        let sinks = mgr
+        let sinks = self
+            .metadata_manager
             .catalog_controller
             .list_sinks()
             .await?

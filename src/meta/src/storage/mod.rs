@@ -12,21 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod etcd_meta_store;
-mod etcd_retry_client;
-mod mem_meta_store;
-pub mod meta_store;
-#[cfg(test)]
-mod tests;
 mod transaction;
-mod wrapped_etcd_client;
 
 pub type ColumnFamily = String;
 pub type Key = Vec<u8>;
 pub type Value = Vec<u8>;
 
-pub use etcd_meta_store::*;
-pub use mem_meta_store::*;
-pub use meta_store::*;
+use thiserror::Error;
 pub use transaction::*;
-pub use wrapped_etcd_client::*;
+
+// Error of metastore
+#[derive(Debug, Error)]
+pub enum MetaStoreError {
+    #[error("item not found: {0}")]
+    ItemNotFound(String),
+    #[error("transaction abort")]
+    TransactionAbort(),
+    #[error("internal error: {0}")]
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
+}
+
+pub type MetaStoreResult<T> = std::result::Result<T, MetaStoreError>;

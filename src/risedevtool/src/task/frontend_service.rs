@@ -19,7 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 
-use super::{ExecuteContext, Task};
+use super::{risingwave_cmd, ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::{add_tempo_endpoint, FrontendConfig};
 
@@ -30,16 +30,6 @@ pub struct FrontendService {
 impl FrontendService {
     pub fn new(config: FrontendConfig) -> Result<Self> {
         Ok(Self { config })
-    }
-
-    fn frontend(&self) -> Result<Command> {
-        let prefix_bin = env::var("PREFIX_BIN")?;
-
-        Ok(Command::new(
-            Path::new(&prefix_bin)
-                .join("risingwave")
-                .join("frontend-node"),
-        ))
     }
 
     /// Apply command args according to config
@@ -85,7 +75,7 @@ impl Task for FrontendService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let mut cmd = self.frontend()?;
+        let mut cmd = risingwave_cmd("frontend-node")?;
 
         if crate::util::is_enable_backtrace() {
             cmd.env("RUST_BACKTRACE", "1");

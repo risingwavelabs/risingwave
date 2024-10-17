@@ -16,24 +16,21 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fail::fail_point;
 use itertools::Itertools;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
+    HummockContextId, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     INVALID_VERSION_ID,
 };
-use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, ValidationTask,
-};
+use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
 
+use crate::controller::SqlMetaStore;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
-use crate::hummock::metrics_utils::{
-    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
-};
+use crate::hummock::metrics_utils::trigger_pin_unpin_version_state;
 use crate::hummock::HummockManager;
-use crate::manager::{MetaStoreImpl, MetadataManager, META_NODE_ID};
+use crate::manager::{MetadataManager, META_NODE_ID};
 use crate::model::BTreeMapTransaction;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -59,7 +56,6 @@ impl Drop for HummockVersionSafePoint {
 #[derive(Default)]
 pub(super) struct ContextInfo {
     pub pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
-    pub pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
     pub version_safe_points: Vec<HummockVersionId>,
 }
@@ -71,7 +67,7 @@ impl ContextInfo {
     async fn release_contexts(
         &mut self,
         context_ids: impl AsRef<[HummockContextId]>,
-        meta_store_ref: MetaStoreImpl,
+        meta_store_ref: SqlMetaStore,
     ) -> Result<()> {
         fail_point!("release_contexts_metastore_err", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
@@ -81,12 +77,10 @@ impl ContextInfo {
         )));
 
         let mut pinned_versions = BTreeMapTransaction::new(&mut self.pinned_versions);
-        let mut pinned_snapshots = BTreeMapTransaction::new(&mut self.pinned_snapshots);
         for context_id in context_ids.as_ref() {
             pinned_versions.remove(*context_id);
-            pinned_snapshots.remove(*context_id);
         }
-        commit_multi_var!(meta_store_ref, pinned_versions, pinned_snapshots)?;
+        commit_multi_var!(meta_store_ref, pinned_versions)?;
 
         Ok(())
     }
@@ -151,7 +145,7 @@ impl ContextInfo {
         metadata_manager: &MetadataManager,
     ) -> Result<bool> {
         Ok(metadata_manager
-            .get_worker_by_id(context_id)
+            .get_worker_by_id(context_id as _)
             .await
             .map_err(|err| Error::MetaStore(err.into()))?
             .is_some())
@@ -173,7 +167,6 @@ impl HummockManager {
                     .map(|c| c.context_id),
             );
             active_context_ids.extend(context_info.pinned_versions.keys());
-            active_context_ids.extend(context_info.pinned_snapshots.keys());
             (active_context_ids, context_info)
         };
 
@@ -196,7 +189,7 @@ impl HummockManager {
 
     pub async fn commit_epoch_sanity_check(
         &self,
-        epoch: HummockEpoch,
+        tables_to_commit: &HashMap<TableId, u64>,
         sstables: &[LocalSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
@@ -221,13 +214,33 @@ impl HummockManager {
             }
         }
 
-        if epoch <= current_version.max_committed_epoch {
-            return Err(anyhow::anyhow!(
-                "Epoch {} <= max_committed_epoch {}",
-                epoch,
-                current_version.max_committed_epoch
-            )
-            .into());
+        // sanity check on monotonically increasing table committed epoch
+        for (table_id, committed_epoch) in tables_to_commit {
+            if let Some(info) = current_version.state_table_info.info().get(table_id) {
+                if *committed_epoch <= info.committed_epoch {
+                    return Err(anyhow::anyhow!(
+                        "table {} Epoch {} <= committed_epoch {}",
+                        table_id,
+                        committed_epoch,
+                        info.committed_epoch,
+                    )
+                    .into());
+                }
+            }
+        }
+
+        // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
+        if !sstables.is_empty() {
+            // Sanity check to ensure SSTs to commit have not been full GCed yet.
+            // TODO: since HummockManager::complete_full_gc have already filtered out SSTs by min uncommitted SST id, this sanity check can be removed.
+            let now = self.now().await?;
+            check_sst_retention(
+                now,
+                self.env.opts.min_sst_retention_time_sec,
+                sstables
+                    .iter()
+                    .map(|s| (s.sst_info.object_id, s.created_at)),
+            )?;
         }
 
         async {
@@ -252,7 +265,6 @@ impl HummockManager {
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {
                     sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context.clone(),
-                    epoch,
                 }))
                 .is_err()
             {
@@ -266,6 +278,36 @@ impl HummockManager {
     pub async fn release_meta_context(&self) -> Result<()> {
         self.release_contexts([META_NODE_ID]).await
     }
+
+    pub(crate) async fn report_compaction_sanity_check(
+        &self,
+        object_timestamps: &HashMap<HummockSstableObjectId, u64>,
+    ) -> Result<()> {
+        // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
+        if object_timestamps.is_empty() {
+            return Ok(());
+        }
+        let now = self.now().await?;
+        check_sst_retention(
+            now,
+            self.env.opts.min_sst_retention_time_sec,
+            object_timestamps.iter().map(|(k, v)| (*k, *v)),
+        )
+    }
+}
+
+fn check_sst_retention(
+    now: u64,
+    retention_sec: u64,
+    sst_infos: impl Iterator<Item = (HummockSstableObjectId, u64)>,
+) -> Result<()> {
+    let sst_retention_watermark = now.saturating_sub(retention_sec);
+    for (object_id, created_at) in sst_infos {
+        if created_at < sst_retention_watermark {
+            return Err(anyhow::anyhow!("object {object_id} is rejected from being committed since it's below watermark: object timestamp {created_at}, meta node timestamp {now}, retention_sec {retention_sec}, watermark {sst_retention_watermark}").into());
+        }
+    }
+    Ok(())
 }
 
 // pin and unpin method
@@ -283,15 +325,15 @@ impl HummockManager {
             context_id,
             HummockPinnedVersion {
                 context_id,
-                min_pinned_id: INVALID_VERSION_ID,
+                min_pinned_id: INVALID_VERSION_ID.to_u64(),
             },
         );
         let version_id = versioning.current_version.id;
         let ret = versioning.current_version.clone();
-        if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
-            || context_pinned_version.min_pinned_id > version_id
+        if HummockVersionId::new(context_pinned_version.min_pinned_id) == INVALID_VERSION_ID
+            || HummockVersionId::new(context_pinned_version.min_pinned_id) > version_id
         {
-            context_pinned_version.min_pinned_id = version_id;
+            context_pinned_version.min_pinned_id = version_id.to_u64();
             commit_multi_var!(self.meta_store_ref(), context_pinned_version)?;
             trigger_pin_unpin_version_state(&self.metrics, &context_info.pinned_versions);
         }
@@ -327,138 +369,18 @@ impl HummockManager {
             },
         );
         assert!(
-            context_pinned_version.min_pinned_id <= unpin_before,
+            context_pinned_version.min_pinned_id <= unpin_before.to_u64(),
             "val must be monotonically non-decreasing. old = {}, new = {}.",
             context_pinned_version.min_pinned_id,
             unpin_before
         );
-        context_pinned_version.min_pinned_id = unpin_before;
+        context_pinned_version.min_pinned_id = unpin_before.to_u64();
         commit_multi_var!(self.meta_store_ref(), context_pinned_version)?;
         trigger_pin_unpin_version_state(&self.metrics, &context_info.pinned_versions);
 
         #[cfg(test)]
         {
             drop(context_info);
-            self.check_state_consistency().await;
-        }
-
-        Ok(())
-    }
-
-    pub async fn pin_specific_snapshot(
-        &self,
-        context_id: HummockContextId,
-        epoch: HummockEpoch,
-    ) -> Result<HummockSnapshot> {
-        let snapshot = self.latest_snapshot.load();
-        let mut guard = self.context_info.write().await;
-        self.check_context_with_meta_node(context_id, &guard)
-            .await?;
-        let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
-        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
-            context_id,
-            HummockPinnedSnapshot {
-                context_id,
-                minimal_pinned_snapshot: INVALID_EPOCH,
-            },
-        );
-        let epoch_to_pin = std::cmp::min(epoch, snapshot.committed_epoch);
-        if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
-            context_pinned_snapshot.minimal_pinned_snapshot = epoch_to_pin;
-            commit_multi_var!(self.meta_store_ref(), context_pinned_snapshot)?;
-        }
-        Ok(HummockSnapshot::clone(&snapshot))
-    }
-
-    /// Make sure `max_committed_epoch` is pinned and return it.
-    pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
-        let snapshot = self.latest_snapshot.load();
-        let mut guard = self.context_info.write().await;
-        self.check_context_with_meta_node(context_id, &guard)
-            .await?;
-        let _timer = start_measure_real_process_timer!(self, "pin_snapshot");
-        let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
-        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
-            context_id,
-            HummockPinnedSnapshot {
-                context_id,
-                minimal_pinned_snapshot: INVALID_EPOCH,
-            },
-        );
-        if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
-            context_pinned_snapshot.minimal_pinned_snapshot = snapshot.committed_epoch;
-            commit_multi_var!(self.meta_store_ref(), context_pinned_snapshot)?;
-            trigger_pin_unpin_snapshot_state(&self.metrics, &guard.pinned_snapshots);
-        }
-        Ok(HummockSnapshot::clone(&snapshot))
-    }
-
-    pub async fn unpin_snapshot(&self, context_id: HummockContextId) -> Result<()> {
-        let mut context_info = self.context_info.write().await;
-        self.check_context_with_meta_node(context_id, &context_info)
-            .await?;
-        let _timer = start_measure_real_process_timer!(self, "unpin_snapshot");
-        let mut pinned_snapshots = BTreeMapTransaction::new(&mut context_info.pinned_snapshots);
-        let release_snapshot = pinned_snapshots.remove(context_id);
-        if release_snapshot.is_some() {
-            commit_multi_var!(self.meta_store_ref(), pinned_snapshots)?;
-            trigger_pin_unpin_snapshot_state(&self.metrics, &context_info.pinned_snapshots);
-        }
-
-        #[cfg(test)]
-        {
-            drop(context_info);
-            self.check_state_consistency().await;
-        }
-
-        Ok(())
-    }
-
-    /// Unpin all snapshots smaller than specified epoch for current context.
-    pub async fn unpin_snapshot_before(
-        &self,
-        context_id: HummockContextId,
-        hummock_snapshot: HummockSnapshot,
-    ) -> Result<()> {
-        let versioning = self.versioning.read().await;
-        let mut context_info = self.context_info.write().await;
-        self.check_context_with_meta_node(context_id, &context_info)
-            .await?;
-        let _timer = start_measure_real_process_timer!(self, "unpin_snapshot_before");
-        // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
-        // visible in the snapshot.
-        let max_committed_epoch = versioning.current_version.max_committed_epoch;
-        // Ensure the unpin will not clean the latest one.
-        let snapshot_committed_epoch = hummock_snapshot.committed_epoch;
-        #[cfg(not(test))]
-        {
-            assert!(snapshot_committed_epoch <= max_committed_epoch);
-        }
-        let last_read_epoch = std::cmp::min(snapshot_committed_epoch, max_committed_epoch);
-
-        let mut pinned_snapshots = BTreeMapTransaction::new(&mut context_info.pinned_snapshots);
-        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
-            context_id,
-            HummockPinnedSnapshot {
-                context_id,
-                minimal_pinned_snapshot: INVALID_EPOCH,
-            },
-        );
-
-        // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
-        // epochs below specific watermark.
-        if context_pinned_snapshot.minimal_pinned_snapshot < last_read_epoch
-            || context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH
-        {
-            context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
-            commit_multi_var!(self.meta_store_ref(), context_pinned_snapshot)?;
-            trigger_pin_unpin_snapshot_state(&self.metrics, &context_info.pinned_snapshots);
-        }
-
-        #[cfg(test)]
-        {
-            drop(context_info);
-            drop(versioning);
             self.check_state_consistency().await;
         }
 
@@ -492,10 +414,10 @@ impl HummockManager {
 
 fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
     if let Some(sp) = safepoints.iter().min() {
-        metrics.min_safepoint_version_id.set(*sp as _);
+        metrics.min_safepoint_version_id.set(sp.to_u64() as _);
     } else {
         metrics
             .min_safepoint_version_id
-            .set(HummockVersionId::MAX as _);
+            .set(HummockVersionId::MAX.to_u64() as _);
     }
 }

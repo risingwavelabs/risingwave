@@ -17,8 +17,9 @@ use std::mem::swap;
 
 use futures::pin_mut;
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
-use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, VnodeCountCompat};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
@@ -30,7 +31,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{TableDistribution, TableIter};
+use risingwave_storage::table::TableIter;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use crate::error::Result;
@@ -194,7 +195,8 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .collect();
 
         // Lookup Join always contains distribution key, so we don't need vnode bitmap
-        let vnodes = Some(TableDistribution::all_vnodes());
+        let vnodes = Some(Bitmap::ones(table_desc.vnode_count()).into());
+
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
             let inner_side_builder = InnerSideExecutorBuilder::new(
@@ -354,10 +356,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         let pk_prefix = OwnedRow::new(scan_range.eq_conds);
 
         if self.lookup_prefix_len == self.table.pk_indices().len() {
-            let row = self
-                .table
-                .get_row(&pk_prefix, self.epoch.clone().into())
-                .await?;
+            let row = self.table.get_row(&pk_prefix, self.epoch.into()).await?;
 
             if let Some(row) = row {
                 self.row_list.push(row);
@@ -366,7 +365,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
             let iter = self
                 .table
                 .batch_iter_with_pk_bounds(
-                    self.epoch.clone().into(),
+                    self.epoch.into(),
                     &pk_prefix,
                     ..,
                     false,

@@ -228,6 +228,9 @@ pub async fn handle_alter_source_with_sr(
         )
         .into());
     };
+    if source.info.is_shared() {
+        bail_not_implemented!(issue = 16003, "alter shared source");
+    }
 
     check_format_encode(&source, &connector_schema)?;
 
@@ -278,7 +281,7 @@ pub async fn handle_alter_source_with_sr(
     pb_source.version += 1;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.alter_source_with_sr(pb_source).await?;
+    catalog_writer.alter_source(pb_source).await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }

@@ -34,9 +34,12 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private final RequestTracker requestTracker;
     BulkProcessor opensearchBulkProcessor;
+    private int retryOnConflict;
 
     public OpensearchBulkProcessorAdapter(
-            RequestTracker requestTracker, OpensearchRestHighLevelClientAdapter client) {
+            RequestTracker requestTracker,
+            OpensearchRestHighLevelClientAdapter client,
+            EsSinkConfig config) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
                         (bulkRequest, bulkResponseActionListener) ->
@@ -45,21 +48,21 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
                                         RequestOptions.DEFAULT,
                                         bulkResponseActionListener),
                         new BulkListener(requestTracker));
-        // Possible feature: move these to config
-        // execute the bulk every 10 000 requests
-        builder.setBulkActions(1000);
-        // flush the bulk every 5mb
-        builder.setBulkSize(new ByteSizeValue(5, ByteSizeUnit.MB));
+        // flush the bulk every `batchNumMessages` rows
+        builder.setBulkActions(config.getBatchNumMessages());
+        // flush the bulk every `batchSizeKb` Kb
+        builder.setBulkSize(new ByteSizeValue(config.getBatchSizeKb(), ByteSizeUnit.KB));
         // flush the bulk every 5 seconds whatever the number of requests
         builder.setFlushInterval(TimeValue.timeValueSeconds(5));
         // Set the number of concurrent requests
-        builder.setConcurrentRequests(1);
+        builder.setConcurrentRequests(config.getConcurrentRequests());
         // Set a custom backoff policy which will initially wait for 100ms, increase exponentially
         // and retries up to three times.
         builder.setBackoffPolicy(
                 BackoffPolicy.exponentialBackoff(TimeValue.timeValueMillis(100), 3));
         this.opensearchBulkProcessor = builder.build();
         this.requestTracker = requestTracker;
+        this.retryOnConflict = config.getRetryOnConflict();
     }
 
     @Override
@@ -73,18 +76,28 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
     }
 
     @Override
-    public void addRow(String index, String key, String doc) {
+    public void addRow(String index, String key, String doc, String routing)
+            throws InterruptedException {
         UpdateRequest updateRequest;
-        updateRequest = new UpdateRequest(index, key).doc(doc, XContentType.JSON);
+        updateRequest =
+                new UpdateRequest(index, key)
+                        .doc(doc, XContentType.JSON)
+                        .retryOnConflict(this.retryOnConflict);
+        if (routing != null) {
+            updateRequest.routing(routing);
+        }
         updateRequest.docAsUpsert(true);
         this.requestTracker.addWriteTask();
         this.opensearchBulkProcessor.add(updateRequest);
     }
 
     @Override
-    public void deleteRow(String index, String key) {
+    public void deleteRow(String index, String key, String routing) throws InterruptedException {
         DeleteRequest deleteRequest;
         deleteRequest = new DeleteRequest(index, key);
+        if (routing != null) {
+            deleteRequest.routing(routing);
+        }
         this.requestTracker.addWriteTask();
         this.opensearchBulkProcessor.add(deleteRequest);
     }

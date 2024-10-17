@@ -44,6 +44,16 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Object1,
+
+    // To join source on the oid column
+    #[sea_orm(
+        belongs_to = "super::source::Entity",
+        from = "Column::Oid",
+        to = "super::source::Column::SourceId",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    Source,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

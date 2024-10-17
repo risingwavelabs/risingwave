@@ -25,7 +25,6 @@ use risingwave_pb::meta::{
     ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
     UpdateWorkerNodeSchedulabilityResponse,
 };
-use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::MetaError;
@@ -58,31 +57,16 @@ impl ClusterService for ClusterServiceImpl {
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
         let resource = req.resource.unwrap_or_default();
-        let result = self
+        let worker_id = self
             .metadata_manager
             .add_worker_node(worker_type, host, property, resource)
-            .await;
+            .await?;
         let cluster_id = self.metadata_manager.cluster_id().to_string();
-        match result {
-            Ok(worker_id) => Ok(Response::new(AddWorkerNodeResponse {
-                status: None,
-                node_id: Some(worker_id),
-                cluster_id,
-            })),
-            Err(e) => {
-                if e.is_invalid_worker() {
-                    return Ok(Response::new(AddWorkerNodeResponse {
-                        status: Some(risingwave_pb::common::Status {
-                            code: risingwave_pb::common::status::Code::UnknownWorker as i32,
-                            message: e.to_report_string(),
-                        }),
-                        node_id: None,
-                        cluster_id,
-                    }));
-                }
-                Err(e.into())
-            }
-        }
+
+        Ok(Response::new(AddWorkerNodeResponse {
+            node_id: Some(worker_id as _),
+            cluster_id,
+        }))
     }
 
     /// Update schedulability of a compute node. Will not affect actors which are already running on
@@ -95,21 +79,13 @@ impl ClusterService for ClusterServiceImpl {
         let schedulability = req.get_schedulability()?;
         let worker_ids = req.worker_ids;
 
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                mgr.cluster_manager
-                    .update_schedulability(worker_ids, schedulability)
-                    .await?
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.cluster_controller
-                    .update_schedulability(
-                        worker_ids.into_iter().map(|id| id as WorkerId).collect(),
-                        schedulability,
-                    )
-                    .await?
-            }
-        }
+        self.metadata_manager
+            .cluster_controller
+            .update_schedulability(
+                worker_ids.into_iter().map(|id| id as WorkerId).collect(),
+                schedulability,
+            )
+            .await?;
 
         Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
             status: None,
@@ -132,14 +108,10 @@ impl ClusterService for ClusterServiceImpl {
             })?;
             info!(?socket_addr, ?host, "resolve host addr");
         }
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.cluster_manager.activate_worker_node(host).await?,
-            MetadataManager::V2(mgr) => {
-                mgr.cluster_controller
-                    .activate_worker(req.node_id as _)
-                    .await?
-            }
-        }
+        self.metadata_manager
+            .cluster_controller
+            .activate_worker(req.node_id as _)
+            .await?;
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
     }
 
@@ -150,10 +122,11 @@ impl ClusterService for ClusterServiceImpl {
         let req = request.into_inner();
         let host = req.get_host()?.clone();
 
-        let worker_node = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.cluster_manager.delete_worker_node(host).await?,
-            MetadataManager::V2(mgr) => mgr.cluster_controller.delete_worker(host).await?,
-        };
+        let worker_node = self
+            .metadata_manager
+            .cluster_controller
+            .delete_worker(host)
+            .await?;
         tracing::info!(
             host = ?worker_node.host,
             id = worker_node.id,

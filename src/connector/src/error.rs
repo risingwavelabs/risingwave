@@ -23,6 +23,8 @@ use crate::schema::schema_registry::{
 };
 use crate::schema::InvalidOptionError;
 use crate::sink::SinkError;
+use crate::source::mqtt::MqttError;
+use crate::source::nats::NatsJetStreamError;
 
 def_anyhow_newtype! {
     pub ConnectorError,
@@ -54,6 +56,7 @@ def_anyhow_newtype! {
     sqlx::Error => transparent, // believed to be self-explanatory
     mysql_async::Error => "MySQL error",
     tokio_postgres::Error => "Postgres error",
+    tiberius::error::Error => "Sql Server error",
     apache_avro::Error => "Avro error",
     rdkafka::error::KafkaError => "Kafka error",
     pulsar::Error => "Pulsar error",
@@ -62,15 +65,18 @@ def_anyhow_newtype! {
     async_nats::jetstream::consumer::pull::MessagesError => "Nats error",
     async_nats::jetstream::context::CreateStreamError => "Nats error",
     async_nats::jetstream::stream::ConsumerError => "Nats error",
+    async_nats::error::Error<async_nats::jetstream::context::RequestErrorKind> => "Nats error",
+    NatsJetStreamError => "Nats error",
+
     icelake::Error => "Iceberg error",
     iceberg::Error => "IcebergV2 error",
     redis::RedisError => "Redis error",
-    arrow_schema::ArrowError => "Arrow error",
-    arrow_schema_iceberg::ArrowError => "Arrow error",
+    risingwave_common::array::arrow::arrow_schema_iceberg::ArrowError => "Arrow error",
     google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
     rumqttc::tokio_rustls::rustls::Error => "TLS error",
-    rumqttc::v5::ClientError => "MQTT error",
-    rumqttc::v5::OptionError => "MQTT error",
+    rumqttc::v5::ClientError => "MQTT SDK error",
+    rumqttc::v5::OptionError => "MQTT Option error",
+    MqttError => "MQTT Source error",
     mongodb::error::Error => "Mongodb error",
 
     openssl::error::ErrorStack => "OpenSSL error",

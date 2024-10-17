@@ -38,7 +38,7 @@ use super::encoder::{
     TimestamptzHandlingMode,
 };
 use super::writer::LogSinkerOf;
-use super::{SinkError, SinkParam};
+use super::{SinkError, SinkParam, SinkWriterMetrics};
 use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
@@ -114,10 +114,13 @@ impl Sink for SnowflakeSink {
             self.pk_indices.clone(),
             self.is_append_only,
         )?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
     }
 
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::SnowflakeSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
         if !self.is_append_only {
             return Err(SinkError::Config(
                 anyhow!("SnowflakeSink only supports append-only mode at present, please change the query to append-only, or use `force_append_only = 'true'`")

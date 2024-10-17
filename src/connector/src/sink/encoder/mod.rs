@@ -201,7 +201,7 @@ impl std::fmt::Display for FieldEncodeError {
 
         write!(
             f,
-            "encode {} error: {}",
+            "encode '{}' error: {}",
             self.rev_path.iter().rev().join("."),
             self.message
         )

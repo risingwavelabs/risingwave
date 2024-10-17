@@ -178,6 +178,8 @@ impl TableCatalogBuilder {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: None,
+            cdc_table_id: None,
+            vnode_count: None, // will be filled in by the meta service later
         }
     }
 
@@ -287,7 +289,7 @@ pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
     let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
     // Accumulate the affected rows.
     let sum_agg = PlanAggCall {
-        agg_kind: PbAggKind::Sum.into(),
+        agg_type: PbAggKind::Sum.into(),
         return_type: DataType::Int64,
         inputs: vec![InputRef::new(0, DataType::Int64)],
         distinct: false,
@@ -375,9 +377,13 @@ pub fn infer_kv_log_store_table_catalog_inner(
 
 /// Check that all leaf nodes must be stream table scan,
 /// since that plan node maps to `backfill` executor, which supports recovery.
-pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
+/// Some other leaf nodes like `StreamValues` do not support recovery, and they
+/// cannot use background ddl.
+pub(crate) fn plan_can_use_backgronud_ddl(plan: &PlanRef) -> bool {
     if plan.inputs().is_empty() {
-        if let Some(scan) = plan.as_stream_table_scan() {
+        if plan.as_stream_source_scan().is_some() {
+            true
+        } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
                 || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
         } else {
@@ -385,7 +391,7 @@ pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
         }
     } else {
         assert!(!plan.inputs().is_empty());
-        plan.inputs().iter().all(plan_has_backfill_leaf_nodes)
+        plan.inputs().iter().all(plan_can_use_backgronud_ddl)
     }
 }
 

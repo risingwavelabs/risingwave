@@ -16,20 +16,24 @@ use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 
 use crate::hummock::error::Error as HummockError;
-use crate::manager::WorkerId;
 use crate::model::MetadataModelError;
 use crate::storage::MetaStoreError;
 
 pub type MetaResult<T> = std::result::Result<T, MetaError>;
 
 #[derive(
-    thiserror::Error, thiserror_ext::ReportDebug, thiserror_ext::Arc, thiserror_ext::Construct,
+    thiserror::Error,
+    thiserror_ext::ReportDebug,
+    thiserror_ext::Arc,
+    thiserror_ext::Construct,
+    thiserror_ext::Macro,
 )]
-#[thiserror_ext(newtype(name = MetaError, backtrace))]
+#[thiserror_ext(newtype(name = MetaError, backtrace), macro(path = "crate::error"))]
 pub enum MetaErrorInner {
     #[error("MetaStore transaction error: {0}")]
     TransactionError(
@@ -66,7 +70,7 @@ pub enum MetaErrorInner {
     InvalidWorker(WorkerId, String),
 
     #[error("Invalid parameter: {0}")]
-    InvalidParameter(String),
+    InvalidParameter(#[message] String),
 
     // Used for catalog errors.
     #[error("{0} id not found: {1}")]
@@ -80,7 +84,7 @@ pub enum MetaErrorInner {
     Duplicated(&'static str, String),
 
     #[error("Service unavailable: {0}")]
-    Unavailable(String),
+    Unavailable(#[message] String),
 
     #[error("Election failed: {0}")]
     Election(#[source] BoxedError),
@@ -125,6 +129,9 @@ pub enum MetaErrorInner {
     // Indicates that recovery was triggered manually.
     #[error("adhoc recovery triggered")]
     AdhocRecovery,
+
+    #[error("Integrity check failed")]
+    IntegrityCheckFailed,
 }
 
 impl MetaError {
@@ -146,12 +153,6 @@ impl MetaError {
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
         MetaErrorInner::Duplicated(relation, name.into()).into()
-    }
-}
-
-impl From<etcd_client::Error> for MetaError {
-    fn from(e: etcd_client::Error) -> Self {
-        MetaErrorInner::Election(e.into()).into()
     }
 }
 

@@ -12,29 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod catalog;
-mod cluster;
 mod error;
-mod migration_plan;
-mod notification;
 mod stream;
-mod user;
 
 use std::collections::btree_map::{Entry, VacantEntry};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
 
-use anyhow::Context as _;
 use async_trait::async_trait;
-pub use cluster::*;
 pub use error::*;
-pub use migration_plan::*;
-pub use notification::*;
 pub use stream::*;
-
-use crate::storage::{MetaStore, MetaStoreError, Snapshot, Transaction};
+use uuid::Uuid;
 
 /// A global, unique identifier of an actor
 pub type ActorId = u32;
@@ -45,225 +34,45 @@ pub type DispatcherId = u64;
 /// A global, unique identifier of a fragment
 pub type FragmentId = u32;
 
+#[derive(Clone, Debug)]
+pub struct ClusterId(String);
+
+impl Default for ClusterId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClusterId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4().to_string())
+    }
+}
+
+impl From<ClusterId> for String {
+    fn from(value: ClusterId) -> Self {
+        value.0
+    }
+}
+
+impl From<String> for ClusterId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for ClusterId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_str()
+    }
+}
+
 #[async_trait]
 pub trait Transactional<TXN> {
     async fn upsert_in_transaction(&self, trx: &mut TXN) -> MetadataModelResult<()>;
     async fn delete_in_transaction(&self, trx: &mut TXN) -> MetadataModelResult<()>;
-}
-
-mod private {
-    /// A marker trait helps to collect all implementors of `MetadataModel` in
-    /// `for_all_metadata_models`. The trait should only be implemented by adding item in
-    /// `for_all_metadata_models`.
-    pub trait MetadataModelMarker {}
-}
-
-/// Compress the value if it's larger then the threshold to avoid hitting the limit of etcd.
-///
-/// By default, the maximum size of any request to etcd is 1.5 MB. So we use a slightly
-/// smaller value here. However, note that this is still a best-effort approach, as the
-/// compressed size may still exceed the limit, in which case we should set the parameter
-/// `--max-request-bytes` of etcd to a larger value.
-const MODEL_COMPRESSION_THRESHOLD: usize = 1 << 20;
-
-/// `MetadataModel` defines basic model operations in CRUD.
-// TODO: better to move the methods that we don't want implementors to override to a separate
-// extension trait.
-#[async_trait]
-pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker {
-    /// Serialized prost message type.
-    type PbType: prost::Message + Default;
-    /// Serialized key type.
-    type KeyType: prost::Message;
-
-    /// Column family for this model.
-    fn cf_name() -> String;
-
-    /// Serialize to protobuf.
-    fn to_protobuf(&self) -> Self::PbType;
-
-    /// Deserialize from protobuf.
-    fn from_protobuf(prost: Self::PbType) -> Self;
-
-    /// Current record key.
-    fn key(&self) -> MetadataModelResult<Self::KeyType>;
-
-    /// Encode key to bytes. Should not be overridden.
-    fn encode_key(key: &Self::KeyType) -> Vec<u8> {
-        use prost::Message;
-        key.encode_to_vec()
-    }
-
-    /// Encode value to bytes. Should not be overridden.
-    fn encode_value(value: &Self::PbType) -> Vec<u8> {
-        use flate2::write::GzEncoder;
-        use flate2::Compression;
-        use prost::Message;
-
-        let pb_encoded = value.encode_to_vec();
-
-        // Compress the value if it's larger then the threshold to avoid hitting the limit of etcd.
-        if pb_encoded.len() > MODEL_COMPRESSION_THRESHOLD {
-            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-            encoder.write_all(&pb_encoded).unwrap();
-            encoder.finish().unwrap()
-        } else {
-            pb_encoded
-        }
-    }
-
-    /// Decode value from bytes. Should not be overridden.
-    fn decode_value(value: &[u8]) -> MetadataModelResult<Self::PbType> {
-        use flate2::bufread::GzDecoder;
-        use prost::Message;
-
-        let mut decoder = GzDecoder::new(value);
-        let mut buf = Vec::new();
-
-        // If the value is compressed, decode it.
-        // This works because a protobuf-encoded message is never a valid gzip stream.
-        // https://stackoverflow.com/questions/63621784/can-a-protobuf-message-begin-with-a-gzip-magic-number
-        let value = if decoder.header().is_some() {
-            decoder
-                .read_to_end(&mut buf)
-                .context("failed to decode gzipped value")?;
-            buf.as_slice()
-        } else {
-            value
-        };
-
-        Self::PbType::decode(value).map_err(Into::into)
-    }
-
-    /// `list` returns all records in this model.
-    async fn list<S>(store: &S) -> MetadataModelResult<Vec<Self>>
-    where
-        S: MetaStore,
-    {
-        let bytes_vec = store.list_cf(&Self::cf_name()).await?;
-        bytes_vec
-            .iter()
-            .map(|(_k, v)| Self::decode_value(v.as_slice()).map(Self::from_protobuf))
-            .collect()
-    }
-
-    async fn list_at_snapshot<S>(snapshot: &S::Snapshot) -> MetadataModelResult<Vec<Self>>
-    where
-        S: MetaStore,
-    {
-        let bytes_vec = snapshot.list_cf(&Self::cf_name()).await?;
-        bytes_vec
-            .iter()
-            .map(|(_k, v)| Self::decode_value(v.as_slice()).map(Self::from_protobuf))
-            .collect()
-    }
-
-    /// `insert` insert a new record in meta store, replaced it if the record already exist.
-    async fn insert<S>(&self, store: &S) -> MetadataModelResult<()>
-    where
-        S: MetaStore,
-    {
-        store
-            .put_cf(
-                &Self::cf_name(),
-                Self::encode_key(&self.key()?),
-                Self::encode_value(&self.to_protobuf()),
-            )
-            .await
-            .map_err(Into::into)
-    }
-
-    /// `delete` drop records from meta store with associated key.
-    async fn delete<S>(store: &S, key: &Self::KeyType) -> MetadataModelResult<()>
-    where
-        S: MetaStore,
-    {
-        store
-            .delete_cf(&Self::cf_name(), &Self::encode_key(key))
-            .await
-            .map_err(Into::into)
-    }
-
-    /// `select` query a record with associated key and version.
-    async fn select<S>(store: &S, key: &Self::KeyType) -> MetadataModelResult<Option<Self>>
-    where
-        S: MetaStore,
-    {
-        let byte_vec = match store.get_cf(&Self::cf_name(), &Self::encode_key(key)).await {
-            Ok(byte_vec) => byte_vec,
-            Err(err) => {
-                if !matches!(err, MetaStoreError::ItemNotFound(_)) {
-                    return Err(err.into());
-                }
-                return Ok(None);
-            }
-        };
-        let model = Self::from_protobuf(Self::decode_value(byte_vec.as_slice())?);
-        Ok(Some(model))
-    }
-}
-
-macro_rules! for_all_metadata_models {
-    ($macro:ident) => {
-        $macro! {
-            // These items should be included in a meta snapshot.
-            // So be sure to update meta backup/restore when adding new items.
-            { risingwave_pb::hummock::HummockVersionStats },
-            { crate::hummock::model::CompactionGroup },
-            { risingwave_pb::catalog::Database },
-            { risingwave_pb::catalog::Schema },
-            { risingwave_pb::catalog::Table },
-            { risingwave_pb::catalog::Index },
-            { risingwave_pb::catalog::Sink },
-            { risingwave_pb::catalog::Subscription },
-            { risingwave_pb::catalog::Source },
-            { risingwave_pb::catalog::View },
-            { crate::model::stream::TableFragments },
-            { risingwave_pb::user::UserInfo },
-            { risingwave_pb::catalog::Function },
-            { risingwave_pb::catalog::Connection },
-            { risingwave_pb::catalog::Secret },
-            // These items need not be included in a meta snapshot.
-            { crate::model::cluster::Worker },
-            { risingwave_pb::hummock::CompactTaskAssignment },
-            { crate::hummock::compaction::CompactStatus },
-            { risingwave_hummock_sdk::version::HummockVersionDelta },
-            { risingwave_pb::hummock::HummockPinnedSnapshot },
-            { risingwave_pb::hummock::HummockPinnedVersion },
-        }
-    };
-}
-
-macro_rules! impl_metadata_model_marker {
-    ($({ $target_type:ty },)*) => {
-        $(
-            impl private::MetadataModelMarker for $target_type {}
-        )*
-    }
-}
-
-for_all_metadata_models!(impl_metadata_model_marker);
-
-/// `Transactional` defines operations supported in a transaction.
-/// Read operations can be supported if necessary.
-#[async_trait]
-impl<T> Transactional<Transaction> for T
-where
-    T: MetadataModel + Sync,
-{
-    async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        trx.put(
-            Self::cf_name(),
-            Self::encode_key(&self.key()?),
-            Self::encode_value(&self.to_protobuf()),
-        );
-        Ok(())
-    }
-
-    async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        trx.delete(Self::cf_name(), Self::encode_key(&self.key()?));
-        Ok(())
-    }
 }
 
 pub trait InMemValTransaction: Sized {
@@ -462,16 +271,20 @@ enum BTreeMapOp<V> {
 /// are stored in `staging`. On `commit`, it will apply the changes stored in `staging` to the in
 /// memory btree map. When serve `get` and `get_mut`, it merges the value stored in `staging` and
 /// `tree_ref`.
-pub struct BTreeMapTransaction<'a, K: Ord, V> {
+pub struct BTreeMapTransactionInner<K: Ord, V, P: DerefMut<Target = BTreeMap<K, V>>> {
     /// A reference to the original `BTreeMap`. All access to this field should be immutable,
     /// except when we commit the staging changes to the original map.
-    tree_ref: &'a mut BTreeMap<K, V>,
+    tree_ref: P,
     /// Store all the staging changes that will be applied to the original map on commit
     staging: BTreeMap<K, BTreeMapOp<V>>,
 }
 
-impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
-    pub fn new(tree_ref: &'a mut BTreeMap<K, V>) -> BTreeMapTransaction<'a, K, V> {
+pub type BTreeMapTransaction<'a, K, V> = BTreeMapTransactionInner<K, V, &'a mut BTreeMap<K, V>>;
+
+impl<K: Ord + Debug, V: Clone, P: DerefMut<Target = BTreeMap<K, V>>>
+    BTreeMapTransactionInner<K, V, P>
+{
+    pub fn new(tree_ref: P) -> BTreeMapTransactionInner<K, V, P> {
         Self {
             tree_ref,
             staging: BTreeMap::default(),
@@ -481,7 +294,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
     /// Start a `BTreeMapEntryTransaction` when the `key` exists
     #[allow(dead_code)]
     pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<'_, K, V>> {
-        BTreeMapEntryTransaction::new(self.tree_ref, key, None)
+        BTreeMapEntryTransaction::new(&mut self.tree_ref, key, None)
     }
 
     /// Start a `BTreeMapEntryTransaction`. If the `key` does not exist, the the `default_val` will
@@ -492,17 +305,17 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
         key: K,
         default_val: V,
     ) -> BTreeMapEntryTransaction<'_, K, V> {
-        BTreeMapEntryTransaction::new(self.tree_ref, key, Some(default_val))
+        BTreeMapEntryTransaction::new(&mut self.tree_ref, key, Some(default_val))
             .expect("default value is provided and should return `Some`")
     }
 
     /// Start a `BTreeMapEntryTransaction` that inserts the `val` into `key`.
     pub fn new_entry_insert_txn(&mut self, key: K, val: V) -> BTreeMapEntryTransaction<'_, K, V> {
-        BTreeMapEntryTransaction::new_insert(self.tree_ref, key, val)
+        BTreeMapEntryTransaction::new_insert(&mut self.tree_ref, key, val)
     }
 
     pub fn tree_ref(&self) -> &BTreeMap<K, V> {
-        self.tree_ref
+        &self.tree_ref
     }
 
     /// Get the value of the provided key by merging the staging value and the original value
@@ -578,7 +391,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
         }
     }
 
-    pub fn commit_memory(self) {
+    pub fn commit_memory(mut self) {
         // Apply each op stored in the staging to original tree.
         for (k, op) in self.staging {
             match op {
@@ -593,14 +406,16 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord + Debug, V: Clone> InMemValTransaction for BTreeMapTransaction<'a, K, V> {
+impl<K: Ord + Debug, V: Clone, P: DerefMut<Target = BTreeMap<K, V>>> InMemValTransaction
+    for BTreeMapTransactionInner<K, V, P>
+{
     fn commit(self) {
         self.commit_memory();
     }
 }
 
-impl<'a, K: Ord + Debug, V: Transactional<TXN> + Clone, TXN> ValTransaction<TXN>
-    for BTreeMapTransaction<'a, K, V>
+impl<K: Ord + Debug, V: Transactional<TXN> + Clone, P: DerefMut<Target = BTreeMap<K, V>>, TXN>
+    ValTransaction<TXN> for BTreeMapTransactionInner<K, V, P>
 {
     async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         // Add the staging operation to txn
@@ -696,12 +511,80 @@ impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
     }
 }
 
+impl<T: InMemValTransaction> InMemValTransaction for Option<T> {
+    fn commit(self) {
+        if let Some(inner) = self {
+            inner.commit();
+        }
+    }
+}
+
+impl<T: ValTransaction<TXN>, TXN> ValTransaction<TXN> for Option<T> {
+    async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
+        if let Some(inner) = &self {
+            inner.apply_to_txn(txn).await?;
+        }
+        Ok(())
+    }
+}
+
+pub struct DerefMutForward<
+    Inner,
+    Target,
+    P: DerefMut<Target = Inner>,
+    F: Fn(&Inner) -> &Target,
+    FMut: Fn(&mut Inner) -> &mut Target,
+> {
+    ptr: P,
+    f: F,
+    f_mut: FMut,
+}
+
+impl<
+        Inner,
+        Target,
+        P: DerefMut<Target = Inner>,
+        F: Fn(&Inner) -> &Target,
+        FMut: Fn(&mut Inner) -> &mut Target,
+    > DerefMutForward<Inner, Target, P, F, FMut>
+{
+    pub fn new(ptr: P, f: F, f_mut: FMut) -> Self {
+        Self { ptr, f, f_mut }
+    }
+}
+
+impl<
+        Inner,
+        Target,
+        P: DerefMut<Target = Inner>,
+        F: Fn(&Inner) -> &Target,
+        FMut: Fn(&mut Inner) -> &mut Target,
+    > Deref for DerefMutForward<Inner, Target, P, F, FMut>
+{
+    type Target = Target;
+
+    fn deref(&self) -> &Self::Target {
+        (self.f)(&self.ptr)
+    }
+}
+
+impl<
+        Inner,
+        Target,
+        P: DerefMut<Target = Inner>,
+        F: Fn(&Inner) -> &Target,
+        FMut: Fn(&mut Inner) -> &mut Target,
+    > DerefMut for DerefMutForward<Inner, Target, P, F, FMut>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        (self.f_mut)(&mut self.ptr)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-
     use super::*;
-    use crate::storage::Operation;
+    use crate::storage::{Operation, Transaction};
 
     #[derive(PartialEq, Clone, Debug)]
     struct TestTransactional {
@@ -726,53 +609,6 @@ mod tests {
             trx.delete(TEST_CF.to_string(), self.key.as_bytes().into());
             Ok(())
         }
-    }
-
-    #[tokio::test]
-    async fn test_compress_decompress() {
-        use prost::Message;
-        use risingwave_pb::catalog::Database;
-
-        use crate::storage::MemStore;
-
-        async fn do_test(len: usize) {
-            // Use `Database` as a test model.
-            type Model = Database;
-
-            let store = MemStore::new();
-            let model = Model {
-                name: "t".repeat(len),
-                ..Default::default()
-            };
-            {
-                let encoded_len = model.encoded_len();
-                // Showing that the encoded length is larger than the original length.
-                // So that a len greater than the threshold will hit the compression branch.
-                assert!(encoded_len >= len, "encoded_len: {encoded_len}, len: {len}");
-            }
-            model.insert(&store).await.unwrap();
-
-            // Test `list`
-            let decoded = Model::list(&store)
-                .await
-                .unwrap()
-                .into_iter()
-                .exactly_one()
-                .unwrap();
-            assert_eq!(model, decoded);
-
-            // Test `select`
-            let decoded = Model::select(&store, &model.key().unwrap())
-                .await
-                .unwrap()
-                .into_iter()
-                .exactly_one()
-                .unwrap();
-            assert_eq!(model, decoded);
-        }
-
-        do_test(1).await;
-        do_test(MODEL_COMPRESSION_THRESHOLD + 1).await;
     }
 
     #[tokio::test]

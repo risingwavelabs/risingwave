@@ -28,7 +28,7 @@ use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IncludeOption, IsOptional, Parser, UPSTREAM_SOURCE_KEY};
+use crate::parser::{IncludeOption, IsOptional, Parser};
 use crate::parser_err;
 use crate::parser_v2::literal_u32;
 use crate::tokenizer::Token;
@@ -63,11 +63,11 @@ macro_rules! impl_fmt_display {
     }};
     ($field:ident => [$($arr:tt)+], $v:ident, $self:ident) => {
         if $self.$field {
-            $v.push(format!("{}", AstVec([$($arr)+].to_vec())));
+            $v.push(format!("{}", display_separated(&[$($arr)+], " ")));
         }
     };
     ([$($arr:tt)+], $v:ident) => {
-        $v.push(format!("{}", AstVec([$($arr)+].to_vec())));
+        $v.push(format!("{}", display_separated(&[$($arr)+], " ")));
     };
 }
 
@@ -82,6 +82,7 @@ macro_rules! impl_fmt_display {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateSourceStatement {
+    pub temporary: bool,
     pub if_not_exists: bool,
     pub columns: Vec<ColumnDef>,
     // The wildchar position in columns defined in sql. Only exist when using external schema.
@@ -208,9 +209,9 @@ impl Encode {
             "PROTOBUF" => Encode::Protobuf,
             "JSON" => Encode::Json,
             "TEMPLATE" => Encode::Template,
+            "PARQUET" => Encode::Parquet,
             "NATIVE" => Encode::Native,
             "NONE" => Encode::None,
-            "PARQUET" => Encode::Parquet,
             _ => parser_err!(
                 "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | PARQUET | NONE after Encode"
             ),
@@ -218,6 +219,7 @@ impl Encode {
     }
 }
 
+/// `FORMAT ... ENCODE ... [(a=b, ...)] [KEY ENCODE ...]`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ConnectorSchema {
@@ -399,44 +401,6 @@ impl fmt::Display for ConnectorSchema {
     }
 }
 
-impl ParseTo for CreateSourceStatement {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
-        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
-        impl_parse_to!(source_name: ObjectName, p);
-
-        // parse columns
-        let (columns, constraints, source_watermarks, wildcard_idx) =
-            p.parse_columns_with_watermark()?;
-        let include_options = p.parse_include_options()?;
-
-        let with_options = p.parse_with_properties()?;
-        let option = with_options
-            .iter()
-            .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
-        let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
-        let cdc_source_job = connector.contains("-cdc");
-        if cdc_source_job && (!columns.is_empty() || !constraints.is_empty()) {
-            parser_err!("CDC source cannot define columns and constraints");
-        }
-
-        // row format for nexmark source must be native
-        // default row format for datagen source is native
-        let source_schema = p.parse_source_schema_with_connector(&connector, cdc_source_job)?;
-
-        Ok(Self {
-            if_not_exists,
-            columns,
-            wildcard_idx,
-            constraints,
-            source_name,
-            with_properties: WithProperties(with_options),
-            source_schema,
-            source_watermarks,
-            include_column_options: include_options,
-        })
-    }
-}
-
 pub(super) fn fmt_create_items(
     columns: &[ColumnDef],
     constraints: &[TableConstraint],
@@ -449,6 +413,7 @@ pub(super) fn fmt_create_items(
         || !watermarks.is_empty()
         || wildcard_idx.is_some();
     has_items.then(|| write!(&mut items, "("));
+
     if let Some(wildcard_idx) = wildcard_idx {
         let (columns_l, columns_r) = columns.split_at(wildcard_idx);
         write!(&mut items, "{}", display_comma_separated(columns_l))?;
@@ -463,14 +428,21 @@ pub(super) fn fmt_create_items(
     } else {
         write!(&mut items, "{}", display_comma_separated(columns))?;
     }
-    if !columns.is_empty() && (!constraints.is_empty() || !watermarks.is_empty()) {
+    let mut leading_items = !columns.is_empty() || wildcard_idx.is_some();
+
+    if leading_items && !constraints.is_empty() {
         write!(&mut items, ", ")?;
     }
     write!(&mut items, "{}", display_comma_separated(constraints))?;
-    if !columns.is_empty() && !constraints.is_empty() && !watermarks.is_empty() {
+    leading_items |= !constraints.is_empty();
+
+    if leading_items && !watermarks.is_empty() {
         write!(&mut items, ", ")?;
     }
     write!(&mut items, "{}", display_comma_separated(watermarks))?;
+    // uncomment this when adding more sections below
+    // leading_items |= !watermarks.is_empty();
+
     has_items.then(|| write!(&mut items, ")"));
     Ok(items)
 }
@@ -491,6 +463,9 @@ impl fmt::Display for CreateSourceStatement {
             v.push(items);
         }
 
+        for item in &self.include_column_options {
+            v.push(format!("{}", item));
+        }
         impl_fmt_display!(with_properties, v, self);
         impl_fmt_display!(source_schema, v, self);
         v.iter().join(" ").fmt(f)
@@ -671,7 +646,7 @@ impl fmt::Display for CreateSubscriptionStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DeclareCursor {
     Query(Box<Query>),
-    Subscription(ObjectName, Option<Since>),
+    Subscription(ObjectName, Since),
 }
 
 impl fmt::Display for DeclareCursor {
@@ -745,6 +720,7 @@ impl fmt::Display for DeclareCursorStatement {
 pub struct FetchCursorStatement {
     pub cursor_name: ObjectName,
     pub count: u32,
+    pub with_properties: WithProperties,
 }
 
 impl ParseTo for FetchCursorStatement {
@@ -756,8 +732,13 @@ impl ParseTo for FetchCursorStatement {
         };
         p.expect_keyword(Keyword::FROM)?;
         impl_parse_to!(cursor_name: ObjectName, p);
+        impl_parse_to!(with_properties: WithProperties, p);
 
-        Ok(Self { cursor_name, count })
+        Ok(Self {
+            cursor_name,
+            count,
+            with_properties,
+        })
     }
 }
 
@@ -891,16 +872,6 @@ impl fmt::Display for CreateSecretStatement {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct AstVec<T>(pub Vec<T>);
-
-impl<T: fmt::Display> fmt::Display for AstVec<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.iter().join(" ").fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WithProperties(pub Vec<SqlOption>);
 
 impl ParseTo for WithProperties {
@@ -927,6 +898,7 @@ pub enum Since {
     TimestampMsNum(u64),
     ProcessTime,
     Begin,
+    Full,
 }
 
 impl fmt::Display for Since {
@@ -936,6 +908,7 @@ impl fmt::Display for Since {
             TimestampMsNum(ts) => write!(f, " SINCE {}", ts),
             ProcessTime => write!(f, " SINCE PROCTIME()"),
             Begin => write!(f, " SINCE BEGIN()"),
+            Full => write!(f, " FULL"),
         }
     }
 }

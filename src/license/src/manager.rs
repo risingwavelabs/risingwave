@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroU64;
 use std::sync::{LazyLock, RwLock};
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
 use thiserror::Error;
 use thiserror_ext::AsReport;
+
+use crate::LicenseKeyRef;
 
 /// License tier.
 ///
@@ -40,7 +43,7 @@ pub enum Tier {
 ///
 /// The issuer must be `prod.risingwave.com` in production, and can be `test.risingwave.com` in
 /// development. This will be validated when refreshing the license key.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub enum Issuer {
     #[serde(rename = "prod.risingwave.com")]
     Prod,
@@ -55,10 +58,13 @@ pub enum Issuer {
 /// The content of a license.
 ///
 /// We use JSON Web Token (JWT) to represent the license. This struct is the payload.
+///
+/// Prefer calling [`crate::Feature::check_available`] to check the availability of a feature,
+/// other than directly checking the content of the license.
 // TODO(license): Shall we add a version field?
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) struct License {
+pub struct License {
     /// Subject of the license.
     ///
     /// See <https://tools.ietf.org/html/rfc7519#section-4.1.2>.
@@ -73,6 +79,9 @@ pub(super) struct License {
 
     /// Tier of the license.
     pub tier: Tier,
+
+    /// Maximum number of compute-node CPU cores allowed to use. Typically used for the paid tier.
+    pub cpu_core_limit: Option<NonZeroU64>,
 
     /// Expiration time in seconds since UNIX epoch.
     ///
@@ -89,6 +98,7 @@ impl Default for License {
             sub: "default".to_owned(),
             tier: Tier::Free,
             iss: Issuer::Prod,
+            cpu_core_limit: None,
             exp: u64::MAX,
         }
     }
@@ -115,7 +125,7 @@ static PUBLIC_KEY: LazyLock<DecodingKey> = LazyLock::new(|| {
 
 impl LicenseManager {
     /// Create a new license manager with the default license.
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: RwLock::new(Inner {
                 license: Ok(License::default()),
@@ -130,7 +140,8 @@ impl LicenseManager {
     }
 
     /// Refresh the license with the given license key.
-    pub fn refresh(&self, license_key: &str) {
+    pub fn refresh(&self, license_key: LicenseKeyRef<'_>) {
+        let license_key = license_key.0;
         let mut inner = self.inner.write().unwrap();
 
         // Empty license key means unset. Use the default one here.
@@ -163,7 +174,10 @@ impl LicenseManager {
     /// Get the current license if it is valid.
     ///
     /// Since the license can expire, the returned license should not be cached by the caller.
-    pub(super) fn license(&self) -> Result<License, LicenseKeyError> {
+    ///
+    /// Prefer calling [`crate::Feature::check_available`] to check the availability of a feature,
+    /// other than directly calling this method and checking the content of the license.
+    pub fn license(&self) -> Result<License, LicenseKeyError> {
         let license = self.inner.read().unwrap().license.clone()?;
 
         // Check the expiration time additionally.
@@ -177,12 +191,6 @@ impl LicenseManager {
     }
 }
 
-/// A license key with the paid tier that only works in tests.
-pub const TEST_PAID_LICENSE_KEY: &str =
- "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
-  eyJzdWIiOiJydy10ZXN0IiwidGllciI6InBhaWQiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
-  c6Gmb6xh3dBDYX_4cOnHUbwRXJbUCM7W3mrJA77nLC5FkoOLpGstzvQ7qfnPVBu412MFtKRDvh-Lk8JwG7pVa0WLw16DeHTtVHxZukMTZ1Q_ciZ1xKeUx_pwUldkVzv6c9j99gNqPSyTjzOXTdKlidBRLer2zP0v3Lf-ZxnMG0tEcIbTinTb3BNCtAQ8bwBSRP-X48cVTWafjaZxv_zGiJT28uV3bR6jwrorjVB4VGvqhsJi6Fd074XOmUlnOleoAtyzKvjmGC5_FvnL0ztIe_I0z_pyCMfWpyJ_J4C7rCP1aVWUImyoowLmVDA-IKjclzOW5Fvi0wjXsc6OckOc_A";
-
 // Tests below only work in debug mode.
 #[cfg(debug_assertions)]
 #[cfg(test)]
@@ -190,10 +198,11 @@ mod tests {
     use expect_test::expect;
 
     use super::*;
+    use crate::{LicenseKey, TEST_PAID_LICENSE_KEY_CONTENT};
 
     fn do_test(key: &str, expect: expect_test::Expect) {
         let manager = LicenseManager::new();
-        manager.refresh(key);
+        manager.refresh(LicenseKey(key));
 
         match manager.license() {
             Ok(license) => expect.assert_debug_eq(&license),
@@ -204,12 +213,13 @@ mod tests {
     #[test]
     fn test_paid_license_key() {
         do_test(
-            TEST_PAID_LICENSE_KEY,
+            TEST_PAID_LICENSE_KEY_CONTENT,
             expect![[r#"
                 License {
                     sub: "rw-test",
                     iss: Test,
                     tier: Paid,
+                    cpu_core_limit: None,
                     exp: 9999999999,
                 }
             "#]],
@@ -230,6 +240,7 @@ mod tests {
                     sub: "rw-test",
                     iss: Test,
                     tier: Free,
+                    cpu_core_limit: None,
                     exp: 9999999999,
                 }
             "#]],
@@ -246,6 +257,7 @@ mod tests {
                     sub: "default",
                     iss: Prod,
                     tier: Free,
+                    cpu_core_limit: None,
                     exp: 18446744073709551615,
                 }
             "#]],

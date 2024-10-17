@@ -22,9 +22,9 @@ use futures_util::AsyncReadExt;
 use opendal::layers::RetryLayer;
 use opendal::services::{Fs, Memory};
 use opendal::Operator;
-use prost::Message;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::data::DataChunk as PbDataChunk;
+use risingwave_pb::Message;
 use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use twox_hash::XxHash64;
@@ -61,15 +61,13 @@ impl SpillOp {
 
         let op = match spill_backend {
             SpillBackend::Disk => {
-                let mut builder = Fs::default();
-                builder.root(&root);
+                let builder = Fs::default().root(&root);
                 Operator::new(builder)?
                     .layer(RetryLayer::default())
                     .finish()
             }
             SpillBackend::Memory => {
-                let mut builder = Memory::default();
-                builder.root(&root);
+                let builder = Memory::default().root(&root);
                 Operator::new(builder)?
                     .layer(RetryLayer::default())
                     .finish()
@@ -86,8 +84,7 @@ impl SpillOp {
             std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
         let root = format!("/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR);
 
-        let mut builder = Fs::default();
-        builder.root(&root);
+        let builder = Fs::default().root(&root);
 
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())
