@@ -22,7 +22,7 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
-    commit_checkpoint_interval = 5,
+    commit_checkpoint_interval = 3,
     primary_key = 'i1,i2',
 );
 
@@ -35,7 +35,7 @@ flush
 statement ok
 DELETE FROM s1 WHERE i1 < 3;
 
-sleep 100s
+sleep 16s
 
 statement ok
 CREATE SOURCE iceberg_t1_source

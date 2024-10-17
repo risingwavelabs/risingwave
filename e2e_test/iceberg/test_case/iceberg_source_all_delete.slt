@@ -22,7 +22,7 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
-    commit_checkpoint_interval = 5,
+    commit_checkpoint_interval = 3,
     primary_key = 'i1,i2',
 );
 
@@ -35,7 +35,7 @@ flush
 statement ok
 DELETE FROM s1 WHERE i1 < 3;
 
-sleep 10s
+sleep 16s
 
 statement ok
 CREATE SOURCE iceberg_t1_source
@@ -52,12 +52,12 @@ WITH (
 );
 
 statement ok
-DELETE FROM s1 where i3 > 4;
+DELETE FROM s1 WHERE i1 > 4;
 
 statement ok
 flush
 
-sleep 10s
+sleep 16s
 
 query I
 select * from iceberg_t1_source order by i1 limit 5;
