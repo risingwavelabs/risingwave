@@ -562,7 +562,7 @@ impl From<PbTable> for TableCatalog {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
         });
         let name = tb.name.clone();
-        let vnode_count = tb.vnode_count_inner();
+        let vnode_count = tb.vnode_count();
 
         let mut col_names = HashSet::new();
         let mut col_index: HashMap<i32, usize> = HashMap::new();
@@ -633,7 +633,7 @@ impl From<PbTable> for TableCatalog {
                 .map(TableId::from)
                 .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
-            vnode_count,
+            vnode_count: VnodeCount::set(vnode_count), /* from existing (persisted) tables, vnode_count must be set */
         }
     }
 }
