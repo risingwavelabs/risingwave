@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use super::opendal_sink::FileSink;
+use super::opendal_sink::{BatchingStrategy, FileSink};
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
@@ -39,6 +39,9 @@ pub struct WebhdfsCommon {
 pub struct WebhdfsConfig {
     #[serde(flatten)]
     pub common: WebhdfsCommon,
+
+    #[serde(flatten)]
+    pub batching_strategy: BatchingStrategy,
 
     pub r#type: String, // accept "append-only"
 
@@ -102,5 +105,13 @@ impl OpendalSinkBackend for WebhdfsSink {
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
         super::opendal_sink::EngineType::Webhdfs
+    }
+
+    fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy {
+        BatchingStrategy {
+            max_row_count: properties.batching_strategy.max_row_count,
+            rollover_seconds: properties.batching_strategy.rollover_seconds,
+            path_partition_prefix: properties.batching_strategy.path_partition_prefix,
+        }
     }
 }
