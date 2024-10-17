@@ -638,10 +638,10 @@ impl HummockManager {
         group: &TableGroupInfo,
         compaction_group_config: CompactionGroup,
     ) {
-        let is_huge_hybrid_group: bool = group.group_size
-            > (compaction_group_config.max_estimated_group_size() as f64
-                * self.env.opts.compaction_group_size_threshold) as u64
-            && group.table_statistic.len() > 1; // avoid split single table group
+        let group_max_size = (compaction_group_config.max_estimated_group_size() as f64
+            * self.env.opts.compaction_group_size_threshold) as u64;
+        let is_huge_hybrid_group =
+            group.group_size > group_max_size && group.table_statistic.len() > 1; // avoid split single table group
         if is_huge_hybrid_group {
             assert!(group.table_statistic.keys().is_sorted());
             let mut accumulated_size = 0;
@@ -651,7 +651,7 @@ impl HummockManager {
                 table_ids.push(*table_id);
                 // split if the accumulated size is greater than half of the group size
                 // avoid split a small table to dedicated compaction group and trigger multiple merge
-                if accumulated_size * 2 > group.group_size {
+                if accumulated_size * 2 > group_max_size {
                     let ret = self
                         .move_state_tables_to_dedicated_compaction_group(
                             group.group_id,
