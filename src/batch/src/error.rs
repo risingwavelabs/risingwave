@@ -129,17 +129,10 @@ pub enum BatchError {
     ),
 
     #[error(transparent)]
-    Postgres(
-        #[from]
-        #[backtrace]
-        tokio_postgres::Error,
-    ),
-
-    #[error(transparent)]
     ExternalSystemError(
         #[from]
         #[backtrace]
-        ExternalSystemError,
+        BatchExternalSystemError,
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.
@@ -210,9 +203,27 @@ impl From<ConnectorError> for BatchError {
 
 // Define a external system error
 def_anyhow_newtype! {
-    pub ExternalSystemError,
+    pub BatchExternalSystemError,
 
     iceberg::Error => "Iceberg Batch Query Error",
     ParquetError => "Parquet Batch Query Error",
     tokio_postgres::Error => "Postgres Batch Query Error",
 }
+
+impl From<tokio_postgres::Error> for BatchError {
+    fn from(e: tokio_postgres::Error) -> Self {
+        Self::ExternalSystemError(e.into())
+    }
+}
+
+// impl From<ParquetError> for BatchError {
+//     fn from(e: ParquetError) -> Self {
+//         Self::ExternalSystemError(e.into())
+//     }
+// }
+//
+// impl From<iceberg::Error> for BatchError {
+//     fn from(e: iceberg::Error) -> Self {
+//         Self::ExternalSystemError(e.into())
+//     }
+// }
