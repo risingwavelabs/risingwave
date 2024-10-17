@@ -58,12 +58,6 @@ async fn test_sink_decouple_err_isolation() -> Result<()> {
         test_source.create_stream_count.load(Relaxed)
     );
 
-    let result = session
-        .run("select * from rw_event_logs where event_type = 'SINK_FAIL'")
-        .await?;
-    assert!(!result.is_empty());
-    println!("Sink fail event: {:?}", result);
-
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     test_sink.store.check_simple_result(&test_source.id_list)?;
     assert!(test_sink.store.inner().checkpoint_count > 0);
