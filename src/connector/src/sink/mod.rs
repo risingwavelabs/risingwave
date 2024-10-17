@@ -534,6 +534,29 @@ impl SinkMetaClient {
             }
         }
     }
+
+    pub async fn add_sink_fail_evet_log(
+        &self,
+        sink_id: u32,
+        sink_name: String,
+        connector: String,
+        error: String,
+    ) {
+        match self {
+            SinkMetaClient::MetaClient(meta_client) => {
+                match meta_client
+                    .add_sink_fail_evet(sink_id, sink_name, connector, error)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), sink_id = sink_id, "Fialed to add sink fail event to event log.");
+                    }
+                }
+            }
+            SinkMetaClient::MockMetaClient(_) => {}
+        }
+    }
 }
 
 impl SinkWriterParam {

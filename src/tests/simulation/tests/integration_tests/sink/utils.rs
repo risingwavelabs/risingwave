@@ -52,6 +52,7 @@ pub struct TestSinkStoreInner {
     pub id_name: HashMap<i32, Vec<String>>,
     pub epochs: Vec<u64>,
     pub checkpoint_count: usize,
+    pub err_count: usize,
 }
 
 #[derive(Clone)]
@@ -66,6 +67,7 @@ impl TestSinkStore {
                 id_name: HashMap::new(),
                 epochs: Vec::new(),
                 checkpoint_count: 0,
+                err_count: 0,
             })),
         }
     }
@@ -99,6 +101,10 @@ impl TestSinkStore {
         self.inner().id_name.len()
     }
 
+    pub fn err_count(&self) -> usize {
+        self.inner().err_count
+    }
+
     pub async fn wait_for_count(&self, count: usize) -> anyhow::Result<()> {
         let mut prev_count = 0;
         let mut has_printed = false;
@@ -118,6 +124,16 @@ impl TestSinkStore {
             } else {
                 prev_count = curr_count;
                 has_printed = false;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn wait_for_err(&self, count: usize) -> anyhow::Result<()> {
+        loop {
+            sleep(Duration::from_secs(1)).await;
+            if self.err_count() >= count {
+                break;
             }
         }
         Ok(())
@@ -154,6 +170,7 @@ impl SinkWriter for TestWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> risingwave_connector::sink::Result<()> {
         if thread_rng().gen_ratio(self.err_rate.load(Relaxed), u32::MAX) {
             println!("write with err");
+            self.store.inner().err_count += 1;
             return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
         }
         for (op, row) in chunk.rows() {
