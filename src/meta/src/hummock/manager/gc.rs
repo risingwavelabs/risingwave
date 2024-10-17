@@ -232,6 +232,7 @@ impl HummockManager {
         &self,
         object_ids: Vec<HummockSstableObjectId>,
         next_start_after: Option<String>,
+        pinned_by_metadata_backup: HashSet<HummockSstableObjectId>,
     ) -> Result<usize> {
         // It's crucial to collect_min_uncommitted_sst_id (i.e. `min_sst_id`) only after LIST object store (i.e. `object_ids`).
         // Because after getting `min_sst_id`, new compute nodes may join and generate new uncommitted SSTs that are not covered by `min_sst_id`.
@@ -268,6 +269,12 @@ impl HummockManager {
             .filter(|s| !pinned_object_ids.contains(s))
             .collect_vec();
         let after_time_travel = object_ids.len();
+        // filter by metadata backup
+        let object_ids = object_ids
+            .into_iter()
+            .filter(|s| !pinned_by_metadata_backup.contains(s))
+            .collect_vec();
+        let after_metadata_backup = object_ids.len();
         // filter by version
         let after_version = self.extend_objects_to_delete_from_scan(&object_ids).await;
         metrics
@@ -277,6 +284,7 @@ impl HummockManager {
             candidate_object_number,
             after_min_sst_id,
             after_time_travel,
+            after_metadata_backup,
             after_version,
             "complete full gc"
         );
@@ -475,6 +483,7 @@ impl PagedMetric {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -536,7 +545,7 @@ mod tests {
 
         // Empty input results immediate return, without waiting heartbeat.
         hummock_manager
-            .complete_full_gc(vec![], None)
+            .complete_full_gc(vec![], None, HashSet::default())
             .await
             .unwrap();
 
@@ -544,7 +553,7 @@ mod tests {
         assert_eq!(
             3,
             hummock_manager
-                .complete_full_gc(vec![1, 2, 3], None)
+                .complete_full_gc(vec![1, 2, 3], None, HashSet::default())
                 .await
                 .unwrap()
         );
@@ -569,7 +578,8 @@ mod tests {
             hummock_manager
                 .complete_full_gc(
                     [committed_object_ids, vec![max_committed_object_id + 1]].concat(),
-                    None
+                    None,
+                    HashSet::default(),
                 )
                 .await
                 .unwrap()
