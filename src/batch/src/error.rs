@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub use anyhow::anyhow;
 use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{def_anyhow_newtype, BoxedError};
+use risingwave_common::error::{def_anyhow_newtype, def_anyhow_variant, BoxedError};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_dml::error::DmlError;
@@ -115,20 +115,6 @@ pub enum BatchError {
     ),
 
     #[error(transparent)]
-    Iceberg(
-        #[from]
-        #[backtrace]
-        iceberg::Error,
-    ),
-
-    #[error(transparent)]
-    Parquet(
-        #[from]
-        #[backtrace]
-        ParquetError,
-    ),
-
-    #[error(transparent)]
     ExternalSystemError(
         #[from]
         #[backtrace]
@@ -202,28 +188,11 @@ impl From<ConnectorError> for BatchError {
 }
 
 // Define a external system error
-def_anyhow_newtype! {
+def_anyhow_variant! {
     pub BatchExternalSystemError,
+    BatchError ExternalSystemError,
 
+    tokio_postgres::Error => "Postgres Batch Query Error",
     iceberg::Error => "Iceberg Batch Query Error",
     ParquetError => "Parquet Batch Query Error",
-    tokio_postgres::Error => "Postgres Batch Query Error",
 }
-
-impl From<tokio_postgres::Error> for BatchError {
-    fn from(e: tokio_postgres::Error) -> Self {
-        Self::ExternalSystemError(e.into())
-    }
-}
-
-// impl From<ParquetError> for BatchError {
-//     fn from(e: ParquetError) -> Self {
-//         Self::ExternalSystemError(e.into())
-//     }
-// }
-//
-// impl From<iceberg::Error> for BatchError {
-//     fn from(e: iceberg::Error) -> Self {
-//         Self::ExternalSystemError(e.into())
-//     }
-// }
