@@ -365,7 +365,13 @@ impl HummockManager {
         });
         let db = &self.meta_store_ref().conn;
         let gc_history_retention_sec = self.env.opts.min_sst_retention_time_sec * 2;
-        let gc_history_low_watermark = now.saturating_sub(gc_history_retention_sec);
+        let gc_history_low_watermark = DateTime::from_timestamp(
+            now.saturating_sub(gc_history_retention_sec)
+                .try_into()
+                .unwrap(),
+            0,
+        )
+        .unwrap();
         hummock_gc_history::Entity::delete_many()
             .filter(hummock_gc_history::Column::MarkDeleteAt.lt(gc_history_low_watermark))
             .exec(db)
