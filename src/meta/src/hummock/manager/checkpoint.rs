@@ -209,8 +209,7 @@ impl HummockManager {
             });
         }
         // We can directly discard reference to stale objects that will no longer be used.
-        let context_info = self.context_info.read().await;
-        let min_pinned_version_id = context_info.min_pinned_version_id();
+        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
         stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
         let new_checkpoint = HummockVersionCheckpoint {
             version: current_version.clone(),
@@ -231,10 +230,9 @@ impl HummockManager {
         // 3. hold write lock and update in memory state
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
-        let context_info = self.context_info.read().await;
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
-        let min_pinned_version_id = context_info.min_pinned_version_id();
+        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
         trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
         trigger_split_stat(&self.metrics, &versioning.current_version);
         drop(versioning_guard);
