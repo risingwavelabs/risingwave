@@ -113,14 +113,6 @@ pub fn summarize_group_deltas(
     }
 }
 
-#[derive(Clone, Default)]
-pub struct TableGroupInfo {
-    pub group_id: CompactionGroupId,
-    pub group_size: u64,
-    pub table_statistic: HashMap<StateTableId, u64>,
-    pub split_by_table: bool,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct SstDeltaInfo {
     pub insert_sst_level: u32,
@@ -335,6 +327,8 @@ impl HummockVersion {
                 let l0 = &parent_levels.l0;
                 let mut split_count = 0;
                 for sub_level in &l0.sub_levels {
+                    assert!(!sub_level.table_infos.is_empty());
+
                     if sub_level.level_type == PbLevelType::Overlapping {
                         // TODO: use table_id / vnode / key_range filter
                         split_count += sub_level
@@ -448,6 +442,8 @@ impl HummockVersion {
                     }
                 }
             }
+
+            l0.sub_levels.retain(|level| !level.table_infos.is_empty());
         }
         for (idx, level) in parent_levels.levels.iter_mut().enumerate() {
             let insert_table_infos =
@@ -475,6 +471,17 @@ impl HummockVersion {
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
                 });
         }
+
+        assert!(parent_levels
+            .l0
+            .sub_levels
+            .iter()
+            .all(|level| !level.table_infos.is_empty()));
+        assert!(cur_levels
+            .l0
+            .sub_levels
+            .iter()
+            .all(|level| !level.table_infos.is_empty()));
     }
 
     pub fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
@@ -966,6 +973,8 @@ impl HummockVersionCommon<SstableInfo> {
                     }
                 }
             }
+
+            l0.sub_levels.retain(|level| !level.table_infos.is_empty());
         }
 
         for (idx, level) in parent_levels.levels.iter_mut().enumerate() {
@@ -1002,6 +1011,17 @@ impl HummockVersionCommon<SstableInfo> {
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
                 });
         }
+
+        assert!(parent_levels
+            .l0
+            .sub_levels
+            .iter()
+            .all(|level| !level.table_infos.is_empty()));
+        assert!(cur_levels
+            .l0
+            .sub_levels
+            .iter()
+            .all(|level| !level.table_infos.is_empty()));
     }
 }
 

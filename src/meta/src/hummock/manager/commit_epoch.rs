@@ -339,7 +339,7 @@ impl HummockManager {
             let throughput = (stat.total_value_size + stat.total_key_size) as u64;
             let entry = table_infos.entry(table_id).or_default();
             entry.push_back(throughput);
-            if entry.len() > self.env.opts.table_info_statistic_history_times {
+            if entry.len() > self.env.opts.table_stat_sample_size {
                 entry.pop_front();
             }
         }
