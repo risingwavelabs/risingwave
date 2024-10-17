@@ -21,6 +21,7 @@ use crate::parser::AccessError;
 use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
 use crate::schema::InvalidOptionError;
 use crate::sink::SinkError;
+use crate::source::mqtt::MqttError;
 use crate::source::nats::NatsJetStreamError;
 
 def_anyhow_newtype! {
@@ -71,8 +72,9 @@ def_anyhow_newtype! {
     risingwave_common::array::arrow::arrow_schema_iceberg::ArrowError => "Arrow error",
     google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
     rumqttc::tokio_rustls::rustls::Error => "TLS error",
-    rumqttc::v5::ClientError => "MQTT error",
-    rumqttc::v5::OptionError => "MQTT error",
+    rumqttc::v5::ClientError => "MQTT SDK error",
+    rumqttc::v5::OptionError => "MQTT Option error",
+    MqttError => "MQTT Source error",
     mongodb::error::Error => "Mongodb error",
 
     openssl::error::ErrorStack => "OpenSSL error",
