@@ -20,7 +20,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, StreamJobStatus, TableDesc,
     TableId, TableVersionId,
 };
-use risingwave_common::hash::VnodeCountCompat;
+use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
@@ -186,7 +186,7 @@ pub struct TableCatalog {
     ///
     /// [`StreamMaterialize::derive_table_catalog`]: crate::optimizer::plan_node::StreamMaterialize::derive_table_catalog
     /// [`TableCatalogBuilder::build`]: crate::optimizer::plan_node::utils::TableCatalogBuilder::build
-    pub vnode_count: Option<usize>,
+    pub vnode_count: VnodeCount,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -408,8 +408,7 @@ impl TableCatalog {
     ///
     /// Panics if it's called on an incomplete (and not yet persisted) table catalog.
     pub fn vnode_count(&self) -> usize {
-        self.vnode_count
-            .expect("vnode count unset, called on an incomplete table catalog?")
+        self.vnode_count.value()
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
@@ -457,7 +456,7 @@ impl TableCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
-            maybe_vnode_count: self.vnode_count.map(|v| v as _),
+            maybe_vnode_count: self.vnode_count.to_protobuf(),
         }
     }
 
@@ -563,7 +562,7 @@ impl From<PbTable> for TableCatalog {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
         });
         let name = tb.name.clone();
-        let vnode_count = tb.vnode_count();
+        let vnode_count = tb.vnode_count_inner();
 
         let mut col_names = HashSet::new();
         let mut col_index: HashMap<i32, usize> = HashMap::new();
@@ -634,7 +633,7 @@ impl From<PbTable> for TableCatalog {
                 .map(TableId::from)
                 .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
-            vnode_count: Some(vnode_count), /* from existing (persisted) tables, vnode_count must be set */
+            vnode_count,
         }
     }
 }
@@ -789,7 +788,7 @@ mod tests {
                 dependent_relations: vec![],
                 version_column_index: None,
                 cdc_table_id: None,
-                vnode_count: Some(233),
+                vnode_count: VnodeCount::set(233),
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
