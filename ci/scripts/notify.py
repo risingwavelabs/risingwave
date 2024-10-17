@@ -111,7 +111,10 @@ def get_failed_tests(get_test_status, test_map):
     for test in test_map.keys():
         test_status = get_test_status(test)
         if test_status == "hard_failed" or test_status == "soft_failed":
+            print(f"{test} failed with outcome {test_status}")
             failed_test_map[test] = test_map[test]
+        else:
+            print(f"{test} passed with outcome {test_status}")
     return failed_test_map
 
 def generate_test_status_message(failed_test_map):
