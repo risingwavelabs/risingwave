@@ -261,7 +261,7 @@ pub fn parse_schema_change(
                                             AccessError::TypeError {
                                                 expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
                                                 got: data_type.to_string(),
-                                                value: val_str.to_string(),
+                                                value: default_val_expr_str.to_string(),
                                             }
                                         })?);
                                     } else {
