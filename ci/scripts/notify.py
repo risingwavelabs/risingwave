@@ -11,6 +11,7 @@ import sys
 MAIN_CRON_TEST_MAP = {
     "test-notify": ["noelkwan", "noelkwan"],
     "test-notify-2": ["noelkwan", "noelkwan"],
+    "test-notify-timeout": ["noelkwan", "noelkwan"],
     "docslt": ["tianxiao"],
     "e2e-test-release": ["zhi", "Eric"],
     "e2e-meta-backup-test-release": ["zhi", "Eric"],
