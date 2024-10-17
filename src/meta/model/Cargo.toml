@@ -1,5 +1,5 @@
 [package]
-name = "risingwave_meta_model_v2"
+name = "risingwave_meta_model"
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }

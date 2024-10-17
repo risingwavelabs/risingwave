@@ -14,12 +14,12 @@
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
-use risingwave_meta_model_v2::compaction_config::CompactionConfig;
-use risingwave_meta_model_v2::compaction_status::LevelHandlers;
-use risingwave_meta_model_v2::compaction_task::CompactionTask;
-use risingwave_meta_model_v2::hummock_version_delta::FullVersionDelta;
-use risingwave_meta_model_v2::hummock_version_stats::TableStats;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::compaction_config::CompactionConfig;
+use risingwave_meta_model::compaction_status::LevelHandlers;
+use risingwave_meta_model::compaction_task::CompactionTask;
+use risingwave_meta_model::hummock_version_delta::FullVersionDelta;
+use risingwave_meta_model::hummock_version_stats::TableStats;
+use risingwave_meta_model::{
     compaction_config, compaction_status, compaction_task, hummock_pinned_snapshot,
     hummock_pinned_version, hummock_version_delta, hummock_version_stats, CompactionGroupId,
     CompactionTaskId, HummockVersionId, WorkerId,

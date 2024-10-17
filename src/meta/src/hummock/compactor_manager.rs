@@ -135,7 +135,7 @@ pub struct CompactorManagerInner {
 
 impl CompactorManagerInner {
     pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
-        use risingwave_meta_model_v2::compaction_task;
+        use risingwave_meta_model::compaction_task;
         use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
         let task_assignment: Vec<CompactTaskAssignment> = compaction_task::Entity::find()
