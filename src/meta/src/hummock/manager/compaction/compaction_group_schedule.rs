@@ -21,7 +21,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compact_task::ReportTask;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::TableGroupInfo;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    HummockLevelsExt, TableGroupInfo,
+};
 use risingwave_hummock_sdk::compaction_group::{
     group_split, StateTableId, StaticCompactionGroupId,
 };
@@ -232,7 +234,7 @@ impl HummockManager {
         // cancel tasks
         let mut canceled_tasks = vec![];
         // after merge, all tasks in right_group_id should be canceled
-        // otherwise, pending size calculation by level handler will make some mistake
+        // Failure of cancel does not cause correctness problems, the report task will have better interception, and the operation here is designed to free up compactor compute resources more quickly.
         let compact_task_assignments =
             compaction_guard.get_compact_task_assignments_by_group_id(right_group_id);
         compact_task_assignments
@@ -252,7 +254,9 @@ impl HummockManager {
 
         drop(versioning_guard);
         drop(compaction_guard);
-        self.report_compact_tasks(canceled_tasks).await?;
+        if !canceled_tasks.is_empty() {
+            self.report_compact_tasks(canceled_tasks).await?;
+        }
 
         self.metrics
             .merge_compaction_group_count
@@ -555,17 +559,30 @@ impl HummockManager {
         }
         // Instead of handling DeltaType::GroupConstruct for time travel, simply enforce a version snapshot.
         versioning.mark_next_time_travel_version_snapshot();
+
+        // The expired compact tasks will be canceled.
+        // Failure of cancel does not cause correctness problems, the report task will have better interception, and the operation here is designed to free up compactor compute resources more quickly.
         let mut canceled_tasks = vec![];
         let compact_task_assignments =
             compaction_guard.get_compact_task_assignments_by_group_id(parent_group_id);
+        let levels = versioning
+            .current_version
+            .get_compaction_group_levels(parent_group_id);
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
                 if let Some(task) = task_assignment.compact_task.as_ref() {
-                    let need_cancel = HummockManager::is_compact_task_expired(
-                        &task.into(),
-                        &versioning.current_version,
-                    );
+                    let input_sst_ids: HashSet<u64> = task
+                        .input_ssts
+                        .iter()
+                        .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
+                        .collect();
+                    let input_level_ids: Vec<u32> = task
+                        .input_ssts
+                        .iter()
+                        .map(|level| level.level_idx)
+                        .collect();
+                    let need_cancel = !levels.check_sst_ids_exist(&input_level_ids, input_sst_ids);
                     if need_cancel {
                         canceled_tasks.push(ReportTask {
                             task_id: task.task_id,
@@ -580,7 +597,9 @@ impl HummockManager {
 
         drop(versioning_guard);
         drop(compaction_guard);
-        self.report_compact_tasks(canceled_tasks).await?;
+        if !canceled_tasks.is_empty() {
+            self.report_compact_tasks(canceled_tasks).await?;
+        }
 
         self.metrics
             .split_compaction_group_count
