@@ -18,7 +18,6 @@ use std::mem::take;
 use std::sync::Arc;
 
 use risingwave_common::hash::ActorId;
-use risingwave_common::must_match;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -30,7 +29,6 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 use tracing::warn;
 
 use crate::barrier::command::CommandContext;
-use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{BarrierKind, TracedEpoch};
 
@@ -100,12 +98,14 @@ impl CreateMviewLogStoreProgressTracker {
 
 #[derive(Debug)]
 pub(super) enum CreatingStreamingJobStatus {
+    /// The creating job is consuming upstream snapshot.
+    /// Will transit to `ConsumingLogStore` on `update_progress` when
+    /// the snapshot has been fully consumed after `update_progress`.
     ConsumingSnapshot {
         prev_epoch_fake_physical_time: u64,
-        pending_commands: Vec<Arc<CommandContext>>,
+        pending_upstream_barriers: Vec<(TracedEpoch, TracedEpoch, BarrierKind)>,
         version_stats: HummockVersionStats,
         create_mview_tracker: CreateMviewProgressTracker,
-        graph_info: InflightGraphInfo,
         snapshot_backfill_actors: HashSet<ActorId>,
         backfill_epoch: u64,
         /// The `prev_epoch` of pending non checkpoint barriers
@@ -114,8 +114,10 @@ pub(super) enum CreatingStreamingJobStatus {
         /// Take the mutation out when injecting the first barrier
         initial_barrier_info: Option<(HashMap<WorkerId, Vec<StreamActor>>, Mutation)>,
     },
+    /// The creating job is consuming log store.
+    ///
+    /// Will transit to `Finishing` on `on_new_upstream_epoch` when `start_consume_upstream` is `true`.
     ConsumingLogStore {
-        graph_info: InflightGraphInfo,
         log_store_progress_tracker: CreateMviewLogStoreProgressTracker,
     },
     /// All backfill actors have started consuming upstream, and the job
@@ -133,29 +135,16 @@ pub(super) struct CreatingJobInjectBarrierInfo {
 }
 
 impl CreatingStreamingJobStatus {
-    pub(super) fn active_graph_info(&self) -> Option<&InflightGraphInfo> {
-        match self {
-            CreatingStreamingJobStatus::ConsumingSnapshot { graph_info, .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { graph_info, .. } => Some(graph_info),
-            CreatingStreamingJobStatus::Finishing(_) => {
-                // when entering `Finishing`, the graph will have been added to the upstream graph,
-                // and therefore the separate graph info is inactive.
-                None
-            }
-        }
-    }
-
     pub(super) fn update_progress(
         &mut self,
         create_mview_progress: impl IntoIterator<Item = &CreateMviewProgress>,
-    ) -> Option<(Vec<CreatingJobInjectBarrierInfo>, &InflightGraphInfo)> {
+    ) -> Option<Vec<CreatingJobInjectBarrierInfo>> {
         match self {
             Self::ConsumingSnapshot {
                 create_mview_tracker,
                 ref version_stats,
                 prev_epoch_fake_physical_time,
-                pending_commands,
-                ref graph_info,
+                pending_upstream_barriers,
                 pending_non_checkpoint_barriers,
                 ref backfill_epoch,
                 initial_barrier_info,
@@ -184,27 +173,24 @@ impl CreatingStreamingJobStatus {
                         mutation,
                     }]
                     .into_iter()
-                    .chain(pending_commands.drain(..).map(|command_ctx| {
-                        CreatingJobInjectBarrierInfo {
-                            curr_epoch: command_ctx.curr_epoch.clone(),
-                            prev_epoch: command_ctx.prev_epoch.clone(),
-                            kind: command_ctx.kind.clone(),
+                    .chain(pending_upstream_barriers.drain(..).map(
+                        |(prev_epoch, curr_epoch, kind)| CreatingJobInjectBarrierInfo {
+                            curr_epoch,
+                            prev_epoch,
+                            kind,
                             new_actors: None,
                             mutation: None,
-                        }
-                    }))
+                        },
+                    ))
                     .collect();
 
                     *self = CreatingStreamingJobStatus::ConsumingLogStore {
-                        graph_info: graph_info.clone(),
                         log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
                             snapshot_backfill_actors.iter().cloned(),
                             barriers_to_inject.len(),
                         ),
                     };
-                    let graph_info = must_match!(self,
-                        CreatingStreamingJobStatus::ConsumingLogStore {graph_info, ..} => graph_info);
-                    Some((barriers_to_inject, graph_info))
+                    Some(barriers_to_inject)
                 } else {
                     None
                 }
@@ -217,6 +203,59 @@ impl CreatingStreamingJobStatus {
                 None
             }
             CreatingStreamingJobStatus::Finishing(_) => None,
+        }
+    }
+
+    pub(super) fn on_new_upstream_epoch(
+        &mut self,
+        command_ctx: &Arc<CommandContext>,
+        start_consume_upstream: bool,
+    ) -> Option<CreatingJobInjectBarrierInfo> {
+        match self {
+            CreatingStreamingJobStatus::ConsumingSnapshot {
+                pending_upstream_barriers,
+                prev_epoch_fake_physical_time,
+                pending_non_checkpoint_barriers,
+                initial_barrier_info,
+                ..
+            } => {
+                assert!(
+                    !start_consume_upstream,
+                    "should not start consuming upstream for a job that are consuming snapshot"
+                );
+                pending_upstream_barriers.push((
+                    command_ctx.prev_epoch.clone(),
+                    command_ctx.curr_epoch.clone(),
+                    command_ctx.kind.clone(),
+                ));
+                Some(CreatingStreamingJobStatus::new_fake_barrier(
+                    prev_epoch_fake_physical_time,
+                    pending_non_checkpoint_barriers,
+                    initial_barrier_info,
+                    command_ctx.kind.is_checkpoint(),
+                ))
+            }
+            CreatingStreamingJobStatus::ConsumingLogStore { .. } => {
+                let prev_epoch = command_ctx.prev_epoch.value().0;
+                if start_consume_upstream {
+                    assert!(command_ctx.kind.is_checkpoint());
+                    *self = CreatingStreamingJobStatus::Finishing(prev_epoch);
+                }
+                Some(CreatingJobInjectBarrierInfo {
+                    curr_epoch: command_ctx.curr_epoch.clone(),
+                    prev_epoch: command_ctx.prev_epoch.clone(),
+                    kind: command_ctx.kind.clone(),
+                    new_actors: None,
+                    mutation: None,
+                })
+            }
+            CreatingStreamingJobStatus::Finishing { .. } => {
+                assert!(
+                    !start_consume_upstream,
+                    "should not start consuming upstream for a job again"
+                );
+                None
+            }
         }
     }
 
@@ -254,5 +293,9 @@ impl CreatingStreamingJobStatus {
                 }
             }
         }
+    }
+
+    pub(super) fn is_finishing(&self) -> bool {
+        matches!(self, Self::Finishing(_))
     }
 }
