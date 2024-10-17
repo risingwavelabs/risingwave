@@ -15,6 +15,7 @@
 use thiserror_ext::AsReport;
 
 use super::super::super::plan_node::*;
+use super::super::super::OResult;
 use super::super::Rule;
 use crate::optimizer::rule::BoxedRule;
 
@@ -30,23 +31,24 @@ const BUSHY_TREE_JOIN_UPPER_LIMIT: usize = 10;
 const BUSHY_TREE_JOIN_LOWER_LIMIT: usize = 4;
 
 impl Rule for BushyTreeJoinOrderingRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let join = plan.as_logical_multi_join()?;
+
         if join.inputs().len() >= BUSHY_TREE_JOIN_LOWER_LIMIT
             && join.inputs().len() <= BUSHY_TREE_JOIN_UPPER_LIMIT
         {
             match join.as_bushy_tree_join() {
-                Ok(plan) => Some(plan),
+                Ok(plan) => OResult::Ok(plan),
                 Err(e) => {
                     eprintln!("{}", e.as_report());
-                    None
+                    OResult::NotApplicable
                 }
             }
         } else {
             // Too many inputs, so fallback to a left deep tree.
             let join_ordering = join.heuristic_ordering().ok()?;
             let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
-            Some(left_deep_join)
+            OResult::Ok(left_deep_join)
         }
     }
 }

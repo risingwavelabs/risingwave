@@ -14,7 +14,7 @@
 
 use risingwave_common::types::ScalarImpl;
 
-use super::Rule;
+use super::{OResult, Rule};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalValues};
 use crate::PlanRef;
@@ -22,7 +22,7 @@ use crate::PlanRef;
 pub struct AlwaysFalseFilterRule;
 
 impl Rule for AlwaysFalseFilterRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         let always_false = filter
             .predicate()
@@ -31,13 +31,13 @@ impl Rule for AlwaysFalseFilterRule {
             .filter_map(|e| e.try_fold_const().transpose().ok().flatten())
             .any(|s| s.unwrap_or(ScalarImpl::Bool(true)) == ScalarImpl::Bool(false));
         if always_false {
-            Some(LogicalValues::create(
+            OResult::Ok(LogicalValues::create(
                 vec![],
                 filter.schema().clone(),
                 filter.ctx(),
             ))
         } else {
-            None
+            OResult::NotApplicable
         }
     }
 }

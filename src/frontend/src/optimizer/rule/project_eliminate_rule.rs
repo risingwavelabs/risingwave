@@ -13,17 +13,17 @@
 // limitations under the License.
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 
 /// Eliminate useless (identity) [`LogicalProject`] nodes.
 pub struct ProjectEliminateRule {}
 impl Rule for ProjectEliminateRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let project = plan.as_logical_project()?;
         if project.is_identity() {
-            Some(project.input())
+            OResult::Ok(project.input())
         } else {
-            None
+            OResult::NotApplicable
         }
     }
 }

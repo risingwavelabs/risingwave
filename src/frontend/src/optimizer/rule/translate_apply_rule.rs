@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
@@ -52,10 +52,10 @@ pub struct TranslateApplyRule {
 }
 
 impl Rule for TranslateApplyRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         if apply.translated() {
-            return None;
+            return OResult::NotApplicable;
         }
         let mut left: PlanRef = apply.left();
         let right: PlanRef = apply.right();
@@ -140,7 +140,7 @@ impl Rule for TranslateApplyRule {
 
         let new_apply = apply.clone_with_left_right(left, right);
         let new_node = new_apply.translate_apply(domain, eq_predicates);
-        Some(new_node)
+        OResult::Ok(new_node)
     }
 }
 

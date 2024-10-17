@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Rule;
+use super::{OResult, Rule};
 use crate::optimizer::plan_node::{LogicalOverWindow, PlanTreeNodeUnary};
 use crate::PlanRef;
 
@@ -27,7 +27,7 @@ impl OverWindowMergeRule {
 }
 
 impl Rule for OverWindowMergeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let over_window = plan.as_logical_over_window()?;
         let mut window_functions_rev = over_window
             .window_functions()
@@ -54,10 +54,10 @@ impl Rule for OverWindowMergeRule {
 
         if curr.as_logical_over_window().unwrap() == over_window {
             // unchanged
-            return None;
+            return OResult::NotApplicable;
         }
 
         let window_functions = window_functions_rev.into_iter().rev().collect::<Vec<_>>();
-        Some(LogicalOverWindow::new(window_functions, curr_input).into())
+        OResult::Ok(LogicalOverWindow::new(window_functions, curr_input).into())
     }
 }

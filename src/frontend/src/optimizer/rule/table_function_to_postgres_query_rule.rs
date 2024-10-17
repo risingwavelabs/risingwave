@@ -17,7 +17,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{Expr, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalPostgresQuery, LogicalTableFunction};
@@ -26,10 +26,10 @@ use crate::optimizer::PlanRef;
 /// Transform a special `TableFunction` (with `POSTGRES_QUERY` table function type) into a `LogicalPostgresQuery`
 pub struct TableFunctionToPostgresQueryRule {}
 impl Rule for TableFunctionToPostgresQueryRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         if logical_table_function.table_function.function_type != TableFunctionType::PostgresQuery {
-            return None;
+            return OResult::NotApplicable;
         }
         assert!(!logical_table_function.with_ordinality);
         let table_function_return_type = logical_table_function.table_function().return_type();
@@ -64,7 +64,7 @@ impl Rule for TableFunctionToPostgresQueryRule {
             let database = eval_args[4].clone();
             let query = eval_args[5].clone();
 
-            Some(
+            OResult::Ok(
                 LogicalPostgresQuery::new(
                     logical_table_function.ctx(),
                     schema,

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 pub struct ProjectJoinSeparateRule {}
 
 impl ProjectJoinSeparateRule {
@@ -23,16 +23,16 @@ impl ProjectJoinSeparateRule {
 }
 
 impl Rule for ProjectJoinSeparateRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let join = plan.as_logical_join()?;
         if join.is_full_out() {
-            None
+            OResult::NotApplicable
         } else {
             let (left, right, on, join_type, output_indices) = join.clone().decompose();
             let new_join = LogicalJoin::new(left, right, join_type, on);
             let project =
                 LogicalProject::with_out_col_idx(new_join.into(), output_indices.into_iter());
-            Some(project.into())
+            OResult::Ok(project.into())
         }
     }
 }

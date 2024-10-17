@@ -14,7 +14,7 @@
 
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalValues};
 use crate::optimizer::PlanRef;
 
@@ -36,7 +36,7 @@ use crate::optimizer::PlanRef;
 /// ```
 pub struct CrossJoinEliminateRule {}
 impl Rule for CrossJoinEliminateRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let join: &LogicalJoin = plan.as_logical_join()?;
         let (left, right, on, join_type, _output_indices) = join.clone().decompose();
         let values: &LogicalValues = right.as_logical_values()?;
@@ -46,9 +46,9 @@ impl Rule for CrossJoinEliminateRule {
             && values.rows()[0].is_empty() // no columns
             && join.output_indices_are_trivial()
         {
-            Some(left)
+            OResult::Ok(left)
         } else {
-            None
+            OResult::NotApplicable
         }
     }
 }

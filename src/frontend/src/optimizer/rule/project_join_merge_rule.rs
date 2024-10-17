@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 pub struct ProjectJoinMergeRule {}
 
 impl ProjectJoinMergeRule {
@@ -23,7 +23,7 @@ impl ProjectJoinMergeRule {
 }
 
 impl Rule for ProjectJoinMergeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let project = plan.as_logical_project()?;
         let input = project.input();
         let join = input.as_logical_join()?;
@@ -32,13 +32,13 @@ impl Rule for ProjectJoinMergeRule {
 
         // We cannot deal with repeated output indices in join
         if has_repeated_element(&outer_output_indices) {
-            return None;
+            return OResult::NotApplicable;
         }
         let output_indices: Vec<usize> = outer_output_indices
             .into_iter()
             .map(|i| inner_output_indices[i])
             .collect();
-        Some(join.clone_with_output_indices(output_indices).into())
+        OResult::Ok(join.clone_with_output_indices(output_indices).into())
     }
 }
 

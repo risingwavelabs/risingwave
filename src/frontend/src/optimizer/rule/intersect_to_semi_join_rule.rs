@@ -16,7 +16,7 @@ use risingwave_common::types::DataType::Boolean;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalIntersect, LogicalJoin, PlanTreeNode};
@@ -24,11 +24,11 @@ use crate::optimizer::PlanRef;
 
 pub struct IntersectToSemiJoinRule {}
 impl Rule for IntersectToSemiJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let logical_intersect: &LogicalIntersect = plan.as_logical_intersect()?;
         let all = logical_intersect.all();
         if all {
-            return None;
+            return OResult::NotApplicable;
         }
 
         let inputs = logical_intersect.inputs();
@@ -44,7 +44,7 @@ impl Rule for IntersectToSemiJoinRule {
             })
             .unwrap();
 
-        Some(Agg::new(vec![], (0..join.schema().len()).collect(), join).into())
+        OResult::Ok(Agg::new(vec![], (0..join.schema().len()).collect(), join).into())
     }
 }
 

@@ -17,16 +17,16 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::StreamScanType;
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 
 /// Use index scan and delta joins for supported queries.
 pub struct IndexDeltaJoinRule {}
 
 impl Rule for IndexDeltaJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let join = plan.as_stream_hash_join()?;
         if join.eq_join_predicate().has_non_eq() || join.join_type() != JoinType::Inner {
-            return Some(plan);
+            return OResult::Ok(plan);
         }
 
         /// FIXME: Exchanges still may exist after table scan, because table scan's distribution
@@ -145,17 +145,17 @@ impl Rule for IndexDeltaJoinRule {
             {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
-                Some(
+                OResult::Ok(
                     join.clone()
                         .into_delta_join()
                         .clone_with_left_right(left, right)
                         .into(),
                 )
             } else {
-                Some(plan)
+                OResult::Ok(plan)
             }
         } else {
-            Some(plan)
+            OResult::Ok(plan)
         }
     }
 }

@@ -13,19 +13,19 @@
 // limitations under the License.
 
 use super::super::plan_node::*;
-use super::Rule;
+use super::{OResult, Rule};
 use crate::optimizer::rule::BoxedRule;
 
 /// Reorders a multi join into a left deep join via the heuristic ordering
 pub struct LeftDeepTreeJoinOrderingRule {}
 
 impl Rule for LeftDeepTreeJoinOrderingRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let join = plan.as_logical_multi_join()?;
         // check if join is inner and can be merged into multijoin
         let join_ordering = join.heuristic_ordering().ok()?; // maybe panic here instead?
         let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
-        Some(left_deep_join)
+        OResult::Ok(left_deep_join)
     }
 }
 
