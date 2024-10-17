@@ -46,11 +46,6 @@ filter_stack_trace_for_all_logs() {
 
 # trap filter_stack_trace_for_all_logs ERR
 
-# NOTE(kwannoel): We must use `export` here, because the variables are not substituted
-# directly via bash subtitution. Instead, the `parallel` command substitutes the variables
-# from the environment. If they are declared without `export`, `parallel` can't read them from the env.
-export EXTRA_ARGS="--sqlite-data-dir=."
-
 if [[ -n "${USE_ARRANGEMENT_BACKFILL:-}" ]]; then
   export EXTRA_ARGS="$EXTRA_ARGS --use-arrangement-backfill"
 fi

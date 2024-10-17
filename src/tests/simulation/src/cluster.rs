@@ -88,9 +88,6 @@ pub struct Configuration {
 
     /// Queries to run per session.
     pub per_session_queries: Arc<Vec<String>>,
-
-    /// dir to store SQL backend sqlite db
-    pub sqlite_data_dir: Option<PathBuf>,
 }
 
 impl Default for Configuration {
@@ -118,7 +115,6 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
-            sqlite_data_dir: None,
         }
     }
 }
@@ -401,16 +397,7 @@ impl Cluster {
 
         // FIXME: some tests like integration tests will run concurrently,
         // resulting in connecting to the same sqlite file if they're using the same seed.
-        let file_path = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
-            format!(
-                "{}/stest-{}-{}.sqlite",
-                sqlite_data_dir.display(),
-                handle.seed(),
-                Uuid::new_v4()
-            )
-        } else {
-            format!("./stest-{}-{}.sqlite", handle.seed(), Uuid::new_v4())
-        };
+        let file_path = format!("./stest-{}-{}.sqlite", handle.seed(), Uuid::new_v4());
         if std::fs::exists(&file_path).unwrap() {
             panic!(
                 "sqlite file already exists and used by other cluster: {}",
@@ -892,12 +879,7 @@ impl Cluster {
 impl Drop for Cluster {
     fn drop(&mut self) {
         // FIXME: remove it when deprecate the on-disk version.
-        let default_path = PathBuf::from(".");
-        let sqlite_data_dir = self
-            .config
-            .sqlite_data_dir
-            .as_ref()
-            .unwrap_or_else(|| &default_path);
+        let sqlite_data_dir = PathBuf::from(".");
         for entry in std::fs::read_dir(sqlite_data_dir).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
