@@ -147,6 +147,11 @@ impl<'a> HummockVersionTransaction<'a> {
 
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
+            // There is no necessity to invoke may_bump_max_sub_level_id here, because
+            // - There's at most one IntraLevel delta for each compaction group in one pre_commit_epoch's delta.
+            // - No other delta type will be present.
+            // - may_bump_max_sub_level_id will be invoked once later for this delta in apply_version_delta.
+            let l0_sub_level_id = new_version_delta.latest_version().max_sub_level_id + 1;
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
@@ -154,7 +159,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .group_deltas;
             let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
                 0,
-                0,      // l0_sub_level_id will be generated during apply_version_delta
+                l0_sub_level_id,
                 vec![], // default
                 inserted_table_infos,
                 0, // default

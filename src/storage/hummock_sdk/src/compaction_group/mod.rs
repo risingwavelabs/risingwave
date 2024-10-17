@@ -49,6 +49,8 @@ pub mod group_split {
     use std::collections::BTreeSet;
 
     use bytes::Bytes;
+    use itertools::Either;
+    use itertools::Either::{Left, Right};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_pb::hummock::PbLevelType;
@@ -272,24 +274,31 @@ pub mod group_split {
     }
 
     /// Merge the right levels into the left levels.
-    pub fn merge_levels(left_levels: &mut Levels, right_levels: Levels) {
+    pub fn merge_levels(left_levels: &mut Levels, right_levels: Levels, max_sub_level_id: u64) {
         let right_l0 = right_levels.l0;
-
-        let mut max_left_sub_level_id = left_levels
+        let mut next_right_sub_level_id = max_sub_level_id + 1;
+        let max_left_sub_level_id = left_levels
             .l0
             .sub_levels
             .iter()
-            .map(|sub_level| sub_level.sub_level_id + 1)
-            .max()
-            .unwrap_or(0); // If there are no sub levels, the max sub level id is 0.
-        let need_rewrite_right_sub_level_id = max_left_sub_level_id != 0;
+            .map(|l| l.sub_level_id)
+            .max();
+        assert!(
+            max_left_sub_level_id
+                .map(|left| left < next_right_sub_level_id)
+                .unwrap_or(true),
+            "max_left_sub_level_id={:?} next_right_sub_level_id={}",
+            max_left_sub_level_id,
+            next_right_sub_level_id
+        );
+        let need_rewrite_right_sub_level_id = !left_levels.l0.sub_levels.is_empty();
 
         for mut right_sub_level in right_l0.sub_levels {
             // Rewrtie the sub level id of right sub level to avoid conflict with left sub levels. (conflict level type)
             // e.g. left sub levels: [0, 1, 2], right sub levels: [0, 1, 2], after rewrite, right sub levels: [3, 4, 5]
             if need_rewrite_right_sub_level_id {
-                right_sub_level.sub_level_id = max_left_sub_level_id;
-                max_left_sub_level_id += 1;
+                right_sub_level.sub_level_id = next_right_sub_level_id;
+                next_right_sub_level_id += 1;
             }
 
             insert_new_sub_level(
@@ -354,26 +363,26 @@ pub mod group_split {
         }
     }
 
-    // When `insert_hint` is `Ok(idx)`, it means that the sub level `idx` in `target_l0`
-    // will extend these SSTs. When `insert_hint` is `Err(idx)`, it
+    // When `insert_hint` is `Left(idx)`, it means that the sub level `idx` in `target_l0`
+    // will extend these SSTs. When `insert_hint` is `Right(idx)`, it
     // means that we will add a new sub level `idx` into `target_l0`.
     pub fn get_sub_level_insert_hint(
         target_levels: &Vec<Level>,
         sub_level: &Level,
-    ) -> Result<usize, usize> {
+    ) -> Either<usize, usize> {
         for (idx, other) in target_levels.iter().enumerate() {
             match other.sub_level_id.cmp(&sub_level.sub_level_id) {
                 Ordering::Less => {}
                 Ordering::Equal => {
-                    return Ok(idx);
+                    return Left(idx);
                 }
                 Ordering::Greater => {
-                    return Err(idx);
+                    return Right(idx);
                 }
             }
         }
 
-        Err(target_levels.len())
+        Right(target_levels.len())
     }
 
     /// Split the SSTs in the level according to the split key.

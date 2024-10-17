@@ -15,9 +15,11 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::iter;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use itertools::Either::{Left, Right};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
@@ -434,10 +436,10 @@ impl HummockVersion {
                     continue;
                 }
                 match group_split::get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
-                    Ok(idx) => {
+                    Left(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
                     }
-                    Err(idx) => {
+                    Right(idx) => {
                         insert_new_sub_level(
                             target_l0,
                             sub_level.sub_level_id,
@@ -660,15 +662,10 @@ impl HummockVersion {
                         || group_destroy.is_some(),
                     "no sst should be deleted when committing an epoch"
                 );
-                let mut next_l0_sub_level_id = levels
-                    .l0
-                    .sub_levels
-                    .last()
-                    .map(|level| level.sub_level_id + 1)
-                    .unwrap_or(1);
                 for group_delta in &group_deltas.group_deltas {
                     if let GroupDelta::IntraLevel(IntraLevelDelta {
                         level_idx,
+                        l0_sub_level_id,
                         inserted_table_infos,
                         ..
                     }) = group_delta
@@ -680,12 +677,11 @@ impl HummockVersion {
                         if !inserted_table_infos.is_empty() {
                             insert_new_sub_level(
                                 &mut levels.l0,
-                                next_l0_sub_level_id,
+                                *l0_sub_level_id,
                                 PbLevelType::Overlapping,
                                 inserted_table_infos.clone(),
                                 None,
                             );
-                            next_l0_sub_level_id += 1;
                         }
                     }
                 }
@@ -764,6 +760,8 @@ impl HummockVersion {
             &version_delta.state_table_info_delta,
             &changed_table_info,
         );
+
+        self.may_bump_max_sub_level_id();
     }
 
     pub fn apply_change_log_delta<T: Clone>(
@@ -883,7 +881,22 @@ impl HummockVersion {
             )
         });
 
-        group_split::merge_levels(left_levels, right_levels);
+        group_split::merge_levels(left_levels, right_levels, self.max_sub_level_id);
+        // There is no necessity to invoke may_bump_max_sub_level_id here, because
+        // - There's at most one GroupMerge delta in one delta.
+        // - No other delta type will be present.
+        // - may_bump_max_sub_level_id will be invoked once later for this delta in apply_version_delta.
+    }
+
+    fn may_bump_max_sub_level_id(&mut self) {
+        // The max_sub_level_id may have been increased, recalculate it.
+        self.max_sub_level_id = self
+            .levels
+            .values()
+            .filter_map(|levels| levels.l0.sub_levels.iter().map(|s| s.sub_level_id).max())
+            .chain(iter::once(self.max_sub_level_id))
+            .max()
+            .unwrap();
     }
 }
 
@@ -952,10 +965,10 @@ impl HummockVersionCommon<SstableInfo> {
                         l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                     });
                 match group_split::get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
-                    Ok(idx) => {
+                    Left(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
                     }
-                    Err(idx) => {
+                    Right(idx) => {
                         insert_new_sub_level(
                             target_l0,
                             sub_level.sub_level_id,
@@ -2032,7 +2045,7 @@ mod tests {
             let mut left_levels = Levels::default();
             let right_levels = Levels::default();
 
-            group_split::merge_levels(&mut left_levels, right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels, 105);
         }
 
         {
@@ -2046,7 +2059,7 @@ mod tests {
             );
             let right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels, 105);
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2071,7 +2084,7 @@ mod tests {
                 },
             );
 
-            group_split::merge_levels(&mut left_levels, right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels, 105);
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2089,7 +2102,7 @@ mod tests {
             let mut left_levels = left_levels.clone();
             let right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels, 105);
 
             assert!(left_levels.l0.sub_levels.len() == 6);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2252,6 +2265,7 @@ mod tests {
                     },
                 ),
             )]),
+            max_sub_level_id: 101,
             ..Default::default()
         };
 
@@ -2447,7 +2461,7 @@ mod tests {
             right_l0.sub_levels.push(Level {
                 level_idx: 0,
                 table_infos: x,
-                sub_level_id: 101,
+                sub_level_id: 100,
                 total_file_size: 100,
                 level_type: LevelType::Overlapping,
                 ..Default::default()
@@ -2459,7 +2473,7 @@ mod tests {
                 ..Default::default()
             };
 
-            merge_levels(cg1, right_levels);
+            merge_levels(cg1, right_levels, version.max_sub_level_id);
         }
 
         {
