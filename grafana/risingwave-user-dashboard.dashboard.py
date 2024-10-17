@@ -120,7 +120,7 @@ def section_overview(panels):
             )
             + [
                 panels.target(
-                    f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval]) > 0",
+                    f"avg(rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval])) / avg(rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval])) > 0",
                     "barrier_latency_avg",
                 ),
             ],
