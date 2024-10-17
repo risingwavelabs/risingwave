@@ -20,7 +20,6 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(HummockGcHistory::MarkDeleteAt)
                             .date_time()
-                            .default(Expr::current_timestamp())
                             .not_null(),
                     )
                     .to_owned(),

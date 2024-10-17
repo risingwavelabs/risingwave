@@ -18,6 +18,7 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::time::{Duration, SystemTime};
 
+use chrono::DateTime;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -26,7 +27,7 @@ use risingwave_meta_model_v2::hummock_sequence::HUMMOCK_NOW;
 use risingwave_meta_model_v2::{hummock_gc_history, hummock_sequence};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::FullScanTask;
-use sea_orm::{ActiveValue, ConnectionTrait, DbBackend, EntityTrait, Set, Statement};
+use sea_orm::{ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::commit_multi_var;
@@ -332,33 +333,19 @@ impl HummockManager {
         &self,
         object_ids: impl Iterator<Item = HummockSstableObjectId>,
     ) -> Result<()> {
+        let now = self.now().await?;
+        let dt = DateTime::from_timestamp(now.try_into().unwrap(), 0).unwrap();
         let models = object_ids.map(|o| hummock_gc_history::ActiveModel {
             object_id: Set(o.try_into().unwrap()),
-            mark_delete_at: Default::default(),
+            mark_delete_at: Set(dt.naive_utc()),
         });
         let db = &self.meta_store_ref().conn;
         let gc_history_retention_sec = self.env.opts.min_sst_retention_time_sec * 2;
-        match db.get_database_backend() {
-            DbBackend::MySql => {
-                db.execute(Statement::from_string(
-                    sea_orm::DatabaseBackend::MySql,
-                    format!("DELETE FROM hummock_gc_history WHERE mark_delete_at < NOW() - INTERVAL {gc_history_retention_sec} SECOND;")
-                )).await?;
-            }
-            DbBackend::Postgres => {
-                db.execute(Statement::from_string(
-                    sea_orm::DatabaseBackend::Postgres,
-                    format!("DELETE FROM hummock_gc_history WHERE mark_delete_at < NOW() - INTERVAL '{gc_history_retention_sec} seconds'")
-                )).await?;
-            }
-            DbBackend::Sqlite => {
-                db.execute(Statement::from_string(
-                    sea_orm::DatabaseBackend::Postgres,
-                    format!("DELETE FROM hummock_gc_history WHERE mark_delete_at < datetime('now', '-{gc_history_retention_sec} seconds')")
-                )).await?;
-            }
-        }
-
+        let gc_history_low_watermark = now.saturating_sub(gc_history_retention_sec);
+        hummock_gc_history::Entity::delete_many()
+            .filter(hummock_gc_history::Column::MarkDeleteAt.lt(gc_history_low_watermark))
+            .exec(db)
+            .await?;
         hummock_gc_history::Entity::insert_many(models)
             .on_conflict(
                 OnConflict::column(hummock_gc_history::Column::ObjectId)
