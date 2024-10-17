@@ -39,23 +39,16 @@ pub struct MinMaxOnIndexRule {}
 
 impl Rule for MinMaxOnIndexRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let logical_agg = match plan.as_logical_agg() {
-            Some(logical_agg) => logical_agg,
-            None => return Ok(None),
-        };
-
+        let logical_agg: &LogicalAgg = plan.as_logical_agg()?;
         if !logical_agg.group_key().is_empty() {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         let calls = logical_agg.agg_calls();
         if calls.is_empty() {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
-        let first_call = match calls.iter().exactly_one() {
-            Ok(first_call) => first_call,
-            Err(_) => return Ok(None),
-        };
+        let first_call = calls.iter().exactly_one().ok()?;
 
         if matches!(
             first_call.agg_type,
@@ -64,29 +57,14 @@ impl Rule for MinMaxOnIndexRule {
             && first_call.filter.always_true()
             && first_call.order_by.is_empty()
         {
-            let input = logical_agg.input();
-            let logical_scan = match input.as_logical_scan() {
-                Some(logical_scan) => logical_scan.to_owned(),
-                None => return Ok(None),
-            };
-
-            let first = match calls.first() {
-                Some(first) => first.to_owned(),
-                None => return Ok(None),
-            };
-
-            let kind = &first.agg_type;
+            let logical_scan: LogicalScan = logical_agg.input().as_logical_scan()?.to_owned();
+            let kind = &calls.first()?.agg_type;
             if !logical_scan.predicate().always_true() {
-                return Ok(None);
+                return OResult::NotApplicable;
             }
-
-            let inputs_first = match first.inputs.first() {
-                Some(inputs_first) => inputs_first.to_owned(),
-                None => return Ok(None),
-            };
             let order = Order {
                 column_orders: vec![ColumnOrder::new(
-                    inputs_first.index(),
+                    calls.first()?.inputs.first()?.index(),
                     if matches!(kind, AggType::Builtin(PbAggKind::Min)) {
                         OrderType::ascending()
                     } else {
@@ -95,12 +73,12 @@ impl Rule for MinMaxOnIndexRule {
                 )],
             };
             if let Some(p) = self.try_on_index(logical_agg, logical_scan.clone(), &order) {
-                Ok(Some(p))
+                OResult::Ok(p)
             } else {
-                Ok(self.try_on_pk(logical_agg, logical_scan, &order))
+                OResult::Ok(self.try_on_pk(logical_agg, logical_scan, &order)?)
             }
         } else {
-            Ok(None)
+            OResult::NotApplicable
         }
     }
 }

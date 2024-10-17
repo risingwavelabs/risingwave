@@ -14,10 +14,11 @@
 
 use risingwave_common::types::DataType;
 
+use crate::error::OResult;
 use crate::expr::{ExprImpl, ExprType, FunctionCall};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalShare, LogicalUnion, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::{PlanRef, Result};
+use crate::optimizer::PlanRef;
 
 /// Convert `LogicalFilter` with now or others predicates to a `UNION ALL`
 ///
@@ -44,24 +45,18 @@ use crate::optimizer::{PlanRef, Result};
 pub struct SplitNowOrRule {}
 impl Rule for SplitNowOrRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let filter = match plan.as_logical_filter() {
-            Some(filter) => filter,
-            None => return Ok(None),
-        };
+        let filter: &LogicalFilter = plan.as_logical_filter()?;
 
         let input = filter.input();
 
         if filter.predicate().conjunctions.len() != 1 {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
-        let disjunctions = match filter.predicate().conjunctions[0].as_or_disjunctions() {
-            Some(disjunctions) => disjunctions,
-            None => return Ok(None),
-        };
+        let disjunctions = filter.predicate().conjunctions[0].as_or_disjunctions()?;
 
         if disjunctions.len() < 2 {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let (now, others): (Vec<ExprImpl>, Vec<ExprImpl>) =
@@ -69,7 +64,7 @@ impl Rule for SplitNowOrRule {
 
         // Only support now in one arm of disjunctions
         if now.len() != 1 {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         // A or B or C ... or Z
@@ -86,7 +81,7 @@ impl Rule for SplitNowOrRule {
         let filter1 = LogicalFilter::create_with_expr(share.clone(), arm1);
         let filter2 = LogicalFilter::create_with_expr(share.clone(), arm2);
         let union_all = LogicalUnion::create(true, vec![filter1, filter2]);
-        Ok(Some(union_all))
+        OResult::Ok(union_all)
     }
 }
 

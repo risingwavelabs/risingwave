@@ -60,27 +60,19 @@ impl Rule for OverWindowToTopNRule {
                 (None, plan)
             }
         };
-
-        let filter = match plan.as_logical_filter() {
-            Some(filter) => filter,
-            None => return Ok(None),
-        };
-
+        let filter = plan.as_logical_filter()?;
         let plan = filter.input();
         // The filter is directly on top of the over window after predicate pushdown.
-        let over_window = match plan.as_logical_over_window() {
-            Some(over_window) => over_window,
-            None => return Ok(None),
-        };
+        let over_window = plan.as_logical_over_window()?;
 
         if over_window.window_functions().len() != 1 {
             // Queries with multiple window function calls are not supported yet.
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         let window_func = &over_window.window_functions()[0];
         if !window_func.kind.is_rank() {
             // Only rank functions can be converted to TopN.
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let output_len = over_window.schema().len();
@@ -92,7 +84,7 @@ impl Rule for OverWindowToTopNRule {
             WindowFuncKind::Rank => true,
             WindowFuncKind::DenseRank => {
                 ctx.warn_to_user("`dense_rank` is not supported in Top-N pattern, will fallback to inefficient implementation");
-                return Ok(None);
+                return OResult::NotApplicable;
             }
             _ => unreachable!("window functions other than rank functions should not reach here"),
         };
@@ -104,15 +96,12 @@ impl Rule for OverWindowToTopNRule {
             predicate.clone().split_disjoint(&rank_col)
         };
 
-        let (limit, offset) = match handle_rank_preds(&rank_pred.conjunctions, window_func_pos) {
-            Some(rank_result) => rank_result,
-            None => return Ok(None),
-        };
+        let (limit, offset) = handle_rank_preds(&rank_pred.conjunctions, window_func_pos)?;
 
         if offset > 0 && with_ties {
             tracing::warn!("Failed to optimize with ties and offset");
             ctx.warn_to_user("group topN with ties and offset is not supported, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let topn: PlanRef = LogicalTopN::new(
@@ -144,7 +133,7 @@ impl Rule for OverWindowToTopNRule {
             ctx.warn_to_user("It can be inefficient to output ranking number in Top-N, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
             over_window.clone_with_input(filter).into()
         };
-        Ok(Some(plan))
+        OResult::Ok(plan)
     }
 }
 

@@ -23,7 +23,7 @@ use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
 use super::{BoxedRule, OResult, Rule};
 use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::Agg;
-use crate::optimizer::plan_node::{LogicalExpand, LogicalProject, PlanAggCall};
+use crate::optimizer::plan_node::{LogicalAgg, LogicalExpand, LogicalProject, PlanAggCall};
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition, IndexSet};
 
@@ -34,24 +34,20 @@ pub struct DistinctAggRule {
 
 impl Rule for DistinctAggRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let agg = match plan.as_logical_agg() {
-            Some(agg) => agg,
-            None => return Ok(None),
-        };
-
+        let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (mut agg_calls, mut agg_group_keys, grouping_sets, input, enable_two_phase) =
             agg.clone().decompose();
         assert!(grouping_sets.is_empty());
 
         if agg_calls.iter().all(|c| !c.distinct) {
             // there's no distinct agg call
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         if self.for_stream && !agg_group_keys.is_empty() {
             // Due to performance issue, we don't do 2-phase agg for stream distinct agg with group
             // by. See https://github.com/risingwavelabs/risingwave/issues/7271 for more.
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         if !agg_calls.iter().all(|c| {
@@ -69,7 +65,7 @@ impl Rule for DistinctAggRule {
             agg_type_ok && order_ok
         }) {
             tracing::warn!("DistinctAggRule: unsupported agg kind, fallback to backend impl");
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let (node, flag_values, has_expand) =
@@ -86,14 +82,14 @@ impl Rule for DistinctAggRule {
             }
         }
 
-        Ok(Some(Self::build_final_agg(
+        OResult::Ok(Self::build_final_agg(
             mid_agg,
             final_agg_group_keys,
             agg_calls,
             flag_values,
             has_expand,
             enable_two_phase,
-        )))
+        ))
     }
 }
 

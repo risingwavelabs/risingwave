@@ -30,11 +30,7 @@ use crate::optimizer::PlanRef;
 pub struct JoinCommuteRule {}
 impl Rule for JoinCommuteRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let join = match plan.as_logical_join() {
-            Some(join) => join,
-            None => return Ok(None),
-        };
-
+        let join: &LogicalJoin = plan.as_logical_join()?;
         let join_type = join.join_type();
         match join_type {
             JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti => {
@@ -69,7 +65,7 @@ impl Rule for JoinCommuteRule {
                     new_output_indices,
                 );
 
-                Ok(Some(new_join.into()))
+                OResult::Ok(new_join.into())
             }
             JoinType::Inner
             | JoinType::LeftOuter
@@ -78,7 +74,7 @@ impl Rule for JoinCommuteRule {
             | JoinType::FullOuter
             | JoinType::AsofInner
             | JoinType::AsofLeftOuter
-            | JoinType::Unspecified => Ok(None),
+            | JoinType::Unspecified => OResult::NotApplicable,
         }
     }
 }

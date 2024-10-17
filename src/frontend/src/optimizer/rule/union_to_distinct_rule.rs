@@ -21,18 +21,15 @@ use crate::optimizer::PlanRef;
 pub struct UnionToDistinctRule {}
 impl Rule for UnionToDistinctRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let union = match plan.as_logical_union() {
-            Some(union) => union,
-            None => return Ok(None),
-        };
+        let union = plan.as_logical_union()?;
 
         if !union.all() {
             let union_all = LogicalUnion::create(true, union.inputs().into_iter().collect());
             let distinct = Agg::new(vec![], (0..union.base.schema().len()).collect(), union_all)
                 .with_enable_two_phase(false);
-            Ok(Some(distinct.into()))
+            OResult::Ok(distinct.into())
         } else {
-            Ok(None)
+            OResult::NotApplicable
         }
     }
 }

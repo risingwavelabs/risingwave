@@ -19,29 +19,21 @@
 
 use itertools::Itertools;
 
-use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::plan_node::{BatchSeqScan, PlanTreeNodeUnary};
-use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::{PlanRef};
 use crate::error::OResult;
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
+use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, PlanTreeNodeUnary};
+use crate::optimizer::rule::{BoxedRule, Rule};
+use crate::optimizer::PlanRef;
 
 pub struct BatchPushLimitToScanRule {}
 
 impl Rule for BatchPushLimitToScanRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let limit = match plan.as_batch_limit() {
-            Some(limit) => limit,
-            None => return Ok(None),
-        };
-
+        let limit: &BatchLimit = plan.as_batch_limit()?;
         let limit_input = limit.input();
-        let scan = match limit_input.as_batch_seq_scan() {
-            Some(scan) => scan,
-            None => return Ok(None),
-        };
-
+        let scan: &BatchSeqScan = limit_input.as_batch_seq_scan()?;
         if scan.limit().is_some() {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         let pushed_limit = limit.limit() + limit.offset();
         let new_scan = BatchSeqScan::new_with_dist(
@@ -50,7 +42,7 @@ impl Rule for BatchPushLimitToScanRule {
             scan.scan_ranges().iter().cloned().collect_vec(),
             Some(pushed_limit),
         );
-        Ok(Some(limit.clone_with_input(new_scan.into()).into()))
+        OResult::Ok(limit.clone_with_input(new_scan.into()).into())
     }
 }
 

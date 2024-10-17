@@ -28,16 +28,12 @@ use crate::optimizer::PlanRef;
 pub struct MaxOneRowEliminateRule {}
 impl Rule for MaxOneRowEliminateRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let apply = match plan.as_logical_apply() {
-            Some(apply) => apply,
-            None => return Ok(None),
-        };
-
+        let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, mut right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
 
         if !max_one_row {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         if !right.max_one_row() {
@@ -45,7 +41,7 @@ impl Rule for MaxOneRowEliminateRule {
             debug_assert!(right.max_one_row());
         }
 
-        Ok(Some(LogicalApply::create(
+        OResult::Ok(LogicalApply::create(
             left,
             right,
             join_type,
@@ -53,7 +49,7 @@ impl Rule for MaxOneRowEliminateRule {
             correlated_id,
             correlated_indices,
             false,
-        )))
+        ))
     }
 }
 

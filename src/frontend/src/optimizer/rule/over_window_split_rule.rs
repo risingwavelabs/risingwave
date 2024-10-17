@@ -29,11 +29,7 @@ impl OverWindowSplitRule {
 
 impl Rule for OverWindowSplitRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let over_window = match plan.as_logical_over_window() {
-            Some(over_window) => over_window,
-            None => return Ok(None),
-        };
-
+        let over_window = plan.as_logical_over_window()?;
         let mut rank_func_seq = 0;
         let groups: HashMap<_, _> = over_window
             .window_functions()
@@ -49,8 +45,6 @@ impl Rule for OverWindowSplitRule {
                 ((&func.order_by, &func.partition_by, func_seq), idx)
             })
             .into_group_map();
-        Ok(Some(
-            over_window.split_with_rule(groups.into_values().sorted().collect()),
-        ))
+        OResult::Ok(over_window.split_with_rule(groups.into_values().sorted().collect()))
     }
 }

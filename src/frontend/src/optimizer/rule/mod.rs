@@ -16,7 +16,6 @@
 
 use super::PlanRef;
 use crate::error::OResult;
-use crate::error::Result;
 
 /// A one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode), every [`Rule`] should
 /// downcast and check if the node matches the rule.

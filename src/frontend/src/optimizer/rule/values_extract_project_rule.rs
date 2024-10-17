@@ -25,15 +25,11 @@ use crate::optimizer::PlanRef;
 pub struct ValuesExtractProjectRule {}
 impl Rule for ValuesExtractProjectRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let old_values = match plan.as_logical_values() {
-            Some(old_values) => old_values,
-            None => return Ok(None),
-        };
-
+        let old_values: &LogicalValues = plan.as_logical_values()?;
         let mut expr_correlated_id_finder = ExprCorrelatedIdFinder::default();
 
         if old_values.rows().len() != 1 {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         old_values.rows()[0]
@@ -41,7 +37,7 @@ impl Rule for ValuesExtractProjectRule {
             .for_each(|expr| expr_correlated_id_finder.visit_expr(expr));
 
         if !expr_correlated_id_finder.has_correlated_input_ref() {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let new_values = LogicalValues::create(
@@ -50,10 +46,10 @@ impl Rule for ValuesExtractProjectRule {
             old_values.ctx(),
         );
 
-        Ok(Some(LogicalProject::create(
+        OResult::Ok(LogicalProject::create(
             new_values,
             old_values.rows()[0].clone(),
-        )))
+        ))
     }
 }
 

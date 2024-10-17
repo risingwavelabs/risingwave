@@ -86,7 +86,7 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct ApplyJoinTransposeRule {}
 impl Rule for ApplyJoinTransposeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let apply = plan.as_logical_apply()?;
+        let apply: &LogicalApply = plan.as_logical_apply()?;
 
         let (
             apply_left,
@@ -103,7 +103,7 @@ impl Rule for ApplyJoinTransposeRule {
         }
 
         assert_eq!(apply_join_type, JoinType::Inner);
-        let join = apply_right.as_logical_join()?;
+        let join: &LogicalJoin = apply_right.as_logical_join()?;
 
         let mut finder = ExprCorrelatedIdFinder::default();
         join.on().visit_expr(&mut finder);

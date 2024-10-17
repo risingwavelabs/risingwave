@@ -48,14 +48,11 @@ use crate::utils::Condition;
 pub struct ApplyExpandTransposeRule {}
 impl Rule for ApplyExpandTransposeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let apply = plan.as_logical_apply()?;
-
+        let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-
         let logical_expand = right.as_logical_expand()?;
-
         let (expand_input, mut column_subsets) = logical_expand.clone().decompose();
 
         let apply_left_len = left.schema().len();

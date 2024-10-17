@@ -44,12 +44,10 @@ use crate::optimizer::PlanRef;
 pub struct ApplyProjectTransposeRule {}
 impl Rule for ApplyProjectTransposeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let apply = plan.as_logical_apply()?;
-
+        let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         let project = right.as_logical_project()?;
-
         assert_eq!(join_type, JoinType::Inner);
 
         // Insert all the columns of `LogicalApply`'s left at the beginning of the new

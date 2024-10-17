@@ -13,17 +13,13 @@
 // limitations under the License.
 
 use super::{BoxedRule, OResult, Rule};
-use crate::optimizer::plan_node::PlanTreeNode;
+use crate::optimizer::plan_node::{LogicalIntersect, PlanTreeNode};
 use crate::optimizer::PlanRef;
 
 pub struct IntersectMergeRule {}
 impl Rule for IntersectMergeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let top_intersect = match plan.as_logical_intersect() {
-            Some(top_intersect) => top_intersect,
-            None => return Ok(None),
-        };
-
+        let top_intersect: &LogicalIntersect = plan.as_logical_intersect()?;
         let top_all = top_intersect.all();
         let mut new_inputs = vec![];
         let mut has_merge = false;
@@ -39,9 +35,9 @@ impl Rule for IntersectMergeRule {
         }
 
         if has_merge {
-            Ok(Some(top_intersect.clone_with_inputs(&new_inputs)))
+            OResult::Ok(top_intersect.clone_with_inputs(&new_inputs))
         } else {
-            Ok(None)
+            OResult::NotApplicable
         }
     }
 }

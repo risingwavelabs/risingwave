@@ -69,16 +69,12 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
             LogicalFilter::new(plan.clone(), Condition::true_cond())
         };
         let top_filter_input = top_filter.input();
-        let apply = match top_filter_input.as_logical_apply() {
-            Some(apply) => apply,
-            None => return Ok(None),
-        };
-
+        let apply = top_filter_input.as_logical_apply()?;
         let (apply_left, apply_right, apply_on, join_type, correlated_id, _, max_one_row) =
             apply.clone().decompose();
 
         if max_one_row {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let top_project = if let Some(project) = apply_right.as_logical_project() {
@@ -92,16 +88,12 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         let (top_proj_exprs, _) = top_project.clone().decompose();
 
         let input = top_project.input();
-        let agg = match input.as_logical_agg() {
-            Some(agg) => agg,
-            None => return Ok(None),
-        };
-
+        let agg: &LogicalAgg = input.as_logical_agg()?;
         let (agg_calls, group_key, grouping_sets, input, _enable_two_phase) =
             agg.clone().decompose();
         // It could be too restrictive to require the group key to be empty. We can relax this in the future if necessary.
         if !group_key.is_empty() {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         assert!(grouping_sets.is_empty());
         let bottom_project = if let Some(project) = input.as_logical_project() {
@@ -114,10 +106,7 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         };
         let (mut bottom_proj_exprs, _) = bottom_project.clone().decompose();
         let bottom_project_input = bottom_project.input();
-        let bottom_filter = match bottom_project_input.as_logical_filter() {
-            Some(bottom_filter) => bottom_filter,
-            None => return Ok(None),
-        };
+        let bottom_filter: &LogicalFilter = bottom_project_input.as_logical_filter()?;
 
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
@@ -140,10 +129,10 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
                 if cor_input_ref.correlated_id() == correlated_id {
                     cor_eq_exprs.push((input_ref, cor_input_ref));
                 } else {
-                    return Ok(None);
+                    return OResult::NotApplicable;
                 }
             } else {
-                return Ok(None);
+                return OResult::NotApplicable;
             }
         }
         let cor_eq_exprs_len = cor_eq_exprs.len();
@@ -186,7 +175,7 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
 
             // If no null agg, bail out.
             if null_agg_pos.is_empty() {
-                return Ok(None);
+                return OResult::NotApplicable;
             }
 
             // Try to prove that the expression is null-rejected by the top filter when not-count-aggs are null.
@@ -212,7 +201,7 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
                 .iter()
                 .any(|expr| !Strong::is_null(expr, top_proj_null_bitset.clone()))
             {
-                return Ok(None);
+                return OResult::NotApplicable;
             }
         }
 
@@ -274,7 +263,7 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         let mut plan_correlated_id_finder = PlanCorrelatedIdFinder::default();
         plan_correlated_id_finder.visit(new_top_proj.clone());
         if plan_correlated_id_finder.contains(&correlated_id) {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         // Merge these expressions with LogicalApply into LogicalJoin.
@@ -292,9 +281,9 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         .into();
 
         if top_filter.predicate().always_true() {
-            Ok(Some(new_join))
+            OResult::Ok(new_join)
         } else {
-            Ok(Some(top_filter.clone_with_input(new_join).into()))
+            OResult::Ok(top_filter.clone_with_input(new_join).into())
         }
     }
 }

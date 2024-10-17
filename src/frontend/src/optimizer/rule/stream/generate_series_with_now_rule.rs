@@ -15,24 +15,20 @@
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 
+use crate::error::OResult;
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::{generic, LogicalNow};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::Result;
 use crate::PlanRef;
 
 pub struct GenerateSeriesWithNowRule {}
 impl Rule for GenerateSeriesWithNowRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let ctx = plan.ctx();
-        let table_func = match plan.as_logical_table_function() {
-            Some(table_func) => table_func,
-            None => return Ok(None),
-        }
-        .table_function();
+        let table_func = plan.as_logical_table_function()?.table_function();
 
         if !table_func.args.iter().any(|arg| arg.has_now()) {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         if !(table_func.function_type == PbTableFuncType::GenerateSeries
@@ -46,7 +42,7 @@ impl Rule for GenerateSeriesWithNowRule {
                 "`now()` is currently only supported in `generate_series(timestamptz, timestamptz, interval)` function as `stop`. \
                 You may not using it correctly. Please kindly check the document."
             );
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let start_timestamp = ctx
@@ -70,17 +66,17 @@ impl Rule for GenerateSeriesWithNowRule {
             ctx.warn_to_user(
                 "When using `generate_series` with `now()`, the `start` and `step` must be non-NULL constants",
             );
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
-        Ok(Some(
+        OResult::Ok(
             LogicalNow::new(generic::Now::generate_series(
                 ctx,
                 start_timestamp.unwrap().into_timestamptz(),
                 interval.unwrap().into_interval(),
             ))
             .into(),
-        ))
+        )
     }
 }
 

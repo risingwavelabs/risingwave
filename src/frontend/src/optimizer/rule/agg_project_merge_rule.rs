@@ -60,9 +60,7 @@ impl Rule for AggProjectMergeRule {
                     new_agg_group_keys_cardinality
                         ..new_agg_group_keys_cardinality + agg.agg_calls.len(),
                 );
-            OResult::Ok(
-                LogicalProject::with_out_col_idx(agg.into(), out_col_idx).into(),
-            )
+            OResult::Ok(LogicalProject::with_out_col_idx(agg.into(), out_col_idx).into())
         } else {
             OResult::Ok(agg.into())
         }

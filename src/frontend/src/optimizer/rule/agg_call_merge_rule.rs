@@ -23,6 +23,7 @@ pub struct AggCallMergeRule {}
 impl Rule for AggCallMergeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let agg = plan.as_logical_agg()?;
+
         let calls = agg.agg_calls();
         let mut new_calls = Vec::with_capacity(calls.len());
         let mut out_fields = (0..agg.group_key().len()).collect::<Vec<_>>();
@@ -42,9 +43,7 @@ impl Rule for AggCallMergeRule {
             let new_agg = Agg::new(new_calls, agg.group_key().clone(), agg.input())
                 .with_enable_two_phase(agg.core().two_phase_agg_enabled())
                 .into();
-            OResult::Ok(
-                LogicalProject::with_out_col_idx(new_agg, out_fields.into_iter()).into(),
-            )
+            OResult::Ok(LogicalProject::with_out_col_idx(new_agg, out_fields.into_iter()).into())
         }
     }
 }

@@ -20,7 +20,7 @@ use risingwave_connector::source::DataType;
 
 use super::{BoxedRule, OResult, Rule};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal};
-use crate::optimizer::plan_node::ExprRewritable;
+use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 use crate::optimizer::PlanRef;
 
 /// `RewriteLikeExprRule` rewrites like expression, so that it can benefit from index selection.
@@ -30,20 +30,16 @@ use crate::optimizer::PlanRef;
 pub struct RewriteLikeExprRule {}
 impl Rule for RewriteLikeExprRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let filter = match plan.as_logical_filter() {
-            Some(filter) => filter,
-            None => return Ok(None),
-        };
-
+        let filter: &LogicalFilter = plan.as_logical_filter()?;
         if filter.predicate().conjunctions.iter().any(|expr| {
             let mut has_like = HasLikeExprVisitor { has: false };
             has_like.visit_expr(expr);
             has_like.has
         }) {
             let mut rewriter = LikeExprRewriter {};
-            Ok(Some(filter.rewrite_exprs(&mut rewriter)))
+            OResult::Ok(filter.rewrite_exprs(&mut rewriter))
         } else {
-            Ok(None)
+            OResult::NotApplicable
         }
     }
 }

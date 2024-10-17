@@ -53,13 +53,9 @@ pub struct TranslateApplyRule {
 
 impl Rule for TranslateApplyRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let apply = match plan.as_logical_apply() {
-            Some(apply) => apply,
-            None => return Ok(None),
-        };
-
+        let apply: &LogicalApply = plan.as_logical_apply()?;
         if apply.translated() {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         let mut left: PlanRef = apply.left();
         let right: PlanRef = apply.right();
@@ -144,7 +140,7 @@ impl Rule for TranslateApplyRule {
 
         let new_apply = apply.clone_with_left_right(left, right);
         let new_node = new_apply.translate_apply(domain, eq_predicates);
-        Ok(Some(new_node))
+        OResult::Ok(new_node)
     }
 }
 

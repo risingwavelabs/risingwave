@@ -30,9 +30,9 @@ impl Rule for DagToTreeRule {
         }
 
         if has_share {
-            Ok(Some(plan.clone_with_inputs(&inputs)))
+            OResult::Ok(plan.clone_with_inputs(&inputs))
         } else {
-            Ok(None)
+            OResult::NotApplicable
         }
     }
 }

@@ -21,18 +21,11 @@ pub struct LeftDeepTreeJoinOrderingRule {}
 
 impl Rule for LeftDeepTreeJoinOrderingRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let join = match plan.as_logical_multi_join() {
-            Some(join) => join,
-            None => return Ok(None),
-        };
-
+        let join = plan.as_logical_multi_join()?;
         // check if join is inner and can be merged into multijoin
-        let join_ordering = match join.heuristic_ordering() {
-            Ok(join_ordering) => join_ordering,
-            Err(_) => return Ok(None),
-        };
+        let join_ordering = join.heuristic_ordering().ok()?; // maybe panic here instead?
         let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
-        Ok(Some(left_deep_join))
+        OResult::Ok(left_deep_join)
     }
 }
 

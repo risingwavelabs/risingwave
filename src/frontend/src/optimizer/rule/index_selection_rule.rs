@@ -91,14 +91,10 @@ pub struct IndexSelectionRule {}
 
 impl Rule for IndexSelectionRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let logical_scan = match plan.as_logical_scan() {
-            Some(logical_scan) => logical_scan,
-            None => return Ok(None),
-        };
-
+        let logical_scan: &LogicalScan = plan.as_logical_scan()?;
         let indexes = logical_scan.indexes();
         if indexes.is_empty() {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
         let primary_cost = min(
@@ -108,7 +104,7 @@ impl Rule for IndexSelectionRule {
 
         // If it is a primary lookup plan, avoid checking other indexes.
         if primary_cost.primary_lookup {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let mut final_plan: PlanRef = logical_scan.clone().into();
@@ -147,9 +143,9 @@ impl Rule for IndexSelectionRule {
         }
 
         if min_cost == primary_cost {
-            Ok(None)
+            OResult::NotApplicable
         } else {
-            Ok(Some(final_plan))
+            OResult::Ok(final_plan)
         }
     }
 }

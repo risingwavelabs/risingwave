@@ -13,20 +13,17 @@
 // limitations under the License.
 
 use super::{BoxedRule, OResult, Rule};
-use crate::optimizer::plan_node::LogicalKafkaScan;
+use crate::optimizer::plan_node::{LogicalKafkaScan, LogicalSource};
 use crate::optimizer::PlanRef;
 
 pub struct SourceToKafkaScanRule {}
 impl Rule for SourceToKafkaScanRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let source = match plan.as_logical_source() {
-            Some(source) => source,
-            None => return Ok(None),
-        };
+        let source: &LogicalSource = plan.as_logical_source()?;
         if source.core.is_kafka_connector() {
-            Ok(Some(LogicalKafkaScan::create(source)))
+            OResult::Ok(LogicalKafkaScan::create(source))
         } else {
-            Ok(None)
+            OResult::NotApplicable
         }
     }
 }

@@ -17,7 +17,9 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, OResult, Rule};
-use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{
+    LogicalApply, LogicalFilter, LogicalLimit, LogicalTopN, PlanTreeNodeUnary,
+};
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -46,14 +48,11 @@ use crate::utils::Condition;
 pub struct ApplyLimitTransposeRule {}
 impl Rule for ApplyLimitTransposeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let apply = plan.as_logical_apply()?;
-
+        let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-
-        let logical_limit = right.as_logical_limit()?;
-
+        let logical_limit: &LogicalLimit = right.as_logical_limit()?;
         let limit_input = logical_limit.input();
         let limit = logical_limit.limit();
         let offset = logical_limit.offset();

@@ -48,13 +48,10 @@ pub struct ApplyAggTransposeRule {}
 impl Rule for ApplyAggTransposeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let apply = plan.as_logical_apply()?;
-
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-
         let agg = right.as_logical_agg()?;
-
         let (mut agg_calls, agg_group_key, grouping_sets, agg_input, enable_two_phase) =
             agg.clone().decompose();
         assert!(grouping_sets.is_empty());

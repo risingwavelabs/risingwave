@@ -24,13 +24,9 @@ pub struct IndexDeltaJoinRule {}
 
 impl Rule for IndexDeltaJoinRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let join = match plan.as_stream_hash_join() {
-            Some(join) => join,
-            None => return Ok(None),
-        };
-
+        let join = plan.as_stream_hash_join()?;
         if join.eq_join_predicate().has_non_eq() || join.join_type() != JoinType::Inner {
-            return Ok(Some(plan));
+            return OResult::Ok(plan);
         }
 
         /// FIXME: Exchanges still may exist after table scan, because table scan's distribution
@@ -46,26 +42,10 @@ impl Rule for IndexDeltaJoinRule {
             }
         }
 
-        let input_left_dyn = match match_through_exchange(join.inputs()[0].clone()) {
-            Some(input_left_dyn) => input_left_dyn,
-            None => return Ok(None),
-        };
-
-        let input_left = match input_left_dyn.as_stream_table_scan() {
-            Some(input_left) => input_left,
-            None => return Ok(None),
-        };
-
-        let input_right_dyn = match match_through_exchange(join.inputs()[1].clone()) {
-            Some(input_right_dyn) => input_right_dyn,
-            None => return Ok(None),
-        };
-
-        let input_right = match input_right_dyn.as_stream_table_scan() {
-            Some(input_right) => input_right,
-            None => return Ok(None),
-        };
-
+        let input_left_dyn = match_through_exchange(join.inputs()[0].clone())?;
+        let input_left = input_left_dyn.as_stream_table_scan()?;
+        let input_right_dyn = match_through_exchange(join.inputs()[1].clone())?;
+        let input_right = input_right_dyn.as_stream_table_scan()?;
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();
 
@@ -165,17 +145,17 @@ impl Rule for IndexDeltaJoinRule {
             {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
-                Ok(Some(
+                OResult::Ok(
                     join.clone()
                         .into_delta_join()
                         .clone_with_left_right(left, right)
                         .into(),
-                ))
+                )
             } else {
-                Ok(Some(plan))
+                OResult::Ok(plan)
             }
         } else {
-            Ok(Some(plan))
+            OResult::Ok(plan)
         }
     }
 }

@@ -70,13 +70,9 @@ impl GroupingSetsToExpandRule {
 
 impl Rule for GroupingSetsToExpandRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let agg = match plan.as_logical_agg() {
-            Some(agg) => agg,
-            None => return Ok(None),
-        };
-
+        let agg: &LogicalAgg = plan.as_logical_agg()?;
         if agg.grouping_sets().is_empty() {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         let agg = Self::prune_column_for_agg(agg);
         let (old_agg_calls, old_group_keys, grouping_sets, input, enable_two_phase) =
@@ -184,6 +180,6 @@ impl Rule for GroupingSetsToExpandRule {
 
         let project = LogicalProject::new(new_agg.into(), project_exprs);
 
-        Ok(Some(project.into()))
+        OResult::Ok(project.into())
     }
 }

@@ -29,16 +29,12 @@ use crate::utils::Condition;
 pub struct PullUpCorrelatedPredicateRule {}
 impl Rule for PullUpCorrelatedPredicateRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let apply = match plan.as_logical_apply() {
-            Some(apply) => apply,
-            None => return Ok(None),
-        };
-
+        let apply = plan.as_logical_apply()?;
         let (apply_left, apply_right, apply_on, join_type, correlated_id, _, max_one_row) =
             apply.clone().decompose();
 
         if max_one_row {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let project = if let Some(project) = apply_right.as_logical_project() {
@@ -52,10 +48,7 @@ impl Rule for PullUpCorrelatedPredicateRule {
         let (mut proj_exprs, _) = project.clone().decompose();
 
         let input = project.input();
-        let filter = match input.as_logical_filter() {
-            Some(filter) => filter,
-            None => return Ok(None),
-        };
+        let filter = input.as_logical_filter()?;
 
         let mut rewriter = Rewriter {
             input_refs: vec![],
@@ -99,14 +92,14 @@ impl Rule for PullUpCorrelatedPredicateRule {
         let mut plan_correlated_id_finder = PlanCorrelatedIdFinder::default();
         plan_correlated_id_finder.visit(project.clone());
         if plan_correlated_id_finder.contains(&correlated_id) {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         // Merge these expressions with LogicalApply into LogicalJoin.
         let on = apply_on.and(Condition {
             conjunctions: cor_exprs,
         });
-        Ok(Some(
+        OResult::Ok(
             LogicalJoin::with_output_indices(
                 apply_left,
                 project,
@@ -115,7 +108,7 @@ impl Rule for PullUpCorrelatedPredicateRule {
                 (0..apply.schema().len()).collect(),
             )
             .into(),
-        ))
+        )
     }
 }
 

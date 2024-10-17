@@ -38,10 +38,7 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
     /// NOTE: `e` should only contain at most a single column
     /// otherwise we will not conduct the optimization
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let filter = match plan.as_logical_filter() {
-            Some(filter) => filter,
-            None => return Ok(None),
-        };
+        let filter: &LogicalFilter = plan.as_logical_filter()?;
 
         // rewrite the entire condition first
         // i.e., the specific optimization that will apply to the entire condition
@@ -53,7 +50,7 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
 
         // then rewrite single expression via `rewrite_exprs`
         let mut expr_rewriter = ExpressionSimplifyRewriter {};
-        Ok(Some(filter.rewrite_exprs(&mut expr_rewriter)))
+        OResult::Ok(filter.rewrite_exprs(&mut expr_rewriter))
     }
 }
 

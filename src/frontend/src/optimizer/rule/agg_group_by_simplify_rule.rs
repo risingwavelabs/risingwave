@@ -28,7 +28,7 @@ use crate::utils::{Condition, IndexSet};
 pub struct AggGroupBySimplifyRule {}
 impl Rule for AggGroupBySimplifyRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let agg = plan.as_logical_agg()?;
+        let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (agg_calls, group_key, grouping_sets, agg_input, _two_phase) = agg.clone().decompose();
         if !grouping_sets.is_empty() {
             return OResult::NotApplicable;

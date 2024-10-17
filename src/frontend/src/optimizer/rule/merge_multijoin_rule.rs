@@ -23,9 +23,9 @@ impl Rule for MergeMultiJoinRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let multijoin_builder = LogicalMultiJoinBuilder::new(plan);
         if multijoin_builder.inputs().len() <= 2 {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
-        Ok(Some(multijoin_builder.build().into()))
+        OResult::Ok(multijoin_builder.build().into())
     }
 }
 

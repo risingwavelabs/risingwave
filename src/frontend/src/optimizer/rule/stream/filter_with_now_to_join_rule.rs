@@ -15,12 +15,13 @@
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
+use crate::error::OResult;
 use crate::expr::{ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
 use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::{PlanRef, Result};
+use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// Convert `LogicalFilter` with now in predicate to left-semi `LogicalJoin`
@@ -28,10 +29,7 @@ use crate::utils::Condition;
 pub struct FilterWithNowToJoinRule {}
 impl Rule for FilterWithNowToJoinRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let filter = match plan.as_logical_filter() {
-            Some(filter) => filter,
-            None => return Ok(None),
-        };
+        let filter: &LogicalFilter = plan.as_logical_filter()?;
 
         let lhs_len = filter.base.schema().len();
 
@@ -59,7 +57,7 @@ impl Rule for FilterWithNowToJoinRule {
 
         // Ignore no now filter
         if now_filters.is_empty() {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         let mut new_plan = plan.inputs()[0].clone();
 
@@ -87,7 +85,7 @@ impl Rule for FilterWithNowToJoinRule {
             .into();
         }
 
-        Ok(Some(new_plan))
+        OResult::Ok(new_plan)
     }
 }
 

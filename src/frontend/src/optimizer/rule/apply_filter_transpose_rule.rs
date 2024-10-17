@@ -45,8 +45,7 @@ use crate::utils::Condition;
 pub struct ApplyFilterTransposeRule {}
 impl Rule for ApplyFilterTransposeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let apply = plan.as_logical_apply()?;
-
+        let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
 

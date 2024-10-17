@@ -494,22 +494,28 @@ impl ToBatch for LogicalScan {
 
         if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
-            if let Some(applied) = index_selection_rule.apply(new.clone().into())? {
-                if let Some(scan) = applied.as_logical_scan() {
-                    // covering index
-                    return required_order.enforce_if_not_satisfies(scan.to_batch()?);
-                } else if let Some(join) = applied.as_logical_join() {
-                    // index lookup join
-                    return required_order
-                        .enforce_if_not_satisfies(join.index_lookup_join_to_batch_lookup_join()?);
-                } else {
-                    unreachable!();
+            match index_selection_rule.apply(new.clone().into()) {
+                crate::error::OResult::Ok(applied) => {
+                    if let Some(scan) = applied.as_logical_scan() {
+                        // covering index
+                        return required_order.enforce_if_not_satisfies(scan.to_batch()?);
+                    } else if let Some(join) = applied.as_logical_join() {
+                        // index lookup join
+                        return required_order.enforce_if_not_satisfies(
+                            join.index_lookup_join_to_batch_lookup_join()?,
+                        );
+                    } else {
+                        unreachable!();
+                    }
                 }
-            } else {
-                // Try to make use of index if it satisfies the required order
-                if let Some(plan_ref) = new.use_index_scan_if_order_is_satisfied(required_order) {
-                    return plan_ref;
+                crate::error::OResult::NotApplicable => {
+                    // Try to make use of index if it satisfies the required order
+                    if let Some(plan_ref) = new.use_index_scan_if_order_is_satisfied(required_order)
+                    {
+                        return plan_ref;
+                    }
                 }
+                crate::error::OResult::Err(e) => return Err(e),
             }
         }
         new.to_batch_inner_with_required(required_order)

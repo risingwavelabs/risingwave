@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::error::OResult;
 use crate::optimizer::plan_node::{LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::{PlanRef, Result};
+use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// Split `LogicalFilter` with many AND conjunctions with now into multiple `LogicalFilter`, prepared for `SplitNowOrRule`
@@ -42,14 +43,10 @@ use crate::utils::Condition;
 pub struct SplitNowAndRule {}
 impl Rule for SplitNowAndRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let filter = match plan.as_logical_filter() {
-            Some(filter) => filter,
-            None => return Ok(None),
-        };
-
+        let filter: &LogicalFilter = plan.as_logical_filter()?;
         let input = filter.input();
         if filter.predicate().conjunctions.len() == 1 {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         if filter
@@ -58,7 +55,7 @@ impl Rule for SplitNowAndRule {
             .iter()
             .all(|e| e.count_nows() == 0)
         {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let [with_now, others] =
@@ -77,7 +74,7 @@ impl Rule for SplitNowAndRule {
             )
             .into();
         }
-        Ok(Some(plan))
+        OResult::Ok(plan)
     }
 }
 

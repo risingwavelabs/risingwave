@@ -16,8 +16,8 @@ use thiserror_ext::AsReport;
 
 use super::super::super::plan_node::*;
 use super::super::Rule;
+use crate::error::OResult;
 use crate::optimizer::rule::BoxedRule;
-use crate::optimizer::Result;
 
 /// Reorders a multi join into a bushy tree shape join tree with a minimal height.
 pub struct BushyTreeJoinOrderingRule {}
@@ -32,30 +32,23 @@ const BUSHY_TREE_JOIN_LOWER_LIMIT: usize = 4;
 
 impl Rule for BushyTreeJoinOrderingRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let join = match plan.as_logical_multi_join() {
-            Some(join) => join,
-            None => return Ok(None),
-        };
+        let join = plan.as_logical_multi_join()?;
 
         if join.inputs().len() >= BUSHY_TREE_JOIN_LOWER_LIMIT
             && join.inputs().len() <= BUSHY_TREE_JOIN_UPPER_LIMIT
         {
             match join.as_bushy_tree_join() {
-                Ok(plan) => Ok(Some(plan)),
+                Ok(plan) => OResult::Ok(plan),
                 Err(e) => {
                     eprintln!("{}", e.as_report());
-                    Ok(None)
+                    OResult::NotApplicable
                 }
             }
         } else {
             // Too many inputs, so fallback to a left deep tree.
-            let join_ordering = match join.heuristic_ordering() {
-                Ok(join_ordering) => join_ordering,
-                Err(_) => return Ok(None),
-            };
-
+            let join_ordering = join.heuristic_ordering().ok()?;
             let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
-            Ok(Some(left_deep_join))
+            OResult::Ok(left_deep_join)
         }
     }
 }

@@ -24,33 +24,21 @@ impl ProjectJoinMergeRule {
 
 impl Rule for ProjectJoinMergeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let project = match plan.as_logical_project() {
-            Some(project) => project,
-            None => return Ok(None),
-        };
-
+        let project = plan.as_logical_project()?;
         let input = project.input();
-        let join = match input.as_logical_join() {
-            Some(join) => join,
-            None => return Ok(None),
-        };
-
-        let outer_output_indices = match project.try_as_projection() {
-            Some(outer_output_indices) => outer_output_indices,
-            None => return Ok(None),
-        };
-
+        let join = input.as_logical_join()?;
+        let outer_output_indices = project.try_as_projection()?;
         let inner_output_indices = join.output_indices();
 
         // We cannot deal with repeated output indices in join
         if has_repeated_element(&outer_output_indices) {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         let output_indices: Vec<usize> = outer_output_indices
             .into_iter()
             .map(|i| inner_output_indices[i])
             .collect();
-        Ok(Some(join.clone_with_output_indices(output_indices).into()))
+        OResult::Ok(join.clone_with_output_indices(output_indices).into())
     }
 }
 

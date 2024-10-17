@@ -44,13 +44,10 @@ pub struct ApplyDedupTransposeRule {}
 impl Rule for ApplyDedupTransposeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let apply = plan.as_logical_apply()?;
-
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-
         let dedup = right.as_logical_dedup()?;
-
         let dedup_cols = dedup.dedup_cols();
         let dedup_input = dedup.input();
 

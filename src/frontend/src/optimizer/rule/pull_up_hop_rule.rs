@@ -16,18 +16,15 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
+use crate::error::OResult;
 use crate::optimizer::plan_node::{LogicalHopWindow, LogicalJoin};
-use crate::optimizer::OResult;
 use crate::utils::IndexRewriter;
 
 pub struct PullUpHopRule {}
 
 impl Rule for PullUpHopRule {
-    fn apply(&self, plan: crate::PlanRef) -> Result<Option<crate::PlanRef>> {
-        let join = match plan.as_logical_join() {
-            Some(join) => join,
-            None => return Ok(None),
-        };
+    fn apply(&self, plan: crate::PlanRef) -> OResult<crate::PlanRef> {
+        let join = plan.as_logical_join()?;
 
         let (left, right, on, join_type, mut output_index) = join.clone().decompose();
 
@@ -136,7 +133,7 @@ impl Rule for PullUpHopRule {
             };
 
         if !pull_up_left && !pull_up_right {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let new_output_index = {
@@ -230,13 +227,13 @@ impl Rule for PullUpHopRule {
             )
         };
 
-        Ok(Some(
+        OResult::Ok(
             new_hop
                 .as_logical_hop_window()
                 .unwrap()
                 .clone_with_output_indices(new_output_index)
                 .into(),
-        ))
+        )
     }
 }
 

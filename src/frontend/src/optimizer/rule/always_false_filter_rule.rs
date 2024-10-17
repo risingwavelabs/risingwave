@@ -16,14 +16,14 @@ use risingwave_common::types::ScalarImpl;
 
 use super::{OResult, Rule};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::LogicalValues;
+use crate::optimizer::plan_node::{LogicalFilter, LogicalValues};
 use crate::PlanRef;
 
 pub struct AlwaysFalseFilterRule;
 
 impl Rule for AlwaysFalseFilterRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let filter = plan.as_logical_filter()?;
+        let filter: &LogicalFilter = plan.as_logical_filter()?;
         let always_false = filter
             .predicate()
             .conjunctions

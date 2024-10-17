@@ -20,7 +20,7 @@ use super::{BoxedRule, OResult, Rule};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    LogicalProject, LogicalProjectSet, LogicalValues, PlanTreeNodeUnary,
+    LogicalProject, LogicalProjectSet, LogicalTableFunction, LogicalValues, PlanTreeNodeUnary,
 };
 use crate::optimizer::PlanRef;
 
@@ -45,11 +45,7 @@ use crate::optimizer::PlanRef;
 pub struct TableFunctionToProjectSetRule {}
 impl Rule for TableFunctionToProjectSetRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let logical_table_function = match plan.as_logical_table_function() {
-            Some(logical_table_function) => logical_table_function,
-            None => return Ok(None),
-        };
-
+        let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         let table_function =
             ExprImpl::TableFunction(logical_table_function.table_function().clone().into());
         let table_function_return_type = table_function.return_type();
@@ -102,9 +98,9 @@ impl Rule for TableFunctionToProjectSetRule {
             let mut exprs = logical_project.exprs().clone();
             exprs.push(ordinality);
             let logical_project = LogicalProject::new(logical_project.input(), exprs);
-            Ok(Some(logical_project.into()))
+            OResult::Ok(logical_project.into())
         } else {
-            Ok(Some(logical_project.into()))
+            OResult::Ok(logical_project.into())
         }
     }
 }

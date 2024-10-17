@@ -24,19 +24,15 @@ impl ProjectJoinSeparateRule {
 
 impl Rule for ProjectJoinSeparateRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let join = match plan.as_logical_join() {
-            Some(join) => join,
-            None => return Ok(None),
-        };
-
+        let join = plan.as_logical_join()?;
         if join.is_full_out() {
-            Ok(None)
+            OResult::NotApplicable
         } else {
             let (left, right, on, join_type, output_indices) = join.clone().decompose();
             let new_join = LogicalJoin::new(left, right, join_type, on);
             let project =
                 LogicalProject::with_out_col_idx(new_join.into(), output_indices.into_iter());
-            Ok(Some(project.into()))
+            OResult::Ok(project.into())
         }
     }
 }

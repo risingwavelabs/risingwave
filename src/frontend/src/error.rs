@@ -258,7 +258,6 @@ impl From<BoxedError> for RwError {
     }
 }
 
-
 /// Result when applying an optimization rule.
 pub enum OResult<T> {
     /// Successfully optimized the input.
@@ -271,7 +270,7 @@ pub enum OResult<T> {
     Err(RwError),
 }
 
-/// Option<T> -> OResult<T>, None -> NotApplicable
+/// `Option<T>` -> `OResult<T>`, `None` -> `NotApplicable`
 impl<T> FromResidual<Option<Infallible>> for OResult<T> {
     fn from_residual(residual: Option<Infallible>) -> Self {
         match residual {
@@ -281,32 +280,12 @@ impl<T> FromResidual<Option<Infallible>> for OResult<T> {
     }
 }
 
-/// Result<T> -> OResult<T>
+/// `Result<T>` -> `OResult<T>`
 impl<T> FromResidual<Result<Infallible>> for OResult<T> {
     fn from_residual(residual: Result<Infallible>) -> Self {
         match residual {
             Ok(_) => unreachable!(),
             Err(e) => Self::Err(e),
-        }
-    }
-}
-
-impl<T> FromResidual<OResult<Infallible>> for OResult<T> {
-    fn from_residual(residual: OResult<Infallible>) -> Self {
-        match residual {
-            OResult::Ok(_) => unreachable!(),
-            OResult::NotApplicable => Self::NotApplicable,
-            OResult::Err(e) => Self::Err(e),
-        }
-    }
-}
-
-impl<T> FromResidual<OResult<Infallible>> for Result<Option<T>> {
-    fn from_residual(residual: OResult<Infallible>) -> Self {
-        match residual {
-            OResult::Ok(_) => unreachable!(),
-            OResult::NotApplicable => Ok(None),
-            OResult::Err(e) => Self::Err(e),
         }
     }
 }

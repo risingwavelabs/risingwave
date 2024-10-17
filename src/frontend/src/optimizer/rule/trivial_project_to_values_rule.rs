@@ -21,29 +21,23 @@ use crate::optimizer::{PlanRef, PlanVisitor};
 pub struct TrivialProjectToValuesRule {}
 impl Rule for TrivialProjectToValuesRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let project = match plan.as_logical_project() {
-            Some(project) => project,
-            None => return Ok(None),
-        };
+        let project = plan.as_logical_project()?;
 
         if !project.exprs().iter().all(|e| e.is_const()) {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         if SideEffectVisitor.visit(project.input()) {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
-        let row_count = match project.input().row_count() {
-            Some(row_count) => row_count,
-            None => return Ok(None),
-        };
+        let row_count = project.input().row_count()?;
 
         let values = LogicalValues::new(
             vec![project.exprs().clone(); row_count],
             project.schema().clone(),
             project.ctx(),
         );
-        Ok(Some(values.into()))
+        OResult::Ok(values.into())
     }
 }
 

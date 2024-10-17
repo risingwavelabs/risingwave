@@ -20,20 +20,16 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use super::{BoxedRule, OResult, Rule};
 use crate::expr::{Expr, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::LogicalFileScan;
+use crate::optimizer::plan_node::{LogicalFileScan, LogicalTableFunction};
 use crate::optimizer::PlanRef;
 
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
 pub struct TableFunctionToFileScanRule {}
 impl Rule for TableFunctionToFileScanRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let logical_table_function = match plan.as_logical_table_function() {
-            Some(logical_table_function) => logical_table_function,
-            None => return Ok(None),
-        };
-
+        let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         if logical_table_function.table_function.function_type != TableFunctionType::FileScan {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         assert!(!logical_table_function.with_ordinality);
         let table_function_return_type = logical_table_function.table_function().return_type();
@@ -68,7 +64,7 @@ impl Rule for TableFunctionToFileScanRule {
             let s3_secret_key = eval_args[4].clone();
             // The rest of the arguments are file locations
             let file_location = eval_args[5..].iter().cloned().collect_vec();
-            Ok(Some(
+            OResult::Ok(
                 LogicalFileScan::new(
                     logical_table_function.ctx(),
                     schema,
@@ -80,7 +76,7 @@ impl Rule for TableFunctionToFileScanRule {
                     file_location,
                 )
                 .into(),
-            ))
+            )
         } else {
             unreachable!("TableFunction return type should be struct")
         }

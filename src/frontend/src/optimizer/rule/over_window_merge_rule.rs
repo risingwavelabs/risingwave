@@ -28,11 +28,7 @@ impl OverWindowMergeRule {
 
 impl Rule for OverWindowMergeRule {
     fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
-        let over_window = match plan.as_logical_over_window() {
-            Some(over_window) => over_window,
-            None => return Ok(None),
-        };
-
+        let over_window = plan.as_logical_over_window()?;
         let mut window_functions_rev = over_window
             .window_functions()
             .iter()
@@ -58,12 +54,10 @@ impl Rule for OverWindowMergeRule {
 
         if curr.as_logical_over_window().unwrap() == over_window {
             // unchanged
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let window_functions = window_functions_rev.into_iter().rev().collect::<Vec<_>>();
-        Ok(Some(
-            LogicalOverWindow::new(window_functions, curr_input).into(),
-        ))
+        OResult::Ok(LogicalOverWindow::new(window_functions, curr_input).into())
     }
 }
