@@ -104,10 +104,8 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
 
                 let file_metadata = parquet_metadata.file_metadata();
-                let column_indices = extract_valid_parquet_schema_column_indices(
-                    self.columns.clone(),
-                    file_metadata,
-                )?;
+                let column_indices =
+                    extract_valid_column_indices(self.columns.clone(), file_metadata)?;
                 let projection_mask =
                     ProjectionMask::leaves(file_metadata.schema_descr(), column_indices);
                 // For the Parquet format, we directly convert from a record batch to a stream chunk.
@@ -247,7 +245,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
 /// - A `ConnectorResult<Vec<usize>>`, which contains the indices of the valid columns in the
 ///   Parquet file schema that match the requested schema. If an error occurs during processing,
 ///   it returns an appropriate error.
-pub fn extract_valid_parquet_schema_column_indices(
+pub fn extract_valid_column_indices(
     columns: Option<Vec<Column>>,
     metadata: &FileMetaData,
 ) -> ConnectorResult<Vec<usize>> {
@@ -264,7 +262,7 @@ pub fn extract_valid_parquet_schema_column_indices(
                 parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())
                     .map_err(anyhow::Error::from)?;
 
-            let valid_indices: Vec<usize> = rw_columns
+            let mut valid_column_indices: Vec<usize> = rw_columns
                 .iter()
                 .filter_map(|column| {
                     parquet_column_names
@@ -282,8 +280,8 @@ pub fn extract_valid_parquet_schema_column_indices(
                         })
                 })
                 .collect();
-
-            Ok(valid_indices)
+            valid_column_indices.sort();
+            Ok(valid_column_indices)
         }
         None => Ok(vec![]),
     }
