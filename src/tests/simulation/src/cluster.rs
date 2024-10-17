@@ -399,12 +399,6 @@ impl Cluster {
         let file = NamedTempFile::new().unwrap();
         let file_path = format!("{}", file.path().display());
         tracing::info!(?file_path, "sqlite_file_path");
-        if std::fs::exists(&file_path).unwrap() {
-            panic!(
-                "sqlite file already exists and used by other cluster: {}",
-                file_path
-            )
-        }
         let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path);
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
 
