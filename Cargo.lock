@@ -148,23 +148,24 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
 name = "anstream"
-version = "0.6.11"
+version = "0.6.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e2e1ebcb11de5c03c67de28a7df593d32191b44939c482e97702baaaa6ab6a5"
+checksum = "64e15c1ab1f89faffbf04a634d5e1962e9074f2741eef6d97f3c4e322426d526"
 dependencies = [
  "anstyle",
  "anstyle-parse",
  "anstyle-query",
  "anstyle-wincon",
  "colorchoice",
+ "is_terminal_polyfill",
  "utf8parse",
 ]
 
 [[package]]
 name = "anstyle"
-version = "1.0.2"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15c4c2c83f81532e5845a733998b6971faca23490340a418e9b72a3ec9de12ea"
+checksum = "1bec1de6f59aedf83baf9ff929c98f2ad654b97c9510f4e70cf6f661d49fd5b1"
 
 [[package]]
 name = "anstyle-parse"
@@ -1103,7 +1104,7 @@ dependencies = [
  "regex",
  "ring 0.17.5",
  "rustls-native-certs 0.7.0",
- "rustls-pemfile 2.1.1",
+ "rustls-pemfile 2.2.0",
  "rustls-webpki 0.102.2",
  "serde",
  "serde_json",
@@ -1416,9 +1417,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-dynamodb"
-version = "1.49.0"
+version = "1.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab0ade000608877169533a54326badd6b5a707d2faf876cfc3976a7f9d7e5329"
+checksum = "f38c3122dd27386bf38745f67c9f2c2c47479157bc8a697a3fd97ff45e78dd34"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1439,9 +1440,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-glue"
-version = "1.23.0"
+version = "1.66.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c500adec7fa43df6405eed7984a2aadc1cc04569897e2689d4524e823e7a7297"
+checksum = "71423b1c319cb3e178c6eadf1a14a9b2c26e48cb8c86de8bf13bd3c396a62efd"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1461,9 +1462,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-kinesis"
-version = "1.18.0"
+version = "1.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83accbe1b477c73d9935f5024e87143822bfe9a2dc01c94643b8425258f1002e"
+checksum = "559fab877d728500a834adcbc7f4a8902db9c08475b688bbeb24afb97320bb58"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -3961,7 +3962,7 @@ dependencies = [
 
 [[package]]
 name = "delta_btree_map"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "educe",
  "enum-as-inner 0.6.0",
@@ -4746,22 +4747,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba4f4911e3666fcd7826997b4745c8224295a6f3072f1418c3067b97a67557ee"
 dependencies = [
  "rustversion",
-]
-
-[[package]]
-name = "etcd-client"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39bde3ce50a626efeb1caa9ab1083972d178bebb55ca627639c8ded507dfcbde"
-dependencies = [
- "http 1.1.0",
- "prost 0.13.1",
- "tokio",
- "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
- "tonic",
- "tonic-build",
- "tower",
- "tower-service",
 ]
 
 [[package]]
@@ -6328,7 +6313,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_repr",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "tokio",
  "typed-builder 0.20.0",
  "url",
@@ -6411,7 +6396,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "tokio",
  "toml 0.7.8",
  "url",
@@ -6658,6 +6643,12 @@ dependencies = [
  "rustix 0.38.37",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "is_terminal_polyfill"
+version = "1.70.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "itertools"
@@ -7038,14 +7029,26 @@ dependencies = [
 
 [[package]]
 name = "libtest-mimic"
-version = "0.7.0"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f0f4c6f44ecfd52e8b443f2ad18f2b996540135771561283c2352ce56a1c70b"
+checksum = "cc0bda45ed5b3a2904262c1bb91e526127aa70e7ef3758aba2ef93cf896b9b58"
 dependencies = [
  "clap",
  "escape8259",
  "termcolor",
  "threadpool",
+]
+
+[[package]]
+name = "libtest-mimic"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5297962ef19edda4ce33aaa484386e0a5b3d7f2f4e037cbeee00503ef6b29d33"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap",
+ "escape8259",
 ]
 
 [[package]]
@@ -7100,7 +7103,7 @@ checksum = "78b3ae25bc7c8c38cec158d1f2757ee79e9b3740fbc7ccf0e59e4b08d793fa89"
 
 [[package]]
 name = "local_stats_alloc"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "workspace-hack",
 ]
@@ -7276,26 +7279,6 @@ dependencies = [
  "http 1.1.0",
  "madsim",
  "spin 0.9.8",
- "tracing",
-]
-
-[[package]]
-name = "madsim-etcd-client"
-version = "0.6.0+0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8edcf23498cb590e415ce2ba6c7f186c7aa3340e7aa716ddddb34faf0a9ffdfb"
-dependencies = [
- "etcd-client",
- "futures-util",
- "http 1.1.0",
- "madsim",
- "serde",
- "serde_with 3.8.0",
- "spin 0.9.8",
- "thiserror",
- "tokio",
- "toml 0.8.12",
- "tonic",
  "tracing",
 ]
 
@@ -8205,7 +8188,7 @@ dependencies = [
  "rand",
  "reqwest 0.12.4",
  "ring 0.17.5",
- "rustls-pemfile 2.1.1",
+ "rustls-pemfile 2.2.0",
  "serde",
  "serde_json",
  "snafu",
@@ -8320,7 +8303,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_plain",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "sha2",
  "subtle",
  "thiserror",
@@ -8329,20 +8312,20 @@ dependencies = [
 
 [[package]]
 name = "opensearch"
-version = "2.2.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd2846759315751e04d8b45a0bdbd89ce442282ffb916cf54f6b0adf8df4b44c"
+checksum = "a62b025c3503d3d53eaba3b6f14adb955af9f69fc71141b4d030a4e5331f5d42"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.0",
  "bytes",
  "dyn-clone",
  "lazy_static",
  "percent-encoding",
- "reqwest 0.11.20",
+ "reqwest 0.12.4",
  "rustc_version 0.4.0",
  "serde",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "url",
  "void",
 ]
@@ -8919,7 +8902,7 @@ dependencies = [
 
 [[package]]
 name = "pgwire"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "auto_enums",
@@ -10224,6 +10207,7 @@ version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "566cafdd92868e0939d3fb961bd0dc25fcfaaed179291093b3d43e6b3150ea10"
 dependencies = [
+ "async-compression",
  "base64 0.22.0",
  "bytes",
  "encoding_rs",
@@ -10249,7 +10233,7 @@ dependencies = [
  "pin-project-lite",
  "rustls 0.22.4",
  "rustls-native-certs 0.7.0",
- "rustls-pemfile 2.1.1",
+ "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -10362,7 +10346,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10380,7 +10364,7 @@ dependencies = [
  "reqwest 0.12.4",
  "serde",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "tempfile",
  "thiserror-ext",
@@ -10392,7 +10376,7 @@ dependencies = [
 
 [[package]]
 name = "risedev-config"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -10405,7 +10389,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave-fields-derive"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "expect-test",
  "indoc",
@@ -10417,7 +10401,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_backup"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10428,7 +10412,7 @@ dependencies = [
  "prost 0.13.1",
  "risingwave_common",
  "risingwave_hummock_sdk",
- "risingwave_meta_model_v2",
+ "risingwave_meta_model",
  "risingwave_object_store",
  "risingwave_pb",
  "serde",
@@ -10439,7 +10423,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -10495,7 +10479,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_bench"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10537,7 +10521,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "clap",
  "madsim-tokio",
@@ -10557,7 +10541,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -10590,7 +10574,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -10678,7 +10662,7 @@ dependencies = [
  "serde_bytes",
  "serde_default",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "smallbitset",
  "speedate",
  "stacker",
@@ -10707,7 +10691,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_estimate_size"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "bytes",
  "educe",
@@ -10722,7 +10706,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_heap_profiling"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10737,7 +10721,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_metrics"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "auto_impl",
  "bytes",
@@ -10774,7 +10758,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_proc_macro"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "bae",
  "itertools 0.13.0",
@@ -10786,7 +10770,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_secret"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -10802,7 +10786,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_service"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "async-trait",
  "axum",
@@ -10826,7 +10810,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compaction_test"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10854,7 +10838,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compactor"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -10878,7 +10862,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10925,7 +10909,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
@@ -11021,14 +11005,14 @@ dependencies = [
  "rumqttc",
  "rust_decimal",
  "rustls-native-certs 0.7.0",
- "rustls-pemfile 2.1.1",
+ "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "rw_futures_util",
  "sea-schema 0.15.0",
  "serde",
  "serde_derive",
  "serde_json",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "simd-json",
  "sqlx",
@@ -11059,7 +11043,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector_codec"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
@@ -11091,7 +11075,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -11103,7 +11087,6 @@ dependencies = [
  "hex",
  "inquire",
  "itertools 0.13.0",
- "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -11114,8 +11097,8 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_meta",
+ "risingwave_meta_model",
  "risingwave_meta_model_migration",
- "risingwave_meta_model_v2",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -11134,7 +11117,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_dml"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "assert_matches",
  "criterion",
@@ -11158,7 +11141,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_e2e_extended_mode_test"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -11173,7 +11156,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_error"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "bincode 1.3.3",
@@ -11189,7 +11172,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11228,7 +11211,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr_impl"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -11293,7 +11276,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -11377,7 +11360,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend_macro"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11386,7 +11369,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_sdk"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "bytes",
  "easy-ext",
@@ -11405,7 +11388,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_test"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
@@ -11438,7 +11421,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_trace"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "async-trait",
  "bincode 2.0.0-rc.3",
@@ -11515,7 +11498,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_license"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "expect-test",
  "jsonbb",
@@ -11530,7 +11513,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_mem_table_spill_test"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
@@ -11546,7 +11529,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -11574,7 +11557,6 @@ dependencies = [
  "http 1.1.0",
  "itertools 0.13.0",
  "jsonbb",
- "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -11596,8 +11578,8 @@ dependencies = [
  "risingwave_hummock_sdk",
  "risingwave_license",
  "risingwave_meta_dashboard",
+ "risingwave_meta_model",
  "risingwave_meta_model_migration",
- "risingwave_meta_model_v2",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -11627,7 +11609,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_dashboard"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "axum",
@@ -11647,20 +11629,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "risingwave_meta_model_migration"
-version = "2.1.0-alpha"
-dependencies = [
- "async-std",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "risingwave_meta_model_v2"
-version = "2.1.0-alpha"
+name = "risingwave_meta_model"
+version = "2.2.0-alpha"
 dependencies = [
  "prost 0.13.1",
  "risingwave_common",
@@ -11672,8 +11642,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_meta_model_migration"
+version = "2.2.0-alpha"
+dependencies = [
+ "async-std",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "risingwave_meta_node"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11682,7 +11664,6 @@ dependencies = [
  "futures",
  "hex",
  "itertools 0.13.0",
- "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "otlp-embedded",
@@ -11707,7 +11688,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_service"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11723,7 +11704,7 @@ dependencies = [
  "risingwave_connector",
  "risingwave_hummock_sdk",
  "risingwave_meta",
- "risingwave_meta_model_v2",
+ "risingwave_meta_model",
  "risingwave_pb",
  "sea-orm",
  "serde_json",
@@ -11736,7 +11717,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_object_store"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -11773,7 +11754,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_pb"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "enum-as-inner 0.6.0",
  "fs-err",
@@ -11794,19 +11775,19 @@ dependencies = [
 
 [[package]]
 name = "risingwave_planner_test"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "expect-test",
  "itertools 0.13.0",
- "libtest-mimic",
+ "libtest-mimic 0.8.1",
  "madsim-tokio",
  "paste",
  "risingwave_expr_impl",
  "risingwave_frontend",
  "risingwave_sqlparser",
  "serde",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "tempfile",
  "thiserror-ext",
@@ -11816,7 +11797,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_regress_test"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11830,7 +11811,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11864,7 +11845,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rt"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "await-tree",
  "console",
@@ -11949,16 +11930,16 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "console",
  "itertools 0.13.0",
- "libtest-mimic",
+ "libtest-mimic 0.8.1",
  "madsim-tokio",
  "matches",
  "serde",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "serde_yaml",
  "thiserror",
  "tracing",
@@ -11970,14 +11951,14 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlsmith"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
  "expect-test",
  "itertools 0.13.0",
- "libtest-mimic",
+ "libtest-mimic 0.8.1",
  "madsim-tokio",
  "rand",
  "rand_chacha",
@@ -11998,7 +11979,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_state_cleaning_test"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -12008,7 +11989,7 @@ dependencies = [
  "regex",
  "risingwave_rt",
  "serde",
- "serde_with 3.8.0",
+ "serde_with 3.8.1",
  "tokio-postgres",
  "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "toml 0.8.12",
@@ -12018,7 +11999,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -12090,7 +12071,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -12159,7 +12140,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_telemetry_event"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "jsonbb",
  "madsim-tokio",
@@ -12174,7 +12155,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_test_runner"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "fail",
  "sync-point",
@@ -12183,7 +12164,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_variables"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "chrono",
  "workspace-hack",
@@ -12308,7 +12289,7 @@ dependencies = [
  "futures-util",
  "log",
  "rustls-native-certs 0.7.0",
- "rustls-pemfile 2.1.1",
+ "rustls-pemfile 2.2.0",
  "rustls-webpki 0.102.2",
  "thiserror",
  "tokio",
@@ -12510,7 +12491,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f1fb85efa936c42c6d5fc28d2629bb51e4b2f4b8a5211e297d599cc5a093792"
 dependencies = [
  "openssl-probe",
- "rustls-pemfile 2.1.1",
+ "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "schannel",
  "security-framework",
@@ -12527,19 +12508,18 @@ dependencies = [
 
 [[package]]
 name = "rustls-pemfile"
-version = "2.1.1"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f48172685e6ff52a556baa527774f61fcaa884f59daf3375c62a3f1cd2549dab"
+checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
 dependencies = [
- "base64 0.21.7",
  "rustls-pki-types",
 ]
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.7.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "976295e77ce332211c0d24d92c0e83e50f5c5f046d11082cea19f3df13a3562d"
+checksum = "16f1201b3c9a7ee8039bcadc17b7e605e2945b27eee7631788c1bd2b0643674b"
 
 [[package]]
 name = "rustls-webpki"
@@ -13226,9 +13206,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.8.0"
+version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c85f8e96d1d6857f13768fcbd895fcb06225510022a2774ed8b5150581847b0"
+checksum = "0ad483d2ab0149d5a5ebcd9972a3852711e0153d863bf5a5d0391d28883c4a20"
 dependencies = [
  "base64 0.22.0",
  "chrono",
@@ -13238,7 +13218,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serde_with_macros 3.8.0",
+ "serde_with_macros 3.8.1",
  "time",
 ]
 
@@ -13256,9 +13236,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.8.0"
+version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8b3a576c4eb2924262d5951a3b737ccaf16c931e39a2810c36f9a7e25575557"
+checksum = "65569b702f41443e8bc8bbb1c5779bd0450bbe723b56198980e80ec45780bce2"
 dependencies = [
  "darling 0.20.9",
  "proc-macro2",
@@ -13705,7 +13685,7 @@ dependencies = [
  "glob",
  "humantime",
  "itertools 0.13.0",
- "libtest-mimic",
+ "libtest-mimic 0.7.3",
  "md-5",
  "owo-colors",
  "regex",
@@ -14756,7 +14736,7 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.13.1",
- "rustls-pemfile 2.1.1",
+ "rustls-pemfile 2.2.0",
  "socket2 0.5.6",
  "tokio",
  "tokio-rustls 0.26.0",
@@ -16418,7 +16398,7 @@ dependencies = [
 
 [[package]]
 name = "with_options"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -16439,7 +16419,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-config"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 dependencies = [
  "libz-sys",
  "log",
@@ -16452,7 +16432,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-hack"
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 
 [[package]]
 name = "wyz"

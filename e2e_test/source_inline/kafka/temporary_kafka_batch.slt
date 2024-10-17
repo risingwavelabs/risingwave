@@ -1,0 +1,97 @@
+control substitution on
+
+system ok
+rpk topic delete test_temporary_kafka_batch || true
+
+system ok
+rpk topic create test_temporary_kafka_batch -p 1
+
+system ok
+cat <<EOF | rpk topic produce test_temporary_kafka_batch -f "%v\n"
+{"v1": 1, "v2": "1"}
+{"v1": 2, "v2": "22"}
+{"v1": 3, "v2": "333"}
+{"v1": 4, "v2": "4444"}
+EOF
+
+statement ok
+create temporary source s1 (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_temporary_kafka_batch',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON
+
+query IT rowsort
+select * from s1
+----
+1 1
+2 22
+3 333
+4 4444
+
+query IT rowsort
+select * from s1 where _rw_kafka_timestamp > '1977-01-01 00:00:00+00:00'
+----
+1 1
+2 22
+3 333
+4 4444
+
+query IT rowsort
+select * from s1 where _rw_kafka_timestamp > '1977-01-01 00:00:00'
+----
+1 1
+2 22
+3 333
+4 4444
+
+query IT rowsort
+select * from s1 where _rw_kafka_timestamp > TO_TIMESTAMP('1977-01-01 00:00:00.000000', 'YYYY-MM-DD HH24:MI:SS.US')
+----
+1 1
+2 22
+3 333
+4 4444
+
+statement error expected format
+select * from s1 where _rw_kafka_timestamp > 'abc'
+
+statement error out of range
+select * from s1 where _rw_kafka_timestamp < TO_TIMESTAMP(2147483647 + 1)
+
+query IT
+select * from s1 where _rw_kafka_timestamp > '2045-01-01 0:00:00+00:00'
+----
+
+query B
+select _rw_kafka_timestamp > '1977-01-01 00:00:00+00:00' from s1
+----
+t
+t
+t
+t
+
+query B
+select _rw_kafka_timestamp < now() from s1
+----
+t
+t
+t
+t
+
+query B
+select _rw_kafka_timestamp < now() - interval '1 day' from s1
+----
+f
+f
+f
+f
+
+query IT rowsort
+select * from s1 limit 2
+----
+1 1
+2 22
+
+statement ok
+drop source s1

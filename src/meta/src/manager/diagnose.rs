@@ -22,7 +22,7 @@ use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_hummock_sdk::level::Level;
-use risingwave_meta_model_v2::table::TableType;
+use risingwave_meta_model::table::TableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::meta::EventLog;
@@ -35,7 +35,7 @@ use thiserror_ext::AsReport;
 
 use crate::hummock::HummockManagerRef;
 use crate::manager::event_log::EventLogManagerRef;
-use crate::manager::{MetadataManager, MetadataManagerV2};
+use crate::manager::MetadataManager;
 use crate::MetaResult;
 
 pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
@@ -90,78 +90,22 @@ impl DiagnoseCommand {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn write_catalog(&self, s: &mut String) {
-        match &self.metadata_manager {
-            MetadataManager::V1(_) => self.write_catalog_v1(s).await,
-            MetadataManager::V2(mgr) => {
-                self.write_catalog_v2(s).await;
-                let _ = self.write_table_definition(mgr, s).await.inspect_err(|e| {
-                    tracing::warn!(
-                        error = e.to_report_string(),
-                        "failed to display table definition"
-                    )
-                });
-            }
-        }
+        self.write_catalog_inner(s).await;
+        let _ = self.write_table_definition(s).await.inspect_err(|e| {
+            tracing::warn!(
+                error = e.to_report_string(),
+                "failed to display table definition"
+            )
+        });
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn write_catalog_v1(&self, s: &mut String) {
-        let mgr = self.metadata_manager.as_v1_ref();
-        let _ = writeln!(s, "number of fragment: {}", self.fragment_num().await);
-        let _ = writeln!(s, "number of actor: {}", self.actor_num().await);
-        let _ = writeln!(
-            s,
-            "number of source: {}",
-            mgr.catalog_manager.source_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of table: {}",
-            mgr.catalog_manager.table_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of materialized view: {}",
-            mgr.catalog_manager.materialized_view_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of sink: {}",
-            mgr.catalog_manager.sink_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of index: {}",
-            mgr.catalog_manager.index_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of function: {}",
-            mgr.catalog_manager.function_count().await
-        );
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn fragment_num(&self) -> usize {
-        let mgr = self.metadata_manager.as_v1_ref();
-        let core = mgr.fragment_manager.get_fragment_read_guard().await;
-        core.table_fragments().len()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn actor_num(&self) -> usize {
-        let mgr = self.metadata_manager.as_v1_ref();
-        let core = mgr.fragment_manager.get_fragment_read_guard().await;
-        core.table_fragments()
-            .values()
-            .map(|t| t.actor_status.len())
-            .sum()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn write_catalog_v2(&self, s: &mut String) {
-        let mgr = self.metadata_manager.as_v2_ref();
-        let guard = mgr.catalog_controller.get_inner_read_guard().await;
+    async fn write_catalog_inner(&self, s: &mut String) {
+        let guard = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
         let stat = match guard.stats().await {
             Ok(stat) => stat,
             Err(err) => {
@@ -259,7 +203,7 @@ impl DiagnoseCommand {
                 {
                     None
                 } else {
-                    match worker_actor_count.get(&worker_node.id) {
+                    match worker_actor_count.get(&(worker_node.id as _)) {
                         None => Some(0),
                         Some(c) => Some(*c),
                     }
@@ -684,40 +628,41 @@ impl DiagnoseCommand {
         write!(s, "{}", all.output()).unwrap();
     }
 
-    async fn write_table_definition(
-        &self,
-        mgr: &MetadataManagerV2,
-        s: &mut String,
-    ) -> MetaResult<()> {
-        let sources = mgr
+    async fn write_table_definition(&self, s: &mut String) -> MetaResult<()> {
+        let sources = self
+            .metadata_manager
             .catalog_controller
             .list_sources()
             .await?
             .into_iter()
             .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
             .collect::<BTreeMap<_, _>>();
-        let tables = mgr
+        let tables = self
+            .metadata_manager
             .catalog_controller
             .list_tables_by_type(TableType::Table)
             .await?
             .into_iter()
             .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
             .collect::<BTreeMap<_, _>>();
-        let mvs = mgr
+        let mvs = self
+            .metadata_manager
             .catalog_controller
             .list_tables_by_type(TableType::MaterializedView)
             .await?
             .into_iter()
             .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
             .collect::<BTreeMap<_, _>>();
-        let indexes = mgr
+        let indexes = self
+            .metadata_manager
             .catalog_controller
             .list_tables_by_type(TableType::Index)
             .await?
             .into_iter()
             .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
             .collect::<BTreeMap<_, _>>();
-        let sinks = mgr
+        let sinks = self
+            .metadata_manager
             .catalog_controller
             .list_sinks()
             .await?

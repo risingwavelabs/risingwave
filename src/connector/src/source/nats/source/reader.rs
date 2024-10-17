@@ -51,8 +51,8 @@ impl SplitReader for NatsSplitReader {
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        // TODO: to simplify the logic, return 1 split for first version
-        assert!(splits.len() == 1);
+        // We guarantee the split num always align with parallelism
+        assert_eq!(splits.len(), 1);
         let split = splits.into_iter().next().unwrap();
         let split_id = split.split_id;
         let start_position = match &split.start_sequence {
@@ -73,6 +73,9 @@ impl SplitReader for NatsSplitReader {
                     }
                 },
             },
+            // We have record on this Nats Split, contains the last seen offset (seq id) or reply subject
+            // We do not use the seq id as start position anymore,
+            // but just let the reader load from durable consumer on broker.
             start_position => start_position.to_owned(),
         };
 
@@ -85,6 +88,7 @@ impl SplitReader for NatsSplitReader {
             .common
             .build_consumer(
                 properties.stream.clone(),
+                properties.durable_consumer_name.clone(),
                 split_id.to_string(),
                 start_position.clone(),
                 config,

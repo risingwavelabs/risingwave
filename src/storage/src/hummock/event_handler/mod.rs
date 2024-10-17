@@ -18,7 +18,7 @@ use std::sync::Arc;
 use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, HummockVersionId};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
@@ -105,6 +105,10 @@ pub enum HummockEvent {
     DestroyReadVersion {
         instance_id: LocalInstanceId,
     },
+
+    GetMinUncommittedSstId {
+        result_tx: oneshot::Sender<Option<HummockSstableObjectId>>,
+    },
 }
 
 impl HummockEvent {
@@ -164,6 +168,7 @@ impl HummockEvent {
 
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(_) => "FlushEvent".to_string(),
+            HummockEvent::GetMinUncommittedSstId { .. } => "GetMinSpilledSstId".to_string(),
         }
     }
 }

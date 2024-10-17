@@ -27,8 +27,8 @@ use risingwave_pb::hummock::{
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use crate::manager::{MetaSrvEnv, MetaStoreImpl};
-use crate::model::{MetadataModel, MetadataModelError};
+use crate::manager::MetaSrvEnv;
+use crate::model::MetadataModelError;
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
@@ -135,19 +135,16 @@ pub struct CompactorManagerInner {
 
 impl CompactorManagerInner {
     pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
-        use risingwave_meta_model_v2::compaction_task;
+        use risingwave_meta_model::compaction_task;
         use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
-        let task_assignment: Vec<CompactTaskAssignment> = match env.meta_store_ref() {
-            MetaStoreImpl::Kv(meta_store) => CompactTaskAssignment::list(meta_store).await?,
-            MetaStoreImpl::Sql(sql_meta_store) => compaction_task::Entity::find()
-                .all(&sql_meta_store.conn)
-                .await
-                .map_err(MetadataModelError::from)?
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-        };
+        let task_assignment: Vec<CompactTaskAssignment> = compaction_task::Entity::find()
+            .all(&env.meta_store_ref().conn)
+            .await
+            .map_err(MetadataModelError::from)?
+            .into_iter()
+            .map(Into::into)
+            .collect();
         let mut manager = Self {
             task_expired_seconds: env.opts.compaction_task_max_progress_interval_secs,
             heartbeat_expired_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,
@@ -493,10 +490,10 @@ mod tests {
     async fn test_compactor_manager() {
         // Initialize metastore with task assignment.
         let (env, context_id) = {
-            let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-            let context_id = worker_node.id;
+            let (env, hummock_manager, _cluster_manager, worker_id) = setup_compute_env(80).await;
+            let context_id = worker_id as _;
             let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(
-                MockHummockMetaClient::new(hummock_manager.clone(), worker_node.id),
+                MockHummockMetaClient::new(hummock_manager.clone(), context_id),
             );
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
             register_table_ids_to_compaction_group(

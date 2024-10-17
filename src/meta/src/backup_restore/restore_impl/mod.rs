@@ -16,7 +16,6 @@ use risingwave_backup::error::BackupResult;
 use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
 use risingwave_backup::MetaSnapshotId;
 
-pub mod v1;
 pub mod v2;
 
 /// `Loader` gets, validates and amends `MetaSnapshot`.

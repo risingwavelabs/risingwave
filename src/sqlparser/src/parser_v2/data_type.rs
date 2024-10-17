@@ -208,10 +208,10 @@ fn keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> PResult<Da
         Keyword::INT | Keyword::INTEGER => empty.value(DataType::Int),
         Keyword::BIGINT => empty.value(DataType::BigInt),
         Keyword::STRING | Keyword::VARCHAR => empty.value(DataType::Varchar),
-        Keyword::CHAR | Keyword::CHARACTER => dispatch! {keyword;
-            Keyword::VARYING => empty.value(DataType::Varchar),
-            _ => opt(precision_in_range(..)).map(DataType::Char),
-        },
+        Keyword::CHAR | Keyword::CHARACTER => alt((
+            Keyword::VARYING.value(DataType::Varchar),
+            opt(precision_in_range(..)).map(DataType::Char),
+        )),
         Keyword::UUID => empty.value(DataType::Uuid),
         Keyword::DATE => empty.value(DataType::Date),
         Keyword::TIMESTAMP => with_time_zone().map(DataType::Timestamp),
