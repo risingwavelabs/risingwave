@@ -396,7 +396,7 @@ impl OpenDalSinkWriter {
             EngineType::Fs => {
                 format!(
                     "{}{}_{}.{}",
-                    self.path_partition_prefix(&create_time,),
+                    self.path_partition_prefix(&create_time),
                     self.executor_id,
                     create_time.as_secs(),
                     suffix

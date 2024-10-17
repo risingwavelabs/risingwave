@@ -132,6 +132,10 @@ impl LogSinker for BatchingLogSinker {
                                 log_reader.truncate(TruncateOffset::Barrier {
                                     epoch: max_uncommitted_epoch,
                                 })?;
+                                state = LogConsumerState::EpochBegun {
+                                    curr_epoch: epoch,
+                                    max_uncommitted_epoch: None,
+                                }
                             };
 
                             log_reader.truncate(TruncateOffset::Chunk {
