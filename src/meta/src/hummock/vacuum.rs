@@ -275,7 +275,30 @@ mod tests {
             .await
             .unwrap();
         hummock_manager.create_version_checkpoint(0).await.unwrap();
-        assert!(!hummock_manager.get_objects_to_delete().is_empty());
+        assert!(hummock_manager.get_objects_to_delete().is_empty());
+        hummock_manager
+            .complete_full_gc(
+                sst_infos
+                    .iter()
+                    .flat_map(|ssts| ssts.iter().map(|s| s.object_id))
+                    .collect(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(hummock_manager.get_objects_to_delete().len(), 3);
+        assert_eq!(
+            hummock_manager
+                .get_objects_to_delete()
+                .into_iter()
+                .sorted()
+                .collect::<Vec<_>>(),
+            sst_infos[0]
+                .iter()
+                .map(|s| s.object_id)
+                .sorted()
+                .collect::<Vec<_>>()
+        );
         // No SST deletion is scheduled because no available worker.
         assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
         let _receiver = compactor_manager.add_compactor(context_id);

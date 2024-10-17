@@ -527,10 +527,14 @@ mod tests {
             .unwrap();
 
         // LSMtree is empty. All input SST ids should be treated as garbage.
+        // Use fake object ids, because they'll be written to GC history and they shouldn't affect later commit.
         assert_eq!(
             3,
             hummock_manager
-                .complete_full_gc(vec![1, 2, 3], None)
+                .complete_full_gc(
+                    vec![i64::MAX as u64 - 2, i64::MAX as u64 - 1, i64::MAX as u64],
+                    None
+                )
                 .await
                 .unwrap()
         );
