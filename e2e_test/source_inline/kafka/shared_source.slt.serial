@@ -23,10 +23,10 @@ sleep 2s
 system ok
 internal_table.mjs --name mv_before_produce --type sourcebackfill
 ----
-0,"""Finished"""
-1,"""Finished"""
-2,"""Finished"""
-3,"""Finished"""
+0,"{""num_consumed_rows"": 0, ""state"": ""Finished""}"
+1,"{""num_consumed_rows"": 0, ""state"": ""Finished""}"
+2,"{""num_consumed_rows"": 0, ""state"": ""Finished""}"
+3,"{""num_consumed_rows"": 0, ""state"": ""Finished""}"
 
 
 system ok
@@ -78,10 +78,10 @@ internal_table.mjs --name s0 --type source
 system ok
 internal_table.mjs --name mv_1 --type sourcebackfill
 ----
-0,"{""SourceCachingUp"": ""0""}"
-1,"{""SourceCachingUp"": ""0""}"
-2,"{""SourceCachingUp"": ""0""}"
-3,"{""SourceCachingUp"": ""0""}"
+0,"{""num_consumed_rows"": 1, ""state"": {""SourceCachingUp"": ""0""}}"
+1,"{""num_consumed_rows"": 1, ""state"": {""SourceCachingUp"": ""0""}}"
+2,"{""num_consumed_rows"": 1, ""state"": {""SourceCachingUp"": ""0""}}"
+3,"{""num_consumed_rows"": 1, ""state"": {""SourceCachingUp"": ""0""}}"
 
 
 # This does not affect the behavior for CREATE MATERIALIZED VIEW below. It also uses the shared source, and creates SourceBackfillExecutor.
@@ -176,10 +176,10 @@ internal_table.mjs --name s0 --type source
 system ok
 internal_table.mjs --name mv_1 --type sourcebackfill
 ----
-0,"""Finished"""
-1,"""Finished"""
-2,"""Finished"""
-3,"""Finished"""
+0,"{""num_consumed_rows"": 2, ""state"": ""Finished""}"
+1,"{""num_consumed_rows"": 2, ""state"": ""Finished""}"
+2,"{""num_consumed_rows"": 2, ""state"": ""Finished""}"
+3,"{""num_consumed_rows"": 2, ""state"": ""Finished""}"
 
 
 system ok

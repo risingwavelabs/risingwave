@@ -54,9 +54,15 @@ pub enum BackfillState {
     SourceCachingUp(String),
     Finished,
 }
-pub type BackfillStates = HashMap<SplitId, BackfillState>;
+pub type BackfillStates = HashMap<SplitId, BackfillStateWithCnt>;
 
-impl BackfillState {
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct BackfillStateWithCnt {
+    pub state: BackfillState,
+    pub num_consumed_rows: u64,
+}
+
+impl BackfillStateWithCnt {
     pub fn encode_to_json(self) -> JsonbVal {
         serde_json::to_value(self).unwrap().into()
     }
@@ -115,6 +121,10 @@ struct BackfillStage {
 }
 
 impl BackfillStage {
+    fn total_backfilled_rows(&self) -> u64 {
+        self.states.values().map(|s| s.num_consumed_rows).sum()
+    }
+
     fn debug_assert_consistent(&self) {
         if cfg!(debug_assertions) {
             let all_splits: HashSet<_> =
@@ -134,7 +144,7 @@ impl BackfillStage {
     fn get_latest_unfinished_splits(&self) -> StreamExecutorResult<Vec<SplitImpl>> {
         let mut unfinished_splits = Vec::new();
         for split in &self.splits {
-            let state = self.states.get(split.id().as_ref()).unwrap();
+            let state = &self.states.get(split.id().as_ref()).unwrap().state;
             match state {
                 BackfillState::Backfilling(Some(offset)) => {
                     let mut updated_split = split.clone();
@@ -151,7 +161,7 @@ impl BackfillStage {
     /// Updates backfill states and `target_offsets` and returns whether the row from upstream `SourceExecutor` is visible.
     fn handle_upstream_row(&mut self, split_id: &str, offset: &str) -> bool {
         let mut vis = false;
-        let state = self.states.get_mut(split_id).unwrap();
+        let state = &mut self.states.get_mut(split_id).unwrap().state;
         match state {
             BackfillState::Backfilling(None) => {
                 // backfilling for this split is not started yet. Ignore this row
@@ -206,6 +216,8 @@ impl BackfillStage {
     /// Updates backfill states and returns whether the row backfilled from external system is visible.
     fn handle_backfill_row(&mut self, split_id: &str, offset: &str) -> bool {
         let state = self.states.get_mut(split_id).unwrap();
+        state.num_consumed_rows += 1;
+        let state = &mut state.state;
         match state {
             BackfillState::Backfilling(_old_offset) => {
                 let target_offset = self.target_offsets.get(split_id).unwrap();
@@ -336,14 +348,16 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         self.backfill_state_store.init_epoch(barrier.epoch);
 
         let mut backfill_states: BackfillStates = HashMap::new();
-
         for split in &owned_splits {
             let split_id = split.id();
             let backfill_state = self
                 .backfill_state_store
                 .try_recover_from_state_store(&split_id)
                 .await?
-                .unwrap_or(BackfillState::Backfilling(None));
+                .unwrap_or(BackfillStateWithCnt {
+                    state: BackfillState::Backfilling(None),
+                    num_consumed_rows: 0,
+                });
             backfill_states.insert(split_id, backfill_state);
         }
         let mut backfill_stage = BackfillStage {
@@ -370,7 +384,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         for (split_id, info) in &backfill_info {
             match info {
                 BackfillInfo::NoDataToBackfill => {
-                    *backfill_stage.states.get_mut(split_id).unwrap() = BackfillState::Finished;
+                    backfill_stage.states.get_mut(split_id).unwrap().state =
+                        BackfillState::Finished;
                 }
                 BackfillInfo::HasDataToBackfill { latest_offset } => {
                     // Note: later we will override it with the offset from the source message, and it's possible to become smaller than this value.
@@ -586,8 +601,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // progress based on the number of consumed rows and an estimated total number of rows from hummock.
                                     // For now, we just rely on the same code path, and for source backfill, the progress will always be 99.99%.
                                     tracing::debug!("progress finish");
-                                    let epoch = barrier.epoch;
-                                    self.progress.finish(epoch, 114514);
+                                    self.progress.finish(
+                                        barrier.epoch,
+                                        backfill_stage.total_backfilled_rows(),
+                                    );
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
@@ -599,6 +616,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         break 'backfill_loop;
                                     }
                                 } else {
+                                    self.progress.update_for_source_backfill(
+                                        barrier.epoch,
+                                        backfill_stage.total_backfilled_rows(),
+                                    );
+                                    // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
                                 }
                             }
@@ -671,16 +693,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             }
         }
 
-        let mut splits: HashSet<SplitId> = backfill_stage.states.keys().cloned().collect();
+        let mut states = backfill_stage.states;
         // Make sure `Finished` state is persisted.
-        self.backfill_state_store
-            .set_states(
-                splits
-                    .iter()
-                    .map(|s| (s.clone(), BackfillState::Finished))
-                    .collect(),
-            )
-            .await?;
+        self.backfill_state_store.set_states(states.clone()).await?;
 
         // All splits finished backfilling. Now we only forward the source data.
         #[for_await]
@@ -700,7 +715,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 );
                                 self.apply_split_change_forward_stage(
                                     actor_splits,
-                                    &mut splits,
+                                    &mut states,
                                     true,
                                 )
                                 .await?;
@@ -708,7 +723,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             Mutation::Update(UpdateMutation { actor_splits, .. }) => {
                                 self.apply_split_change_forward_stage(
                                     actor_splits,
-                                    &mut splits,
+                                    &mut states,
                                     false,
                                 )
                                 .await?;
@@ -743,7 +758,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     fn should_report_finished(&self, states: &BackfillStates) -> bool {
         states.values().all(|state| {
             matches!(
-                state,
+                state.state,
                 BackfillState::Finished | BackfillState::SourceCachingUp(_)
             )
         })
@@ -763,13 +778,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     async fn backfill_finished(&self, states: &BackfillStates) -> StreamExecutorResult<bool> {
         Ok(states
             .values()
-            .all(|state| matches!(state, BackfillState::Finished))
+            .all(|state| matches!(state.state, BackfillState::Finished))
             && self
                 .backfill_state_store
                 .scan()
                 .await?
                 .into_iter()
-                .all(|state| matches!(state, BackfillState::Finished)))
+                .all(|state| matches!(state.state, BackfillState::Finished)))
     }
 
     /// For newly added splits, we do not need to backfill and can directly forward from upstream.
@@ -823,8 +838,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 match backfill_state {
                     None => {
                         // Newly added split. We don't need to backfill.
-                        // Note that this branch is different from the initial barrier (BackfillState::Backfilling(None) there).
-                        target_state.insert(split_id, BackfillState::Finished);
+                        // Note that this branch is different from the initial barrier (BackfillStateInner::Backfilling(None) there).
+                        target_state.insert(
+                            split_id,
+                            BackfillStateWithCnt {
+                                state: BackfillState::Finished,
+                                num_consumed_rows: 0,
+                            },
+                        );
                     }
                     Some(backfill_state) => {
                         // Migrated split. Backfill if unfinished.
@@ -878,12 +899,12 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     async fn apply_split_change_forward_stage(
         &mut self,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
-        splits: &mut HashSet<SplitId>,
+        states: &mut BackfillStates,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
         self.source_split_change_count.inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
-            self.update_state_if_changed_forward_stage(target_splits, splits, should_trim_state)
+            self.update_state_if_changed_forward_stage(target_splits, states, should_trim_state)
                 .await?;
         }
 
@@ -893,7 +914,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     async fn update_state_if_changed_forward_stage(
         &mut self,
         target_splits: Vec<SplitImpl>,
-        current_splits: &mut HashSet<SplitId>,
+        states: &mut BackfillStates,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
         let target_splits: HashSet<SplitId> = target_splits
@@ -902,23 +923,25 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .collect();
 
         let mut split_changed = false;
+        let mut newly_added_splits = vec![];
 
         // Checks added splits
         for split_id in &target_splits {
-            if !current_splits.contains(split_id) {
+            if !states.contains_key(split_id) {
                 split_changed = true;
 
                 let backfill_state = self
                     .backfill_state_store
                     .try_recover_from_state_store(split_id)
                     .await?;
-                match backfill_state {
+                match &backfill_state {
                     None => {
                         // Newly added split. We don't need to backfill!
+                        newly_added_splits.push(split_id.clone());
                     }
                     Some(backfill_state) => {
                         // Migrated split. It should also be finished since we are in forwarding stage.
-                        match backfill_state {
+                        match backfill_state.state {
                             BackfillState::Finished => {}
                             _ => {
                                 return Err(anyhow::anyhow!(
@@ -930,11 +953,18 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         }
                     }
                 }
+                states.insert(
+                    split_id.clone(),
+                    backfill_state.unwrap_or(BackfillStateWithCnt {
+                        state: BackfillState::Finished,
+                        num_consumed_rows: 0,
+                    }),
+                );
             }
         }
 
         // Checks dropped splits
-        for existing_split_id in current_splits.iter() {
+        for existing_split_id in states.keys() {
             if !target_splits.contains(existing_split_id) {
                 tracing::info!("split dropping detected: {}", existing_split_id);
                 split_changed = true;
@@ -947,19 +977,30 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 "apply split change"
             );
 
-            let dropped_splits =
-                current_splits.extract_if(|split_id| !target_splits.contains(split_id));
+            let dropped_splits = states.extract_if(|split_id, _| !target_splits.contains(split_id));
 
             if should_trim_state {
                 // trim dropped splits' state
-                self.backfill_state_store.trim_state(dropped_splits).await?;
+                self.backfill_state_store
+                    .trim_state(dropped_splits.map(|(k, _v)| k))
+                    .await?;
             }
 
+            // For migrated splits, and existing splits, we do not need to update
+            // state store, but only for newly added splits.
             self.backfill_state_store
                 .set_states(
-                    target_splits
+                    newly_added_splits
                         .into_iter()
-                        .map(|split_id| (split_id, BackfillState::Finished))
+                        .map(|split_id| {
+                            (
+                                split_id,
+                                BackfillStateWithCnt {
+                                    state: BackfillState::Finished,
+                                    num_consumed_rows: 0,
+                                },
+                            )
+                        })
                         .collect(),
                 )
                 .await?;
