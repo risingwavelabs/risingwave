@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
+use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
@@ -179,7 +180,7 @@ impl TableCatalogBuilder {
             created_at_cluster_version: None,
             retention_seconds: None,
             cdc_table_id: None,
-            vnode_count: None, // will be filled in by the meta service later
+            vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
         }
     }
 

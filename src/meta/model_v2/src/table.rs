@@ -213,11 +213,11 @@ impl From<PbTable> for ActiveModel {
         // `PbTable` here should be sourced from the wire, not from persistence.
         // An unset `maybe_vnode_count` field should be treated as `NotSet`, instead of calling
         // the compatibility code.
-        let vnode_count = if let Some(vnode_count) = pb_table.maybe_vnode_count {
-            Set(vnode_count as _)
-        } else {
-            NotSet
-        };
+        let vnode_count = pb_table
+            .vnode_count_inner()
+            .value_opt()
+            .map(|v| v as _)
+            .map_or(NotSet, Set);
 
         let fragment_id = if pb_table.fragment_id == OBJECT_ID_PLACEHOLDER {
             NotSet
