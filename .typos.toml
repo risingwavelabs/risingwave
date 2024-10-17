@@ -38,5 +38,7 @@ extend-exclude = [
     "src/common/src/cast/mod.rs",
     "src/tests/simulation/tests/integration_tests/scale/shared_source.rs",
     # We don't want to fix "Divy" here, but may want in other places.
-    "integration_tests/deltalake-sink/spark-script/run-sql-file.sh"
+    "integration_tests/deltalake-sink/spark-script/run-sql-file.sh",
+    # These files are copied from debezium connector, we don't want to fix their typos
+    "java/connector-node/risingwave-source-cdc/src/main/java/io/debezium/connector/postgresql/*.java"
 ]
