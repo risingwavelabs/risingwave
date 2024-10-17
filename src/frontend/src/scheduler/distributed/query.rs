@@ -473,7 +473,7 @@ pub(crate) mod tests {
         ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, StreamJobStatus,
         DEFAULT_SUPER_USER_ID,
     };
-    use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};
+    use risingwave_common::hash::{VirtualNode, VnodeCount, WorkerSlotId, WorkerSlotMapping};
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
@@ -589,7 +589,7 @@ pub(crate) mod tests {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             cdc_table_id: None,
-            vnode_count: Some(vnode_count),
+            vnode_count: VnodeCount::set(vnode_count),
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
