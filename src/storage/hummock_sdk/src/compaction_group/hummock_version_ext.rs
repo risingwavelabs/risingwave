@@ -1022,7 +1022,7 @@ impl Levels {
             ..
         } = summary;
 
-        if !self.check_deleted_sst_exist(&delete_sst_levels, delete_sst_ids_set.clone()) {
+        if !self.check_sst_ids_exist(&delete_sst_levels, delete_sst_ids_set.clone()) {
             warn!(
                 "This VersionDelta may be committed by an expired compact task. Please check it. \n
                     delete_sst_levels: {:?}\n,
@@ -1112,26 +1112,26 @@ impl Levels {
         }
     }
 
-    pub fn check_deleted_sst_exist(
+    pub fn check_sst_ids_exist(
         &self,
-        delete_sst_levels: &[u32],
-        mut delete_sst_ids_set: HashSet<u64>,
+        level_idx_to_check: &[u32],
+        mut sst_ids: HashSet<u64>,
     ) -> bool {
-        for level_idx in delete_sst_levels {
+        for level_idx in level_idx_to_check {
             if *level_idx == 0 {
                 for level in &self.l0.sub_levels {
                     level.table_infos.iter().for_each(|table| {
-                        delete_sst_ids_set.remove(&table.sst_id);
+                        sst_ids.remove(&table.sst_id);
                     });
                 }
             } else {
                 let idx = *level_idx as usize - 1;
                 self.levels[idx].table_infos.iter().for_each(|table| {
-                    delete_sst_ids_set.remove(&table.sst_id);
+                    sst_ids.remove(&table.sst_id);
                 });
             }
         }
-        delete_sst_ids_set.is_empty()
+        sst_ids.is_empty()
     }
 }
 
