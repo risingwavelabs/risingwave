@@ -22,7 +22,7 @@ use crate::HummockSstableObjectId;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub object_id: HummockSstableObjectId,
-    pub created_at: DateTime,
+    pub mark_delete_at: DateTime,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

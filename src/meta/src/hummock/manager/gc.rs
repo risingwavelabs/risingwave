@@ -334,7 +334,7 @@ impl HummockManager {
     ) -> Result<()> {
         let models = object_ids.map(|o| hummock_gc_history::ActiveModel {
             object_id: Set(o.try_into().unwrap()),
-            created_at: Default::default(),
+            mark_delete_at: Default::default(),
         });
         let db = &self.meta_store_ref().conn;
         let gc_history_retention_sec = self.env.opts.min_sst_retention_time_sec * 2;
