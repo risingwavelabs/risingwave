@@ -410,6 +410,11 @@ impl HummockManager {
             .collect();
 
         self.delete_object_tracker.clear();
+        // Not delete stale objects when archive or time travel is enabled
+        if !self.env.opts.enable_hummock_data_archive && !self.time_travel_enabled().await {
+            versioning_guard.mark_objects_for_deletion(context_info, &self.delete_object_tracker);
+        }
+
         self.initial_compaction_group_config_after_load(
             versioning_guard,
             self.compaction_group_manager.write().await.deref_mut(),
