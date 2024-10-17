@@ -38,7 +38,7 @@ apt-get -y install jq
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-inline-source-test
-risedev slt './e2e_test/source_inline/**/*.slt'
+risedev slt './e2e_test/source_inline/**/*.slt' -j16
 echo "--- Kill cluster"
 risedev ci-kill
 
