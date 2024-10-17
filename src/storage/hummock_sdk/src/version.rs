@@ -38,6 +38,7 @@ use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
 use crate::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
+    INVALID_MAX_SUB_LEVEL_ID,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -225,7 +226,7 @@ pub struct HummockVersionCommon<T> {
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<T>>,
     pub state_table_info: HummockVersionStateTableInfo,
     /// The maximum `sub_level_id` that has been recorded thus far, regardless of whether the `sub_level_id` currently exists.
-    pub max_sub_level_id: Option<u64>,
+    pub max_sub_level_id: u64,
 }
 
 pub type HummockVersion = HummockVersionCommon<SstableInfo>;
@@ -315,20 +316,10 @@ where
                 &pb_version.state_table_info,
             ),
             // The next_sub_level_id is expected to be None in Pb from previous kernel version.
-            // For backward compatibility, try to initialize next_sub_level_id with max(existing sub_level ids).
-            max_sub_level_id: pb_version.max_sub_level_id.or_else(|| {
-                pb_version
-                    .levels
-                    .values()
-                    .filter_map(|levels| {
-                        levels
-                            .l0
-                            .as_ref()
-                            .map(|l0| l0.sub_levels.iter().map(|s| s.sub_level_id).max())
-                    })
-                    .flatten()
-                    .max()
-            }),
+            // For backward compatibility, see load_meta_store_state_impl.
+            max_sub_level_id: pb_version
+                .max_sub_level_id
+                .unwrap_or(INVALID_MAX_SUB_LEVEL_ID),
         }
     }
 }
@@ -358,7 +349,7 @@ where
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
             state_table_info: version.state_table_info.to_protobuf(),
-            max_sub_level_id: version.max_sub_level_id,
+            max_sub_level_id: Some(version.max_sub_level_id),
         }
     }
 }
@@ -389,7 +380,7 @@ where
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
             state_table_info: version.state_table_info.to_protobuf(),
-            max_sub_level_id: version.max_sub_level_id,
+            max_sub_level_id: Some(version.max_sub_level_id),
         }
     }
 }
@@ -452,7 +443,7 @@ impl HummockVersion {
             table_watermarks: HashMap::new(),
             table_change_log: HashMap::new(),
             state_table_info: HummockVersionStateTableInfo::empty(),
-            max_sub_level_id: None,
+            max_sub_level_id: INVALID_MAX_SUB_LEVEL_ID,
         };
         for group_id in [
             StaticCompactionGroupId::StateDefault as CompactionGroupId,

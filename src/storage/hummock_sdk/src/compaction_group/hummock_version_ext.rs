@@ -893,10 +893,10 @@ impl HummockVersion {
         self.max_sub_level_id = self
             .levels
             .values()
-            .map(|levels| levels.l0.sub_levels.iter().map(|s| s.sub_level_id).max())
+            .filter_map(|levels| levels.l0.sub_levels.iter().map(|s| s.sub_level_id).max())
             .chain(iter::once(self.max_sub_level_id))
-            .flatten()
-            .max();
+            .max()
+            .unwrap();
     }
 }
 
@@ -2045,7 +2045,7 @@ mod tests {
             let mut left_levels = Levels::default();
             let right_levels = Levels::default();
 
-            group_split::merge_levels(&mut left_levels, right_levels, None);
+            group_split::merge_levels(&mut left_levels, right_levels, 105);
         }
 
         {
@@ -2059,7 +2059,7 @@ mod tests {
             );
             let right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, right_levels, None);
+            group_split::merge_levels(&mut left_levels, right_levels, 105);
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2084,7 +2084,7 @@ mod tests {
                 },
             );
 
-            group_split::merge_levels(&mut left_levels, right_levels, Some(105));
+            group_split::merge_levels(&mut left_levels, right_levels, 105);
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2102,7 +2102,7 @@ mod tests {
             let mut left_levels = left_levels.clone();
             let right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, right_levels, Some(105));
+            group_split::merge_levels(&mut left_levels, right_levels, 105);
 
             assert!(left_levels.l0.sub_levels.len() == 6);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2265,7 +2265,7 @@ mod tests {
                     },
                 ),
             )]),
-            max_sub_level_id: Some(101),
+            max_sub_level_id: 101,
             ..Default::default()
         };
 

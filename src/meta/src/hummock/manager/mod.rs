@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::iter;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -24,7 +25,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, HummockCompactionTaskId,
-    HummockContextId, HummockVersionId,
+    HummockContextId, HummockVersionId, INVALID_MAX_SUB_LEVEL_ID,
 };
 use risingwave_meta_model_v2::{
     compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
@@ -68,6 +69,7 @@ mod worker;
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 use compaction::*;
 pub use compaction::{check_cg_write_limit, WriteLimitType};
+use risingwave_common::util::epoch::Epoch;
 pub(crate) use utils::*;
 
 // Update to states are performed as follow:
@@ -433,6 +435,19 @@ impl HummockManager {
             hummock_version_id: 0,
             ..Default::default()
         });
+
+        let may_init_max_sub_level_id = if redo_state.max_sub_level_id == INVALID_MAX_SUB_LEVEL_ID {
+            Epoch::now().0
+        } else {
+            redo_state.max_sub_level_id
+        };
+        redo_state.max_sub_level_id = redo_state
+            .levels
+            .values()
+            .filter_map(|levels| levels.l0.sub_levels.iter().map(|s| s.sub_level_id).max())
+            .chain(iter::once(may_init_max_sub_level_id))
+            .max()
+            .unwrap();
 
         versioning_guard.current_version = redo_state;
         versioning_guard.hummock_version_deltas = hummock_version_deltas;

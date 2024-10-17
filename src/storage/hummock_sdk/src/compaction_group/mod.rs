@@ -61,7 +61,7 @@ pub mod group_split {
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels};
     use crate::sstable_info::SstableInfo;
-    use crate::{can_concat, HummockEpoch, KeyComparator, FIRST_SUB_LEVEL_ID};
+    use crate::{can_concat, HummockEpoch, KeyComparator};
 
     /// The split will follow the following rules:
     /// 1. Ssts with `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.right`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`].
@@ -274,16 +274,23 @@ pub mod group_split {
     }
 
     /// Merge the right levels into the left levels.
-    pub fn merge_levels(
-        left_levels: &mut Levels,
-        right_levels: Levels,
-        max_sub_level_id: Option<u64>,
-    ) {
+    pub fn merge_levels(left_levels: &mut Levels, right_levels: Levels, max_sub_level_id: u64) {
         let right_l0 = right_levels.l0;
-
-        let mut next_right_sub_level_id = max_sub_level_id
-            .map(|v| v + 1)
-            .unwrap_or(FIRST_SUB_LEVEL_ID);
+        let mut next_right_sub_level_id = max_sub_level_id + 1;
+        let max_left_sub_level_id = left_levels
+            .l0
+            .sub_levels
+            .iter()
+            .map(|l| l.sub_level_id)
+            .max();
+        assert!(
+            max_left_sub_level_id
+                .map(|left| left < next_right_sub_level_id)
+                .unwrap_or(true),
+            "max_left_sub_level_id={:?} next_right_sub_level_id={}",
+            max_left_sub_level_id,
+            next_right_sub_level_id
+        );
         let need_rewrite_right_sub_level_id = !left_levels.l0.sub_levels.is_empty();
 
         for mut right_sub_level in right_l0.sub_levels {
