@@ -13,7 +13,6 @@ public class SparkIcebergCompaction {
                 .config("spark.sql.extensions", "nimtable.shaded.org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
                 .config("spark.sql.catalog.nimtable", "nimtable.shaded.org.apache.iceberg.spark.SparkCatalog")
                 .getOrCreate();
-        session.sparkContext().
         List<Row> rows = session.sql(String.format("CALL nimtable.system.rewrite_data_files(table => '%s.%s', options => map('rewrite-all', 'true'))", database, table)).collectAsList();
         System.out.printf("compaction success: %s/%s, output: %s%n", database, table, rows);
         try {
