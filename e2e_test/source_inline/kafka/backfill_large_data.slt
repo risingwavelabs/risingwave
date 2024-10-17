@@ -1,0 +1,138 @@
+control substitution on
+
+statement ok
+SET streaming_use_shared_source TO true;
+
+statement ok
+SET background_ddl TO true;
+
+system ok
+rpk topic delete test_backfill_large_data || true
+
+system ok
+rpk topic create test_backfill_large_data -p 4
+
+# ========================================================
+# topic has no data now
+# ========================================================
+
+statement ok
+create source s0 (x int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_backfill_large_data',
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+create materialized view mv0_0 as select * from s0;
+
+
+
+
+# ========================================================
+# produce some data to the topic before creating MV
+# ========================================================
+system ok
+rpk topic produce test_backfill_large_data -f '%v{json}\n' <<< $(seq -f %1.0f 1 1000000 | jq -c '{"x": .}') > /dev/null
+
+statement ok
+create source s1 (x int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_backfill_large_data',
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+create materialized view mv0_1 as select * from s0;
+
+
+statement ok
+create materialized view mv1_0 as select * from s1;
+
+
+# ========================================================
+# produce more data in the background, and create MV concurrently
+# ========================================================
+system ok
+rpk topic produce test_backfill_large_data -f '%v{json}\n' <<< $(seq -f %1.0f 1000001 2000000 | jq -c '{"x": .}') > /dev/null &
+
+
+statement ok
+create materialized view mv0_2 as select * from s0;
+
+statement ok
+create materialized view mv1_1 as select * from s1;
+
+
+
+
+# ========================================================
+# No more new data later. create MV now
+# ========================================================
+statement ok
+create source s2 (x int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_backfill_large_data',
+) FORMAT PLAIN ENCODE JSON;
+
+
+statement ok
+create materialized view mv0_3 as select * from s0;
+
+statement ok
+create materialized view mv1_2 as select * from s1;
+
+statement ok
+create materialized view mv2_0 as select * from s2;
+
+sleep 200s
+
+query I
+select count(distinct x) from mv0_0;
+----
+2000000
+
+query I
+select count(distinct x) from mv0_1;
+----
+2000000
+
+query I
+select count(distinct x) from mv0_2;
+----
+2000000
+
+query I
+select count(distinct x) from mv0_3;
+----
+2000000
+
+query I
+select count(distinct x) from mv1_0;
+----
+2000000
+
+
+query I
+select count(distinct x) from mv1_1;
+----
+2000000
+
+query I
+select count(distinct x) from mv1_2;
+----
+2000000
+
+query I
+select count(distinct x) from mv2_0;
+----
+2000000
+
+
+
+statement ok
+drop source s0 cascade;
+
+statement ok
+drop source s1 cascade;
+
+statement ok
+drop source s2 cascade;
