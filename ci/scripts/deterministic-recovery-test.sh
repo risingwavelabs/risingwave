@@ -46,6 +46,7 @@ filter_stack_trace_for_all_logs() {
 
 # trap filter_stack_trace_for_all_logs ERR
 
+export EXTRA_ARGS="${EXTRA_ARGS:-}"
 if [[ -n "${USE_ARRANGEMENT_BACKFILL:-}" ]]; then
   export EXTRA_ARGS="$EXTRA_ARGS --use-arrangement-backfill"
 fi
