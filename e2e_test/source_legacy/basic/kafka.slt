@@ -1,3 +1,6 @@
+statement ok
+SET streaming_use_shared_source TO false;
+
 # We don't support CSV header for Kafka
 statement error CSV HEADER is not supported when creating table with Kafka connector
 create table s0 (v1 int, v2 varchar) with (
@@ -910,3 +913,6 @@ drop table debezium_ignore_key;
 
 statement ok
 drop table test_include_payload;
+
+statement ok
+SET streaming_use_shared_source TO true;
