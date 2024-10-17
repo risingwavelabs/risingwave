@@ -534,12 +534,13 @@ impl HummockManagerService for HummockServiceImpl {
             periodic_space_reclaim_compaction_interval_sec,
             periodic_ttl_reclaim_compaction_interval_sec,
             periodic_tombstone_reclaim_compaction_interval_sec,
-            periodic_scheduling_compaction_group_interval_sec,
+            periodic_scheduling_compaction_group_split_interval_sec,
             do_not_config_object_storage_lifecycle,
             partition_vnode_count,
             table_high_write_throughput_threshold,
             table_low_write_throughput_threshold,
-            compaction_task_max_heartbeat_interval_secs
+            compaction_task_max_heartbeat_interval_secs,
+            periodic_scheduling_compaction_group_merge_interval_sec
         );
         Ok(Response::new(ListHummockMetaConfigResponse { configs }))
     }

@@ -548,6 +548,7 @@ impl HummockManager {
 }
 
 impl HummockManager {
+    /// Split the compaction group if the group is too large or contains high throughput tables.
     pub async fn try_split_compaction_group(
         &self,
         table_write_throughput: &HashMap<u32, VecDeque<u64>>,
@@ -579,6 +580,7 @@ impl HummockManager {
             .await;
     }
 
+    /// Try to move the high throughput table to a dedicated compaction group.
     pub async fn try_move_high_throughput_table_to_dedicated_cg(
         &self,
         table_write_throughput: &HashMap<u32, VecDeque<u64>>,
@@ -797,6 +799,7 @@ impl HummockManager {
     }
 }
 
+/// Check if the table is high write throughput with the given threshold and ratio.
 pub fn is_table_high_write_throughput(
     table_throughput: &VecDeque<u64>,
     checkpoint_secs: u64,

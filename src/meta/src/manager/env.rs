@@ -167,8 +167,8 @@ pub struct MetaOpts {
     /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule `periodic_scheduling_compaction_group_interval_sec` for all compaction groups with this interval.
-    pub periodic_scheduling_compaction_group_interval_sec: u64,
+    /// Schedule `periodic_scheduling_compaction_group_split_interval_sec` for all compaction groups with this interval.
+    pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
@@ -237,6 +237,8 @@ pub struct MetaOpts {
     pub compact_task_table_size_partition_threshold_low: u64,
     pub compact_task_table_size_partition_threshold_high: u64,
 
+    pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
+
     // The private key for the secret store, used when the secret is stored in the meta.
     pub secret_store_private_key: Option<Vec<u8>>,
     /// The path of the temp secret file directory.
@@ -287,7 +289,7 @@ impl MetaOpts {
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
-            periodic_scheduling_compaction_group_interval_sec: 60,
+            periodic_scheduling_compaction_group_split_interval_sec: 60,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
             compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,
             table_high_write_throughput_threshold: 128 * 1024 * 1024,
@@ -319,6 +321,7 @@ impl MetaOpts {
             table_statistic_low_write_throughput_ratio: 0.7,
             split_group_statistic_window_times: 240,
             merge_group_statistic_window_times: 240,
+            periodic_scheduling_compaction_group_merge_interval_sec: 60 * 10,
             license_key_path: None,
         }
     }

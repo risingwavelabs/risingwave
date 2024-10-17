@@ -386,9 +386,12 @@ pub fn start(
                 periodic_tombstone_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_tombstone_reclaim_compaction_interval_sec,
-                periodic_scheduling_compaction_group_interval_sec: config
+                periodic_scheduling_compaction_group_split_interval_sec: config
                     .meta
-                    .periodic_scheduling_compaction_group_interval_sec,
+                    .periodic_scheduling_compaction_group_split_interval_sec,
+                periodic_scheduling_compaction_group_merge_interval_sec: config
+                    .meta
+                    .periodic_scheduling_compaction_group_merge_interval_sec,
                 table_high_write_throughput_threshold: config
                     .meta
                     .table_high_write_throughput_threshold,

@@ -302,10 +302,10 @@ pub struct MetaConfig {
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
     #[serde(
-        default = "default::meta::periodic_scheduling_compaction_group_interval_sec",
+        default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
         alias = "periodic_split_compact_group_interval_sec"
     )]
-    pub periodic_scheduling_compaction_group_interval_sec: u64,
+    pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
     #[serde(default = "default::meta::move_table_size_limit")]
     #[deprecated]
@@ -413,6 +413,9 @@ pub struct MetaConfig {
     /// The window times of table statistic history for merge compaction group.
     #[serde(default = "default::meta::merge_group_statistic_window_times")]
     pub merge_group_statistic_window_times: usize,
+
+    #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
+    pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -1455,7 +1458,7 @@ pub mod default {
             1800 // 30mi
         }
 
-        pub fn periodic_scheduling_compaction_group_interval_sec() -> u64 {
+        pub fn periodic_scheduling_compaction_group_split_interval_sec() -> u64 {
             10 // 10s
         }
 
@@ -1551,6 +1554,10 @@ pub mod default {
 
         pub fn merge_group_statistic_window_times() -> usize {
             240
+        }
+
+        pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
+            60 * 10 // 10min
         }
     }
 
@@ -2745,7 +2752,7 @@ mod tests {
             assert_eq!(
                 config
                     .meta
-                    .periodic_scheduling_compaction_group_interval_sec,
+                    .periodic_scheduling_compaction_group_split_interval_sec,
                 1
             );
             assert_eq!(config.meta.table_high_write_throughput_threshold, 10);

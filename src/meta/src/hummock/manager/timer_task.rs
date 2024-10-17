@@ -43,7 +43,7 @@ impl HummockManager {
             const COMPACTION_HEARTBEAT_PERIOD_SEC: u64 = 1;
 
             pub enum HummockTimerEvent {
-                GroupSchedule,
+                GroupScheduleSplit,
                 CheckDeadTask,
                 Report,
                 CompactionHeartBeatExpiredCheck,
@@ -54,6 +54,8 @@ impl HummockManager {
                 TombstoneCompactionTrigger,
 
                 FullGc,
+
+                GroupScheduleMerge,
             }
             let mut check_compact_trigger_interval =
                 tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
@@ -145,22 +147,38 @@ impl HummockManager {
                 Box::pin(tombstone_reclaim_trigger),
             ];
 
-            let periodic_scheduling_compaction_group_interval_sec = hummock_manager
+            let periodic_scheduling_compaction_group_split_interval_sec = hummock_manager
                 .env
                 .opts
-                .periodic_scheduling_compaction_group_interval_sec;
+                .periodic_scheduling_compaction_group_split_interval_sec;
 
-            if periodic_scheduling_compaction_group_interval_sec > 0 {
+            if periodic_scheduling_compaction_group_split_interval_sec > 0 {
                 let mut scheduling_compaction_group_trigger_interval = tokio::time::interval(
-                    Duration::from_secs(periodic_scheduling_compaction_group_interval_sec),
+                    Duration::from_secs(periodic_scheduling_compaction_group_split_interval_sec),
                 );
                 scheduling_compaction_group_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-                let group_scheduling_trigger =
+                let group_scheduling_split_trigger =
                     IntervalStream::new(scheduling_compaction_group_trigger_interval)
-                        .map(|_| HummockTimerEvent::GroupSchedule);
-                triggers.push(Box::pin(group_scheduling_trigger));
+                        .map(|_| HummockTimerEvent::GroupScheduleSplit);
+                triggers.push(Box::pin(group_scheduling_split_trigger));
+            }
+
+            let periodic_scheduling_compaction_group_merge_interval_sec = hummock_manager
+                .env
+                .opts
+                .periodic_scheduling_compaction_group_merge_interval_sec;
+
+            if periodic_scheduling_compaction_group_merge_interval_sec > 0 {
+                let mut scheduling_compaction_group_merge_trigger_interval = tokio::time::interval(
+                    Duration::from_secs(periodic_scheduling_compaction_group_merge_interval_sec),
+                );
+                scheduling_compaction_group_merge_trigger_interval
+                    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                let group_scheduling_merge_trigger =
+                    IntervalStream::new(scheduling_compaction_group_merge_trigger_interval)
+                        .map(|_| HummockTimerEvent::GroupScheduleMerge);
+                triggers.push(Box::pin(group_scheduling_merge_trigger));
             }
 
             let event_stream = select_all(triggers);
@@ -170,8 +188,8 @@ impl HummockManager {
             let shutdown_rx_shared = shutdown_rx.shared();
 
             tracing::info!(
-                "Hummock timer task [GroupScheduling interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
-                periodic_scheduling_compaction_group_interval_sec, CHECK_PENDING_TASK_PERIOD_SEC, STAT_REPORT_PERIOD_SEC, COMPACTION_HEARTBEAT_PERIOD_SEC
+                "Hummock timer task [GroupSchedulingSplit interval {} sec] [GroupSchedulingMerge interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
+                periodic_scheduling_compaction_group_split_interval_sec, periodic_scheduling_compaction_group_merge_interval_sec, CHECK_PENDING_TASK_PERIOD_SEC, STAT_REPORT_PERIOD_SEC, COMPACTION_HEARTBEAT_PERIOD_SEC
             );
 
             loop {
@@ -190,12 +208,20 @@ impl HummockManager {
                                     hummock_manager.check_dead_task().await;
                                 }
 
-                                HummockTimerEvent::GroupSchedule => {
+                                HummockTimerEvent::GroupScheduleSplit => {
                                     if hummock_manager.env.opts.compaction_deterministic_test {
                                         continue;
                                     }
 
-                                    hummock_manager.on_handle_schedule_group().await;
+                                    hummock_manager.on_handle_schedule_group_split().await;
+                                }
+
+                                HummockTimerEvent::GroupScheduleMerge => {
+                                    if hummock_manager.env.opts.compaction_deterministic_test {
+                                        continue;
+                                    }
+
+                                    hummock_manager.on_handle_schedule_group_merge().await;
                                 }
 
                                 HummockTimerEvent::Report => {
@@ -522,16 +548,71 @@ impl HummockManager {
         }
     }
 
-    /// * For compaction group with only one single state-table, do not change it again.
-    /// * For state-table which only write less than `HISTORY_TABLE_INFO_WINDOW_SIZE` times, do not
-    ///   change it. Because we need more statistic data to decide split strategy.
-    /// * For state-table with low throughput which write no more than
-    ///   `min_table_split_write_throughput` data, never split it.
-    /// * For state-table whose size less than `min_table_split_size`, do not split it unless its
-    ///   throughput keep larger than `table_write_throughput_threshold` for a long time.
-    /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
-    ///   increase it size of base-level.
-    async fn on_handle_schedule_group(&self) {
+    /// Try to schedule a compaction `split` for the given compaction groups.
+    /// The `split` will be triggered if the following conditions are met:
+    /// 1. `state table throughput`: If the table is in a high throughput state and it belongs to a multi table group, then an attempt will be made to split the table into separate compaction groups to increase its throughput and reduce the impact on write amplification.
+    /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `compaction_group_size_threshold`
+    async fn on_handle_schedule_group_split(&self) {
+        let params = self.env.system_params_reader().await;
+        let barrier_interval_ms = params.barrier_interval_ms() as u64;
+        let checkpoint_secs = std::cmp::max(
+            1,
+            params.checkpoint_frequency() * barrier_interval_ms / 1000,
+        );
+        let table_write_throughput = self.history_table_throughput.read().clone();
+        let mut group_infos = self.calculate_compaction_group_statistic().await;
+        // sort by first table id for deterministic merge order
+        group_infos.sort_by_key(|group| {
+            let table_ids = group
+                .table_statistic
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            table_ids.iter().next().cloned()
+        });
+
+        for group in &group_infos {
+            if group.table_statistic.len() == 1 {
+                // no need to handle the separate compaciton group
+                continue;
+            }
+
+            let compaction_group_config = {
+                let compaction_group_manager = self.compaction_group_manager.read().await;
+                compaction_group_manager
+                    .try_get_compaction_group_config(group.group_id)
+                    .unwrap()
+            };
+
+            self.try_split_compaction_group(
+                &table_write_throughput,
+                checkpoint_secs,
+                group,
+                compaction_group_config,
+            )
+            .await;
+        }
+    }
+
+    async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
+        for cg_id in self.compaction_group_ids().await {
+            if let Err(e) = self.compaction_state.try_sched_compaction(cg_id, task_type) {
+                tracing::error!(
+                    error = %e.as_report(),
+                    "Failed to schedule {:?} compaction for compaction group {}",
+                    task_type,
+                    cg_id,
+                );
+            }
+        }
+    }
+
+    /// Try to schedule a compaction merge for the given compaction groups.
+    /// The merge will be triggered if the following conditions are met:
+    /// 1. The compaction group is not contains creating table.
+    /// 2. The compaction group is a small group.
+    /// 3. All tables in compaction group is in a low throughput state.
+    async fn on_handle_schedule_group_merge(&self) {
         let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
         let checkpoint_secs = std::cmp::max(
@@ -559,28 +640,6 @@ impl HummockManager {
         });
 
         let group_count = group_infos.len();
-        for group in &group_infos {
-            if group.table_statistic.len() == 1 {
-                // no need to handle the separate compaciton group
-                continue;
-            }
-
-            let compaction_group_config = {
-                let compaction_group_manager = self.compaction_group_manager.read().await;
-                compaction_group_manager
-                    .try_get_compaction_group_config(group.group_id)
-                    .unwrap()
-            };
-
-            self.try_split_compaction_group(
-                &table_write_throughput,
-                checkpoint_secs,
-                group,
-                compaction_group_config,
-            )
-            .await;
-        }
-
         if group_count < 2 {
             return;
         }
@@ -627,19 +686,6 @@ impl HummockManager {
                     left = right;
                     right = left + 1;
                 }
-            }
-        }
-    }
-
-    async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
-        for cg_id in self.compaction_group_ids().await {
-            if let Err(e) = self.compaction_state.try_sched_compaction(cg_id, task_type) {
-                tracing::error!(
-                    error = %e.as_report(),
-                    "Failed to schedule {:?} compaction for compaction group {}",
-                    task_type,
-                    cg_id,
-                );
             }
         }
     }
