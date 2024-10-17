@@ -78,7 +78,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
 
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
-            tracing::info!("current_checkpointepoch: {}", epoch);
             if let LogStoreReadItem::UpdateVnodeBitmap(vnode_bitmap) = &item {
                 match &mut state {
                     LogConsumerState::BarrierReceived {
@@ -148,11 +147,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                     };
                     let committed = if is_checkpoint {
                         current_checkpoint += 1;
-                        tracing::info!(
-                            "current_checkpoint: {},commit_checkpoint_interval: {}",
-                            current_checkpoint,
-                            commit_checkpoint_interval
-                        );
                         if current_checkpoint >= commit_checkpoint_interval.get() {
                             let start_time = Instant::now();
                             sink_writer.barrier(true).await?;
