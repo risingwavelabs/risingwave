@@ -12,29 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::optimizer::plan_node::{LogicalApply, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
 
 /// Eliminate `LogicalShare` for `LogicalApply`.
 pub struct ApplyShareEliminateRule {}
 impl Rule for ApplyShareEliminateRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = match plan.as_logical_apply() {
-            Some(apply) => apply,
-            None => return Ok(None),
-        };
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
+        let apply = plan.as_logical_apply()?;
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
 
-        let share = match right.as_logical_share() {
-            Some(share) => share,
-            None => return Ok(None),
-        };
+        let share = right.as_logical_share()?;
 
         // Eliminate the share operator
-        Ok(Some(LogicalApply::create(
+        OResult::Ok(LogicalApply::create(
             left,
             share.input(),
             join_type,
@@ -42,7 +36,7 @@ impl Rule for ApplyShareEliminateRule {
             correlated_id,
             correlated_indices,
             max_one_row,
-        )))
+        ))
     }
 }
 

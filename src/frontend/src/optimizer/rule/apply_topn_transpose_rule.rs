@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalTopN};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -43,19 +43,13 @@ use crate::utils::Condition;
 /// ```
 pub struct ApplyTopNTransposeRule {}
 impl Rule for ApplyTopNTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = match plan.as_logical_apply() {
-            Some(apply) => apply,
-            None => return Ok(None),
-        };
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
+        let apply = plan.as_logical_apply()?;
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
-        let topn = match right.as_logical_top_n() {
-            Some(topn) => topn,
-            None => return Ok(None),
-        };
+        let topn = right.as_logical_top_n()?;
 
         let (topn_input, limit, offset, with_ties, mut order, mut group_key) =
             topn.clone().decompose();
@@ -63,7 +57,7 @@ impl Rule for ApplyTopNTransposeRule {
         let apply_left_len = left.schema().len();
 
         if max_one_row {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let new_apply = LogicalApply::create(
@@ -88,7 +82,7 @@ impl Rule for ApplyTopNTransposeRule {
         };
 
         let filter = LogicalFilter::create(new_topn.into(), on);
-        Ok(Some(filter))
+        OResult::Ok(filter)
     }
 }
 

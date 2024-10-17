@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::optimizer::plan_node::LogicalIcebergScan;
 use crate::optimizer::PlanRef;
 
 pub struct SourceToIcebergScanRule {}
 impl Rule for SourceToIcebergScanRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let source = match plan.as_logical_source() {
             Some(source) => source,
             None => return Ok(None),

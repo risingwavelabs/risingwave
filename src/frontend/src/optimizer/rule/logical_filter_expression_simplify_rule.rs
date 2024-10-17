@@ -18,7 +18,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::ScalarImpl;
 use risingwave_connector::source::DataType;
 
-use super::Result;
+use super::OResult;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall};
 use crate::optimizer::plan_expr_visitor::strong::Strong;
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, PlanTreeNodeUnary};
@@ -37,7 +37,7 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
     ///
     /// NOTE: `e` should only contain at most a single column
     /// otherwise we will not conduct the optimization
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let filter = match plan.as_logical_filter() {
             Some(filter) => filter,
             None => return Ok(None),

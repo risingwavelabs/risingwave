@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 
@@ -25,7 +25,7 @@ impl ExpandToProjectRule {
     }
 }
 impl Rule for ExpandToProjectRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let expand = match plan.as_logical_expand() {
             Some(expand) => expand,
             None => return Ok(None),

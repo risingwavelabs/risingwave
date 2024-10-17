@@ -19,7 +19,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_expr_visitor::Strong;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode, GenericPlanRef};
@@ -62,7 +62,7 @@ use crate::utils::{Condition, IndexSet};
 
 pub struct PullUpCorrelatedPredicateAggRule {}
 impl Rule for PullUpCorrelatedPredicateAggRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let top_filter = if let Some(top_filter) = plan.as_logical_filter() {
             top_filter.clone()
         } else {

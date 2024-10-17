@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::Type;
 
-use super::{BoxedRule, Result};
+use super::{BoxedRule, OResult};
 use crate::expr::{align_types, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::optimizer::rule::Rule;
@@ -27,7 +27,7 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct PushCalculationOfJoinRule {}
 
 impl Rule for PushCalculationOfJoinRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let join = match plan.as_logical_join() {
             Some(join) => join,
             None => return Ok(None),

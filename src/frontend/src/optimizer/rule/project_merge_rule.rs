@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_expr_visitor::InputRefCounter;
 use crate::utils::Substitute;
@@ -21,7 +21,7 @@ use crate::utils::Substitute;
 /// Merge contiguous [`LogicalProject`] nodes.
 pub struct ProjectMergeRule {}
 impl Rule for ProjectMergeRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let outer_project = match plan.as_logical_project() {
             Some(outer_project) => outer_project,
             None => return Ok(None),

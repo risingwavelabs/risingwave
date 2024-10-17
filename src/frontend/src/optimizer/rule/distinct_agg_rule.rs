@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalExpand, LogicalProject, PlanAggCall};
@@ -33,7 +33,7 @@ pub struct DistinctAggRule {
 }
 
 impl Rule for DistinctAggRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let agg = match plan.as_logical_agg() {
             Some(agg) => agg,
             None => return Ok(None),

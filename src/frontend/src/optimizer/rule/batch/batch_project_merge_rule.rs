@@ -15,23 +15,18 @@
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_expr_visitor::InputRefCounter;
 use crate::optimizer::plan_node::{generic, BatchProject, PlanTreeNodeUnary};
-use crate::optimizer::{BoxedRule, PlanRef, Result, Rule};
+use crate::optimizer::{BoxedRule, PlanRef, Rule};
 use crate::utils::Substitute;
+use crate::error::OResult;
 
 /// Merge contiguous [`BatchProject`] nodes.
 pub struct BatchProjectMergeRule {}
 impl Rule for BatchProjectMergeRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let outer_project = match plan.as_batch_project() {
-            Some(outer_project) => outer_project,
-            None => return Ok(None),
-        };
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
+        let outer_project = plan.as_batch_project()?;
 
         let input = outer_project.input();
-        let inner_project = match input.as_batch_project() {
-            Some(inner_project) => inner_project,
-            None => return Ok(None),
-        };
+        let inner_project = input.as_batch_project()?;
 
         let mut input_ref_counter = InputRefCounter::default();
         for expr in outer_project.exprs() {

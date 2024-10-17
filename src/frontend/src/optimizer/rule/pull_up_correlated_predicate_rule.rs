@@ -16,7 +16,7 @@ use itertools::{Either, Itertools};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
@@ -28,7 +28,7 @@ use crate::utils::Condition;
 /// convert it into corresponding type of Join.
 pub struct PullUpCorrelatedPredicateRule {}
 impl Rule for PullUpCorrelatedPredicateRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let apply = match plan.as_logical_apply() {
             Some(apply) => apply,
             None => return Ok(None),

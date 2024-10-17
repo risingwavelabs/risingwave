@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::LogicalJoin;
 use crate::optimizer::PlanRef;
@@ -29,7 +29,7 @@ use crate::optimizer::PlanRef;
 /// `RightAnti` => `LeftAnti`
 pub struct JoinCommuteRule {}
 impl Rule for JoinCommuteRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let join = match plan.as_logical_join() {
             Some(join) => join,
             None => return Ok(None),

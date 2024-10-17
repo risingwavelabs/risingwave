@@ -43,7 +43,7 @@ use crate::optimizer::{PlanRef, Result};
 /// ```text
 pub struct SplitNowOrRule {}
 impl Rule for SplitNowOrRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let filter = match plan.as_logical_filter() {
             Some(filter) => filter,
             None => return Ok(None),

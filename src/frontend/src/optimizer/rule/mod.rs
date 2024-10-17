@@ -15,13 +15,14 @@
 //! Define all [`Rule`]
 
 use super::PlanRef;
+use crate::error::OResult;
 use crate::error::Result;
 
 /// A one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode), every [`Rule`] should
 /// downcast and check if the node matches the rule.
 pub trait Rule: Send + Sync + Description {
     /// return err(()) if not match
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>>;
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef>;
 }
 
 pub trait Description {

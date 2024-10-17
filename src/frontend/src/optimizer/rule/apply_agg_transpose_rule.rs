@@ -16,7 +16,7 @@ use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ApplyOffsetRewriter, BoxedRule, Result, Rule};
+use super::{ApplyOffsetRewriter, BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalProject};
@@ -46,20 +46,14 @@ use crate::utils::{Condition, IndexSet};
 /// ```
 pub struct ApplyAggTransposeRule {}
 impl Rule for ApplyAggTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = match plan.as_logical_apply() {
-            Some(apply) => apply,
-            None => return Ok(None),
-        };
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
+        let apply = plan.as_logical_apply()?;
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
 
-        let agg = match right.as_logical_agg() {
-            Some(agg) => agg,
-            None => return Ok(None),
-        };
+        let agg = right.as_logical_agg()?;
 
         let (mut agg_calls, agg_group_key, grouping_sets, agg_input, enable_two_phase) =
             agg.clone().decompose();
@@ -69,7 +63,7 @@ impl Rule for ApplyAggTransposeRule {
 
         if !is_scalar_agg && max_one_row {
             // We can only eliminate max_one_row for scalar aggregation.
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         let input = if is_scalar_agg {
@@ -209,7 +203,7 @@ impl Rule for ApplyAggTransposeRule {
         };
 
         let filter = LogicalFilter::create(group_agg, on);
-        Ok(Some(filter))
+        OResult::Ok(filter)
     }
 }
 

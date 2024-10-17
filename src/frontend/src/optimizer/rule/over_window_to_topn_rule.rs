@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
 use risingwave_expr::window_function::WindowFuncKind;
 
-use super::{Result, Rule};
+use super::{OResult, Rule};
 use crate::expr::{collect_input_refs, ExprImpl, ExprType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
@@ -51,7 +51,7 @@ impl OverWindowToTopNRule {
 }
 
 impl Rule for OverWindowToTopNRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let ctx = plan.ctx();
         let (project, plan) = {
             if let Some(project) = plan.as_logical_project() {

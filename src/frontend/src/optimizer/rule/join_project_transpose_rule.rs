@@ -19,7 +19,7 @@ use risingwave_pb::plan_common::JoinType;
 use super::Rule;
 use crate::expr::{ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
-use crate::optimizer::Result;
+use super::OResult;
 use crate::utils::IndexRewriter;
 
 /// Before this rule:
@@ -33,7 +33,7 @@ use crate::utils::IndexRewriter;
 pub struct JoinProjectTransposeRule {}
 
 impl Rule for JoinProjectTransposeRule {
-    fn apply(&self, plan: crate::PlanRef) -> Result<Option<crate::PlanRef>> {
+    fn apply(&self, plan: crate::PlanRef) -> OResult<Option<crate::PlanRef>> {
         let join = match plan.as_logical_join() {
             Some(join) => join,
             None => return Ok(None),

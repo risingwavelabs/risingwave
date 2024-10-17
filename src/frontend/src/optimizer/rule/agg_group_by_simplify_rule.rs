@@ -15,7 +15,7 @@
 use risingwave_expr::aggregate::PbAggKind;
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::InputRef;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::utils::{Condition, IndexSet};
@@ -27,19 +27,16 @@ use crate::utils::{Condition, IndexSet};
 /// group by b, `first_value`(a), `first_value`(c),
 pub struct AggGroupBySimplifyRule {}
 impl Rule for AggGroupBySimplifyRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let agg = match plan.as_logical_agg() {
-            Some(agg) => agg,
-            None => return Ok(None),
-        };
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
+        let agg = plan.as_logical_agg()?;
         let (agg_calls, group_key, grouping_sets, agg_input, _two_phase) = agg.clone().decompose();
         if !grouping_sets.is_empty() {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         let functional_dependency = agg_input.functional_dependency();
         let group_key = group_key.to_vec();
         if !functional_dependency.is_key(&group_key) {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
         let minimized_group_key = functional_dependency.minimize_key(&group_key);
         if minimized_group_key.len() < group_key.len() {
@@ -80,11 +77,11 @@ impl Rule for AggGroupBySimplifyRule {
             }
             let new_agg = Agg::new(new_agg_calls, new_group_key, agg.input());
 
-            Ok(Some(
+            OResult::Ok(
                 LogicalProject::with_out_col_idx(new_agg.into(), out_fields.into_iter()).into(),
-            ))
+            )
         } else {
-            Ok(None)
+            OResult::NotApplicable
         }
     }
 }

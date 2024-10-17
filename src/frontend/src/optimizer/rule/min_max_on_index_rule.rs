@@ -25,7 +25,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
@@ -38,7 +38,7 @@ use crate::utils::{Condition, IndexSet};
 pub struct MinMaxOnIndexRule {}
 
 impl Rule for MinMaxOnIndexRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let logical_agg = match plan.as_logical_agg() {
             Some(logical_agg) => logical_agg,
             None => return Ok(None),

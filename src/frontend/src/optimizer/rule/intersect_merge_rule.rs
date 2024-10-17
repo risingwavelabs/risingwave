@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::optimizer::PlanRef;
 
 pub struct IntersectMergeRule {}
 impl Rule for IntersectMergeRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let top_intersect = match plan.as_logical_intersect() {
             Some(top_intersect) => top_intersect,
             None => return Ok(None),

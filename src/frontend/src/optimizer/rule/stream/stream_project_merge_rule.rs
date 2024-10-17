@@ -21,7 +21,7 @@ use crate::utils::Substitute;
 /// Merge contiguous [`StreamProject`] nodes.
 pub struct StreamProjectMergeRule {}
 impl Rule for StreamProjectMergeRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let outer_project = match plan.as_stream_project() {
             Some(outer_project) => outer_project,
             None => return Ok(None),

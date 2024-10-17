@@ -23,7 +23,7 @@ use crate::PlanRef;
 
 pub struct GenerateSeriesWithNowRule {}
 impl Rule for GenerateSeriesWithNowRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let ctx = plan.ctx();
         let table_func = match plan.as_logical_table_function() {
             Some(table_func) => table_func,

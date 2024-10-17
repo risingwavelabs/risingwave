@@ -25,7 +25,7 @@ use crate::optimizer::plan_node::{
 use crate::utils::{Condition, GroupBy};
 use crate::PlanRef;
 pub struct OverWindowToAggAndJoinRule;
-use super::Result;
+use super::OResult;
 
 impl OverWindowToAggAndJoinRule {
     pub fn create() -> Box<dyn Rule> {
@@ -34,7 +34,7 @@ impl OverWindowToAggAndJoinRule {
 }
 
 impl Rule for OverWindowToAggAndJoinRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let over_window = match plan.as_logical_over_window() {
             Some(over_window) => over_window,
             None => return Ok(None),

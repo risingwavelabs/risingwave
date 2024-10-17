@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::{LogicalCardinalityExt, SideEffectVisitor};
@@ -20,7 +20,7 @@ use crate::optimizer::{PlanRef, PlanVisitor};
 
 pub struct TrivialProjectToValuesRule {}
 impl Rule for TrivialProjectToValuesRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let project = match plan.as_logical_project() {
             Some(project) => project,
             None => return Ok(None),

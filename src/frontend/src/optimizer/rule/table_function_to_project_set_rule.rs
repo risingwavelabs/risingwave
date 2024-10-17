@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -44,7 +44,7 @@ use crate::optimizer::PlanRef;
 /// ```
 pub struct TableFunctionToProjectSetRule {}
 impl Rule for TableFunctionToProjectSetRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let logical_table_function = match plan.as_logical_table_function() {
             Some(logical_table_function) => logical_table_function,
             None => return Ok(None),

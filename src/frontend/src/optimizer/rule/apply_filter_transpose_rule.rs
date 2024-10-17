@@ -15,7 +15,7 @@
 use itertools::{Either, Itertools};
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ApplyOffsetRewriter, BoxedRule, Result, Rule};
+use super::{ApplyOffsetRewriter, BoxedRule, OResult, Rule};
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
@@ -44,24 +44,18 @@ use crate::utils::Condition;
 /// ```
 pub struct ApplyFilterTransposeRule {}
 impl Rule for ApplyFilterTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
-        let apply = match plan.as_logical_apply() {
-            Some(apply) => apply,
-            None => return Ok(None),
-        };
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
+        let apply = plan.as_logical_apply()?;
 
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
 
         if max_one_row {
-            return Ok(None);
+            return OResult::NotApplicable;
         }
 
         assert_eq!(join_type, JoinType::Inner);
-        let filter = match right.as_logical_filter() {
-            Some(filter) => filter,
-            None => return Ok(None),
-        };
+        let filter = right.as_logical_filter()?;
 
         let input = filter.input();
 
@@ -103,7 +97,7 @@ impl Rule for ApplyFilterTransposeRule {
             },
         )
         .into();
-        Ok(Some(new_filter))
+        OResult::Ok(new_filter)
     }
 }
 

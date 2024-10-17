@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 pub struct ProjectJoinMergeRule {}
 
 impl ProjectJoinMergeRule {
@@ -23,7 +23,7 @@ impl ProjectJoinMergeRule {
 }
 
 impl Rule for ProjectJoinMergeRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let project = match plan.as_logical_project() {
             Some(project) => project,
             None => return Ok(None),

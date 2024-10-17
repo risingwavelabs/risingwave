@@ -60,7 +60,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::AsOf;
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::catalog::IndexCatalog;
 use crate::expr::{
     to_conjunctions, to_disjunctions, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
@@ -90,7 +90,7 @@ const MAX_CONJUNCTION_SIZE: usize = 8;
 pub struct IndexSelectionRule {}
 
 impl Rule for IndexSelectionRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let logical_scan = match plan.as_logical_scan() {
             Some(logical_scan) => logical_scan,
             None => return Ok(None),

@@ -22,12 +22,13 @@ use itertools::Itertools;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::{BatchSeqScan, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::{PlanRef, Result};
+use crate::optimizer::{PlanRef};
+use crate::error::OResult;
 
 pub struct BatchPushLimitToScanRule {}
 
 impl Rule for BatchPushLimitToScanRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let limit = match plan.as_batch_limit() {
             Some(limit) => limit,
             None => return Ok(None),

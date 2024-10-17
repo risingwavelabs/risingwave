@@ -17,7 +17,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{Expr, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::LogicalFileScan;
@@ -26,7 +26,7 @@ use crate::optimizer::PlanRef;
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
 pub struct TableFunctionToFileScanRule {}
 impl Rule for TableFunctionToFileScanRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let logical_table_function = match plan.as_logical_table_function() {
             Some(logical_table_function) => logical_table_function,
             None => return Ok(None),

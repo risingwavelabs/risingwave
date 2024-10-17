@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, ExprVisitor};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalProject, LogicalValues};
@@ -24,7 +24,7 @@ use crate::optimizer::PlanRef;
 
 pub struct ValuesExtractProjectRule {}
 impl Rule for ValuesExtractProjectRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let old_values = match plan.as_logical_values() {
             Some(old_values) => old_values,
             None => return Ok(None),

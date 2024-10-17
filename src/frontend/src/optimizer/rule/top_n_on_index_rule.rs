@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::optimizer::plan_node::{LogicalScan, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
@@ -29,7 +29,7 @@ use crate::optimizer::PlanRef;
 pub struct TopNOnIndexRule {}
 
 impl Rule for TopNOnIndexRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let logical_top_n = match plan.as_logical_top_n() {
             Some(logical_top_n) => logical_top_n,
             None => return Ok(None),

@@ -17,7 +17,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{LogicalHopWindow, LogicalJoin};
-use crate::optimizer::Result;
+use crate::optimizer::OResult;
 use crate::utils::IndexRewriter;
 
 pub struct PullUpHopRule {}

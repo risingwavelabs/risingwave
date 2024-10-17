@@ -31,7 +31,7 @@ const BUSHY_TREE_JOIN_UPPER_LIMIT: usize = 10;
 const BUSHY_TREE_JOIN_LOWER_LIMIT: usize = 4;
 
 impl Rule for BushyTreeJoinOrderingRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let join = match plan.as_logical_multi_join() {
             Some(join) => join,
             None => return Ok(None),

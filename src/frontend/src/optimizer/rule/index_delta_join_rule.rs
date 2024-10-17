@@ -17,13 +17,13 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::StreamScanType;
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Result, Rule};
+use super::{BoxedRule, OResult, Rule};
 
 /// Use index scan and delta joins for supported queries.
 pub struct IndexDeltaJoinRule {}
 
 impl Rule for IndexDeltaJoinRule {
-    fn apply(&self, plan: PlanRef) -> Result<Option<PlanRef>> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let join = match plan.as_stream_hash_join() {
             Some(join) => join,
             None => return Ok(None),
