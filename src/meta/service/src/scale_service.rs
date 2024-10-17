@@ -16,7 +16,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::stream::{RescheduleOptions, ScaleControllerRef, WorkerReschedule};
-use risingwave_meta_model_v2::FragmentId;
+use risingwave_meta_model::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{

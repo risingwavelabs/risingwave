@@ -31,7 +31,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 
-use crate::backup_restore::meta_snapshot_builder_v2;
+use crate::backup_restore::meta_snapshot_builder;
 use crate::backup_restore::metrics::BackupManagerMetrics;
 use crate::hummock::sequence::next_meta_backup_id;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
@@ -353,7 +353,7 @@ impl BackupWorker {
             };
             let meta_store = backup_manager_clone.env.meta_store();
             let mut snapshot_builder =
-                meta_snapshot_builder_v2::MetaSnapshotV2Builder::new(meta_store);
+                meta_snapshot_builder::MetaSnapshotV2Builder::new(meta_store);
             // Reuse job id as snapshot id.
             snapshot_builder
                 .build(job_id, hummock_version_builder)

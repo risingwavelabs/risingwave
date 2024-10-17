@@ -19,7 +19,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_meta_model_v2::{ObjectId, WorkerId};
+use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
@@ -489,7 +489,7 @@ impl GlobalStreamManager {
         &self,
         removed_actors: Vec<ActorId>,
         streaming_job_ids: Vec<ObjectId>,
-        state_table_ids: Vec<risingwave_meta_model_v2::TableId>,
+        state_table_ids: Vec<risingwave_meta_model::TableId>,
         fragment_ids: HashSet<FragmentId>,
     ) {
         if !removed_actors.is_empty()

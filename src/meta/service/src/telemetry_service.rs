@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_meta::controller::SqlMetaStore;
-use risingwave_meta_model_v2::prelude::Cluster;
+use risingwave_meta_model::prelude::Cluster;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
 use sea_orm::EntityTrait;

@@ -22,15 +22,15 @@ use risingwave_common::bail;
 use risingwave_common::hash::{VnodeCountCompat, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::util::worker_util::WorkerNodeId;
-use risingwave_meta_model_migration::{Alias, SelectStatement};
-use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::fragment::DistributionType;
-use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::actor::ActorStatus;
+use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
+use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ActorUpstreamActors,
     ConnectorSplits, ExprContext, FragmentId, I32Array, JobStatus, ObjectId, SinkId, SourceId,
     StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
+use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
@@ -1500,9 +1500,9 @@ mod tests {
     use risingwave_common::hash::{ActorMapping, VirtualNode};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-    use risingwave_meta_model_v2::actor::ActorStatus;
-    use risingwave_meta_model_v2::fragment::DistributionType;
-    use risingwave_meta_model_v2::{
+    use risingwave_meta_model::actor::ActorStatus;
+    use risingwave_meta_model::fragment::DistributionType;
+    use risingwave_meta_model::{
         actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
         ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId, VnodeBitmap,
     };

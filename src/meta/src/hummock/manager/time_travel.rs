@@ -28,8 +28,8 @@ use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
 };
-use risingwave_meta_model_v2::hummock_sstable_info::SstableInfoV2Backend;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
+use risingwave_meta_model::{
     hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
     hummock_time_travel_version,
 };
@@ -82,7 +82,7 @@ impl HummockManager {
         let version_watermark = hummock_epoch_to_version::Entity::find()
             .filter(
                 hummock_epoch_to_version::Column::Epoch
-                    .lt(risingwave_meta_model_v2::Epoch::try_from(epoch_watermark).unwrap()),
+                    .lt(risingwave_meta_model::Epoch::try_from(epoch_watermark).unwrap()),
             )
             .order_by_desc(hummock_epoch_to_version::Column::Epoch)
             .order_by_asc(hummock_epoch_to_version::Column::VersionId)
@@ -95,7 +95,7 @@ impl HummockManager {
         let res = hummock_epoch_to_version::Entity::delete_many()
             .filter(
                 hummock_epoch_to_version::Column::Epoch
-                    .lt(risingwave_meta_model_v2::Epoch::try_from(epoch_watermark).unwrap()),
+                    .lt(risingwave_meta_model::Epoch::try_from(epoch_watermark).unwrap()),
             )
             .exec(&txn)
             .await?;
@@ -122,7 +122,7 @@ impl HummockManager {
                 earliest_valid_version.get_sst_ids(),
             )
         };
-        let version_ids_to_delete: Vec<risingwave_meta_model_v2::HummockVersionId> =
+        let version_ids_to_delete: Vec<risingwave_meta_model::HummockVersionId> =
             hummock_time_travel_version::Entity::find()
                 .select_only()
                 .column(hummock_time_travel_version::Column::VersionId)
@@ -134,7 +134,7 @@ impl HummockManager {
                 .into_tuple()
                 .all(&txn)
                 .await?;
-        let delta_ids_to_delete: Vec<risingwave_meta_model_v2::HummockVersionId> =
+        let delta_ids_to_delete: Vec<risingwave_meta_model::HummockVersionId> =
             hummock_time_travel_delta::Entity::find()
                 .select_only()
                 .column(hummock_time_travel_delta::Column::VersionId)
@@ -234,7 +234,7 @@ impl HummockManager {
     pub(crate) async fn all_object_ids_in_time_travel(
         &self,
     ) -> Result<impl Iterator<Item = HummockSstableId>> {
-        let object_ids: Vec<risingwave_meta_model_v2::HummockSstableObjectId> =
+        let object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
             hummock_sstable_info::Entity::find()
                 .select_only()
                 .column(hummock_sstable_info::Column::ObjectId)
@@ -274,7 +274,7 @@ impl HummockManager {
             )
             .filter(
                 hummock_epoch_to_version::Column::Epoch
-                    .lte(risingwave_meta_model_v2::Epoch::try_from(query_epoch).unwrap()),
+                    .lte(risingwave_meta_model::Epoch::try_from(query_epoch).unwrap()),
             )
             .order_by_desc(hummock_epoch_to_version::Column::Epoch)
             .one(&sql_store.conn)
@@ -428,7 +428,7 @@ impl HummockManager {
             )
             .await?;
             let m = hummock_time_travel_version::ActiveModel {
-                version_id: Set(risingwave_meta_model_v2::HummockVersionId::try_from(
+                version_id: Set(risingwave_meta_model::HummockVersionId::try_from(
                     version.id.to_u64(),
                 )
                 .unwrap()),
@@ -456,7 +456,7 @@ impl HummockManager {
         // Ignore delta which adds no data.
         if written > 0 {
             let m = hummock_time_travel_delta::ActiveModel {
-                version_id: Set(risingwave_meta_model_v2::HummockVersionId::try_from(
+                version_id: Set(risingwave_meta_model::HummockVersionId::try_from(
                     delta.id.to_u64(),
                 )
                 .unwrap()),
