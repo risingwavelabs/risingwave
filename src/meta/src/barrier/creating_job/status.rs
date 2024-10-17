@@ -17,7 +17,7 @@ use std::mem::take;
 use std::sync::Arc;
 
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::StreamActor;

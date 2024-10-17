@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::{
     HummockContextId, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     INVALID_VERSION_ID,
 };
-use risingwave_meta_model_v2::hummock_gc_history;
+use risingwave_meta_model::hummock_gc_history;
 use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
 use sea_orm::{DatabaseConnection, EntityTrait};
 
@@ -324,7 +324,7 @@ async fn check_gc_history(
     object_ids: impl IntoIterator<Item = HummockSstableObjectId>,
 ) -> Result<()> {
     let futures = object_ids.into_iter().map(|id| async move {
-        let id: risingwave_meta_model_v2::HummockSstableObjectId = id.try_into().unwrap();
+        let id: risingwave_meta_model::HummockSstableObjectId = id.try_into().unwrap();
         hummock_gc_history::Entity::find_by_id(id)
             .one(db)
             .await
