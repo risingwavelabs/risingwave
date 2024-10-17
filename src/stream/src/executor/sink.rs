@@ -22,7 +22,6 @@ use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::{LabelGuardedIntGauge, GLOBAL_ERROR_METRICS};
-use risingwave_common::util::epoch::Epoch;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::dispatch_sink;
