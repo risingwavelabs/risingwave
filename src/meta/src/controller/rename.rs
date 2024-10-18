@@ -156,7 +156,7 @@ impl QueryRewriter<'_> {
                 match &mut cte_table.cte_inner {
                     risingwave_sqlparser::ast::CteInner::Query(query) => self.visit_query(query),
                     risingwave_sqlparser::ast::CteInner::ChangeLog(from) => {
-                        *from = Ident::new_unchecked(self.to)
+                        *from = ObjectName(vec![Ident::new_unchecked(self.to)])
                     }
                 }
             }
