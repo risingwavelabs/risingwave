@@ -173,7 +173,7 @@ macro_rules! def_anyhow_variant {
         $(
             impl From<$from> for $enum_name {
                 fn from(error: $from) -> Self {
-                    todo!()
+                    $enum_name::$variant_name($name::from(error))
                 }
             }
         )*
