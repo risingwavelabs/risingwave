@@ -63,7 +63,7 @@ use crate::barrier::{ReplaceTablePlan, Reschedule};
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
-    build_relation_group, check_relation_name_duplicate, check_sink_into_table_cycle,
+    build_relation_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
     ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
     rebuild_fragment_mapping_from_actors, PartialObject,
 };
@@ -575,7 +575,7 @@ impl CatalogController {
         txn.commit().await?;
 
         if !objs.is_empty() {
-            self.notify_frontend(Operation::Delete, build_relation_group(objs))
+            self.notify_frontend(Operation::Delete, build_relation_group_for_delete(objs))
                 .await;
         }
         Ok(true)
