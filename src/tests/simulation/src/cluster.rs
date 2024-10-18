@@ -324,10 +324,11 @@ pub struct Cluster {
     pub(crate) client: NodeHandle,
     #[cfg(madsim)]
     pub(crate) ctl: NodeHandle,
+    #[cfg(madsim)]
+    pub(crate) sqlite_file_handle: NamedTempFile,
 }
 
 thread_local! {
-    static SQLITE_FILE: NamedTempFile = NamedTempFile::new().unwrap();
 }
 
 impl Cluster {
@@ -400,10 +401,8 @@ impl Cluster {
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
-        let mut file_path = Default::default();
-        SQLITE_FILE.with(|handle| {
-            file_path = handle.path().display().to_string();
-        });
+        let sqlite_file_handle: NamedTempFile = NamedTempFile::new().unwrap();
+        let file_path = sqlite_file_handle.path().display().to_string();
         tracing::info!(?file_path, "sqlite_file_path");
         let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path);
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
@@ -546,6 +545,7 @@ impl Cluster {
             handle,
             client,
             ctl,
+            sqlite_file_handle,
         })
     }
 
