@@ -94,6 +94,7 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     retry: *auto-retry
     notify:
       - slack:
