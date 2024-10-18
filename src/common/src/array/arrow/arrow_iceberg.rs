@@ -151,8 +151,6 @@ pub struct IcebergCreateTableArrowConvert {
     next_field_id: RefCell<u32>,
 }
 
-impl FromArrow for IcebergCreateTableArrowConvert {}
-
 impl IcebergCreateTableArrowConvert {
     pub fn to_arrow_field(
         &self,
@@ -172,14 +170,6 @@ impl IcebergCreateTableArrowConvert {
         // for icelake
         metadata.insert("column_id".to_string(), field_id.to_string());
         arrow_field.set_metadata(metadata);
-    }
-
-    pub fn array_from_arrow_array(
-        &self,
-        field: &arrow_schema::Field,
-        array: &arrow_array::ArrayRef,
-    ) -> Result<ArrayImpl, ArrayError> {
-        FromArrow::from_array(self, field, array)
     }
 }
 
