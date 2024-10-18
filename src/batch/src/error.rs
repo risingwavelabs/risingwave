@@ -114,7 +114,7 @@ pub enum BatchError {
         DmlError,
     ),
 
-    #[error(transparent)]
+    #[error("External system error: {0}")]
     ExternalSystemError(
         #[from]
         #[backtrace]
@@ -192,7 +192,7 @@ def_anyhow_variant! {
     pub BatchExternalSystemError,
     BatchError ExternalSystemError,
 
-    tokio_postgres::Error => "Postgres Batch Query Error",
-    iceberg::Error => "Iceberg Batch Query Error",
-    ParquetError => "Parquet Batch Query Error",
+    tokio_postgres::Error => "Postgres error",
+    iceberg::Error => "Iceberg error",
+    ParquetError => "Parquet error",
 }
