@@ -37,6 +37,7 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
+use tempfile::NamedTempFile;
 #[cfg(not(madsim))]
 use tokio::runtime::Handle;
 use uuid::Uuid;
@@ -88,9 +89,6 @@ pub struct Configuration {
 
     /// Queries to run per session.
     pub per_session_queries: Arc<Vec<String>>,
-
-    /// dir to store SQL backend sqlite db
-    pub sqlite_data_dir: Option<PathBuf>,
 }
 
 impl Default for Configuration {
@@ -118,7 +116,6 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
-            sqlite_data_dir: None,
         }
     }
 }
@@ -206,7 +203,6 @@ metrics_level = "Disabled"
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
             ]
                 .into(),
-            ..Default::default()
         }
     }
 
@@ -253,7 +249,6 @@ metrics_level = "Disabled"
             compute_node_cores: 1,
             per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".into()]
                 .into(),
-            ..Default::default()
         }
     }
 
@@ -300,7 +295,6 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
-            ..Default::default()
         }
     }
 }
@@ -327,6 +321,8 @@ pub struct Cluster {
     pub(crate) client: NodeHandle,
     #[cfg(madsim)]
     pub(crate) ctl: NodeHandle,
+    #[cfg(madsim)]
+    pub(crate) sqlite_file_handle: NamedTempFile,
 }
 
 impl Cluster {
@@ -399,38 +395,11 @@ impl Cluster {
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
-        // FIXME: some tests like integration tests will run concurrently,
-        // resulting in connecting to the same sqlite file if they're using the same seed.
-        let file_path = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
-            format!(
-                "{}/stest-{}-{}.sqlite",
-                sqlite_data_dir.display(),
-                handle.seed(),
-                Uuid::new_v4()
-            )
-        } else {
-            format!("./stest-{}-{}.sqlite", handle.seed(), Uuid::new_v4())
-        };
-        if std::fs::exists(&file_path).unwrap() {
-            panic!(
-                "sqlite file already exists and used by other cluster: {}",
-                file_path
-            )
-        }
+        let sqlite_file_handle: NamedTempFile = NamedTempFile::new().unwrap();
+        let file_path = sqlite_file_handle.path().display().to_string();
+        tracing::info!(?file_path, "sqlite_file_path");
         let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path);
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
-
-        // FIXME(kwannoel):
-        // Currently we just use the on-disk version,
-        // but it can lead to randomness due to disk io.
-        // We can use shared in-memory db instead.
-        // However sqlite cannot be started inside meta.
-        // Because if cluster stops, then this db will be dropped.
-        // We must instantiate it outside, not just pass the path in.
-        // let sqlite_path = format!(
-        //     "sqlite::file:memdb{}?mode=memory&cache=shared",
-        //     Uuid::new_v4()
-        // );
 
         // meta node
         for i in 1..=conf.meta_nodes {
@@ -570,6 +539,7 @@ impl Cluster {
             handle,
             client,
             ctl,
+            sqlite_file_handle,
         })
     }
 
@@ -883,33 +853,6 @@ impl Cluster {
         for node in nodes.iter().chain(metas.iter()) {
             if !self.handle.is_exit(node) {
                 panic!("failed to graceful shutdown {node} in {waiting_time:?}");
-            }
-        }
-    }
-}
-
-#[cfg_or_panic(madsim)]
-impl Drop for Cluster {
-    fn drop(&mut self) {
-        // FIXME: remove it when deprecate the on-disk version.
-        let default_path = PathBuf::from(".");
-        let sqlite_data_dir = self
-            .config
-            .sqlite_data_dir
-            .as_ref()
-            .unwrap_or_else(|| &default_path);
-        for entry in std::fs::read_dir(sqlite_data_dir).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .starts_with(&format!("stest-{}-", self.handle.seed()))
-            {
-                std::fs::remove_file(path).unwrap();
-                break;
             }
         }
     }
