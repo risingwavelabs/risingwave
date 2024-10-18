@@ -98,6 +98,6 @@ steps:
     retry: *auto-retry
     notify:
       - slack:
-        channels:
+        chanels:
           - "#notification-buildkite"
         message: "Docker Scout Report\n${SCOUT_REPORT}"
