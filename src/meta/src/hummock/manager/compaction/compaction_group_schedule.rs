@@ -697,17 +697,18 @@ impl HummockManager {
             return;
         }
 
-        let window_size =
-            self.env.opts.table_stat_sample_size_for_split / (checkpoint_secs as usize);
+        let table_stat_throughput_sample_size =
+            ((self.env.opts.table_stat_throuput_window_seconds_for_split as f64)
+                / (checkpoint_secs as f64))
+                .ceil() as usize;
         let table_throughput = table_write_throughput.get(table_id).unwrap();
-        if table_throughput.len() < window_size {
+        if table_throughput.len() < table_stat_throughput_sample_size {
             return;
         }
 
         let is_high_write_throughput = is_table_high_write_throughput(
             table_throughput,
-            checkpoint_secs,
-            window_size,
+            table_stat_throughput_sample_size,
             self.env.opts.table_high_write_throughput_threshold,
             self.env
                 .opts
@@ -825,14 +826,15 @@ impl HummockManager {
         }
 
         // do not merge high throughput group
-        let window_size =
-            self.env.opts.table_stat_sample_size_for_merge / (checkpoint_secs as usize);
+        let table_stat_throughput_sample_size =
+            ((self.env.opts.table_stat_throuput_window_seconds_for_merge as f64)
+                / (checkpoint_secs as f64))
+                .ceil() as usize;
 
         // merge the group which is low write throughput
         if !check_is_low_write_throughput_compaction_group(
             table_write_throughput,
-            checkpoint_secs,
-            window_size,
+            table_stat_throughput_sample_size,
             self.env.opts.table_low_write_throughput_threshold,
             group,
             self.env
@@ -864,8 +866,7 @@ impl HummockManager {
 
         if !check_is_low_write_throughput_compaction_group(
             table_write_throughput,
-            checkpoint_secs,
-            window_size,
+            table_stat_throughput_sample_size,
             self.env.opts.table_low_write_throughput_threshold,
             next_group,
             self.env
@@ -911,52 +912,49 @@ impl HummockManager {
 /// Check if the table is high write throughput with the given threshold and ratio.
 pub fn is_table_high_write_throughput(
     table_throughput: &VecDeque<u64>,
-    checkpoint_secs: u64,
-    window_size: usize,
+    sample_size: usize,
     threshold: u64,
     high_write_throughput_ratio: f64,
 ) -> bool {
-    assert!(table_throughput.len() >= window_size);
+    assert!(table_throughput.len() >= sample_size);
     let mut high_write_throughput_count = 0;
     for throughput in table_throughput
         .iter()
-        .skip(table_throughput.len().saturating_sub(window_size))
+        .skip(table_throughput.len().saturating_sub(sample_size))
     {
         // only check the latest window_size
-        if *throughput / checkpoint_secs > threshold {
+        if *throughput > threshold {
             high_write_throughput_count += 1;
         }
     }
 
-    high_write_throughput_count as f64 > window_size as f64 * high_write_throughput_ratio
+    high_write_throughput_count as f64 > sample_size as f64 * high_write_throughput_ratio
 }
 
 pub fn is_table_low_write_throughput(
     table_throughput: &VecDeque<u64>,
-    checkpoint_secs: u64,
-    window_size: usize,
+    sample_size: usize,
     threshold: u64,
     low_write_throughput_ratio: f64,
 ) -> bool {
-    assert!(table_throughput.len() >= window_size);
+    assert!(table_throughput.len() >= sample_size);
 
     let mut low_write_throughput_count = 0;
     for throughput in table_throughput
         .iter()
-        .skip(table_throughput.len().saturating_sub(window_size))
+        .skip(table_throughput.len().saturating_sub(sample_size))
     {
-        if *throughput / checkpoint_secs <= threshold {
+        if *throughput <= threshold {
             low_write_throughput_count += 1;
         }
     }
 
-    low_write_throughput_count as f64 > window_size as f64 * low_write_throughput_ratio
+    low_write_throughput_count as f64 > sample_size as f64 * low_write_throughput_ratio
 }
 
 fn check_is_low_write_throughput_compaction_group(
     table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-    checkpoint_secs: u64,
-    window_size: usize,
+    sample_size: usize,
     threshold: u64,
     group: &CompactionGroupStatistic,
     low_write_throughput_ratio: f64,
@@ -966,7 +964,7 @@ fn check_is_low_write_throughput_compaction_group(
         .table_statistic
         .keys()
         .filter(|table_id| table_write_throughput.contains_key(table_id))
-        .filter(|table_id| table_write_throughput.get(table_id).unwrap().len() >= window_size)
+        .filter(|table_id| table_write_throughput.get(table_id).unwrap().len() >= sample_size)
         .cloned()
         .collect_vec();
 
@@ -978,8 +976,7 @@ fn check_is_low_write_throughput_compaction_group(
         let table_write_throughput = table_write_throughput.get(&table_id).unwrap();
         is_table_low_write_throughput(
             table_write_throughput,
-            checkpoint_secs,
-            window_size,
+            sample_size,
             threshold,
             low_write_throughput_ratio,
         )

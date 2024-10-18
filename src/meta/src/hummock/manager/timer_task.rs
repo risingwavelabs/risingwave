@@ -582,12 +582,6 @@ impl HummockManager {
     /// 2. The compaction group is a small group.
     /// 3. All tables in compaction group is in a low throughput state.
     async fn on_handle_schedule_group_merge(&self) {
-        let params = self.env.system_params_reader().await;
-        let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let checkpoint_secs = std::cmp::max(
-            1,
-            params.checkpoint_frequency() * barrier_interval_ms / 1000,
-        );
         let created_tables = match self.metadata_manager.get_created_table_ids().await {
             Ok(created_tables) => HashSet::from_iter(created_tables),
             Err(err) => {
@@ -611,6 +605,15 @@ impl HummockManager {
         if group_count < 2 {
             return;
         }
+
+        let params = self.env.system_params_reader().await;
+        let barrier_interval_ms = params.barrier_interval_ms() as u64;
+        let checkpoint_secs = {
+            std::cmp::max(
+                1,
+                params.checkpoint_frequency() * barrier_interval_ms / 1000,
+            )
+        };
 
         let mut left = 0;
         let mut right = left + 1;

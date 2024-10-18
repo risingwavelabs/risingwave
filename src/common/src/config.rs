@@ -373,10 +373,6 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
 
-    /// The size of table throughput statistics sample.
-    #[serde(default = "default::meta::table_stat_sample_size")]
-    pub table_stat_sample_size: usize,
-
     /// Whether to split the compaction group when the size of the group exceeds the `compaction_group_config.max_estimated_group_size() * split_group_size_ratio`.
     #[serde(default = "default::meta::split_group_size_ratio")]
     pub split_group_size_ratio: f64,
@@ -395,12 +391,12 @@ pub struct MetaConfig {
     // Hummock also control the number of samples to be judged during group scheduling by `table_stat_sample_size_for_split` and `table_stat_sample_size_for_merge`.
     // For example, if `table_stat_sample_size` = 240 and `table_stat_sample_size_for_split` = 60, then only the last 60 samples will be considered, and so on.
     /// The window times of table statistic history for split compaction group.
-    #[serde(default = "default::meta::table_stat_sample_size_for_split")]
-    pub table_stat_sample_size_for_split: usize,
+    #[serde(default = "default::meta::table_stat_throuput_window_seconds_for_split")]
+    pub table_stat_throuput_window_seconds_for_split: usize,
 
     /// The window times of table statistic history for merge compaction group.
-    #[serde(default = "default::meta::table_stat_sample_size_for_merge")]
-    pub table_stat_sample_size_for_merge: usize,
+    #[serde(default = "default::meta::table_stat_throuput_window_seconds_for_merge")]
+    pub table_stat_throuput_window_seconds_for_merge: usize,
 
     /// The threshold of table size in one compact task to decide whether to partition one table into `hybrid_partition_vnode_count` parts, which belongs to default group and materialized view group.
     /// Set it max value of 64-bit number to disable this feature.
@@ -825,6 +821,11 @@ pub struct StorageConfig {
     pub compactor_fast_max_compact_task_size: u64,
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
+
+    /// [Deprecated]  The window size of table info statistic history.
+    #[serde(default = "default::storage::table_info_statistic_history_times")]
+    #[deprecated]
+    pub table_info_statistic_history_times: usize,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1548,20 +1549,16 @@ pub mod default {
             0.7
         }
 
-        pub fn table_stat_sample_size_for_split() -> usize {
+        pub fn table_stat_throuput_window_seconds_for_split() -> usize {
             60
         }
 
-        pub fn table_stat_sample_size_for_merge() -> usize {
+        pub fn table_stat_throuput_window_seconds_for_merge() -> usize {
             240
         }
 
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
-        }
-
-        pub fn table_stat_sample_size() -> usize {
-            240
         }
     }
 
@@ -1757,6 +1754,11 @@ pub mod default {
 
         pub fn compactor_max_overlap_sst_count() -> usize {
             64
+        }
+
+        // deprecated
+        pub fn table_info_statistic_history_times() -> usize {
+            240
         }
 
         pub fn block_file_cache_flush_buffer_threshold_mb() -> usize {

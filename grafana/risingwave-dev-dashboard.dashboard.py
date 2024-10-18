@@ -645,11 +645,11 @@ def section_compaction(outer_panels):
                     [
                         panels.target(
                             f"sum({table_metric('storage_split_compaction_group_count')}) by (group)",
-                            "split compaction group - cg{{group}}",
+                            "split compaction group - left cg{{group}}",
                         ),
                         panels.target(
                             f"sum({table_metric('storage_merge_compaction_group_count')}) by (group)",
-                            "merge compaction group - cg{{group}}",
+                            "merge compaction group - left cg{{group}}",
                         ),
                     ],
                 ),
