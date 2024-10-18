@@ -1423,6 +1423,26 @@ impl MetaClient {
         .join();
     }
 
+    pub async fn add_sink_fail_evet(
+        &self,
+        sink_id: u32,
+        sink_name: String,
+        connector: String,
+        error: String,
+    ) -> Result<()> {
+        let event = event_log::EventSinkFail {
+            sink_id,
+            sink_name,
+            connector,
+            error,
+        };
+        let req = AddEventLogRequest {
+            event: Some(add_event_log_request::Event::SinkFail(event)),
+        };
+        self.inner.add_event_log(req).await?;
+        Ok(())
+    }
+
     pub async fn cancel_compact_task(&self, task_id: u64, task_status: TaskStatus) -> Result<bool> {
         let req = CancelCompactTaskRequest {
             task_id,
