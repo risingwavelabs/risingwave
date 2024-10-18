@@ -23,14 +23,14 @@ use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
     AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnTimestamp,
-    AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName,
+    AdditionalColumnTopic, AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::MONGODB_CDC_CONNECTOR;
 use crate::source::{
-    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR,
-    OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
+    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, MQTT_CONNECTOR,
+    NATS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
 
 // Hidden additional columns connectors which do not support `include` syntax.
@@ -86,6 +86,10 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                     "database_name",
                     "collection_name",
                 ]),
+            ),
+            (
+                MQTT_CONNECTOR,
+                HashSet::from(["topic", "offset", "partition"]),
             ),
         ])
     });
@@ -264,6 +268,14 @@ pub fn build_additional_column_desc(
                 column_type: Some(AdditionalColumnType::CollectionName(
                     AdditionalCollectionName {},
                 )),
+            },
+        ),
+        "topic" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Topic(AdditionalColumnTopic {})),
             },
         ),
         _ => unreachable!(),

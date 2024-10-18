@@ -85,6 +85,17 @@
       topic = 'dummy')
     FORMAT plain ENCODE bytes;
   formatted_sql: CREATE TABLE t (raw BYTEA) INCLUDE header AS all_headers INCLUDE header 'foo' AS foo_bytea INCLUDE header 'foo' CHARACTER VARYING AS foo_str INCLUDE header INCLUDE header 'foo' INCLUDE header 'foo' CHARACTER VARYING INCLUDE header 'foo' BYTEA INCLUDE header 'bar' WITH (connector = 'kafka', kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', topic = 'dummy') FORMAT PLAIN ENCODE BYTES
+- input: |-
+    CREATE TABLE t
+      (raw BYTEA)
+      INCLUDE topic
+    WITH (
+      connector = 'mqtt',
+      url = 'tcp://mqtt-server',
+      topic = 'test',
+      qos = 'at_least_once')
+    FORMAT plain ENCODE bytes;
+  formatted_sql: CREATE TABLE t (raw BYTEA) INCLUDE topic WITH (connector = 'mqtt', url = 'tcp://mqtt-server', topic = 'test', qos = 'at_least_once') FORMAT PLAIN ENCODE BYTES
 - input: CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT>)
   formatted_sql: CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT>)
 - input: CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT, v3 STRUCT<v1 INT, v2 INT>>)
