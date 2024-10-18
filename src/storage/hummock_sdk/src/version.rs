@@ -21,12 +21,12 @@ use std::sync::{Arc, LazyLock};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_pb::hummock::group_delta::PbDeltaType;
+use risingwave_pb::hummock::group_delta::{DeltaType, PbDeltaType};
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{
     CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMerge,
-    PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta, PbSstableInfo, PbStateTableInfo,
-    StateTableInfo, StateTableInfoDelta,
+    PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta, PbNewL0SubLevel, PbSstableInfo,
+    PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
@@ -512,76 +512,45 @@ impl HummockVersionDelta {
     /// Note: the result can be false positive because we only collect the set of sst object ids in the `inserted_table_infos`,
     /// but it is possible that the object is moved or split from other compaction groups or levels.
     pub fn newly_added_object_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.group_deltas
-            .values()
-            .flat_map(|group_deltas| {
-                group_deltas.group_deltas.iter().flat_map(|group_delta| {
-                    static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                    let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
-                        &level_delta.inserted_table_infos
-                    } else {
-                        &EMPTY_VEC
-                    };
-                    sst_slice.iter().map(|sst| sst.object_id)
-                })
-            })
-            .chain(self.change_log_delta.values().flat_map(|delta| {
-                let new_log = delta.new_log.as_ref().unwrap();
-                new_log
-                    .new_value
-                    .iter()
-                    .map(|sst| sst.object_id)
-                    .chain(new_log.old_value.iter().map(|sst| sst.object_id))
-            }))
+        self.newly_added_sst_infos(None)
+            .map(|sst| sst.object_id)
             .collect()
     }
 
     pub fn newly_added_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
-        let ssts_from_group_deltas = self.group_deltas.values().flat_map(|group_deltas| {
-            group_deltas.group_deltas.iter().flat_map(|group_delta| {
-                static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
-                    &level_delta.inserted_table_infos
-                } else {
-                    &EMPTY_VEC
-                };
-                sst_slice.iter()
-            })
-        });
-
-        let ssts_from_change_log = self.change_log_delta.values().flat_map(|delta| {
-            let new_log = delta.new_log.as_ref().unwrap();
-            new_log.new_value.iter().chain(new_log.old_value.iter())
-        });
-
-        ssts_from_group_deltas
-            .chain(ssts_from_change_log)
+        self.newly_added_sst_infos(None)
             .map(|sst| sst.sst_id)
             .collect()
     }
 
     pub fn newly_added_sst_infos<'a>(
         &'a self,
-        select_group: &'a HashSet<CompactionGroupId>,
+        select_group: Option<&'a HashSet<CompactionGroupId>>,
     ) -> impl Iterator<Item = &SstableInfo> + 'a {
         self.group_deltas
             .iter()
-            .filter_map(|(cg_id, group_deltas)| {
-                if select_group.contains(cg_id) {
-                    Some(group_deltas)
-                } else {
+            .filter_map(move |(cg_id, group_deltas)| {
+                if let Some(select_group) = select_group
+                    && !select_group.contains(cg_id)
+                {
                     None
+                } else {
+                    Some(group_deltas)
                 }
             })
             .flat_map(|group_deltas| {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
-                    static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                    let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
-                        &level_delta.inserted_table_infos
-                    } else {
-                        &EMPTY_VEC
+                    let sst_slice = match &group_delta {
+                        GroupDeltaCommon::NewL0SubLevel(inserted_table_infos)
+                        | GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon {
+                            inserted_table_infos,
+                            ..
+                        }) => Some(inserted_table_infos.iter()),
+                        GroupDeltaCommon::GroupConstruct(_)
+                        | GroupDeltaCommon::GroupDestroy(_)
+                        | GroupDeltaCommon::GroupMerge(_) => None,
                     };
-                    sst_slice.iter()
+                    sst_slice.into_iter().flatten()
                 })
             })
             .chain(self.change_log_delta.values().flat_map(|delta| {
@@ -785,7 +754,7 @@ where
 pub struct IntraLevelDeltaCommon<T> {
     pub level_idx: u32,
     pub l0_sub_level_id: u64,
-    pub removed_table_ids: Vec<u64>,
+    pub removed_table_ids: HashSet<u64>,
     pub inserted_table_infos: Vec<T>,
     pub vnode_partition_count: u32,
 }
@@ -814,7 +783,7 @@ where
         Self {
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
-            removed_table_ids: pb_intra_level_delta.removed_table_ids,
+            removed_table_ids: HashSet::from_iter(pb_intra_level_delta.removed_table_ids),
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
                 .into_iter()
@@ -833,7 +802,7 @@ where
         Self {
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
-            removed_table_ids: intra_level_delta.removed_table_ids,
+            removed_table_ids: intra_level_delta.removed_table_ids.into_iter().collect(),
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
                 .into_iter()
@@ -852,7 +821,11 @@ where
         Self {
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
-            removed_table_ids: intra_level_delta.removed_table_ids.clone(),
+            removed_table_ids: intra_level_delta
+                .removed_table_ids
+                .iter()
+                .cloned()
+                .collect(),
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
                 .iter()
@@ -871,7 +844,9 @@ where
         Self {
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
-            removed_table_ids: pb_intra_level_delta.removed_table_ids.clone(),
+            removed_table_ids: HashSet::from_iter(
+                pb_intra_level_delta.removed_table_ids.iter().cloned(),
+            ),
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
                 .iter()
@@ -886,7 +861,7 @@ impl IntraLevelDelta {
     pub fn new(
         level_idx: u32,
         l0_sub_level_id: u64,
-        removed_table_ids: Vec<u64>,
+        removed_table_ids: HashSet<u64>,
         inserted_table_infos: Vec<SstableInfo>,
         vnode_partition_count: u32,
     ) -> Self {
@@ -902,6 +877,7 @@ impl IntraLevelDelta {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum GroupDeltaCommon<T> {
+    NewL0SubLevel(Vec<T>),
     IntraLevel(IntraLevelDeltaCommon<T>),
     GroupConstruct(PbGroupConstruct),
     GroupDestroy(PbGroupDestroy),
@@ -928,6 +904,13 @@ where
             Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
                 GroupDeltaCommon::GroupMerge(pb_group_merge)
             }
+            Some(DeltaType::NewL0SubLevel(pb_new_sub_level)) => GroupDeltaCommon::NewL0SubLevel(
+                pb_new_sub_level
+                    .inserted_table_infos
+                    .into_iter()
+                    .map(T::from)
+                    .collect(),
+            ),
             None => panic!("delta_type is not set"),
         }
     }
@@ -951,6 +934,14 @@ where
             GroupDeltaCommon::GroupMerge(pb_group_merge) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMerge(pb_group_merge)),
             },
+            GroupDeltaCommon::NewL0SubLevel(new_sub_level) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::NewL0SubLevel(PbNewL0SubLevel {
+                    inserted_table_infos: new_sub_level
+                        .into_iter()
+                        .map(PbSstableInfo::from)
+                        .collect(),
+                })),
+            },
         }
     }
 }
@@ -972,6 +963,11 @@ where
             },
             GroupDeltaCommon::GroupMerge(pb_group_merge) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMerge(*pb_group_merge)),
+            },
+            GroupDeltaCommon::NewL0SubLevel(new_sub_level) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::NewL0SubLevel(PbNewL0SubLevel {
+                    inserted_table_infos: new_sub_level.iter().map(PbSstableInfo::from).collect(),
+                })),
             },
         }
     }
@@ -995,6 +991,13 @@ where
             Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
                 GroupDeltaCommon::GroupMerge(*pb_group_merge)
             }
+            Some(DeltaType::NewL0SubLevel(pb_new_sub_level)) => GroupDeltaCommon::NewL0SubLevel(
+                pb_new_sub_level
+                    .inserted_table_infos
+                    .iter()
+                    .map(T::from)
+                    .collect(),
+            ),
             None => panic!("delta_type is not set"),
         }
     }
