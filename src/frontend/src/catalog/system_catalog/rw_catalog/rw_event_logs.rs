@@ -63,6 +63,7 @@ fn event_type(e: &Event) -> String {
         Event::CollectBarrierFail(_) => "COLLECT_BARRIER_FAIL",
         Event::WorkerNodePanic(_) => "WORKER_NODE_PANIC",
         Event::AutoSchemaChangeFail(_) => "AUTO_SCHEMA_CHANGE_FAIL",
+        Event::SinkFail(_) => "SINK_FAIL",
     }
     .into()
 }
