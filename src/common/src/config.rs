@@ -822,7 +822,7 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
 
-    /// [Deprecated]  The window size of table info statistic history.
+    /// Deprecated: The window size of table info statistic history.
     #[serde(default = "default::storage::table_info_statistic_history_times")]
     #[deprecated]
     pub table_info_statistic_history_times: usize,

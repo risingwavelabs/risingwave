@@ -2526,9 +2526,15 @@ async fn test_merge_compaction_group_task_expired() {
         .unwrap()
         .unwrap();
 
+    let created_tables = HashSet::from_iter(vec![100, 101, 102]);
+
     // will cancel the task2
     hummock_manager
-        .merge_compaction_group(left_compaction_group_id, right_compaction_group_id)
+        .merge_compaction_group(
+            left_compaction_group_id,
+            right_compaction_group_id,
+            Some(created_tables),
+        )
         .await
         .unwrap();
 

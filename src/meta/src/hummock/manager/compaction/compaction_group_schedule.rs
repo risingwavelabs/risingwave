@@ -46,6 +46,7 @@ impl HummockManager {
         &self,
         group_1: CompactionGroupId,
         group_2: CompactionGroupId,
+        created_tables: Option<HashSet<u32>>,
     ) -> Result<()> {
         let compaction_guard = self.compaction.write().await;
         let mut versioning_guard = self.versioning.write().await;
@@ -77,14 +78,19 @@ impl HummockManager {
         assert!(member_table_ids_1.is_sorted());
         assert!(member_table_ids_2.is_sorted());
 
-        let created_tables = match self.metadata_manager.get_created_table_ids().await {
-            Ok(created_tables) => HashSet::from_iter(created_tables),
-            Err(err) => {
-                tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
-                return Err(Error::CompactionGroup(format!(
-                    "merge group_1 {} group_2 {} failed to fetch created table ids",
-                    group_1, group_2
-                )));
+        let created_tables = if let Some(created_tables) = created_tables {
+            // if the created_tables is provided, use it directly, most for test
+            created_tables
+        } else {
+            match self.metadata_manager.get_created_table_ids().await {
+                Ok(created_tables) => HashSet::from_iter(created_tables),
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
+                    return Err(Error::CompactionGroup(format!(
+                        "merge group_1 {} group_2 {} failed to fetch created table ids",
+                        group_1, group_2
+                    )));
+                }
             }
         };
 
@@ -619,13 +625,24 @@ impl HummockManager {
             )
             .await?;
         assert!(result_vec.len() <= 2);
-        for (cg_id, table_ids) in result_vec {
-            if table_ids.contains(&table_id_to_split) {
+
+        let mut finish_move = false;
+        for (cg_id, table_ids_after_split) in result_vec {
+            if table_ids_after_split.contains(&table_id_to_split) {
                 target_compaction_group_id = cg_id;
             }
-            cg_id_to_table_ids.insert(cg_id, table_ids);
+
+            if table_ids_after_split == table_ids {
+                finish_move = true;
+            }
+
+            cg_id_to_table_ids.insert(cg_id, table_ids_after_split);
         }
         check_table_ids_valid(&cg_id_to_table_ids);
+
+        if finish_move {
+            return Ok((target_compaction_group_id, cg_id_to_table_ids));
+        }
 
         // split 2
         // See the example above and the split rule in `split_compaction_group_impl`.
@@ -640,11 +657,11 @@ impl HummockManager {
             )
             .await?;
         assert!(result_vec.len() <= 2);
-        for (cg_id, table_ids) in result_vec {
-            if table_ids.contains(&table_id_to_split) {
+        for (cg_id, table_ids_after_split) in result_vec {
+            if table_ids_after_split.contains(&table_id_to_split) {
                 target_compaction_group_id = cg_id;
             }
-            cg_id_to_table_ids.insert(cg_id, table_ids);
+            cg_id_to_table_ids.insert(cg_id, table_ids_after_split);
         }
         check_table_ids_valid(&cg_id_to_table_ids);
 
@@ -880,7 +897,7 @@ impl HummockManager {
         }
 
         match self
-            .merge_compaction_group(group.group_id, next_group.group_id)
+            .merge_compaction_group(group.group_id, next_group.group_id, None)
             .await
         {
             Ok(()) => {

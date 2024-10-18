@@ -2120,9 +2120,11 @@ pub(crate) mod tests {
         )
         .await;
 
+        let created_tables = HashSet::from_iter(vec![table_id_1.table_id(), table_id_2.table_id()]);
+
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group(parent_group_id, new_cg_id, Some(created_tables.clone()))
             .await
             .unwrap();
 
@@ -2175,7 +2177,7 @@ pub(crate) mod tests {
 
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group(parent_group_id, new_cg_id, Some(created_tables.clone()))
             .await
             .unwrap();
 
@@ -2219,7 +2221,7 @@ pub(crate) mod tests {
         epoch += millisec_interval_epoch;
 
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group(parent_group_id, new_cg_id, Some(created_tables.clone()))
             .await
             .unwrap();
 
@@ -2361,7 +2363,7 @@ pub(crate) mod tests {
 
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group(parent_group_id, new_cg_id, Some(created_tables.clone()))
             .await
             .unwrap();
     }
