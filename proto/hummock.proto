@@ -63,6 +63,10 @@ message InputLevel {
   repeated SstableInfo table_infos = 3;
 }
 
+message NewL0SubLevel {
+  repeated SstableInfo inserted_table_infos = 1;
+}
+
 message IntraLevelDelta {
   uint32 level_idx = 1;
   uint64 l0_sub_level_id = 2;
@@ -112,6 +116,7 @@ message GroupDelta {
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
     GroupMerge group_merge = 6;
+    NewL0SubLevel new_l0_sub_level = 7;
   }
 }
 
@@ -528,7 +533,6 @@ message ReportCompactionTaskResponse {
 message ValidationTask {
   repeated SstableInfo sst_infos = 1;
   map<uint64, uint32> sst_id_to_worker_id = 2;
-  uint64 epoch = 3;
 }
 
 // Delete SSTs in object store

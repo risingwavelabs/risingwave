@@ -17,10 +17,8 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, summarize_group_deltas,
-};
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
+use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
@@ -156,13 +154,27 @@ impl HummockManager {
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
-            for (group_id, group_deltas) in &version_delta.group_deltas {
-                let summary = summarize_group_deltas(group_deltas, *group_id);
+            for group_deltas in version_delta.group_deltas.values() {
                 object_sizes.extend(
-                    summary
-                        .insert_table_infos
+                    group_deltas
+                        .group_deltas
                         .iter()
-                        .map(|t| (t.object_id, t.file_size))
+                        .flat_map(|delta| {
+                            match delta {
+                                GroupDeltaCommon::IntraLevel(level_delta) => {
+                                    Some(level_delta.inserted_table_infos.iter())
+                                }
+                                GroupDeltaCommon::NewL0SubLevel(inserted_table_infos) => {
+                                    Some(inserted_table_infos.iter())
+                                }
+                                GroupDeltaCommon::GroupConstruct(_)
+                                | GroupDeltaCommon::GroupDestroy(_)
+                                | GroupDeltaCommon::GroupMerge(_) => None,
+                            }
+                            .into_iter()
+                            .flatten()
+                            .map(|t| (t.object_id, t.file_size))
+                        })
                         .chain(
                             version_delta
                                 .change_log_delta
