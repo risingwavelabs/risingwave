@@ -244,8 +244,10 @@ impl HummockManager {
                     .iter()
                     .map(|s| (s.sst_info.object_id, s.created_at)),
             )?;
-            let ids = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
-            check_gc_history(&self.meta_store_ref().conn, ids).await?;
+            if self.env.opts.gc_history_retention_time_sec != 0 {
+                let ids = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
+                check_gc_history(&self.meta_store_ref().conn, ids).await?;
+            }
         }
 
         async {
@@ -298,8 +300,10 @@ impl HummockManager {
             self.env.opts.min_sst_retention_time_sec,
             object_timestamps.iter().map(|(k, v)| (*k, *v)),
         )?;
-        let ids = object_timestamps.iter().map(|(id, _)| *id).collect_vec();
-        check_gc_history(&self.meta_store_ref().conn, ids).await?;
+        if self.env.opts.gc_history_retention_time_sec != 0 {
+            let ids = object_timestamps.iter().map(|(id, _)| *id).collect_vec();
+            check_gc_history(&self.meta_store_ref().conn, ids).await?;
+        }
         Ok(())
     }
 }

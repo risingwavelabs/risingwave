@@ -355,6 +355,9 @@ impl HummockManager {
         &self,
         object_ids: impl Iterator<Item = HummockSstableObjectId>,
     ) -> Result<()> {
+        if self.env.opts.gc_history_retention_time_sec == 0 {
+            return Ok(());
+        }
         let now = self.now().await?;
         let dt = DateTime::from_timestamp(now.try_into().unwrap(), 0).unwrap();
         let models = object_ids.map(|o| hummock_gc_history::ActiveModel {
