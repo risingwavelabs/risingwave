@@ -14,8 +14,6 @@
 
 #![cfg_attr(not(madsim), allow(dead_code))]
 
-use std::path::PathBuf;
-
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 
