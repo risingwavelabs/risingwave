@@ -403,13 +403,12 @@ impl Cluster {
         // resulting in connecting to the same sqlite file if they're using the same seed.
         let file_path = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
             format!(
-                "{}/stest-{}-{}.sqlite",
+                "{}/stest-{}.sqlite",
                 sqlite_data_dir.display(),
-                handle.seed(),
                 Uuid::new_v4()
             )
         } else {
-            format!("./stest-{}-{}.sqlite", handle.seed(), Uuid::new_v4())
+            format!("./stest-{}.sqlite", Uuid::new_v4())
         };
         if std::fs::exists(&file_path).unwrap() {
             panic!(
