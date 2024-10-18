@@ -195,6 +195,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_object_limit")]
     pub full_gc_object_limit: u64,
 
+    /// Duration in seconds to retain garbage collection history data.
+    #[serde(default = "default::meta::gc_history_retention_time_sec")]
+    pub gc_history_retention_time_sec: u64,
+
     /// Max number of inflight time travel query.
     #[serde(default = "default::meta::max_inflight_time_travel_query")]
     pub max_inflight_time_travel_query: u64,
@@ -1389,6 +1393,10 @@ pub mod default {
 
         pub fn min_sst_retention_time_sec() -> u64 {
             3600 * 3
+        }
+
+        pub fn gc_history_retention_time_sec() -> u64 {
+            3600 * 6
         }
 
         pub fn full_gc_interval_sec() -> u64 {

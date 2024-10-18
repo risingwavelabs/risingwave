@@ -18,18 +18,19 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::time::{Duration, SystemTime};
 
+use chrono::DateTime;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_meta_model::hummock_sequence;
 use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
+use risingwave_meta_model::{hummock_gc_history, hummock_sequence};
 use risingwave_meta_model_migration::OnConflict;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::FullScanTask;
 use risingwave_pb::stream_service::GetMinUncommittedSstIdRequest;
 use risingwave_rpc_client::StreamClientPool;
-use sea_orm::{ActiveValue, EntityTrait};
+use sea_orm::{ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::commit_multi_var;
@@ -137,7 +138,7 @@ impl HummockManager {
     pub async fn extend_objects_to_delete_from_scan(
         &self,
         object_ids: &[HummockSstableObjectId],
-    ) -> usize {
+    ) -> Result<usize> {
         let tracked_object_ids: HashSet<HummockSstableObjectId> = {
             let versioning = self.versioning.read().await;
             let context_info = self.context_info.read().await;
@@ -167,13 +168,15 @@ impl HummockManager {
         let to_delete = object_ids
             .iter()
             .filter(|object_id| !tracked_object_ids.contains(object_id))
+            .copied()
             .collect_vec();
+        let to_delete_num = to_delete.len();
+        self.write_gc_history(to_delete.iter().cloned()).await?;
         // This lock ensures that during commit_epoch or report_compact_tasks, where versioning lock is held,
         // no new objects will be marked for deletion here.
         let _versioning = self.versioning.read().await;
-        self.delete_object_tracker
-            .add(to_delete.iter().map(|id| **id));
-        to_delete.len()
+        self.delete_object_tracker.add(to_delete.into_iter());
+        Ok(to_delete_num)
     }
 
     /// Starts a full GC.
@@ -269,7 +272,7 @@ impl HummockManager {
             .collect_vec();
         let after_time_travel = object_ids.len();
         // filter by version
-        let after_version = self.extend_objects_to_delete_from_scan(&object_ids).await;
+        let after_version = self.extend_objects_to_delete_from_scan(&object_ids).await?;
         metrics
             .full_gc_selected_object_count
             .observe(after_version as _);
@@ -346,6 +349,43 @@ impl HummockManager {
         if let Some(total_object_count) = paged_metrics.total_object_count.take() {
             self.metrics.total_object_count.set(total_object_count as _);
         }
+    }
+
+    async fn write_gc_history(
+        &self,
+        object_ids: impl Iterator<Item = HummockSstableObjectId>,
+    ) -> Result<()> {
+        if self.env.opts.gc_history_retention_time_sec == 0 {
+            return Ok(());
+        }
+        let now = self.now().await?;
+        let dt = DateTime::from_timestamp(now.try_into().unwrap(), 0).unwrap();
+        let models = object_ids.map(|o| hummock_gc_history::ActiveModel {
+            object_id: Set(o.try_into().unwrap()),
+            mark_delete_at: Set(dt.naive_utc()),
+        });
+        let db = &self.meta_store_ref().conn;
+        let gc_history_low_watermark = DateTime::from_timestamp(
+            now.saturating_sub(self.env.opts.gc_history_retention_time_sec)
+                .try_into()
+                .unwrap(),
+            0,
+        )
+        .unwrap();
+        hummock_gc_history::Entity::delete_many()
+            .filter(hummock_gc_history::Column::MarkDeleteAt.lt(gc_history_low_watermark))
+            .exec(db)
+            .await?;
+        hummock_gc_history::Entity::insert_many(models)
+            .on_conflict(
+                OnConflict::column(hummock_gc_history::Column::ObjectId)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .do_nothing()
+            .exec(db)
+            .await?;
+        Ok(())
     }
 }
 
@@ -541,10 +581,14 @@ mod tests {
             .unwrap();
 
         // LSMtree is empty. All input SST ids should be treated as garbage.
+        // Use fake object ids, because they'll be written to GC history and they shouldn't affect later commit.
         assert_eq!(
             3,
             hummock_manager
-                .complete_full_gc(vec![1, 2, 3], None)
+                .complete_full_gc(
+                    vec![i64::MAX as u64 - 2, i64::MAX as u64 - 1, i64::MAX as u64],
+                    None
+                )
                 .await
                 .unwrap()
         );

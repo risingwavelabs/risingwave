@@ -28,6 +28,7 @@ message BarrierCompleteResponse {
     bool done = 2;
     uint64 consumed_epoch = 3;
     uint64 consumed_rows = 4;
+    uint32 pending_barrier_num = 5;
   }
   string request_id = 1;
   common.Status status = 2;

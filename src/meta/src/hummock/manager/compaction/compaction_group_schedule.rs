@@ -21,7 +21,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compact_task::ReportTask;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::compaction_group::{
     group_split, StateTableId, StaticCompactionGroupId,
 };
