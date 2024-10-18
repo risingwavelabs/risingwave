@@ -413,10 +413,12 @@ pub trait ToArrow {
 
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
-        arrow_schema::Field::new(name, arrow_schema::DataType::Utf8, true)
-            .with_metadata([("ARROW:extension:name".into(), "arrowudf.decimal".into())].into())
+        let data_type = arrow_schema::DataType::Decimal128(
+            arrow_schema::DECIMAL128_MAX_PRECISION,
+            arrow_schema::DECIMAL_DEFAULT_SCALE,
+        );
+        arrow_schema::Field::new(name, data_type, true)
     }
-
     #[inline]
     fn serial_type_to_arrow(&self) -> arrow_schema::DataType {
         arrow_schema::DataType::Int64

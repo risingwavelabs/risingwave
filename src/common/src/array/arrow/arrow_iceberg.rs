@@ -83,8 +83,10 @@ impl IcebergArrowConvert {
 impl ToArrow for IcebergArrowConvert {
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
-        let data_type =
-            arrow_schema::DataType::Decimal128(arrow_schema::DECIMAL128_MAX_PRECISION, 0);
+        let data_type = arrow_schema::DataType::Decimal128(
+            arrow_schema::DECIMAL128_MAX_PRECISION,
+            arrow_schema::DECIMAL_DEFAULT_SCALE,
+        );
         arrow_schema::Field::new(name, data_type, true)
     }
 
@@ -149,6 +151,8 @@ pub struct IcebergCreateTableArrowConvert {
     next_field_id: RefCell<u32>,
 }
 
+impl FromArrow for IcebergCreateTableArrowConvert {}
+
 impl IcebergCreateTableArrowConvert {
     pub fn to_arrow_field(
         &self,
@@ -168,6 +172,14 @@ impl IcebergCreateTableArrowConvert {
         // for icelake
         metadata.insert("column_id".to_string(), field_id.to_string());
         arrow_field.set_metadata(metadata);
+    }
+
+    pub fn array_from_arrow_array(
+        &self,
+        field: &arrow_schema::Field,
+        array: &arrow_array::ArrayRef,
+    ) -> Result<ArrayImpl, ArrayError> {
+        FromArrow::from_array(self, field, array)
     }
 }
 
