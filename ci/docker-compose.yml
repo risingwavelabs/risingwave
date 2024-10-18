@@ -1,4 +1,5 @@
 services:
+  # TODO: Rename this to `postgres`
   db:
     image: postgres:15-alpine
     environment:
