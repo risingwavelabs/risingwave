@@ -382,7 +382,7 @@ pub struct MetaConfig {
     pub split_group_size_ratio: f64,
 
     // During group scheduling, the configured `*_throughput_ratio` is used to determine if the sample exceeds the threshold.
-    // Use `*_statistic_window_times` to check if the split and merge conditions are met.
+    // Use `table_stat_throuput_window_seconds_for_*` to check if the split and merge conditions are met.
     /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
     #[serde(default = "default::meta::table_stat_high_write_throughput_ratio_for_split")]
     pub table_stat_high_write_throughput_ratio_for_split: f64,
@@ -391,14 +391,15 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::table_stat_low_write_throughput_ratio_for_merge")]
     pub table_stat_low_write_throughput_ratio_for_merge: f64,
 
-    // Hummock control the number of samples kept in memory by configuring `table_stat_sample_size`.
-    // Hummock also control the number of samples to be judged during group scheduling by `table_stat_sample_size_for_split` and `table_stat_sample_size_for_merge`.
-    // For example, if `table_stat_sample_size` = 240 and `table_stat_sample_size_for_split` = 60, then only the last 60 samples will be considered, and so on.
-    /// The window times of table statistic history for split compaction group.
+    // Hummock also control the size of samples to be judged during group scheduling by `table_stat_sample_size_for_split` and `table_stat_sample_size_for_merge`.
+    // Will use max(table_stat_throuput_window_seconds_for_split /ckpt, table_stat_throuput_window_seconds_for_merge/ckpt) as the global sample size.
+    // For example, if `table_stat_throuput_window_seconds_for_merge` = 240 and `table_stat_throuput_window_seconds_for_split` = 60, and `ckpt_sec = 1`,
+    //  global sample size will be max(240/1, 60/1), then only the last 60 samples will be considered for split, and so on.
+    /// The window seconds of table throughput statistic history for split compaction group.
     #[serde(default = "default::meta::table_stat_throuput_window_seconds_for_split")]
     pub table_stat_throuput_window_seconds_for_split: usize,
 
-    /// The window times of table statistic history for merge compaction group.
+    /// The window seconds of table throughput statistic history for merge compaction group.
     #[serde(default = "default::meta::table_stat_throuput_window_seconds_for_merge")]
     pub table_stat_throuput_window_seconds_for_merge: usize,
 
