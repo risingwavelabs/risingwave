@@ -2076,7 +2076,11 @@ pub(crate) mod tests {
         }
 
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2123,7 +2127,11 @@ pub(crate) mod tests {
             .unwrap();
 
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2184,7 +2192,11 @@ pub(crate) mod tests {
 
         // try split
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2303,7 +2315,11 @@ pub(crate) mod tests {
 
         // try split
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
