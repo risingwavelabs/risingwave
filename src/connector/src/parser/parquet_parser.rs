@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use deltalake::parquet::arrow::async_reader::AsyncFileReader;
 use futures_async_stream::try_stream;
-use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
+use risingwave_common::array::arrow::{arrow_array_iceberg::RecordBatch, IcebergCreateTableArrowConvert};
 use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::bail;
@@ -109,12 +109,20 @@ impl ParquetParser {
                             if let Some(parquet_column) =
                                 record_batch.column_by_name(rw_column_name)
                             {
-                                let arrow_field = IcebergArrowConvert
+                                let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+                                let arrow_field = iceberg_create_table_arrow_convert
                                     .to_arrow_field(rw_column_name, rw_data_type)?;
+                                println!(
+                                    "这里rw_data_type = {:?}, arrow_field.data_type() {:?}, parquet_column.data_type() = {:?}",
+                                    rw_data_type,
+                                    arrow_field.data_type(),
+                                    parquet_column.data_type()
+                                );
                                 let converted_arrow_data_type: &arrow_schema_iceberg::DataType =
                                     arrow_field.data_type();
+                                
                                 if converted_arrow_data_type == parquet_column.data_type() {
-                                    let array_impl = IcebergArrowConvert
+                                    let array_impl = iceberg_create_table_arrow_convert
                                         .array_from_arrow_array(&arrow_field, parquet_column)?;
                                     let column = Arc::new(array_impl);
                                     chunk_columns.push(column);

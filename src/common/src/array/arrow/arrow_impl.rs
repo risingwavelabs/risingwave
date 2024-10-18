@@ -42,6 +42,7 @@
 
 use std::fmt::Write;
 
+use arrow_53_schema::DataType::Decimal128;
 use arrow_array::array;
 use arrow_array::cast::AsArray;
 use arrow_buffer::OffsetBuffer;
@@ -413,8 +414,15 @@ pub trait ToArrow {
 
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
-        arrow_schema::Field::new(name, arrow_schema::DataType::Utf8, true)
-            .with_metadata([("ARROW:extension:name".into(), "arrowudf.decimal".into())].into())
+        // To create a iceberg table, we need a decimal type with precision and scale to be set
+        // We choose 28 here
+        // The decimal type finally will be converted to an iceberg decimal type.
+        // Iceberg decimal(P,S)
+        // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be 38 or less.
+        println!("在做转换了");
+        let data_type = arrow_schema::DataType::Decimal128(28, 10);
+        arrow_schema::Field::new(name, data_type, true)
+          
     }
 
     #[inline]
