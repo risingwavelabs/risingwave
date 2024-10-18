@@ -36,7 +36,7 @@ use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
-use crate::barrier::state::BarrierManagerState;
+use crate::barrier::state::{BarrierInfo, BarrierManagerState};
 use crate::barrier::{BarrierKind, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{TableFragments, TableParallelism};
@@ -311,15 +311,19 @@ impl GlobalBarrierManager {
                         subscriptions_to_add: Default::default(),
                     });
 
-                    let new_epoch = if let Some(prev_epoch) = &prev_epoch {
+                    let new_epoch = if let Some(prev_epoch) = prev_epoch {
                         // Use a different `curr_epoch` for each recovery attempt.
-                        let new_epoch = prev_epoch.next();
+                        let curr_epoch = prev_epoch.next();
+                        let barrier_info = BarrierInfo {
+                            prev_epoch,
+                            curr_epoch,
+                            kind: BarrierKind::Initial,
+                        };
 
                         let mut node_to_collect = control_stream_manager.inject_barrier(
                             None,
                             Some(mutation),
-                            (&new_epoch, prev_epoch),
-                            &BarrierKind::Initial,
+                            &barrier_info,
                             &info,
                             Some(&info),
                             Some(node_actors),
@@ -332,11 +336,11 @@ impl GlobalBarrierManager {
                                 .next_complete_barrier_response()
                                 .await;
                             let resp = result?;
-                            assert_eq!(resp.epoch, prev_epoch.value().0);
+                            assert_eq!(resp.epoch, barrier_info.prev_epoch.value().0);
                             assert!(node_to_collect.remove(&worker_id));
                         }
                         debug!("collected initial barrier");
-                        Some(new_epoch)
+                        Some(barrier_info.curr_epoch)
                     } else {
                         assert!(info.is_empty());
                         None
@@ -364,21 +368,22 @@ impl GlobalBarrierManager {
 
         let create_mview_tracker: CreateMviewProgressTracker;
 
+        let state: BarrierManagerState;
         (
-            self.state,
+            state,
             self.active_streaming_nodes,
             self.control_stream_manager,
             create_mview_tracker,
         ) = new_state;
 
-        self.checkpoint_control =
-            CheckpointControl::new(self.context.clone(), create_mview_tracker).await;
-
         tracing::info!(
-            epoch = self.state.in_flight_prev_epoch().map(|epoch| epoch.value().0),
-            paused = ?self.state.paused_reason(),
+            epoch = state.in_flight_prev_epoch().map(|epoch| epoch.value().0),
+            paused = ?state.paused_reason(),
             "recovery success"
         );
+
+        self.checkpoint_control =
+            CheckpointControl::new(self.context.clone(), create_mview_tracker, state).await;
 
         self.env
             .notification_manager()
