@@ -448,7 +448,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
     };
     let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
-    let internal_tables = fragment_graph.internal_tables();
+    let internal_tables = fragment_graph.incomplete_internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
         job.id(),

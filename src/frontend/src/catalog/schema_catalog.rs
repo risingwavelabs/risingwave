@@ -160,7 +160,11 @@ impl SchemaCatalog {
     }
 
     pub fn drop_table(&mut self, id: TableId) {
-        let table_ref = self.table_by_id.remove(&id).unwrap();
+        let Some(table_ref) = self.table_by_id.remove(&id) else {
+            tracing::warn!(?id, "table to drop not found, cleaning up?");
+            return;
+        };
+
         self.table_by_name.remove(&table_ref.name).unwrap();
         self.indexes_by_table_id.remove(&table_ref.id);
     }
@@ -190,7 +194,11 @@ impl SchemaCatalog {
     }
 
     pub fn drop_index(&mut self, id: IndexId) {
-        let index_ref = self.index_by_id.remove(&id).unwrap();
+        let Some(index_ref) = self.index_by_id.remove(&id) else {
+            tracing::warn!(?id, "index to drop not found, cleaning up?");
+            return;
+        };
+
         self.index_by_name.remove(&index_ref.name).unwrap();
         match self.indexes_by_table_id.entry(index_ref.primary_table.id) {
             Occupied(mut entry) => {
@@ -225,7 +233,11 @@ impl SchemaCatalog {
     }
 
     pub fn drop_source(&mut self, id: SourceId) {
-        let source_ref = self.source_by_id.remove(&id).unwrap();
+        let Some(source_ref) = self.source_by_id.remove(&id) else {
+            tracing::warn!(?id, "source to drop not found, cleaning up?");
+            return;
+        };
+
         self.source_by_name.remove(&source_ref.name).unwrap();
         if let Some(connection_id) = source_ref.connection_id {
             if let Occupied(mut e) = self.connection_source_ref.entry(connection_id) {
@@ -274,7 +286,11 @@ impl SchemaCatalog {
     }
 
     pub fn drop_sink(&mut self, id: SinkId) {
-        let sink_ref = self.sink_by_id.remove(&id).unwrap();
+        let Some(sink_ref) = self.sink_by_id.remove(&id) else {
+            tracing::warn!(?id, "sink to drop not found, cleaning up?");
+            return;
+        };
+
         self.sink_by_name.remove(&sink_ref.name).unwrap();
         if let Some(connection_id) = sink_ref.connection_id {
             if let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0) {
@@ -318,7 +334,11 @@ impl SchemaCatalog {
     }
 
     pub fn drop_subscription(&mut self, id: SubscriptionId) {
-        let subscription_ref = self.subscription_by_id.remove(&id).unwrap();
+        let Some(subscription_ref) = self.subscription_by_id.remove(&id) else {
+            tracing::warn!(?id, "subscription to drop not found, cleaning up?");
+            return;
+        };
+
         self.subscription_by_name
             .remove(&subscription_ref.name)
             .unwrap();
@@ -354,7 +374,11 @@ impl SchemaCatalog {
     }
 
     pub fn drop_view(&mut self, id: ViewId) {
-        let view_ref = self.view_by_id.remove(&id).unwrap();
+        let Some(view_ref) = self.view_by_id.remove(&id) else {
+            tracing::warn!(?id, "view to drop not found, cleaning up?");
+            return;
+        };
+
         self.view_by_name.remove(&view_ref.name).unwrap();
     }
 
@@ -411,10 +435,10 @@ impl SchemaCatalog {
     }
 
     pub fn drop_function(&mut self, id: FunctionId) {
-        let function_ref = self
-            .function_by_id
-            .remove(&id)
-            .expect("function not found by id");
+        let Some(function_ref) = self.function_by_id.remove(&id) else {
+            tracing::warn!(?id, "function to drop not found, cleaning up?");
+            return;
+        };
 
         self.function_registry
             .remove(Self::get_func_sign(&function_ref))
@@ -483,10 +507,11 @@ impl SchemaCatalog {
     }
 
     pub fn drop_connection(&mut self, connection_id: ConnectionId) {
-        let connection_ref = self
-            .connection_by_id
-            .remove(&connection_id)
-            .expect("connection not found by id");
+        let Some(connection_ref) = self.connection_by_id.remove(&connection_id) else {
+            tracing::warn!(?connection_id, "connection to drop not found, cleaning up?");
+            return;
+        };
+
         self.connection_by_name
             .remove(&connection_ref.name)
             .expect("connection not found by name");
@@ -523,10 +548,11 @@ impl SchemaCatalog {
     }
 
     pub fn drop_secret(&mut self, secret_id: SecretId) {
-        let secret_ref = self
-            .secret_by_id
-            .remove(&secret_id)
-            .expect("secret not found by id");
+        let Some(secret_ref) = self.secret_by_id.remove(&secret_id) else {
+            tracing::warn!(?secret_id, "secret to drop not found, cleaning up?");
+            return;
+        };
+
         self.secret_by_name
             .remove(&secret_ref.name)
             .expect("secret not found by name");

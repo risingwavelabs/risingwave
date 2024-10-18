@@ -18,8 +18,10 @@ use std::ops::AddAssign;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId};
+use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{SourceId, WorkerId};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -562,6 +564,25 @@ impl TableFragments {
         } else {
             None
         }
+    }
+
+    /// Retrieve the internal tables map of the whole graph.
+    ///
+    /// See also [`crate::stream::StreamFragmentGraph::incomplete_internal_tables`].
+    pub fn internal_tables(&self) -> BTreeMap<u32, Table> {
+        let mut tables = BTreeMap::new();
+        for fragment in self.fragments.values() {
+            stream_graph_visitor::visit_stream_node_internal_tables(
+                &mut fragment.actors[0].nodes.clone().unwrap(),
+                |table, _| {
+                    let table_id = table.id;
+                    tables
+                        .try_insert(table_id, table.clone())
+                        .unwrap_or_else(|_| panic!("duplicated table id `{}`", table_id));
+                },
+            );
+        }
+        tables
     }
 
     /// Returns the internal table ids without the mview table.
