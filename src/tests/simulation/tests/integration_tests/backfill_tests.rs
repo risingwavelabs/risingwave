@@ -262,7 +262,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     let progress = session
         .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
         .await?;
-    let progress = progress.replace('%', "");
+    let progress = progress.split_once("%").unwrap().0;
     let progress = progress.parse::<f64>().unwrap();
     assert!(
         (0.5..1.5).contains(&progress),
@@ -276,7 +276,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     let progress = session
         .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
         .await?;
-    let progress = progress.replace('%', "");
+    let progress = progress.split_once("%").unwrap().0;
     let progress = progress.parse::<f64>().unwrap();
     assert!(
         (prev_progress - 0.5..prev_progress + 1.5).contains(&progress),
