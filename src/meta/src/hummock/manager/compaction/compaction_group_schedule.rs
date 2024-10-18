@@ -833,6 +833,23 @@ impl HummockManager {
             )));
         }
 
+        if group
+            .compaction_group_config
+            .compaction_config
+            .disable_auto_group_scheduling
+            .unwrap_or(false)
+            || next_group
+                .compaction_group_config
+                .compaction_config
+                .disable_auto_group_scheduling
+                .unwrap_or(false)
+        {
+            return Err(Error::CompactionGroup(format!(
+                "group-{} or group-{} disable_auto_group_scheduling",
+                group.group_id, next_group.group_id
+            )));
+        }
+
         // do not merge the compaction group which is creating
         if check_is_creating_compaction_group(group, created_tables) {
             return Err(Error::CompactionGroup(format!(
