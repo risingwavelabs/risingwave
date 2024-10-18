@@ -568,13 +568,13 @@ impl TestCase {
                 Statement::CreateSchema {
                     schema_name,
                     if_not_exists,
-                    user_specified,
+                    owner,
                 } => {
                     create_schema::handle_create_schema(
                         handler_args,
                         schema_name,
                         if_not_exists,
-                        user_specified,
+                        owner,
                     )
                     .await?;
                 }
