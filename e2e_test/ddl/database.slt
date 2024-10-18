@@ -10,6 +10,15 @@ create database ddl_database;
 statement ok
 create database if not exists ddl_database;
 
+statement ok
+create user user_for_db_owner;
+
+statement ok
+create database db_with_owner with owner = user_for_db_owner;
+
+statement ok
+create database db_with_owner2 owner user_for_db_owner;
+
 # Drop the database and public schema in it.
 statement ok
 drop database ddl_database;
@@ -21,3 +30,15 @@ drop database ddl_database;
 # Drop it again with if exists.
 statement ok
 drop database if exists ddl_database;
+
+# Drop the database with owner.
+statement ok
+drop database db_with_owner;
+
+# Drop the database with owner.
+statement ok
+drop database db_with_owner2;
+
+# Drop the user.
+statement ok
+drop user user_for_db_owner;

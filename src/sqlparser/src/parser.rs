@@ -2042,31 +2042,40 @@ impl Parser<'_> {
 
     pub fn parse_create_schema(&mut self) -> PResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
-        let (schema_name, user_specified) = if self.parse_keyword(Keyword::AUTHORIZATION) {
-            let user_specified = self.parse_object_name()?;
-            (user_specified.clone(), Some(user_specified))
+        let (schema_name, owner) = if self.parse_keyword(Keyword::AUTHORIZATION) {
+            let owner = self.parse_object_name()?;
+            (owner.clone(), Some(owner))
         } else {
             let schema_name = self.parse_object_name()?;
-            let user_specified = if self.parse_keyword(Keyword::AUTHORIZATION) {
+            let owner = if self.parse_keyword(Keyword::AUTHORIZATION) {
                 Some(self.parse_object_name()?)
             } else {
                 None
             };
-            (schema_name, user_specified)
+            (schema_name, owner)
         };
         Ok(Statement::CreateSchema {
             schema_name,
             if_not_exists,
-            user_specified,
+            owner,
         })
     }
 
     pub fn parse_create_database(&mut self) -> PResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let db_name = self.parse_object_name()?;
+        let _ = self.parse_keyword(Keyword::WITH);
+        let owner = if self.parse_keyword(Keyword::OWNER) {
+            let _ = self.consume_token(&Token::Eq);
+            Some(self.parse_object_name()?)
+        } else {
+            None
+        };
+
         Ok(Statement::CreateDatabase {
             db_name,
             if_not_exists,
+            owner,
         })
     }
 
