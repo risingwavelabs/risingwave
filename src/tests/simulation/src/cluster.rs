@@ -405,7 +405,7 @@ impl Cluster {
         // FIXME: some tests like integration tests will run concurrently,
         // resulting in connecting to the same sqlite file if they're using the same seed.
         let file_path = {
-           let mut file_path = Default::default();
+            let mut file_path = Default::default();
             SQLITE_PATH.with(|p| {
                 file_path = p.clone();
             });
@@ -892,13 +892,14 @@ impl Cluster {
 impl Drop for Cluster {
     fn drop(&mut self) {
         let file_path = {
-           let mut file_path = Default::default();
+            let mut file_path = Default::default();
             SQLITE_PATH.with(|p| {
                 file_path = p.clone();
             });
             file_path
         };
-        std::fs::remove_file(&file_path).expect("remove sqlite file failed when cleaning cluster resource");
+        std::fs::remove_file(&file_path)
+            .expect("remove sqlite file failed when cleaning cluster resource");
     }
 }
 
