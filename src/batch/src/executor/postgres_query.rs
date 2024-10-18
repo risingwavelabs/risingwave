@@ -138,7 +138,7 @@ impl PostgresQueryExecutor {
             "host={} port={} user={} password={} dbname={}",
             self.host, self.port, self.username, self.password, self.database
         );
-        let (client, conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await?;
+        let (mut client, conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await?;
 
         tokio::spawn(async move {
             if let Err(e) = conn.await {
@@ -153,9 +153,13 @@ impl PostgresQueryExecutor {
         let query = self.query.clone();
 
         #[for_await]
-        for chunk in
-            Self::create_pg_row_stream(&client, cursor_name, query, self.chunk_size, self.schema())
-        {
+        for chunk in Self::create_pg_row_stream(
+            &mut client,
+            cursor_name,
+            query,
+            self.chunk_size,
+            self.schema(),
+        ) {
             yield chunk?;
         }
 
@@ -164,7 +168,7 @@ impl PostgresQueryExecutor {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn create_pg_row_stream<'a>(
-        client: &'a tokio_postgres::Client,
+        client: &'a mut tokio_postgres::Client,
         cursor_name: String,
         query: String,
         chunk_size: usize,
@@ -173,20 +177,22 @@ impl PostgresQueryExecutor {
         let cursor_query = format!("DECLARE \"{}\" CURSOR FOR {}", cursor_name, query);
         let fetch_query = format!("FETCH FORWARD {} FROM \"{}\"", chunk_size, cursor_name);
         let close_query = format!("CLOSE \"{}\"", cursor_name);
-        client
+        let transaction = client.transaction().await?;
+        transaction
             .execute(cursor_query.as_str(), &[])
             .await
             .context("postgres_query_executor: cursor declaration failed")?;
         let mut builder = DataChunkBuilder::new(schema.data_types(), chunk_size);
         tracing::debug!("postgres_query_executor: query executed, start deserializing rows");
         loop {
-            let rows = client
+            let rows = transaction
                 .query(fetch_query.as_str(), &[])
                 .await
                 .context("postgres_query_executor: cursor fetch failed")?;
             if rows.is_empty() {
                 tracing::info!("postgres_query_executor: cursor fetch completed");
-                client.query(close_query.as_str(), &[]).await?;
+                transaction.query(close_query.as_str(), &[]).await?;
+                transaction.commit().await?;
                 if let Some(chunk) = builder.consume_all() {
                     yield chunk;
                 }
