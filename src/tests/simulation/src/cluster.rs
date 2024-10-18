@@ -14,6 +14,7 @@
 
 #![cfg_attr(not(madsim), allow(unused_imports))]
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
@@ -37,6 +38,8 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
+use sqlx;
+use sqlx::Connection;
 #[cfg(not(madsim))]
 use tokio::runtime::Handle;
 use uuid::Uuid;
@@ -329,6 +332,10 @@ pub struct Cluster {
     pub(crate) ctl: NodeHandle,
 }
 
+thread_local! {
+    static __CLUSTER_SQLITE_CONNECTION: OnceCell<Box<sqlx::SqliteConnection>> = OnceCell::new();
+}
+
 impl Cluster {
     /// Start a RisingWave cluster for testing.
     ///
@@ -401,23 +408,51 @@ impl Cluster {
 
         // FIXME: some tests like integration tests will run concurrently,
         // resulting in connecting to the same sqlite file if they're using the same seed.
-        let file_path = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
-            format!(
-                "{}/stest-{}-{}.sqlite",
-                sqlite_data_dir.display(),
-                handle.seed(),
-                Uuid::new_v4()
-            )
-        } else {
-            format!("./stest-{}-{}.sqlite", handle.seed(), Uuid::new_v4())
-        };
-        if std::fs::exists(&file_path).unwrap() {
-            panic!(
-                "sqlite file already exists and used by other cluster: {}",
-                file_path
-            )
+        // let file_path = format!("stest-{}-{}", handle.seed(), Uuid::new_v4());
+
+        let sql_endpoint = format!("sqlite::memory:?cache=shared");
+        let sql_conn = Box::new(sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap());
+        __CLUSTER_SQLITE_CONNECTION
+            .with(|conn| {
+                conn.set(sql_conn).unwrap();
+            });
+
+        {
+            // Test that the same sqlite instance can be accessed outside.
+            let mut conn = sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap();
+            sqlx::query("CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, name TEXT)")
+                .execute(&mut conn)
+                .await
+                .unwrap();
+
+            let mut conn2 = sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap();
+            sqlx::query("CREATE TABLE IF NOT EXISTS test2 (id INTEGER PRIMARY KEY, name TEXT)")
+                .execute(&mut conn)
+                .await
+                .unwrap();
+
+            // Test that if we drop this connection,
+            // and recreate the sqlite instance we can still connect to it.
+            drop(conn);
+            let mut conn = sqlx::SqliteConnection::connect(&sql_endpoint).await.unwrap();
+            sqlx::query("SELECT * FROM test")
+                .fetch_all(&mut conn)
+                .await
+                .unwrap();
+
+            // Test that it's not created on disk.
+            if std::fs::exists(&"sqlite::memory:").unwrap() {
+                panic!(
+                    "there shouldn't be any file at the path, it is an in-memory sqlite instance",
+                )
+            }
+            if std::fs::exists(&"sqlite::memory:&cache=shared").unwrap() {
+                panic!(
+                    "there shouldn't be any file at the path, it is an in-memory sqlite instance",
+                )
+            }
         }
-        let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path);
+
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
 
         // FIXME(kwannoel):
@@ -883,33 +918,6 @@ impl Cluster {
         for node in nodes.iter().chain(metas.iter()) {
             if !self.handle.is_exit(node) {
                 panic!("failed to graceful shutdown {node} in {waiting_time:?}");
-            }
-        }
-    }
-}
-
-#[cfg_or_panic(madsim)]
-impl Drop for Cluster {
-    fn drop(&mut self) {
-        // FIXME: remove it when deprecate the on-disk version.
-        let default_path = PathBuf::from(".");
-        let sqlite_data_dir = self
-            .config
-            .sqlite_data_dir
-            .as_ref()
-            .unwrap_or_else(|| &default_path);
-        for entry in std::fs::read_dir(sqlite_data_dir).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .starts_with(&format!("stest-{}-", self.handle.seed()))
-            {
-                std::fs::remove_file(path).unwrap();
-                break;
             }
         }
     }
