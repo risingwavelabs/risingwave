@@ -28,6 +28,7 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};
 use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
@@ -43,9 +44,9 @@ use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use super::command::CommandContext;
-use super::{BarrierKind, GlobalBarrierManagerContext, InflightSubscriptionInfo, TracedEpoch};
+use super::{Command, GlobalBarrierManagerContext, InflightSubscriptionInfo};
 use crate::barrier::info::InflightGraphInfo;
+use crate::barrier::state::BarrierInfo;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -248,11 +249,13 @@ impl ControlStreamManager {
 impl ControlStreamManager {
     pub(super) fn inject_command_ctx_barrier(
         &mut self,
-        command_ctx: &CommandContext,
+        command: &Command,
+        barrier_info: &BarrierInfo,
+        prev_paused_reason: Option<PausedReason>,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
     ) -> MetaResult<HashSet<WorkerId>> {
-        let mutation = command_ctx.to_mutation();
+        let mutation = command.to_mutation(prev_paused_reason);
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
         } else {
@@ -266,11 +269,10 @@ impl ControlStreamManager {
         self.inject_barrier(
             None,
             mutation,
-            (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
-            &command_ctx.kind,
+            barrier_info,
             pre_applied_graph_info,
             applied_graph_info,
-            command_ctx.command.actors_to_create(),
+            command.actors_to_create(),
             subscriptions_to_add,
             subscriptions_to_remove,
         )
@@ -280,8 +282,7 @@ impl ControlStreamManager {
         &mut self,
         creating_table_id: Option<TableId>,
         mutation: Option<Mutation>,
-        (curr_epoch, prev_epoch): (&TracedEpoch, &TracedEpoch),
-        kind: &BarrierKind,
+        barrier_info: &BarrierInfo,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
         mut new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
@@ -351,12 +352,13 @@ impl ControlStreamManager {
                     let mutation = mutation.clone();
                     let barrier = Barrier {
                         epoch: Some(risingwave_pb::data::Epoch {
-                            curr: curr_epoch.value().0,
-                            prev: prev_epoch.value().0,
+                            curr: barrier_info.curr_epoch.value().0,
+                            prev: barrier_info.prev_epoch.value().0,
                         }),
                         mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
-                        tracing_context: TracingContext::from_span(curr_epoch.span()).to_protobuf(),
-                        kind: kind.to_protobuf() as i32,
+                        tracing_context: TracingContext::from_span(barrier_info.curr_epoch.span())
+                            .to_protobuf(),
+                        kind: barrier_info.kind.to_protobuf() as i32,
                         passed_actors: vec![],
                     };
 
@@ -401,8 +403,8 @@ impl ControlStreamManager {
                 // Record failure in event log.
                 use risingwave_pb::meta::event_log;
                 let event = event_log::EventInjectBarrierFail {
-                    prev_epoch: prev_epoch.value().0,
-                    cur_epoch: curr_epoch.value().0,
+                    prev_epoch: barrier_info.prev_epoch.value().0,
+                    cur_epoch: barrier_info.curr_epoch.value().0,
                     error: e.to_report_string(),
                 };
                 self.context
@@ -455,16 +457,12 @@ impl GlobalBarrierManagerContext {
     }
 
     /// Send barrier-complete-rpc and wait for responses from all CNs
-    pub(super) fn report_collect_failure(
-        &self,
-        command_context: &CommandContext,
-        error: &MetaError,
-    ) {
+    pub(super) fn report_collect_failure(&self, barrier_info: &BarrierInfo, error: &MetaError) {
         // Record failure in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventCollectBarrierFail {
-            prev_epoch: command_context.prev_epoch.value().0,
-            cur_epoch: command_context.curr_epoch.value().0,
+            prev_epoch: barrier_info.prev_epoch.value().0,
+            cur_epoch: barrier_info.curr_epoch.value().0,
             error: error.to_report_string(),
         };
         self.env

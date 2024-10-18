@@ -13,13 +13,21 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::mem::take;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 
 use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
-use crate::barrier::{Command, CreateStreamingJobType, TracedEpoch};
+use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+
+#[derive(Debug, Clone)]
+pub struct BarrierInfo {
+    pub prev_epoch: TracedEpoch,
+    pub curr_epoch: TracedEpoch,
+    pub kind: BarrierKind,
+}
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
 pub struct BarrierManagerState {
@@ -28,6 +36,9 @@ pub struct BarrierManagerState {
     /// There's no need to persist this field. On recovery, we will restore this from the latest
     /// committed snapshot in `HummockManager`.
     in_flight_prev_epoch: Option<TracedEpoch>,
+
+    /// The `prev_epoch` of pending non checkpoint barriers
+    pending_non_checkpoint_barriers: Vec<u64>,
 
     /// Inflight running actors info.
     pub(crate) inflight_graph_info: InflightGraphInfo,
@@ -47,6 +58,7 @@ impl BarrierManagerState {
     ) -> Self {
         Self {
             in_flight_prev_epoch,
+            pending_non_checkpoint_barriers: vec![],
             inflight_graph_info,
             inflight_subscription_info,
             paused_reason,
@@ -57,7 +69,7 @@ impl BarrierManagerState {
         self.paused_reason
     }
 
-    pub fn set_paused_reason(&mut self, paused_reason: Option<PausedReason>) {
+    fn set_paused_reason(&mut self, paused_reason: Option<PausedReason>) {
         if self.paused_reason != paused_reason {
             tracing::info!(current = ?self.paused_reason, new = ?paused_reason, "update paused state");
             self.paused_reason = paused_reason;
@@ -69,7 +81,11 @@ impl BarrierManagerState {
     }
 
     /// Returns the epoch pair for the next barrier, and updates the state.
-    pub fn next_epoch_pair(&mut self, command: &Command) -> Option<(TracedEpoch, TracedEpoch)> {
+    pub fn next_barrier_info(
+        &mut self,
+        command: &Command,
+        is_checkpoint: bool,
+    ) -> Option<BarrierInfo> {
         if self.inflight_graph_info.is_empty()
             && !matches!(&command, Command::CreateStreamingJob { .. })
         {
@@ -79,15 +95,27 @@ impl BarrierManagerState {
             .in_flight_prev_epoch
             .get_or_insert_with(|| TracedEpoch::new(Epoch::now()));
         let prev_epoch = in_flight_prev_epoch.clone();
-        let next_epoch = prev_epoch.next();
-        *in_flight_prev_epoch = next_epoch.clone();
-        Some((prev_epoch, next_epoch))
+        let curr_epoch = prev_epoch.next();
+        *in_flight_prev_epoch = curr_epoch.clone();
+        self.pending_non_checkpoint_barriers
+            .push(prev_epoch.value().0);
+        let kind = if is_checkpoint {
+            let epochs = take(&mut self.pending_non_checkpoint_barriers);
+            BarrierKind::Checkpoint(epochs)
+        } else {
+            BarrierKind::Barrier
+        };
+        Some(BarrierInfo {
+            prev_epoch,
+            curr_epoch,
+            kind,
+        })
     }
 
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
     ///
-    /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`)
+    /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`, `prev_paused_reason`)
     pub fn apply_command(
         &mut self,
         command: &Command,
@@ -96,6 +124,7 @@ impl BarrierManagerState {
         InflightSubscriptionInfo,
         HashSet<TableId>,
         HashSet<TableId>,
+        Option<PausedReason>,
     ) {
         // update the fragment_infos outside pre_apply
         let fragment_changes = if let Command::CreateStreamingJob {
@@ -131,6 +160,16 @@ impl BarrierManagerState {
 
         self.inflight_subscription_info.post_apply(command);
 
-        (info, subscription_info, table_ids_to_commit, jobs_to_wait)
+        let prev_paused_reason = self.paused_reason;
+        let curr_paused_reason = command.next_paused_reason(prev_paused_reason);
+        self.set_paused_reason(curr_paused_reason);
+
+        (
+            info,
+            subscription_info,
+            table_ids_to_commit,
+            jobs_to_wait,
+            prev_paused_reason,
+        )
     }
 }
