@@ -104,10 +104,16 @@ impl UpsertParser {
         } else {
             change_event_op = ChangeEventOperation::Delete;
         }
-        let f = |column: &SourceColumnDesc| row_op.access_field(column);
+
         match change_event_op {
-            ChangeEventOperation::Upsert => writer.do_insert(f)?,
-            ChangeEventOperation::Delete => writer.do_delete(f)?,
+            ChangeEventOperation::Upsert => {
+                let f = |column: &SourceColumnDesc| row_op.access_field::<false>(column);
+                writer.do_insert(f)?
+            }
+            ChangeEventOperation::Delete => {
+                let f = |column: &SourceColumnDesc| row_op.access_field::<true>(column);
+                writer.do_delete(f)?
+            }
         }
         Ok(())
     }
