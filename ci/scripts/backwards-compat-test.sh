@@ -96,7 +96,7 @@ setup_old_cluster() {
   echo "--- Get RisingWave binary for $OLD_VERSION"
   OLD_URL=https://github.com/risingwavelabs/risingwave/releases/download/v${OLD_VERSION}/risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
   set +e
-  wget "$OLD_URL"
+  wget --no-verbose "$OLD_URL"
   if [[ "$?" -ne 0 ]]; then
     set -e
     echo "Failed to download ${OLD_VERSION} from github releases, build from source later during \`risedev d\`"
