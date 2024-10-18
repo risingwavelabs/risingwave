@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use futures::channel::{mpsc, oneshot};
@@ -326,9 +326,9 @@ pub struct Cluster {
 }
 
 thread_local! {
-    static SQLITE_PATH: PathBuf = {
+    static SQLITE_PATH: String = {
         let path = format!("./stest-{}.sqlite", Uuid::new_v4());
-        PathBuf::from(path)
+        path
     };
 }
 
@@ -404,7 +404,13 @@ impl Cluster {
 
         // FIXME: some tests like integration tests will run concurrently,
         // resulting in connecting to the same sqlite file if they're using the same seed.
-        let mut file_path = SQLITE_PATH.get();
+        let file_path = {
+           let mut file_path = Default::default();
+            SQLITE_PATH.with(|p| {
+                file_path = p.clone();
+            });
+            file_path
+        };
         if std::fs::exists(&file_path).unwrap() {
             panic!(
                 "sqlite file already exists and used by other cluster: {}",
@@ -885,22 +891,14 @@ impl Cluster {
 #[cfg_or_panic(madsim)]
 impl Drop for Cluster {
     fn drop(&mut self) {
-        // FIXME: remove it when deprecate the on-disk version.
-        let sqlite_data_dir = PathBuf::from(".");
-        for entry in std::fs::read_dir(sqlite_data_dir).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .starts_with(&format!("stest-{}-", self.handle.seed()))
-            {
-                std::fs::remove_file(path).unwrap();
-                break;
-            }
-        }
+        let file_path = {
+           let mut file_path = Default::default();
+            SQLITE_PATH.with(|p| {
+                file_path = p.clone();
+            });
+            file_path
+        };
+        std::fs::remove_file(&file_path).expect("remove sqlite file failed when cleaning cluster resource");
     }
 }
 
