@@ -219,15 +219,20 @@ impl CreateMviewProgressReporter {
         current_consumed_rows: ConsumedRows,
     ) {
         match self.state {
-            Some(BackfillState::ConsumingUpstream(last_epoch, _last_consumed_rows)) => {
+            Some(BackfillState::ConsumingUpstreamTable(last_epoch, _last_consumed_rows)) => {
                 debug_assert_eq!(last_epoch, 0);
             }
-            Some(BackfillState::Done(_)) => unreachable!(),
+            Some(state) => {
+                panic!(
+                    "should not update consuming progress at invalid state: {:?}",
+                    state
+                )
+            }
             None => {}
         };
         self.update_inner(
             epoch,
-            BackfillState::ConsumingUpstream(0, current_consumed_rows),
+            BackfillState::ConsumingUpstreamTable(0, current_consumed_rows),
         );
     }
 
