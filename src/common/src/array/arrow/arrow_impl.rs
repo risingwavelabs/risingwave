@@ -417,7 +417,6 @@ pub trait ToArrow {
             .with_metadata([("ARROW:extension:name".into(), "arrowudf.decimal".into())].into())
     }
 
-    }
     #[inline]
     fn serial_type_to_arrow(&self) -> arrow_schema::DataType {
         arrow_schema::DataType::Int64
