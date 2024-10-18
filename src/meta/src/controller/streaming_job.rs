@@ -575,6 +575,10 @@ impl CatalogController {
         txn.commit().await?;
 
         if !objs.is_empty() {
+            // We **may** also have notified the frontend about these objects,
+            // so we need to notify the frontend to delete them here.
+            // The frontend will ignore the request if the object does not exist,
+            // so it's safe to always notify.
             self.notify_frontend(Operation::Delete, build_relation_group_for_delete(objs))
                 .await;
         }
