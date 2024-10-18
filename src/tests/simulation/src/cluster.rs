@@ -203,7 +203,6 @@ metrics_level = "Disabled"
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
             ]
                 .into(),
-            ..Default::default()
         }
     }
 
@@ -250,7 +249,6 @@ metrics_level = "Disabled"
             compute_node_cores: 1,
             per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".into()]
                 .into(),
-            ..Default::default()
         }
     }
 
@@ -297,7 +295,6 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
-            ..Default::default()
         }
     }
 }
