@@ -22,7 +22,7 @@ function docker-scout {
 }
 docker-scout quickview "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
 docker-scout recommendations "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
-docker-scout cves --format sarif -o scout.sarif --only-severity critical "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
+docker-scout cves --format sarif -o scout.sarif "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
 
 export SCOUT_REPORT=$(cat scout.sarif)
 echo "--- scout report ---"
