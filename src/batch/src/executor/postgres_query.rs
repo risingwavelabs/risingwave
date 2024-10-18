@@ -170,12 +170,13 @@ impl PostgresQueryExecutor {
         chunk_size: usize,
         schema: &'a Schema,
     ) {
-        let cursor_query = format!("DECLARE {} CURSOR FOR {}", cursor_name, query);
+        let cursor_query = format!("DECLARE \"{}\" CURSOR FOR {}", cursor_name, query);
+        let fetch_query = format!("FETCH FORWARD {} FROM \"{}\"", chunk_size, cursor_name);
+        let close_query = format!("CLOSE \"{}\"", cursor_name);
         client
             .execute(cursor_query.as_str(), &[])
             .await
             .context("postgres_query_executor: cursor declaration failed")?;
-        let fetch_query = format!("FETCH FORWARD {chunk_size} FROM {cursor_name}");
         let mut builder = DataChunkBuilder::new(schema.data_types(), chunk_size);
         tracing::debug!("postgres_query_executor: query executed, start deserializing rows");
         loop {
@@ -184,7 +185,6 @@ impl PostgresQueryExecutor {
                 .await
                 .context("postgres_query_executor: cursor fetch failed")?;
             if rows.is_empty() {
-                let close_query = format!("CLOSE {}", cursor_name);
                 tracing::info!("postgres_query_executor: cursor fetch completed");
                 client.query(close_query.as_str(), &[]).await?;
                 if let Some(chunk) = builder.consume_all() {
