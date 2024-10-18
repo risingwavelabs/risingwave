@@ -556,7 +556,7 @@ impl HummockVersionDelta {
 
         ssts_from_group_deltas
             .chain(ssts_from_change_log)
-            .map(|sst| sst.object_id)
+            .map(|sst| sst.sst_id)
             .collect()
     }
 
