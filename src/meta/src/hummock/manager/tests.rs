@@ -1192,7 +1192,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize
     );
     assert_eq!(
@@ -1213,7 +1214,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
@@ -1242,7 +1244,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
@@ -1270,7 +1273,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize + 3
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
