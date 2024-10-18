@@ -519,10 +519,7 @@ impl HummockVersionDelta {
 
     pub fn newly_added_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.newly_added_sst_infos(None)
-            .map(|sst| {
-                // TODO: should we instead use sst.sst_id?
-                sst.object_id
-            })
+            .map(|sst| sst.sst_id)
             .collect()
     }
 

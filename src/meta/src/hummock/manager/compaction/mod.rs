@@ -42,12 +42,12 @@ use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::level::{InputLevel, Level, Levels};
+use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, IntraLevelDelta};
+use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
     HummockSstableObjectId, HummockVersionId,
@@ -89,7 +89,7 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
-use crate::manager::{MetadataManager, META_NODE_ID};
+use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
 pub mod compaction_group_manager;
@@ -645,7 +645,15 @@ impl HummockManager {
         if deterministic_mode {
             version.disable_apply_to_txn();
         }
-
+        let all_versioned_table_schemas = if self.env.opts.enable_dropped_column_reclaim {
+            self.metadata_manager
+                .catalog_controller
+                .get_versioned_table_schemas()
+                .await
+                .map_err(|e| Error::Internal(e.into()))?
+        } else {
+            HashMap::default()
+        };
         let mut unschedule_groups = vec![];
         let mut trivial_tasks = vec![];
         let mut pick_tasks = vec![];
@@ -822,25 +830,21 @@ impl HummockManager {
                     compact_task.table_watermarks = version
                         .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
-
-                    if self.env.opts.enable_dropped_column_reclaim {
-                        // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
-                        compact_task.table_schemas = match self.metadata_manager() {
-                            MetadataManager::V1(mgr) => mgr
-                                .catalog_manager
-                                .get_versioned_table_schemas(&compact_task.existing_table_ids)
-                                .await
-                                .into_iter()
-                                .map(|(table_id, column_ids)| {
-                                    (table_id, TableSchema { column_ids })
-                                })
-                                .collect(),
-                            MetadataManager::V2(_) => {
-                                // TODO #13952: support V2
-                                BTreeMap::default()
-                            }
-                        };
-                    }
+                    compact_task.table_schemas = compact_task
+                        .existing_table_ids
+                        .iter()
+                        .filter_map(|table_id| {
+                            let id = (*table_id).try_into().unwrap();
+                            all_versioned_table_schemas.get(&id).map(|column_ids| {
+                                (
+                                    *table_id,
+                                    TableSchema {
+                                        column_ids: column_ids.clone(),
+                                    },
+                                )
+                            })
+                        })
+                        .collect();
 
                     compact_task_assignment.insert(
                         compact_task.task_id,
@@ -1064,42 +1068,6 @@ impl HummockManager {
             .await
     }
 
-    pub(super) fn is_compact_task_expired(
-        compact_task: &CompactTask,
-        hummock_version: &HummockVersion,
-    ) -> bool {
-        if let Some(group) = hummock_version
-            .levels
-            .get(&compact_task.compaction_group_id)
-        {
-            for input_level in &compact_task.input_ssts {
-                let input_level: &InputLevel = input_level;
-                let mut sst_ids: HashSet<_> = input_level
-                    .table_infos
-                    .iter()
-                    .map(|sst| sst.sst_id)
-                    .collect();
-                fn filter_ssts(levels: &Level, sst_ids: &mut HashSet<u64>) {
-                    for sst in &levels.table_infos {
-                        sst_ids.remove(&sst.sst_id);
-                    }
-                }
-                if input_level.level_idx == 0 {
-                    for level in &group.level0().sub_levels {
-                        filter_ssts(level, &mut sst_ids);
-                    }
-                } else {
-                    filter_ssts(group.get_level(input_level.level_idx as _), &mut sst_ids);
-                }
-                if !sst_ids.is_empty() {
-                    warn!(stale_sst_id = ?sst_ids, ?compact_task, "compact task expired");
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     pub async fn report_compact_task(
         &self,
         task_id: u64,
@@ -1215,20 +1183,15 @@ impl HummockManager {
                     );
                     compact_task.task_status = TaskStatus::RetentionTimeRejected;
                     false
-                } else if Self::is_compact_task_expired(&compact_task, version.latest_version()) {
-                    // if member_table_ids changes, the data of sstable may stale.
-                    compact_task.task_status = TaskStatus::InputOutdatedCanceled;
-                    false
                 } else {
                     let group = version
                         .latest_version()
                         .levels
                         .get(&compact_task.compaction_group_id)
                         .unwrap();
-                    let input_exist =
-                        group.check_deleted_sst_exist(&input_level_ids, input_sst_ids);
+                    let input_exist = group.check_sst_ids_exist(&input_level_ids, input_sst_ids);
                     if !input_exist {
-                        compact_task.task_status = TaskStatus::InvalidGroupCanceled;
+                        compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                         warn!(
                             "The task may be expired because of group split, task:\n {:?}",
                             compact_task_to_string(&compact_task)

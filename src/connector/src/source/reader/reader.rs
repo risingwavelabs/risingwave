@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
+use async_nats::jetstream::consumer::AckPolicy;
 use futures::future::try_join_all;
 use futures::stream::pending;
 use futures::StreamExt;
@@ -127,6 +128,18 @@ impl SourceReader {
                 prop.subscription_client().await?,
                 vec![],
             )),
+            ConnectorProperties::Nats(prop) => {
+                match prop.nats_properties_consumer.get_ack_policy()? {
+                    a @ AckPolicy::Explicit | a @ AckPolicy::All => {
+                        Some(WaitCheckpointTask::AckNatsJetStream(
+                            prop.common.build_context().await?,
+                            vec![],
+                            a,
+                        ))
+                    }
+                    AckPolicy::None => None,
+                }
+            }
             _ => None,
         })
     }

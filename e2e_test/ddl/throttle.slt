@@ -1,5 +1,5 @@
 # streaming_rate_limit applies to create source, please refer to
-# e2e_test/source/basic/kafka.slt.
+# e2e_test/source_legacy/basic/kafka.slt.
 # backfill_rate_limit applies to create sink, please refer to
 # e2e_test/sink/kafka/create_sink.slt.
 

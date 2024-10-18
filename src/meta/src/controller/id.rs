@@ -15,14 +15,26 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use risingwave_meta_model_v2::prelude::{Actor, Fragment};
-use risingwave_meta_model_v2::{actor, fragment};
+use risingwave_meta_model::prelude::{Actor, Fragment};
+use risingwave_meta_model::{actor, fragment};
 use sea_orm::sea_query::{Expr, Func};
 use sea_orm::{DatabaseConnection, EntityTrait, QuerySelect};
 
-use crate::manager::{IdCategory, IdCategoryType};
 use crate::MetaResult;
 
+pub type IdCategoryType = u8;
+
+// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
+#[expect(non_snake_case, non_upper_case_globals)]
+pub mod IdCategory {
+    use super::IdCategoryType;
+
+    #[cfg(test)]
+    pub const Test: IdCategoryType = 0;
+    pub const Table: IdCategoryType = 1;
+    pub const Fragment: IdCategoryType = 2;
+    pub const Actor: IdCategoryType = 3;
+}
 pub struct IdGenerator<const TYPE: IdCategoryType>(AtomicU64);
 
 impl<const TYPE: IdCategoryType> IdGenerator<TYPE> {

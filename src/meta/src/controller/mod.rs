@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::{
     connection, database, function, index, object, schema, secret, sink, source, subscription,
     table, view,
 };
@@ -60,16 +60,17 @@ pub struct SqlMetaStore {
     pub conn: DatabaseConnection,
 }
 
+pub const IN_MEMORY_STORE: &str = "sqlite::memory:";
+
 impl SqlMetaStore {
     pub fn new(conn: DatabaseConnection) -> Self {
         Self { conn }
     }
 
     #[cfg(any(test, feature = "test"))]
-    #[cfg(not(madsim))]
     pub async fn for_test() -> Self {
         use risingwave_meta_model_migration::{Migrator, MigratorTrait};
-        let conn = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
         Migrator::up(&conn, None).await.unwrap();
         Self { conn }
     }

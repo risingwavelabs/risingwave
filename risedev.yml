@@ -31,10 +31,6 @@ profile:
       #   bucket: test-bucket
 
       # By default, the meta-backend is sqlite.
-      # To enable etcd backend, uncomment the following lines and set the meta-backend to etcd in 'meta-node'
-      # - use: etcd
-      #   unsafe-no-fsync: true
-
       # To enable postgres backend, uncomment the following lines and set the meta-backend to postgres in 'meta-node'
       # - use: postgres
       #   port: 8432
@@ -48,7 +44,6 @@ profile:
 
       - use: meta-node
       #   - meta-backend: postgres
-      #   - meta-backend: etcd
       - use: compute-node
       - use: frontend
 
@@ -154,13 +149,13 @@ profile:
       - use: kafka
         persist-data: true
 
-  standalone-minio-etcd:
+  standalone-minio-sqlite:
     steps:
       - use: minio
-      - use: etcd
+      - use: sqlite
       - use: meta-node
         user-managed: true
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -168,13 +163,13 @@ profile:
       - use: compactor
         user-managed: true
 
-  standalone-minio-etcd-compactor:
+  standalone-minio-sqlite-compactor:
     steps:
       - use: minio
-      - use: etcd
+      - use: sqlite
       - use: meta-node
         user-managed: true
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -183,7 +178,6 @@ profile:
 
   hdfs:
     steps:
-      # - use: etcd
       - use: meta-node
       - use: compute-node
       - use: frontend
@@ -196,7 +190,6 @@ profile:
       # - use: grafana
   fs:
     steps:
-      # - use: etcd
       - use: meta-node
       - use: compute-node
       - use: frontend
@@ -207,7 +200,6 @@ profile:
       # - use: grafana
   webhdfs:
     steps:
-      # - use: etcd
       - use: meta-node
       - use: compute-node
       - use: frontend
@@ -221,7 +213,6 @@ profile:
 
   gcs:
     steps:
-      # - use: etcd
       - use: meta-node
       - use: compute-node
       - use: frontend
@@ -234,7 +225,6 @@ profile:
       # - use: grafana
   obs:
     steps:
-      # - use: etcd
       - use: meta-node
       - use: compute-node
       - use: frontend
@@ -248,7 +238,6 @@ profile:
 
   oss:
     steps:
-      # - use: etcd
       - use: meta-node
       - use: compute-node
       - use: frontend
@@ -262,7 +251,6 @@ profile:
 
   azblob:
     steps:
-      # - use: etcd
       - use: meta-node
       - use: compute-node
       - use: frontend
@@ -277,9 +265,9 @@ profile:
   full-benchmark:
     steps:
       - use: minio
-      - use: etcd
+      - use: postgres
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: postgres
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -290,78 +278,6 @@ profile:
       - use: grafana
       - use: kafka
         persist-data: true
-
-  3etcd-3meta:
-    steps:
-      - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
-        port: 2388
-        peer-port: 2389
-        exporter-port: 2379
-      - use: etcd
-        unsafe-no-fsync: true
-        port: 12388
-        peer-port: 12389
-        exporter-port: 12379
-      - use: etcd
-        unsafe-no-fsync: true
-        port: 22388
-        peer-port: 22389
-        exporter-port: 22379
-      - use: meta-node
-        port: 5690
-        dashboard-port: 5691
-        exporter-port: 1250
-        meta-backend: etcd
-      - use: meta-node
-        port: 15690
-        dashboard-port: 15691
-        exporter-port: 11250
-        meta-backend: etcd
-      - use: meta-node
-        port: 25690
-        dashboard-port: 25691
-        exporter-port: 21250
-        meta-backend: etcd
-      - use: compactor
-
-  3etcd-3meta-1cn-1fe:
-    steps:
-      - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
-        port: 2388
-        peer-port: 2389
-        exporter-port: 2379
-      - use: etcd
-        unsafe-no-fsync: true
-        port: 12388
-        peer-port: 12389
-        exporter-port: 12379
-      - use: etcd
-        unsafe-no-fsync: true
-        port: 22388
-        peer-port: 22389
-        exporter-port: 22379
-      - use: meta-node
-        port: 5690
-        dashboard-port: 5691
-        exporter-port: 1250
-        meta-backend: etcd
-      - use: meta-node
-        port: 15690
-        dashboard-port: 15691
-        exporter-port: 11250
-        meta-backend: etcd
-      - use: meta-node
-        port: 25690
-        dashboard-port: 25691
-        exporter-port: 21250
-        meta-backend: etcd
-      - use: compactor
-      - use: compute-node
-      - use: frontend
 
   meta-1cn-1fe-sqlite:
     steps:
@@ -492,9 +408,9 @@ profile:
       # NOTE(kwannoel): We do not use aws-s3 here, to avoid
       # contention over s3 bucket when multiple benchmarks at run at once.
       - use: minio
-      - use: etcd
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         parallelism: 8
       - use: frontend
@@ -563,11 +479,6 @@ profile:
         address: ${id}
         id: tempo-0
 
-      - use: etcd
-        listen-address: "0.0.0.0"
-        address: ${id}
-        id: etcd-0
-
   # special config for deployment, see related PR for more information
   compose-3node-deploy:
     steps:
@@ -579,13 +490,6 @@ profile:
 
       - use: aws-s3
         bucket: ${terraform:s3-bucket}
-
-      # Not enabled by default as all previous benchmarks are not done with etcd.
-      # Also we currently only support node-level docker volume tear down.
-      # - use: etcd
-      #   listen-address: "0.0.0.0"
-      #   address: ${dns-host:rw-meta-0}
-      #   id: etcd-0
 
       - use: meta-node
         # Id must starts with `meta-node`, therefore to be picked up by other
@@ -650,10 +554,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -663,10 +566,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -682,14 +584,13 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-backfill-backfill-3cn-1fe:
+  ci-backfill-3cn-1fe:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -709,10 +610,9 @@ profile:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -736,10 +636,9 @@ profile:
       - use: minio
         api-requests-max: 30
         api-requests-deadline: 3s
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -761,10 +660,9 @@ profile:
       - use: minio
         api-requests-max: 30
         api-requests-deadline: 2s
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -786,10 +684,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -846,10 +743,9 @@ profile:
   ci-3cn-3fe-opendal-fs-backend:
     config-path: src/config/ci.toml
     steps:
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: opendal
         engine: fs
         bucket: "/tmp/rw_ci"
@@ -880,10 +776,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -932,10 +827,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -953,10 +847,9 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -982,10 +875,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -996,10 +888,9 @@ profile:
     config-path: src/config/ci-compaction-test.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         enable-tiered-cache: true
         total-memory-bytes: 17179869184
@@ -1010,9 +901,9 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: etcd
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -1022,10 +913,9 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -1045,9 +935,9 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: etcd
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -1056,23 +946,6 @@ profile:
         user-managed: true
         address: message_queue
         port: 29092
-
-  ci-meta-backup-test-etcd:
-    config-path: src/config/ci-meta-backup-test.toml
-    steps:
-      - use: etcd
-      - use: minio
-      - use: meta-node
-        meta-backend: etcd
-      - use: compute-node
-      - use: frontend
-      - use: compactor
-
-  ci-meta-backup-test-restore-etcd:
-    config-path: src/config/ci-meta-backup-test.toml
-    steps:
-      - use: etcd
-      - use: minio
 
   ci-meta-backup-test-sql:
     config-path: src/config/ci-meta-backup-test.toml
@@ -1090,11 +963,6 @@ profile:
     steps:
       - use: sqlite
       - use: minio
-
-  ci-meta-etcd-for-migration:
-    config-path: src/config/ci.toml
-    steps:
-      - use: etcd
 
   ci-iceberg-test:
     config-path: src/config/ci-iceberg-test.toml
@@ -1129,9 +997,9 @@ profile:
     config-path: "src/config/ci-backfill.toml"
     steps:
       - use: minio
-      - use: etcd
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1141,9 +1009,9 @@ profile:
     steps:
       - use: aws-s3
         bucket: renjie-iceberg-bench
-      - use: etcd
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1154,9 +1022,9 @@ profile:
     config-path: src/config/full-with-batch-query-limit.toml
     steps:
       - use: minio
-      - use: etcd
+      - use: sqlite
       - use: meta-node
-        meta-backend: etcd
+        meta-backend: sqlite
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1169,7 +1037,6 @@ compose:
   minio: "quay.io/minio/minio:latest"
   redpanda: "redpandadata/redpanda:latest"
   grafana: "grafana/grafana-oss:latest"
-  etcd: "quay.io/coreos/etcd:latest"
   tempo: "grafana/tempo:latest"
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
@@ -1213,31 +1080,6 @@ template:
     # Deadline for api requests.
     # Empty string means this env var will use the default of minio.
     api-requests-deadline: ""
-
-  etcd:
-    # Id of this instance
-    id: etcd-${port}
-
-    # Advertise address of the single-node etcd.
-    address: "127.0.0.1"
-
-    # Listen port of the single-node etcd.
-    port: 2388
-
-    # Listen address
-    listen-address: ${address}
-
-    # Peer listen port of the single-node etcd.
-    peer-port: 2389
-
-    # Prometheus exporter listen port
-    exporter-port: 2379
-
-    # Whether to enable fsync (NEVER SET TO TRUE IN PRODUCTION ENVIRONMENT!)
-    unsafe-no-fsync: false
-
-    # Other etcd nodes
-    provide-etcd: "etcd*"
 
   sqlite:
     # Id of this instance
@@ -1320,9 +1162,6 @@ template:
     # meta backend type, requires extra config for provided backend
     meta-backend: "memory"
 
-    # Etcd backend config
-    provide-etcd-backend: "etcd*"
-
     # Sqlite backend config
     provide-sqlite-backend: "sqlite*"
 
@@ -1389,9 +1228,6 @@ template:
 
     # Compactors used by this Prometheus instance
     provide-compactor: "compactor*"
-
-    # Etcd used by this Prometheus instance
-    provide-etcd: "etcd*"
 
     # Redpanda used by this Prometheus instance
     provide-redpanda: "redpanda*"

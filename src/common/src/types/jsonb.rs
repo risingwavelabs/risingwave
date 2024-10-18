@@ -311,6 +311,13 @@ impl<'a> JsonbRef<'a> {
             .ok_or_else(|| format!("cannot cast jsonb {} to type string", self.type_name()))
     }
 
+    /// If the JSON is a string, returns the associated &str.
+    pub fn as_str(&self) -> Result<&str, String> {
+        self.0
+            .as_str()
+            .ok_or_else(|| format!("cannot cast jsonb {} to type &str", self.type_name()))
+    }
+
     /// Attempt to read jsonb as a JSON number.
     ///
     /// According to RFC 8259, only number within IEEE 754 binary64 (double precision) has good

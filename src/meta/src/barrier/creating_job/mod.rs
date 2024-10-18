@@ -24,6 +24,7 @@ use std::time::Duration;
 use prometheus::HistogramTimer;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -42,7 +43,6 @@ use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo};
-use crate::manager::WorkerId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
