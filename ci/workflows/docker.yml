@@ -38,6 +38,7 @@ steps:
     depends_on:
       - "build-amd64"
       - "build-aarch64"
+    key: "multi-arch-image-create-push"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -81,3 +82,22 @@ steps:
     agents:
       queue: "linux-arm64"
     retry: *auto-retry
+
+  - label: "docker scout"
+    key: docker-scout
+    command: "ci/scripts/docker-scout.sh"
+    depends_on:
+      - "multi-arch-image-create-push"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+    artifacts:
+      - "/scout/**/*"
+    retry: *auto-retry
+    notify:
+      - slack:
+        channels:
+          - "#notification-buildkite"
+        message: "Docker Scout Report\n${SCOUT_REPORT}"
