@@ -332,10 +332,11 @@ async fn check_gc_history(
     });
     let res: Vec<_> = stream::iter(futures).buffer_unordered(10).collect().await;
     let res: Result<Vec<_>> = res.into_iter().collect();
-    let expired_object_ids: Vec<_> = res?.into_iter().flatten().collect();
-    if expired_object_ids.is_empty() {
+    let mut expired_object_ids = res?.into_iter().flatten().peekable();
+    if expired_object_ids.peek().is_none() {
         return Ok(());
     }
+    let expired_object_ids: Vec<_> = expired_object_ids.collect();
     tracing::error!(
         ?expired_object_ids,
         "new SSTs are rejected because they have already been GCed"

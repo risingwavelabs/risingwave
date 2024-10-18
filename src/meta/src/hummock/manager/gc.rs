@@ -362,9 +362,8 @@ impl HummockManager {
             mark_delete_at: Set(dt.naive_utc()),
         });
         let db = &self.meta_store_ref().conn;
-        let gc_history_retention_sec = self.env.opts.min_sst_retention_time_sec * 2;
         let gc_history_low_watermark = DateTime::from_timestamp(
-            now.saturating_sub(gc_history_retention_sec)
+            now.saturating_sub(self.env.opts.gc_history_retention_time_sec)
                 .try_into()
                 .unwrap(),
             0,
