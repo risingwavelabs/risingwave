@@ -71,6 +71,11 @@ t
 t
 t
 
+sleep 1s
+
+statement ok
+flush;
+
 query B
 select _rw_kafka_timestamp < now() from s1
 ----
