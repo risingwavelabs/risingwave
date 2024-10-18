@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 
@@ -25,12 +25,12 @@ impl ExpandToProjectRule {
     }
 }
 impl Rule for ExpandToProjectRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let expand: &LogicalExpand = plan.as_logical_expand()?;
         let (input, column_subsets) = expand.clone().decompose();
         assert!(!column_subsets.is_empty());
         if column_subsets.len() > 1 {
-            return None;
+            return OResult::NotApplicable;
         }
         assert!(column_subsets.len() == 1);
         let column_subset = column_subsets.first().unwrap();
@@ -55,6 +55,6 @@ impl Rule for ExpandToProjectRule {
         // Add flag
         exprs.push(ExprImpl::literal_bigint(0));
 
-        Some(LogicalProject::create(input, exprs))
+        OResult::Ok(LogicalProject::create(input, exprs))
     }
 }

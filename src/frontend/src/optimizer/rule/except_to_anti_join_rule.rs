@@ -14,7 +14,7 @@
 
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalExcept, LogicalJoin, PlanTreeNode};
 use crate::optimizer::rule::IntersectToSemiJoinRule;
@@ -22,11 +22,11 @@ use crate::optimizer::PlanRef;
 
 pub struct ExceptToAntiJoinRule {}
 impl Rule for ExceptToAntiJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let logical_except: &LogicalExcept = plan.as_logical_except()?;
         let all = logical_except.all();
         if all {
-            return None;
+            return OResult::NotApplicable;
         }
 
         let inputs = logical_except.inputs();
@@ -42,7 +42,7 @@ impl Rule for ExceptToAntiJoinRule {
             })
             .unwrap();
 
-        Some(Agg::new(vec![], (0..join.schema().len()).collect(), join).into())
+        OResult::Ok(Agg::new(vec![], (0..join.schema().len()).collect(), join).into())
     }
 }
 

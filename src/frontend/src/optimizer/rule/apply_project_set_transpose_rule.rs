@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ApplyOffsetRewriter, BoxedRule, Rule};
+use super::{ApplyOffsetRewriter, BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalApply, LogicalProject, LogicalProjectSet};
@@ -46,7 +46,7 @@ use crate::optimizer::PlanRef;
 /// ```
 pub struct ApplyProjectSetTransposeRule {}
 impl Rule for ApplyProjectSetTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
@@ -84,7 +84,7 @@ impl Rule for ApplyProjectSetTransposeRule {
         if rewriter.refer_table_function {
             // The join on condition refers to the table function column of the `project_set` which
             // cannot be unnested.
-            return None;
+            return OResult::NotApplicable;
         }
 
         let new_apply = LogicalApply::create(
@@ -106,7 +106,7 @@ impl Rule for ApplyProjectSetTransposeRule {
             .chain((left_schema_len + 1)..new_project_set.schema().len());
         let reorder_project = LogicalProject::with_out_col_idx(new_project_set, out_col_idxs);
 
-        Some(reorder_project.into())
+        OResult::Ok(reorder_project.into())
     }
 }
 

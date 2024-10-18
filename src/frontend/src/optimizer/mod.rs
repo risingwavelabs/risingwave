@@ -1,3 +1,5 @@
+use core::convert::Infallible;
+use core::ops::FromResidual;
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -73,7 +75,7 @@ use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecke
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::TimestamptzExprFinder;
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
@@ -334,7 +336,7 @@ impl PlanRoot {
             "Merge BatchProject",
             vec![BatchProjectMergeRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
@@ -400,7 +402,7 @@ impl PlanRoot {
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
@@ -443,7 +445,7 @@ impl PlanRoot {
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
@@ -483,7 +485,7 @@ impl PlanRoot {
             "Merge StreamProject",
             vec![StreamProjectMergeRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         if ctx.session_ctx().config().streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
@@ -492,7 +494,7 @@ impl PlanRoot {
                 "To IndexDeltaJoin",
                 vec![IndexDeltaJoinRule::create()],
                 ApplyOrder::BottomUp,
-            ));
+            ))?;
         }
 
         // Inline session timezone
@@ -1116,6 +1118,38 @@ fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
     exist_and_no_exchange_before(&plan, is_user_table)
         || exist_and_no_exchange_before(&plan, is_source)
         || exist_and_no_exchange_before(&plan, is_insert)
+}
+
+/// Result when applying an optimization rule.
+pub enum OResult<T> {
+    /// Successfully optimized the input.
+    Ok(T),
+    /// The current rule is not applicable to the input.
+    /// The caller may try other rules.
+    NotApplicable,
+    /// There was an unrecoverable error while applying the rule.
+    /// The caller should stop trying other rules and report the error.
+    Err(RwError),
+}
+
+/// `Option<T>` -> `OResult<T>`, `None` -> `NotApplicable`
+impl<T> FromResidual<Option<Infallible>> for OResult<T> {
+    fn from_residual(residual: Option<Infallible>) -> Self {
+        match residual {
+            Some(_) => unreachable!(),
+            None => Self::NotApplicable,
+        }
+    }
+}
+
+/// `Result<T>` -> `OResult<T>`
+impl<T> FromResidual<Result<Infallible>> for OResult<T> {
+    fn from_residual(residual: Result<Infallible>) -> Self {
+        match residual {
+            Ok(_) => unreachable!(),
+            Err(e) => Self::Err(e),
+        }
+    }
 }
 
 #[cfg(test)]

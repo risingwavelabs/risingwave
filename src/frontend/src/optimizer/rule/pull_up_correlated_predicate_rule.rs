@@ -16,7 +16,7 @@ use itertools::{Either, Itertools};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
@@ -28,13 +28,13 @@ use crate::utils::Condition;
 /// convert it into corresponding type of Join.
 pub struct PullUpCorrelatedPredicateRule {}
 impl Rule for PullUpCorrelatedPredicateRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (apply_left, apply_right, apply_on, join_type, correlated_id, _, max_one_row) =
             apply.clone().decompose();
 
         if max_one_row {
-            return None;
+            return OResult::NotApplicable;
         }
 
         let project = if let Some(project) = apply_right.as_logical_project() {
@@ -92,14 +92,14 @@ impl Rule for PullUpCorrelatedPredicateRule {
         let mut plan_correlated_id_finder = PlanCorrelatedIdFinder::default();
         plan_correlated_id_finder.visit(project.clone());
         if plan_correlated_id_finder.contains(&correlated_id) {
-            return None;
+            return OResult::NotApplicable;
         }
 
         // Merge these expressions with LogicalApply into LogicalJoin.
         let on = apply_on.and(Condition {
             conjunctions: cor_exprs,
         });
-        Some(
+        OResult::Ok(
             LogicalJoin::with_output_indices(
                 apply_left,
                 project,

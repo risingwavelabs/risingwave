@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::optimizer::plan_node::{LogicalExcept, PlanTreeNode};
 use crate::optimizer::PlanRef;
 
@@ -20,7 +20,7 @@ use crate::optimizer::PlanRef;
 /// left most one input.
 pub struct ExceptMergeRule {}
 impl Rule for ExceptMergeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let top_except: &LogicalExcept = plan.as_logical_except()?;
         let top_all = top_except.all();
         let top_except_inputs = top_except.inputs();
@@ -32,9 +32,9 @@ impl Rule for ExceptMergeRule {
             let mut new_inputs = vec![];
             new_inputs.extend(bottom_except.inputs());
             new_inputs.extend(remain_vec.iter().cloned());
-            Some(top_except.clone_with_inputs(&new_inputs))
+            OResult::Ok(top_except.clone_with_inputs(&new_inputs))
         } else {
-            None
+            OResult::NotApplicable
         }
     }
 }

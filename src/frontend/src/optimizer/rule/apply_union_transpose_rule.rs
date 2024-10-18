@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::optimizer::plan_node::{LogicalApply, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary};
 use crate::optimizer::PlanRef;
 
@@ -42,10 +42,10 @@ use crate::optimizer::PlanRef;
 
 pub struct ApplyUnionTransposeRule {}
 impl Rule for ApplyUnionTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         if apply.max_one_row() {
-            return None;
+            return OResult::NotApplicable;
         }
         let left = apply.left();
         let right = apply.right();
@@ -56,7 +56,7 @@ impl Rule for ApplyUnionTransposeRule {
             .into_iter()
             .map(|input| apply.clone_with_left_right(left.clone(), input).into())
             .collect_vec();
-        Some(union.clone_with_inputs(&new_inputs))
+        OResult::Ok(union.clone_with_inputs(&new_inputs))
     }
 }
 
