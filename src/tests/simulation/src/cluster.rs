@@ -37,10 +37,10 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
+use tempfile::NamedTempFile;
 #[cfg(not(madsim))]
 use tokio::runtime::Handle;
 use uuid::Uuid;
-use tempfile::NamedTempFile;
 
 use crate::client::RisingWave;
 
@@ -326,9 +326,6 @@ pub struct Cluster {
     pub(crate) ctl: NodeHandle,
     #[cfg(madsim)]
     pub(crate) sqlite_file_handle: NamedTempFile,
-}
-
-thread_local! {
 }
 
 impl Cluster {
