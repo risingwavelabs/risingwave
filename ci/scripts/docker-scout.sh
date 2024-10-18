@@ -14,9 +14,8 @@ echo "pulling ${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
 docker pull "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
 
 echo "--- check vulnerabilities ---"
-mkdir -p /scout
-docker scout quickview "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee /scout/scout-quickview.txt
-docker scout cves "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee /scout/scout-cves.txt
-docker scout recommendations "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee /scout/scout-recommendations.txt
+docker scout quickview "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee scout-quickview.txt
+docker scout cves "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee scout-cves.txt
+docker scout recommendations "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee scout-recommendations.txt
 
-export SCOUT_REPORT=$(echo -e "Scout Quickview\n\n" && cat /scout/scout-quickview.txt && echo -e "\n\nScout CVEs\n\n" && cat /scout/scout-cves.txt && echo -e "\n\nScout Recommendations\n\n" && cat /scout/scout-recommendations.txt)
+export SCOUT_REPORT=$(echo -e "Scout Quickview\n\n" && cat scout-quickview.txt && echo -e "\n\nScout CVEs\n\n" && cat scout-cves.txt && echo -e "\n\nScout Recommendations\n\n" && cat scout-recommendations.txt)

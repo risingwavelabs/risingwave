@@ -94,8 +94,6 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
-    artifacts:
-      - "/scout/**/*"
     retry: *auto-retry
     notify:
       - slack:
