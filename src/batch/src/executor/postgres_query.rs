@@ -37,6 +37,7 @@ pub struct PostgresQueryExecutor {
     database: String,
     query: String,
     identity: String,
+    chunk_size: usize,
 }
 
 impl Executor for PostgresQueryExecutor {
@@ -115,6 +116,7 @@ impl PostgresQueryExecutor {
         database: String,
         query: String,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         Self {
             schema,
@@ -125,6 +127,7 @@ impl PostgresQueryExecutor {
             database,
             query,
             identity,
+            chunk_size,
         }
     }
 
@@ -146,24 +149,56 @@ impl PostgresQueryExecutor {
             }
         });
 
-        // TODO(kwannoel): Use pagination using CURSOR.
-        let rows = client
-            .query(&self.query, &[])
+        let cursor_name = format!("cursor_{}", self.identity);
+        let query = self.query.clone();
+
+        #[for_await]
+        for chunk in
+            Self::create_pg_row_stream(&client, cursor_name, query, self.chunk_size, self.schema())
+        {
+            yield chunk?;
+        }
+
+        return Ok(());
+    }
+
+    #[try_stream(ok = DataChunk, error = BatchError)]
+    async fn create_pg_row_stream<'a>(
+        client: &'a tokio_postgres::Client,
+        cursor_name: String,
+        query: String,
+        chunk_size: usize,
+        schema: &'a Schema,
+    ) {
+        let cursor_query = format!("DECLARE {} CURSOR FOR {}", cursor_name, query);
+        client
+            .execute(cursor_query.as_str(), &[])
             .await
-            .context("postgres_query received error from remote server")?;
-        let mut builder = DataChunkBuilder::new(self.schema.data_types(), 1024);
+            .context("postgres_query_executor: cursor declaration failed")?;
+        let fetch_query = format!("FETCH FORWARD {chunk_size} FROM {cursor_name}");
+        let mut builder = DataChunkBuilder::new(schema.data_types(), chunk_size);
         tracing::debug!("postgres_query_executor: query executed, start deserializing rows");
-        // deserialize the rows
-        for row in rows {
-            let owned_row = postgres_row_to_owned_row(row, &self.schema)?;
-            if let Some(chunk) = builder.append_one_row(owned_row) {
-                yield chunk;
+        loop {
+            let rows = client
+                .query(fetch_query.as_str(), &[])
+                .await
+                .context("postgres_query_executor: cursor fetch failed")?;
+            if rows.is_empty() {
+                let close_query = format!("CLOSE {}", cursor_name);
+                tracing::info!("postgres_query_executor: cursor fetch completed");
+                client.query(close_query.as_str(), &[]).await?;
+                if let Some(chunk) = builder.consume_all() {
+                    yield chunk;
+                }
+                break;
+            }
+            for row in rows {
+                let owned_row = postgres_row_to_owned_row(row, schema)?;
+                if let Some(chunk) = builder.append_one_row(owned_row) {
+                    yield chunk;
+                }
             }
         }
-        if let Some(chunk) = builder.consume_all() {
-            yield chunk;
-        }
-        return Ok(());
     }
 }
 
@@ -189,6 +224,7 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
             postgres_query_node.database.clone(),
             postgres_query_node.query.clone(),
             source.plan_node().get_identity().clone(),
+            source.context.get_config().developer.chunk_size,
         )))
     }
 }
