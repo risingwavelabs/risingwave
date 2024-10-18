@@ -289,9 +289,12 @@ impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.cte_inner {
             CteInner::Query(query) => write!(f, "{} AS ({})", self.alias, query)?,
-            CteInner::ChangeLog(ident) => {
-                write!(f, "{} AS changelog from {}", self.alias, ident.value)?
-            }
+            CteInner::ChangeLog(obj_name) => write!(
+                f,
+                "{} AS changelog from {}",
+                self.alias,
+                obj_name.real_value()
+            )?,
         }
         Ok(())
     }
@@ -301,7 +304,7 @@ impl fmt::Display for Cte {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CteInner {
     Query(Query),
-    ChangeLog(Ident),
+    ChangeLog(ObjectName),
 }
 
 /// One item of the comma-separated list following `SELECT`
