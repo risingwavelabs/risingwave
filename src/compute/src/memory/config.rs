@@ -138,7 +138,7 @@ pub fn storage_memory_config(
                     << 20;
             if config_storage_memory_bytes as f64 > storage_memory_bytes {
                 tracing::warn!(
-                    "config block_cache_capacity_mb {} + meta_cache_capacity_mb {} + shared_buffer_capacity_mb {} = {} exceeds allowed storage_memory_bytes {}.",
+                    "config block_cache_capacity_mb {} + meta_cache_capacity_mb {} + shared_buffer_capacity_mb {} = {} exceeds allowed storage_memory_bytes {}. These configs will be ignored.",
                     block_cache_capacity_mb, meta_cache_capacity_mb, shared_buffer_capacity_mb, convert(config_storage_memory_bytes as _), convert(storage_memory_bytes as _)
                 );
                 (None, None, None)
@@ -150,7 +150,13 @@ pub fn storage_memory_config(
                 )
             }
         }
-        _ => (None, None, None),
+        c => {
+            tracing::warn!(
+                "config (block_cache_capacity_mb, meta_cache_capacity_mb, shared_buffer_capacity_mb): {} should be set altogether. These configs will be ignored.",
+                c
+            );
+            (None, None, None)
+        }
     };
 
     let mut default_block_cache_capacity_mb =
