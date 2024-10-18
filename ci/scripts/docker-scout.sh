@@ -18,10 +18,12 @@ docker pull "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
 
 echo "--- check vulnerabilities ---"
 function docker-scout {
-    docker run -it -e DOCKER_SCOUT_HUB_USER=risingwavelabs -e DOCKER_SCOUT_HUB_PASSWORD=$DOCKER_TOKEN docker/scout-cli
+    docker run -it -e DOCKER_SCOUT_HUB_USER=risingwavelabs -e DOCKER_SCOUT_HUB_PASSWORD=$DOCKER_TOKEN -u root -v /var/run/docker.sock:/var/run/docker.sock docker/scout-cli
 }
-docker-scout quickview "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee scout-quickview.txt
-docker-scout cves "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee scout-cves.txt
-docker-scout recommendations "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee scout-recommendations.txt
+docker-scout quickview "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
+docker-scout recommendations "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
+docker-scout cves --format sarif -o scout.sarif --only-severity critical "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
 
-export SCOUT_REPORT=$(echo -e "Scout Quickview\n\n" && cat scout-quickview.txt && echo -e "\n\nScout CVEs\n\n" && cat scout-cves.txt && echo -e "\n\nScout Recommendations\n\n" && cat scout-recommendations.txt)
+export SCOUT_REPORT=$(cat scout.sarif)
+echo "--- scout report ---"
+cat scout.sarif
