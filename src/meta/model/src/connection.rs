@@ -26,6 +26,8 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub connection_id: ConnectionId,
     pub name: String,
+
+    // todo: Private link service has been deprecated, consider using a new field for the connection info
     pub info: PrivateLinkService,
 }
 
