@@ -1,7 +1,7 @@
 control substitution on
 
 statement ok
-SET enable_shared_source TO true;
+SET streaming_use_shared_source TO true;
 
 system ok
 rpk topic create shared_source -p 4
@@ -86,7 +86,7 @@ internal_table.mjs --name mv_1 --type sourcebackfill
 
 # This does not affect the behavior for CREATE MATERIALIZED VIEW below. It also uses the shared source, and creates SourceBackfillExecutor.
 statement ok
-SET enable_shared_source TO false;
+SET streaming_use_shared_source TO false;
 
 statement ok
 create materialized view mv_2 as select * from s0;

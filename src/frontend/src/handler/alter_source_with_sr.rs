@@ -348,7 +348,14 @@ pub mod tests {
         let session = frontend.session_ref();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
-        frontend.run_sql(sql).await.unwrap();
+        frontend
+            .run_sql_with_session(session.clone(), "SET streaming_use_shared_source TO false;")
+            .await
+            .unwrap();
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
 
         let get_source = || {
             let catalog_reader = session.env().catalog_reader().read_guard();
