@@ -18,7 +18,7 @@ docker pull "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
 
 echo "--- check vulnerabilities ---"
 function docker-scout {
-    docker-scout="docker run -it -e DOCKER_SCOUT_HUB_USER=risingwavelabs -e DOCKER_SCOUT_HUB_PASSWORD=$DOCKER_TOKEN docker/scout-cli"
+    docker run -it -e DOCKER_SCOUT_HUB_USER=risingwavelabs -e DOCKER_SCOUT_HUB_PASSWORD=$DOCKER_TOKEN docker/scout-cli
 }
 docker-scout quickview "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee scout-quickview.txt
 docker-scout cves "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" | tee scout-cves.txt
