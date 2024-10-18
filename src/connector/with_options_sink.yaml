@@ -977,21 +977,31 @@ S3Config:
   - name: s3.region_name
     field_type: String
     required: true
+    alias:
+    - snowflake.aws_region
   - name: s3.bucket_name
     field_type: String
     required: true
+    alias:
+    - snowflake.s3_bucket
   - name: s3.path
     field_type: String
     comments: The directory where the sink file is located.
     required: true
+    alias:
+    - snowflake.s3_path
   - name: s3.credentials.access
     field_type: String
     required: false
     default: Default::default
+    alias:
+    - snowflake.aws_access_key_id
   - name: s3.credentials.secret
     field_type: String
     required: false
     default: Default::default
+    alias:
+    - snowflake.aws_secret_access_key
   - name: s3.endpoint_url
     field_type: String
     required: false
@@ -1014,42 +1024,6 @@ S3Config:
   - name: r#type
     field_type: String
     required: true
-SnowflakeConfig:
-  fields:
-  - name: snowflake.s3_bucket
-    field_type: String
-    comments: The s3 bucket where intermediate sink files will be stored
-    required: true
-    alias:
-    - s3.bucket_name
-  - name: snowflake.s3_path
-    field_type: String
-    comments: |-
-      The optional s3 path to be specified
-      the actual file location would be `s3://<s3_bucket>/<s3_path>/<rw_auto_gen_intermediate_file_name>`
-      if this field is specified by user(s)
-      otherwise it would be `s3://<s3_bucket>/<rw_auto_gen_intermediate_file_name>`
-    required: false
-    alias:
-    - s3.path
-  - name: snowflake.aws_access_key_id
-    field_type: String
-    comments: s3 credentials
-    required: true
-    alias:
-    - s3.credentials.access
-  - name: snowflake.aws_secret_access_key
-    field_type: String
-    comments: s3 credentials
-    required: true
-    alias:
-    - s3.credentials.secret
-  - name: snowflake.aws_region
-    field_type: String
-    comments: The s3 region, e.g., us-east-2
-    required: true
-    alias:
-    - s3.region_name
 SqlServerConfig:
   fields:
   - name: sqlserver.host
