@@ -113,8 +113,8 @@ impl IcebergArrowConvert {
 impl ToArrow for IcebergArrowConvert {
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
-        let data_type =
-            arrow_schema::DataType::Decimal128(arrow_schema::DECIMAL128_MAX_PRECISION, 0);
+        // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be less than 38.
+        let data_type = arrow_schema::DataType::Decimal128(28, 10);
         arrow_schema::Field::new(name, data_type, true)
     }
 
