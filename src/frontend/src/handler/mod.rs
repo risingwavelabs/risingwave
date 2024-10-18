@@ -384,7 +384,16 @@ pub async fn handle(
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
-        } => create_database::handle_create_database(handler_args, db_name, if_not_exists).await,
+            user_specified,
+        } => {
+            create_database::handle_create_database(
+                handler_args,
+                db_name,
+                if_not_exists,
+                user_specified,
+            )
+            .await
+        }
         Statement::CreateSchema {
             schema_name,
             if_not_exists,

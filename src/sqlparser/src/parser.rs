@@ -2064,9 +2064,18 @@ impl Parser<'_> {
     pub fn parse_create_database(&mut self) -> PResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let db_name = self.parse_object_name()?;
+        let _ = self.parse_keyword(Keyword::WITH);
+        let user_specified = if self.parse_keyword(Keyword::OWNER) {
+            let _ = self.consume_token(&Token::Eq);
+            Some(self.parse_object_name()?)
+        } else {
+            None
+        };
+
         Ok(Statement::CreateDatabase {
             db_name,
             if_not_exists,
+            user_specified,
         })
     }
 
