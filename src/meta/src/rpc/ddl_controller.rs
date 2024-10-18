@@ -46,8 +46,8 @@ use risingwave_meta_model::{
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    connection, Comment, Connection, CreateType, Database, Function, PbSink, PbSource, PbTable,
-    Schema, Secret, Sink, Source, Subscription, Table, View,
+    Comment, Connection, CreateType, Database, Function, PbSink, PbSource, PbTable, Schema, Secret,
+    Sink, Source, Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -1139,14 +1139,11 @@ impl DdlController {
                     .await;
             }
             ObjectType::Connection => {
-                let (version, conn) = self
+                let (version, _conn) = self
                     .metadata_manager
                     .catalog_controller
                     .drop_connection(object_id)
                     .await?;
-                if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
-                    self.delete_vpc_endpoint(svc).await?;
-                }
                 return Ok(version);
             }
             _ => {
@@ -1257,21 +1254,11 @@ impl DdlController {
             streaming_job_ids,
             state_table_ids,
             source_ids,
-            connections,
             source_fragments,
             removed_actors,
             removed_fragments,
+            ..
         } = release_ctx;
-
-        // delete vpc endpoints.
-        for conn in connections {
-            let _ = self
-                .delete_vpc_endpoint(&conn.to_protobuf())
-                .await
-                .inspect_err(|err| {
-                    tracing::warn!(err = ?err.as_report(), "failed to delete vpc endpoint");
-                });
-        }
 
         // unregister sources.
         self.source_manager
