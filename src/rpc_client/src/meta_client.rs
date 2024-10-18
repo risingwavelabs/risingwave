@@ -547,9 +547,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn alter_source(&self, source: PbSource) -> Result<WaitVersion> {
+    pub async fn alter_source(
+        &self,
+        source: PbSource,
+        plan: Option<PbReplaceStreamingJobPlan>,
+    ) -> Result<WaitVersion> {
         let request = AlterSourceRequest {
             source: Some(source),
+            plan,
         };
         let resp = self.inner.alter_source(request).await?;
         Ok(resp

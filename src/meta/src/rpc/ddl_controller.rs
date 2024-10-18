@@ -53,7 +53,8 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType, WaitVersion,
+    alter_name_request, alter_set_schema_request, DdlProgress, PbReplaceStreamingJobPlan,
+    TableJobType, WaitVersion,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
@@ -149,7 +150,7 @@ pub enum DdlCommand {
     DropStreamingJob(StreamingJobId, DropMode, Option<ReplaceTableInfo>),
     AlterName(alter_name_request::Object, String),
     ReplaceTable(ReplaceTableInfo),
-    AlterSourceColumn(Source),
+    AlterSource(Source, Option<PbReplaceStreamingJobPlan>),
     AlterObjectOwner(Object, UserId),
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
     CreateConnection(Connection),
@@ -341,7 +342,7 @@ impl DdlController {
                 }
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
                 DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
-                DdlCommand::AlterSourceColumn(source) => ctrl.alter_source(source).await,
+                DdlCommand::AlterSource(source, plan) => ctrl.alter_source(source, plan).await,
                 DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
                 DdlCommand::CreateSubscription(subscription) => {
                     ctrl.create_subscription(subscription).await
@@ -458,11 +459,22 @@ impl DdlController {
 
     /// This replaces the source in the catalog.
     /// Note: `StreamSourceInfo` in downstream MVs' `SourceExecutor`s are not updated.
-    async fn alter_source(&self, source: Source) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
+    async fn alter_source(
+        &self,
+        source: Source,
+        plan: Option<PbReplaceStreamingJobPlan>,
+    ) -> MetaResult<NotificationVersion> {
+        let version = self
+            .metadata_manager
             .catalog_controller
             .alter_source(source)
-            .await
+            .await?;
+        if let Some(plan) = plan {
+            // finish_replace_streaming_job
+        } else {
+            // Note: `StreamSourceInfo` in downstream MVs' `SourceExecutor`s are not updated.
+        }
+        Ok(version)
     }
 
     async fn create_function(&self, function: Function) -> MetaResult<NotificationVersion> {
