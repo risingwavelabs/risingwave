@@ -207,7 +207,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> StreamExecutorResult<(Self, AggStateCacheStats)> {
+    ) -> StreamExecutorResult<Self> {
         let encoded_states = intermediate_state_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
@@ -239,12 +239,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         };
 
         if encoded_states.is_some() {
-            let (_, outputs, stats) = this.get_outputs(storages, agg_funcs).await?;
+            let (_, outputs, _stats) = this.get_outputs(storages, agg_funcs).await?;
             this.prev_outputs = Some(outputs);
-            Ok((this, stats))
-        } else {
-            Ok((this, AggStateCacheStats::default()))
         }
+
+        Ok(this)
     }
 
     /// Create a group from encoded states for EOWC. The previous output is set to `None`.
