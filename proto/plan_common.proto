@@ -264,6 +264,8 @@ message AdditionalCollectionName {}
 
 message AdditionalColumnPayload {}
 
+message AdditionalColumnTopic {}
+
 // this type means we read all headers as a whole
 message AdditionalColumnHeaders {}
 
@@ -281,6 +283,7 @@ message AdditionalColumn {
     AdditionalTableName table_name = 10;
     AdditionalCollectionName collection_name = 11;
     AdditionalColumnPayload payload = 12;
+    AdditionalColumnTopic topic = 13;
   }
 }
 
@@ -294,4 +297,5 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_FILENAME = 6;
   ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
   ADDITIONAL_COLUMN_TYPE_PAYLOAD = 8;
+  ADDITIONAL_COLUMN_TYPE_TOPIC = 9;
 }
