@@ -527,7 +527,7 @@ impl HummockVersion {
 
         // apply to `levels`, which is different compaction groups
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
-            let mut is_l0_changed = false;
+            let mut is_applied_l0_compact = false;
             for group_delta in &group_deltas.group_deltas {
                 match group_delta {
                     GroupDeltaCommon::GroupConstruct(group_construct) => {
@@ -621,7 +621,6 @@ impl HummockVersion {
                                         inserted_table_infos.clone(),
                                         None,
                                     );
-                                    is_l0_changed = true;
                                 }
                             }
                         } else {
@@ -632,7 +631,7 @@ impl HummockVersion {
                                     .compaction_group_member_table_ids(*compaction_group_id),
                             );
                             if level_delta.level_idx == 0 {
-                                is_l0_changed = true;
+                                is_applied_l0_compact = true;
                             }
                         }
                     }
@@ -658,7 +657,6 @@ impl HummockVersion {
                                 inserted_table_infos.clone(),
                                 None,
                             );
-                            is_l0_changed = true;
                         }
                     }
                     GroupDeltaCommon::GroupDestroy(_) => {
@@ -666,8 +664,9 @@ impl HummockVersion {
                     }
                 }
             }
-            if is_l0_changed && let Some(levels) = self.levels.get_mut(compaction_group_id) {
-                levels.update_l0();
+            if is_applied_l0_compact && let Some(levels) = self.levels.get_mut(compaction_group_id)
+            {
+                levels.post_apply_l0_compact();
             }
         }
         self.id = version_delta.id;
@@ -1063,7 +1062,7 @@ impl Levels {
         }
     }
 
-    pub(crate) fn update_l0(&mut self) {
+    pub(crate) fn post_apply_l0_compact(&mut self) {
         {
             self.l0
                 .sub_levels
