@@ -86,9 +86,15 @@ message StreamingControlStreamResponse {
   }
 }
 
+message GetMinUncommittedSstIdRequest {}
+message GetMinUncommittedSstIdResponse {
+  uint64 min_uncommitted_sst_id = 1;
+}
+
 service StreamService {
   rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
+  rpc GetMinUncommittedSstId(GetMinUncommittedSstIdRequest) returns (GetMinUncommittedSstIdResponse);
 }
 
 // TODO: Lifecycle management for actors.
