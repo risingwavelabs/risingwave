@@ -170,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
         .type_attribute("common.Buffer", "#[derive(Eq)]")
-        // Eq is required to derive `FromJsonQueryResult` for models in risingwave_meta_model_v2.
+        // Eq is required to derive `FromJsonQueryResult` for models in risingwave_meta_model.
         .type_attribute("hummock.TableStats", "#[derive(Eq)]")
         .type_attribute("hummock.SstableInfo", "#[derive(Eq)]")
         .type_attribute("hummock.KeyRange", "#[derive(Eq)]")
@@ -183,6 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.GroupTableChange", "#[derive(Eq)]")
         .type_attribute("hummock.GroupMerge", "#[derive(Eq)]")
         .type_attribute("hummock.GroupDelta", "#[derive(Eq)]")
+        .type_attribute("hummock.NewL0SubLevel", "#[derive(Eq)]")
         .type_attribute("hummock.LevelHandler.RunningCompactTask", "#[derive(Eq)]")
         .type_attribute("hummock.LevelHandler", "#[derive(Eq)]")
         .type_attribute("hummock.TableOption", "#[derive(Eq)]")

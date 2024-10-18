@@ -517,6 +517,17 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 actor_context.fragment_id.to_string(),
             ]);
 
+            if let Some(meta_client) = sink_writer_param.meta_client.as_ref() {
+                meta_client
+                    .add_sink_fail_evet_log(
+                        sink_writer_param.sink_id.sink_id,
+                        sink_writer_param.sink_name.clone(),
+                        sink_writer_param.connector.clone(),
+                        e.to_report_string(),
+                    )
+                    .await;
+            }
+
             match log_reader.rewind().await {
                 Ok((true, curr_vnode_bitmap)) => {
                     warn!(

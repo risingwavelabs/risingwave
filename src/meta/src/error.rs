@@ -16,7 +16,7 @@ use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 
