@@ -325,6 +325,13 @@ pub struct Cluster {
     pub(crate) ctl: NodeHandle,
 }
 
+thread_local! {
+    static SQLITE_PATH: PathBuf = {
+        let path = format!("./stest-{}.sqlite", Uuid::new_v4());
+        PathBuf::from(path)
+    };
+}
+
 impl Cluster {
     /// Start a RisingWave cluster for testing.
     ///
@@ -397,7 +404,7 @@ impl Cluster {
 
         // FIXME: some tests like integration tests will run concurrently,
         // resulting in connecting to the same sqlite file if they're using the same seed.
-        let file_path = format!("./stest-{}-{}.sqlite", handle.seed(), Uuid::new_v4());
+        let mut file_path = SQLITE_PATH.get();
         if std::fs::exists(&file_path).unwrap() {
             panic!(
                 "sqlite file already exists and used by other cluster: {}",
