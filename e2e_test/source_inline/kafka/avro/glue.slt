@@ -14,6 +14,8 @@ EOF
 statement ok
 ALTER SYSTEM SET license_key TO '';
 
+sleep 1s
+
 statement error
 create source t with (
   connector = 'kafka',
