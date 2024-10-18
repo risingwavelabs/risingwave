@@ -5,7 +5,7 @@ telemetry_enabled = false
 stream_chunk_size = 10
 
 [storage.object_store.retry]
-streaming_upload_attempt_timeout_ms = 30000
+streaming_upload_attempt_timeout_ms = 20000
 
 [system]
 # NOTE(kwannoel): If can't reproduce it, set to a lower number.
