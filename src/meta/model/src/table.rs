@@ -209,7 +209,15 @@ impl From<PbTable> for ActiveModel {
     fn from(pb_table: PbTable) -> Self {
         let table_type = pb_table.table_type();
         let handle_pk_conflict_behavior = pb_table.handle_pk_conflict_behavior();
-        let vnode_count = pb_table.vnode_count();
+
+        // `PbTable` here should be sourced from the wire, not from persistence.
+        // A placeholder `maybe_vnode_count` field should be treated as `NotSet`, instead of calling
+        // the compatibility code.
+        let vnode_count = pb_table
+            .vnode_count_inner()
+            .value_opt()
+            .map(|v| v as _)
+            .map_or(NotSet, Set);
 
         let fragment_id = if pb_table.fragment_id == OBJECT_ID_PLACEHOLDER {
             NotSet
@@ -258,7 +266,7 @@ impl From<PbTable> for ActiveModel {
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
             cdc_table_id: Set(pb_table.cdc_table_id),
-            vnode_count: Set(vnode_count as _),
+            vnode_count,
         }
     }
 }
