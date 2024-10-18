@@ -326,6 +326,10 @@ pub struct Cluster {
     pub(crate) ctl: NodeHandle,
 }
 
+thread_local! {
+    static SQLITE_FILE: NamedTempFile = NamedTempFile::new().unwrap();
+}
+
 impl Cluster {
     /// Start a RisingWave cluster for testing.
     ///
@@ -396,8 +400,10 @@ impl Cluster {
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
-        let file = NamedTempFile::new().unwrap();
-        let file_path = format!("{}", file.path().display());
+        let mut file_path = Default::default();
+        SQLITE_FILE.with(|handle| {
+            file_path = handle.path().display().to_string();
+        });
         tracing::info!(?file_path, "sqlite_file_path");
         let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path);
         let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
