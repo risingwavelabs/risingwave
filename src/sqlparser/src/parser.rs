@@ -363,7 +363,10 @@ impl Parser<'_> {
                 // Since there's no parenthesis, `w` must be a column or a table
                 // So what follows must be dot-delimited identifiers, e.g. `a.b.c.*`
                 let wildcard_expr = self.parse_simple_wildcard_expr(checkpoint)?;
-                return self.word_concat_wildcard_expr(w.to_ident()?, wildcard_expr);
+                let ident = w.to_ident().inspect_err(|_| {
+                    *self = checkpoint;
+                })?;
+                return self.word_concat_wildcard_expr(ident, wildcard_expr);
             }
             Token::Mul => {
                 return Ok(WildcardOrExpr::Wildcard(self.parse_except()?));
@@ -482,7 +485,9 @@ impl Parser<'_> {
             let ckpt = *self;
             let token = self.next_token();
             match token.token {
-                Token::Word(w) => id_parts.push(w.to_ident()?),
+                Token::Word(w) => id_parts.push(w.to_ident().inspect_err(|_| {
+                    *self = ckpt;
+                })?),
                 Token::Mul => {
                     return if id_parts.is_empty() {
                         Ok(WildcardOrExpr::Wildcard(self.parse_except()?))
@@ -640,7 +645,11 @@ impl Parser<'_> {
                         _ => unreachable!(),
                     })
                 }
+                Keyword::WITH => Ok(Expr::Identifier(w.to_ident().inspect_err(|_| {
+                    *self = checkpoint;
+                })?)),
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
+                    *self = checkpoint;
                     parser_err!("syntax error at or near {token}")
                 }
                 // Here `w` is a word, check if it's a part of a multi-part
@@ -657,7 +666,9 @@ impl Parser<'_> {
                             self.parse_function()
                         }
                     }
-                    _ => Ok(Expr::Identifier(w.to_ident()?)),
+                    _ => Ok(Expr::Identifier(w.to_ident().inspect_err(|_| {
+                        *self = checkpoint;
+                    })?)),
                 },
             }, // End of Token::Word
 
@@ -2979,7 +2990,9 @@ impl Parser<'_> {
             let token = self.next_token();
             match token.token {
                 Token::Word(w) => {
-                    let ident = w.to_ident()?;
+                    let ident = w.to_ident().inspect_err(|_| {
+                        *self = checkpoint;
+                    })?;
                     // Backward compatibility for now.
                     if ident.real_value() == "proctime" || ident.real_value() == "now" {
                         self.expect_token(&Token::LParen)?;
@@ -3731,7 +3744,9 @@ impl Parser<'_> {
             // (For example, in `FROM t1 JOIN` the `JOIN` will always be parsed as a keyword,
             // not an alias.)
             Token::Word(w) if after_as || (!reserved_kwds.contains(&w.keyword)) => {
-                Ok(Some(w.to_ident()?))
+                Ok(Some(w.to_ident().inspect_err(|_| {
+                    *self = checkpoint;
+                })?))
             }
             _ => {
                 *self = checkpoint;
@@ -3866,10 +3881,13 @@ impl Parser<'_> {
     pub fn parse_identifiers(&mut self) -> PResult<Vec<Ident>> {
         let mut idents = vec![];
         loop {
+            let checkpoint = *self;
             let token = self.next_token();
             match token.token {
                 Token::Word(w) => {
-                    idents.push(w.to_ident()?);
+                    idents.push(w.to_ident().inspect_err(|_| {
+                        *self = checkpoint;
+                    })?);
                 }
                 Token::EOF => break,
                 _ => {}
@@ -3884,7 +3902,9 @@ impl Parser<'_> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
-            Token::Word(w) => Ok(w.to_ident()?),
+            Token::Word(w) => Ok(w.to_ident().inspect_err(|_| {
+                *self = checkpoint;
+            })?),
             _ => self.expected_at(checkpoint, "identifier"),
         }
     }
@@ -3894,10 +3914,15 @@ impl Parser<'_> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
-            Token::Word(w) => {
+            Token::Word(ref w) => {
                 match keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&w.keyword) {
-                    true => parser_err!("syntax error at or near {w}"),
-                    false => Ok(w.to_ident()?),
+                    true => {
+                        *self = checkpoint;
+                        parser_err!("syntax error at or near {token}")
+                    }
+                    false => Ok(w.to_ident().inspect_err(|_| {
+                        *self = checkpoint;
+                    })?),
                 }
             }
             _ => self.expected_at(checkpoint, "identifier"),
