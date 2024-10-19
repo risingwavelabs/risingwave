@@ -766,7 +766,7 @@ pub const RESERVED_FOR_COLUMN_OR_TABLE_NAME: &[Keyword] = &[
     Keyword::WHEN,
     Keyword::WHERE,
     Keyword::WINDOW,
-    // Keyword::WITH,
+    Keyword::WITH,
 ];
 
 impl fmt::Display for Keyword {
