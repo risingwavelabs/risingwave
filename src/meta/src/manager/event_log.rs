@@ -172,6 +172,7 @@ impl From<&EventLog> for ChannelId {
             Event::CollectBarrierFail(_) => 6,
             Event::WorkerNodePanic(_) => 7,
             Event::AutoSchemaChangeFail(_) => 8,
+            Event::SinkFail(_) => 9,
         }
     }
 }
