@@ -14,6 +14,11 @@ create source s_before_produce (v1 int, v2 varchar) with (
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON;
 
+query T
+select connector, is_shared from rw_sources where name = 's_before_produce';
+----
+KAFKA t
+
 statement ok
 create materialized view mv_before_produce as select * from s_before_produce;
 
