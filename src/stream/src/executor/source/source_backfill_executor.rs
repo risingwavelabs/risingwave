@@ -609,11 +609,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         break 'backfill_loop;
                                     }
                                 } else {
-                                    self.progress.update_for_source_backfill(
-                                        barrier.epoch,
-                                        backfill_stage.total_backfilled_rows(),
-                                    );
-                                    // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
                                 }
                             }
