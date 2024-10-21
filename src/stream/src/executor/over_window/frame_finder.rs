@@ -150,7 +150,7 @@ pub(super) fn find_frame_end_for_rows_frame<'cache>(
 /// Given the first and last key in delta, calculate the order values of the first
 /// and the last frames logically affected by some `RANGE` frames.
 pub(super) fn calc_logical_curr_for_range_frames(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     delta_first_key: &StateKey,
     delta_last_key: &StateKey,
 ) -> Option<(Sentinelled<Datum>, Sentinelled<Datum>)> {
@@ -167,7 +167,7 @@ pub(super) fn calc_logical_curr_for_range_frames(
 /// values of the logical start row of the first frame and the logical end row of the
 /// last frame.
 pub(super) fn calc_logical_boundary_for_range_frames(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     first_curr_key: &StateKey,
     last_curr_key: &StateKey,
 ) -> Option<(Sentinelled<Datum>, Sentinelled<Datum>)> {
@@ -184,7 +184,7 @@ pub(super) fn calc_logical_boundary_for_range_frames(
 /// find the most closed cache key in `part_with_delta`. Ideally this function returns
 /// the smallest key that is larger than or equal to the given logical order (using `lower_bound`).
 pub(super) fn find_left_for_range_frames<'cache>(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     logical_order_value: impl ToDatumRef,
     cache_key_pk_len: usize, // this is dirty but we have no better choice
@@ -201,7 +201,7 @@ pub(super) fn find_left_for_range_frames<'cache>(
 /// find the most closed cache key in `part_with_delta`. Ideally this function returns
 /// the largest key that is smaller than or equal to the given logical order (using `lower_bound`).
 pub(super) fn find_right_for_range_frames<'cache>(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     logical_order_value: impl ToDatumRef,
     cache_key_pk_len: usize, // this is dirty but we have no better choice
@@ -391,7 +391,7 @@ fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
 /// repeating. Check [`calc_logical_curr_for_range_frames`] and [`calc_logical_boundary_for_range_frames`]
 /// if you cannot understand the purpose of this function.
 fn calc_logical_ord_for_range_frames(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     left_key: &StateKey,
     right_key: &StateKey,
     left_offset_fn: impl Fn(&RangeFrameBounds, &Datum) -> Sentinelled<Datum>,
@@ -459,7 +459,7 @@ fn calc_logical_ord_for_range_frames(
 }
 
 fn find_for_range_frames<'cache, const LEFT: bool>(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     logical_order_value: impl ToDatumRef,
     cache_key_pk_len: usize,
