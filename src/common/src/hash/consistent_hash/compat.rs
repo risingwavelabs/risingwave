@@ -30,11 +30,12 @@ pub enum VnodeCount {
 
 impl VnodeCount {
     /// Creates a `VnodeCount` set to the given value.
-    pub fn set(v: impl TryInto<NonZeroUsize>) -> Self {
-        VnodeCount::Set(
-            v.try_into()
-                .unwrap_or_else(|_| panic!("vnode count must be non-zero")),
-        )
+    pub fn set(v: impl TryInto<usize> + Copy + std::fmt::Debug) -> Self {
+        let v = (v.try_into().ok())
+            .filter(|v| (1..=VirtualNode::MAX_COUNT).contains(v))
+            .unwrap_or_else(|| panic!("invalid vnode count {v:?}"));
+
+        VnodeCount::Set(NonZeroUsize::new(v).unwrap())
     }
 
     /// Converts to protobuf representation for `maybe_vnode_count`.
@@ -49,9 +50,9 @@ impl VnodeCount {
     /// Converts from protobuf representation of `maybe_vnode_count`.
     pub fn from_protobuf(v: Option<u32>) -> Self {
         match v {
-            None => VnodeCount::Compat,
             Some(0) => VnodeCount::Placeholder,
             Some(v) => VnodeCount::set(v as usize),
+            None => VnodeCount::Compat,
         }
     }
 
@@ -66,7 +67,8 @@ impl VnodeCount {
 
     /// Returns the value of the vnode count. Panics if it's a placeholder.
     pub fn value(self) -> usize {
-        self.value_opt().expect("vnode count not set")
+        self.value_opt()
+            .expect("vnode count is a placeholder that must be filled by the meta service first")
     }
 }
 

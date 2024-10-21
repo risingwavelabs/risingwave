@@ -723,7 +723,7 @@ mod tests {
             initialized_at_cluster_version: None,
             version_column_index: None,
             cdc_table_id: None,
-            maybe_vnode_count: Some(233),
+            maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
         }
         .into();
 
