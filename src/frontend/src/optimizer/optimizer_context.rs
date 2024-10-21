@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
+use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use crate::binder::ShareId;
 use crate::expr::{CorrelatedId, SessionTimezone};
@@ -174,6 +174,10 @@ impl OptimizerContext {
 
     pub fn explain_type(&self) -> ExplainType {
         self.explain_options.explain_type.clone()
+    }
+
+    pub fn explain_format(&self) -> ExplainFormat {
+        self.explain_options.explain_format.clone()
     }
 
     pub fn is_explain_logical(&self) -> bool {
