@@ -23,12 +23,78 @@
 //! since it's a good enough intermediate representation.
 
 use pretty_xmlish::Pretty;
+use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub struct PrettySerde<'a>(pub Pretty<'a>);
 
 impl<'a> Serialize for PrettySerde<'a> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("")
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match &self.0 {
+            Pretty::Text(text) => serializer.serialize_str(text.as_ref()),
+
+            Pretty::Record(node) => {
+                let mut state = serializer.serialize_struct("XmlNode", 3)?;
+                state.serialize_field("name", node.name.as_ref())?;
+                state.serialize_field(
+                    "fields",
+                    &node
+                        .fields
+                        .iter()
+                        .map(|(k, v)| (k.as_ref(), PrettySerde(v.clone())))
+                        .collect::<Vec<_>>(),
+                )?;
+                state.serialize_field(
+                    "children",
+                    &node
+                        .children
+                        .iter()
+                        .map(|c| PrettySerde(c.clone()))
+                        .collect::<Vec<_>>(),
+                )?;
+                state.end()
+            }
+
+            Pretty::Array(elements) => {
+                let mut seq = serializer.serialize_seq(Some(elements.len()))?;
+                for element in elements {
+                    seq.serialize_element(&PrettySerde((*element).clone()))?;
+                }
+                seq.end()
+            }
+
+            Pretty::Linearized(inner, size) => {
+                let mut state = serializer.serialize_struct("Linearized", 2)?;
+                state.serialize_field("inner", &PrettySerde((**inner).clone()))?;
+                state.serialize_field("size", size)?;
+                state.end()
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Debug;
+    use expect_test::{expect, Expect};
+    use super::*;
+
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
+        expect.assert_eq(&actual);
+    }
+
+    #[test]
+    fn test_pretty_serde() {
+        let pretty = Pretty::childless_record("root", vec![("a", Pretty::Text("1".into()))]);
+        let pretty_serde = PrettySerde(pretty);
+        let serialized = serde_json::to_string(&pretty_serde).unwrap();
+        check(
+            serialized,
+            expect![[r#""{\"name\":\"root\",\"fields\":[[\"a\",\"1\"]],\"children\":[]}""#]],
+        );
     }
 }
