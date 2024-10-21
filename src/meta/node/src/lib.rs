@@ -231,6 +231,7 @@ pub fn start(
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
+        let meta_store_config = config.meta.meta_store_config.clone();
         let backend = match config.meta.backend {
             MetaBackend::Mem => MetaStoreBackend::Mem,
             MetaBackend::Sql => MetaStoreBackend::Sql {
@@ -239,6 +240,7 @@ pub fn start(
                     .expect("sql endpoint is required")
                     .expose_secret()
                     .to_string(),
+                config: meta_store_config,
             },
             MetaBackend::Sqlite => MetaStoreBackend::Sql {
                 endpoint: format!(
@@ -247,6 +249,7 @@ pub fn start(
                         .expect("sql endpoint is required")
                         .expose_secret()
                 ),
+                config: meta_store_config,
             },
             MetaBackend::Postgres => MetaStoreBackend::Sql {
                 endpoint: format!(
@@ -258,6 +261,7 @@ pub fn start(
                         .expose_secret(),
                     opts.sql_database
                 ),
+                config: meta_store_config,
             },
             MetaBackend::Mysql => MetaStoreBackend::Sql {
                 endpoint: format!(
@@ -269,6 +273,7 @@ pub fn start(
                         .expose_secret(),
                     opts.sql_database
                 ),
+                config: meta_store_config,
             },
         };
         validate_config(&config);
