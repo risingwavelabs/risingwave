@@ -19,13 +19,14 @@
 //! The _proper way_ to do this would be to create a new data structure that plan nodes get converted into,
 //! and then implement `Serialize` and `Deserialize` on that data structure (including to `Pretty`).
 //! But that's a lot of refactoring work.
-//! So we just wrap `Pretty` in a newtype and implement `Serialize` and `Deserialize` on that,
+//! So we just wrap `Pretty` in a newtype and implement `Serialize` on that,
 //! since it's a good enough intermediate representation.
 
 use std::collections::BTreeMap;
+
 use pretty_xmlish::Pretty;
 use serde::ser::{SerializeSeq, SerializeStruct};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Serialize, Serializer};
 
 pub struct PrettySerde<'a>(pub Pretty<'a>);
 

@@ -107,6 +107,7 @@ impl OptimizationStage {
 }
 
 use std::sync::LazyLock;
+
 use risingwave_sqlparser::ast::ExplainFormat;
 
 pub struct LogicalOptimizer {}
