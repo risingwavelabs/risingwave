@@ -29,6 +29,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::{bail, must_match};
+use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
@@ -37,9 +38,11 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId, LocalSstableInfo};
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
+use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
@@ -54,7 +57,7 @@ use self::notifier::Notifier;
 use crate::barrier::creating_job::{CompleteJobType, CreatingStreamingJobControl};
 use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
-use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
+use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager, ControlStreamNode};
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierWorkerState;
 use crate::error::MetaErrorInner;
@@ -64,7 +67,8 @@ use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
     MetadataManager,
 };
-use crate::rpc::metrics::MetaMetrics;
+use crate::model::ActorId;
+use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -163,8 +167,6 @@ struct GlobalBarrierWorkerContext {
 
     sink_manager: SinkCoordinatorManager,
 
-    pub(super) metrics: Arc<MetaMetrics>,
-
     env: MetaSrvEnv,
 }
 
@@ -176,7 +178,6 @@ impl GlobalBarrierManager {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
-        meta_metrics: Arc<MetaMetrics>,
         scale_controller: ScaleControllerRef,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
@@ -187,7 +188,6 @@ impl GlobalBarrierManager {
             hummock_manager,
             source_manager,
             sink_manager,
-            meta_metrics,
             scale_controller,
             request_rx,
         )
@@ -203,6 +203,91 @@ impl GlobalBarrierManager {
     }
 }
 
+trait GlobalBarrierManagerContextTrait: Clone + Send + Sync + 'static {
+    fn commit_epoch(
+        &self,
+        commit_info: CommitEpochInfo,
+    ) -> impl Future<Output = MetaResult<HummockVersionStats>> + Send + '_;
+
+    fn post_collect_command<'a>(
+        &'a self,
+        command: &'a CommandContext,
+    ) -> impl Future<Output = MetaResult<()>> + Send + 'a;
+
+    async fn notify_creating_job_failed(&self, err: &MetaError);
+
+    fn finish_creating_job(
+        &self,
+        job: TrackingJob,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
+    async fn new_control_stream_node(
+        &self,
+        node: WorkerNode,
+        mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+    ) -> MetaResult<ControlStreamNode>;
+
+    async fn reload_runtime_info(
+        &self,
+        pre_apply_drop_cancel: impl Fn() -> bool,
+    ) -> MetaResult<(
+        ActiveStreamingWorkerNodes,
+        ControlStreamManager,
+        InflightGraphInfo,
+        InflightSubscriptionInfo,
+        Option<TracedEpoch>,
+        HashMap<WorkerId, Vec<StreamActor>>,
+        HashMap<ActorId, Vec<SplitImpl>>,
+        CreateMviewProgressTracker,
+        HummockVersionStats,
+    )>;
+}
+
+impl GlobalBarrierManagerContextTrait for GlobalBarrierWorkerContext {
+    async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> MetaResult<HummockVersionStats> {
+        self.hummock_manager.commit_epoch(commit_info).await?;
+        Ok(self.hummock_manager.get_version_stats().await)
+    }
+
+    async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
+        command.post_collect(self).await
+    }
+
+    async fn notify_creating_job_failed(&self, err: &MetaError) {
+        self.metadata_manager.notify_finish_failed(err).await
+    }
+
+    async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
+        job.finish(&self.metadata_manager).await
+    }
+
+    async fn new_control_stream_node(
+        &self,
+        node: WorkerNode,
+        mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+    ) -> MetaResult<ControlStreamNode> {
+        self.new_control_stream_node_inner(node, mv_depended_subscriptions)
+            .await
+    }
+
+    async fn reload_runtime_info(
+        &self,
+        pre_apply_drop_cancel: impl Fn() -> bool,
+    ) -> MetaResult<(
+        ActiveStreamingWorkerNodes,
+        ControlStreamManager,
+        InflightGraphInfo,
+        InflightSubscriptionInfo,
+        Option<TracedEpoch>,
+        HashMap<WorkerId, Vec<StreamActor>>,
+        HashMap<ActorId, Vec<SplitImpl>>,
+        CreateMviewProgressTracker,
+        HummockVersionStats,
+    )> {
+        self.reload_runtime_info_impl(pre_apply_drop_cancel).await
+    }
+}
+
 /// [`crate::barrier::GlobalBarrierWorker`] sends barriers to all registered compute nodes and
 /// collect them, with monotonic increasing epoch numbers. On compute nodes, `LocalBarrierManager`
 /// in `risingwave_stream` crate will serve these requests and dispatch them to source actors.
@@ -212,7 +297,7 @@ impl GlobalBarrierManager {
 /// accepting [`Command`] that carries info to build `Mutation`. To keep the consistency between
 /// barrier manager and meta store, some actions like "drop materialized view" or "create mv on mv"
 /// must be done in barrier manager transactional using [`Command`].
-struct GlobalBarrierWorker {
+struct GlobalBarrierWorker<C> {
     /// Enable recovery or not when failover.
     enable_recovery: bool,
 
@@ -222,7 +307,7 @@ struct GlobalBarrierWorker {
     /// The max barrier nums in flight
     in_flight_barrier_nums: usize,
 
-    context: GlobalBarrierWorkerContext,
+    context: C,
 
     status: Arc<ArcSwap<BarrierManagerStatus>>,
 
@@ -257,24 +342,21 @@ struct CheckpointControl {
     hummock_version_stats: HummockVersionStats,
 
     create_mview_tracker: CreateMviewProgressTracker,
-
-    context: GlobalBarrierWorkerContext,
 }
 
 impl CheckpointControl {
-    async fn new(
-        context: GlobalBarrierWorkerContext,
+    fn new(
         create_mview_tracker: CreateMviewProgressTracker,
         state: BarrierWorkerState,
+        hummock_version_stats: HummockVersionStats,
     ) -> Self {
         Self {
             state,
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             creating_streaming_job_controls: Default::default(),
-            hummock_version_stats: context.hummock_manager.get_version_stats().await,
+            hummock_version_stats,
             create_mview_tracker,
-            context,
         }
     }
 
@@ -288,14 +370,13 @@ impl CheckpointControl {
 
     /// Update the metrics of barrier nums.
     fn update_barrier_nums_metrics(&self) {
-        self.context.metrics.in_flight_barrier_nums.set(
+        GLOBAL_META_METRICS.in_flight_barrier_nums.set(
             self.command_ctx_queue
                 .values()
                 .filter(|x| x.state.is_inflight())
                 .count() as i64,
         );
-        self.context
-            .metrics
+        GLOBAL_META_METRICS
             .all_barrier_nums
             .set(self.total_command_num() as i64);
     }
@@ -329,7 +410,7 @@ impl CheckpointControl {
         node_to_collect: HashSet<WorkerId>,
         creating_jobs_to_wait: HashSet<TableId>,
     ) {
-        let timer = self.context.metrics.barrier_latency.start_timer();
+        let timer = GLOBAL_META_METRICS.barrier_latency.start_timer();
 
         if let Some((_, node)) = self.command_ctx_queue.last_key_value() {
             assert_eq!(
@@ -429,7 +510,7 @@ impl CheckpointControl {
     }
 }
 
-impl GlobalBarrierWorker {
+impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
     /// We need to make sure there are no changes when doing recovery
     pub async fn clear_on_err(&mut self, err: &MetaError) {
         // join spawned completing command to finish no matter it succeeds or not.
@@ -473,7 +554,7 @@ impl GlobalBarrierWorker {
                         .map(|(command, _)| command.barrier_info.prev_epoch.value().0),
                     task.creating_job_epochs.clone(),
                 );
-                match self.context.clone().complete_barrier(task).await {
+                match task.complete_barrier(&self.context, self.env.clone()).await {
                     Ok(hummock_version_stats) => {
                         self.checkpoint_control
                             .ack_completed(BarrierCompleteOutput {
@@ -562,7 +643,7 @@ enum CompletingTask {
     Err(MetaError),
 }
 
-impl GlobalBarrierWorker {
+impl GlobalBarrierWorker<GlobalBarrierWorkerContext> {
     /// Create a new [`crate::barrier::GlobalBarrierWorker`].
     pub async fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
@@ -571,7 +652,6 @@ impl GlobalBarrierWorker {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
-        metrics: Arc<MetaMetrics>,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
     ) -> Self {
@@ -597,13 +677,15 @@ impl GlobalBarrierWorker {
             source_manager,
             scale_controller,
             sink_manager,
-            metrics,
             env: env.clone(),
         };
 
-        let control_stream_manager = ControlStreamManager::new(context.clone());
-        let checkpoint_control =
-            CheckpointControl::new(context.clone(), tracker, initial_invalid_state).await;
+        let control_stream_manager = ControlStreamManager::new(env.clone());
+        let checkpoint_control = CheckpointControl::new(
+            tracker,
+            initial_invalid_state,
+            context.hummock_manager.get_version_stats().await,
+        );
 
         Self {
             enable_recovery,
@@ -652,7 +734,7 @@ impl GlobalBarrierWorker {
     }
 
     /// Start an infinite loop to take scheduled barriers and send them.
-    async fn run(mut self, mut shutdown_rx: Receiver<()>) {
+    async fn run(mut self, shutdown_rx: Receiver<()>) {
         // Initialize the barrier manager.
         let interval = Duration::from_millis(
             self.env.system_params_reader().await.barrier_interval_ms() as u64,
@@ -705,6 +787,12 @@ impl GlobalBarrierWorker {
 
         self.set_status(BarrierManagerStatus::Running);
 
+        self.run_inner(shutdown_rx).await
+    }
+}
+
+impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
+    async fn run_inner(mut self, mut shutdown_rx: Receiver<()>) {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
         self.env
@@ -745,11 +833,11 @@ impl GlobalBarrierWorker {
                 }
 
                 changed_worker = self.active_streaming_nodes.changed() => {
-                    #[cfg(debug_assertions)]
-                    {
+                    if cfg!(debug_assertions)
+                        && let Some(context) = (&self.context as &dyn std::any::Any).downcast_ref::<GlobalBarrierWorkerContext>() {
+                        info!("downcast to GlobalBarrierWorkerContext success");
                         use risingwave_pb::common::WorkerNode;
-                        match self
-                            .context
+                        match context
                             .metadata_manager
                             .list_active_streaming_compute_nodes()
                             .await
@@ -797,7 +885,7 @@ impl GlobalBarrierWorker {
                         .on_new_worker_node_map(self.active_streaming_nodes.current());
                     self.checkpoint_control.creating_streaming_job_controls.values().for_each(|job| job.on_new_worker_node_map(self.active_streaming_nodes.current()));
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node, &self.checkpoint_control.state.inflight_subscription_info).await;
+                        self.control_stream_manager.add_worker(node, &self.checkpoint_control.state.inflight_subscription_info, &self.context).await;
                     }
                 }
 
@@ -822,7 +910,9 @@ impl GlobalBarrierWorker {
                     .next_completed_barrier(
                         &mut self.scheduled_barriers,
                         &mut self.checkpoint_control,
-                        &mut self.control_stream_manager
+                        &mut self.control_stream_manager,
+                        &self.context,
+                        &self.env,
                 ) => {
                     match complete_result {
                         Ok(output) => {
@@ -843,7 +933,7 @@ impl GlobalBarrierWorker {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
                                 if let Some(failed_barrier) = failed_barrier {
-                                    self.context.report_collect_failure(failed_barrier, &err);
+                                    self.report_collect_failure(failed_barrier, &err);
                                 }
                                 self.failure_recovery(err).await;
                             } else {
@@ -948,7 +1038,6 @@ impl CheckpointControl {
                     snapshot_backfill_info.clone(),
                     barrier_info.prev_epoch.value().0,
                     &self.hummock_version_stats,
-                    &self.context.metrics,
                     mutation,
                 ),
             );
@@ -1019,7 +1108,7 @@ impl CheckpointControl {
     }
 }
 
-impl GlobalBarrierWorker {
+impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
     /// Set barrier manager status.
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
@@ -1122,44 +1211,57 @@ impl GlobalBarrierWorkerContext {
                 });
         };
     }
+}
 
-    async fn complete_barrier(self, task: CompleteBarrierTask) -> MetaResult<HummockVersionStats> {
-        let result: MetaResult<()> = try {
-            let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
-            self.hummock_manager.commit_epoch(task.commit_info).await?;
-            if let Some((command_ctx, _)) = &task.command_context {
-                command_ctx.post_collect(&self).await?;
+impl CompleteBarrierTask {
+    async fn complete_barrier(
+        self,
+        context: &impl GlobalBarrierManagerContextTrait,
+        env: MetaSrvEnv,
+    ) -> MetaResult<HummockVersionStats> {
+        let result: MetaResult<HummockVersionStats> = try {
+            let wait_commit_timer = GLOBAL_META_METRICS
+                .barrier_wait_commit_latency
+                .start_timer();
+            let version_stats = context.commit_epoch(self.commit_info).await?;
+            if let Some((command_ctx, _)) = &self.command_context {
+                context.post_collect_command(command_ctx).await?;
             }
 
             wait_commit_timer.observe_duration();
+            version_stats
         };
 
-        {
-            if let Err(e) = result {
-                for notifier in task.notifiers {
-                    notifier.notify_collection_failed(e.clone());
+        let version_stats = {
+            let version_stats = match result {
+                Ok(version_stats) => version_stats,
+                Err(e) => {
+                    for notifier in self.notifiers {
+                        notifier.notify_collection_failed(e.clone());
+                    }
+                    return Err(e);
                 }
-                return Err(e);
-            }
-            task.notifiers.into_iter().for_each(|notifier| {
+            };
+            self.notifiers.into_iter().for_each(|notifier| {
                 notifier.notify_collected();
             });
             try_join_all(
-                task.finished_jobs
+                self.finished_jobs
                     .into_iter()
-                    .map(|finished_job| finished_job.finish(&self.metadata_manager)),
+                    .map(|finished_job| context.finish_creating_job(finished_job)),
             )
             .await?;
-            if let Some((command_ctx, enqueue_time)) = task.command_context {
+            if let Some((command_ctx, enqueue_time)) = self.command_context {
                 let duration_sec = enqueue_time.stop_and_record();
-                self.report_complete_event(duration_sec, &command_ctx);
-                self.metrics
+                Self::report_complete_event(env, duration_sec, &command_ctx);
+                GLOBAL_META_METRICS
                     .last_committed_barrier_time
                     .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
             }
-        }
+            version_stats
+        };
 
-        Ok(self.hummock_manager.get_version_stats().await)
+        Ok(version_stats)
     }
 }
 
@@ -1204,8 +1306,8 @@ impl CreateMviewProgressTracker {
     }
 }
 
-impl GlobalBarrierWorkerContext {
-    fn report_complete_event(&self, duration_sec: f64, command_ctx: &CommandContext) {
+impl CompleteBarrierTask {
+    fn report_complete_event(env: MetaSrvEnv, duration_sec: f64, command_ctx: &CommandContext) {
         // Record barrier latency in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventBarrierComplete {
@@ -1215,8 +1317,7 @@ impl GlobalBarrierWorkerContext {
             command: command_ctx.command.to_string(),
             barrier_kind: command_ctx.barrier_info.kind.as_str_name().to_string(),
         };
-        self.env
-            .event_log_manager_ref()
+        env.event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::BarrierComplete(event)]);
     }
 }
@@ -1396,6 +1497,8 @@ impl CompletingTask {
         scheduled_barriers: &mut ScheduledBarriers,
         checkpoint_control: &mut CheckpointControl,
         control_stream_manager: &mut ControlStreamManager,
+        context: &impl GlobalBarrierManagerContextTrait,
+        env: &MetaSrvEnv,
     ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
         // If there is no completing barrier, try to start completing the earliest barrier if
         // it has been collected.
@@ -1409,8 +1512,10 @@ impl CompletingTask {
                         .command_context
                         .as_ref()
                         .map(|(command, _)| command.barrier_info.prev_epoch.value().0);
+                    let context = context.clone();
+                    let env = env.clone();
                     let join_handle =
-                        tokio::spawn(checkpoint_control.context.clone().complete_barrier(task));
+                        tokio::spawn(async move { task.complete_barrier(&context, env).await });
                     *self = CompletingTask::Completing {
                         command_prev_epoch,
                         join_handle,

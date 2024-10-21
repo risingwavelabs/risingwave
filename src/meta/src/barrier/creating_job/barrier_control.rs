@@ -25,7 +25,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
 
-use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::metrics::GLOBAL_META_METRICS;
 
 #[derive(Debug)]
 struct CreatingStreamingJobEpochState {
@@ -57,7 +57,7 @@ pub(super) struct CreatingStreamingJobBarrierControl {
 }
 
 impl CreatingStreamingJobBarrierControl {
-    pub(super) fn new(table_id: TableId, backfill_epoch: u64, metrics: &MetaMetrics) -> Self {
+    pub(super) fn new(table_id: TableId, backfill_epoch: u64) -> Self {
         let table_id_str = format!("{}", table_id.table_id);
         Self {
             table_id,
@@ -68,16 +68,16 @@ impl CreatingStreamingJobBarrierControl {
             pending_barriers_to_complete: Default::default(),
             completing_barrier: None,
 
-            consuming_snapshot_barrier_latency: metrics
+            consuming_snapshot_barrier_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_barrier_latency
                 .with_guarded_label_values(&[&table_id_str, "consuming_snapshot"]),
-            consuming_log_store_barrier_latency: metrics
+            consuming_log_store_barrier_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_barrier_latency
                 .with_guarded_label_values(&[&table_id_str, "consuming_log_store"]),
-            wait_commit_latency: metrics
+            wait_commit_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_wait_commit_latency
                 .with_guarded_label_values(&[&table_id_str]),
-            inflight_barrier_num: metrics
+            inflight_barrier_num: GLOBAL_META_METRICS
                 .snapshot_backfill_inflight_barrier_num
                 .with_guarded_label_values(&[&table_id_str]),
         }
