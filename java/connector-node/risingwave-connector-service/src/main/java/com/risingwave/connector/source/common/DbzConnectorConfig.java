@@ -174,6 +174,13 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(mysqlProps);
 
+            if (isCdcSourceJob) {
+                // remove table filtering for the shared MySQL source, since we
+                // allow user to ingest tables in different database
+                LOG.info("Disable table filtering for the shared MySQL source");
+                dbzProps.remove("table.include.list");
+            }
+
         } else if (source == SourceTypeE.POSTGRES) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
