@@ -38,6 +38,13 @@ impl VnodeCount {
         VnodeCount::Set(NonZeroUsize::new(v).unwrap())
     }
 
+    /// Creates a `VnodeCount` set to the value for testing.
+    ///
+    /// Equivalent to `VnodeCount::set(VirtualNode::COUNT_FOR_TEST)`.
+    pub fn for_test() -> Self {
+        Self::set(VirtualNode::COUNT_FOR_TEST)
+    }
+
     /// Converts to protobuf representation for `maybe_vnode_count`.
     pub fn to_protobuf(self) -> Option<u32> {
         match self {

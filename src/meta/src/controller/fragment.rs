@@ -1627,7 +1627,7 @@ mod tests {
                 .values()
                 .flat_map(|m| m.keys().map(|x| *x as _))
                 .collect(),
-            maybe_vnode_count: VnodeCount::set(VirtualNode::COUNT_FOR_TEST).to_protobuf(),
+            maybe_vnode_count: VnodeCount::for_test().to_protobuf(),
         };
 
         let pb_actor_status = (0..actor_count)
