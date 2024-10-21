@@ -18,7 +18,7 @@ use std::str::from_utf8;
 use risingwave_common::types::ScalarImpl;
 use risingwave_connector::source::DataType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal};
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 use crate::optimizer::PlanRef;
@@ -29,7 +29,7 @@ use crate::optimizer::PlanRef;
 /// col like 'ABC%E' => col >= 'ABC' and col < 'ABD' and col like 'ABC%E'
 pub struct RewriteLikeExprRule {}
 impl Rule for RewriteLikeExprRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         if filter.predicate().conjunctions.iter().any(|expr| {
             let mut has_like = HasLikeExprVisitor { has: false };
@@ -37,9 +37,9 @@ impl Rule for RewriteLikeExprRule {
             has_like.has
         }) {
             let mut rewriter = LikeExprRewriter {};
-            Some(filter.rewrite_exprs(&mut rewriter))
+            OResult::Ok(filter.rewrite_exprs(&mut rewriter))
         } else {
-            None
+            OResult::NotApplicable
         }
     }
 }

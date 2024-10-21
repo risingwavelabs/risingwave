@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
 use risingwave_expr::window_function::WindowFuncKind;
 
-use super::Rule;
+use super::{OResult, Rule};
 use crate::expr::{collect_input_refs, ExprImpl, ExprType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
@@ -51,7 +51,7 @@ impl OverWindowToTopNRule {
 }
 
 impl Rule for OverWindowToTopNRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let ctx = plan.ctx();
         let (project, plan) = {
             if let Some(project) = plan.as_logical_project() {
@@ -67,12 +67,12 @@ impl Rule for OverWindowToTopNRule {
 
         if over_window.window_functions().len() != 1 {
             // Queries with multiple window function calls are not supported yet.
-            return None;
+            return OResult::NotApplicable;
         }
         let window_func = &over_window.window_functions()[0];
         if !window_func.kind.is_rank() {
             // Only rank functions can be converted to TopN.
-            return None;
+            return OResult::NotApplicable;
         }
 
         let output_len = over_window.schema().len();
@@ -84,7 +84,7 @@ impl Rule for OverWindowToTopNRule {
             WindowFuncKind::Rank => true,
             WindowFuncKind::DenseRank => {
                 ctx.warn_to_user("`dense_rank` is not supported in Top-N pattern, will fallback to inefficient implementation");
-                return None;
+                return OResult::NotApplicable;
             }
             _ => unreachable!("window functions other than rank functions should not reach here"),
         };
@@ -101,7 +101,7 @@ impl Rule for OverWindowToTopNRule {
         if offset > 0 && with_ties {
             tracing::warn!("Failed to optimize with ties and offset");
             ctx.warn_to_user("group topN with ties and offset is not supported, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
-            return None;
+            return OResult::NotApplicable;
         }
 
         let topn: PlanRef = LogicalTopN::new(
@@ -133,7 +133,7 @@ impl Rule for OverWindowToTopNRule {
             ctx.warn_to_user("It can be inefficient to output ranking number in Top-N, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
             over_window.clone_with_input(filter).into()
         };
-        Some(plan)
+        OResult::Ok(plan)
     }
 }
 

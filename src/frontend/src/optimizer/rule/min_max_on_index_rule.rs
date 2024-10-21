@@ -25,7 +25,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
@@ -38,15 +38,16 @@ use crate::utils::{Condition, IndexSet};
 pub struct MinMaxOnIndexRule {}
 
 impl Rule for MinMaxOnIndexRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let logical_agg: &LogicalAgg = plan.as_logical_agg()?;
         if !logical_agg.group_key().is_empty() {
-            return None;
+            return OResult::NotApplicable;
         }
         let calls = logical_agg.agg_calls();
         if calls.is_empty() {
-            return None;
+            return OResult::NotApplicable;
         }
+
         let first_call = calls.iter().exactly_one().ok()?;
 
         if matches!(
@@ -59,7 +60,7 @@ impl Rule for MinMaxOnIndexRule {
             let logical_scan: LogicalScan = logical_agg.input().as_logical_scan()?.to_owned();
             let kind = &calls.first()?.agg_type;
             if !logical_scan.predicate().always_true() {
-                return None;
+                return OResult::NotApplicable;
             }
             let order = Order {
                 column_orders: vec![ColumnOrder::new(
@@ -72,12 +73,12 @@ impl Rule for MinMaxOnIndexRule {
                 )],
             };
             if let Some(p) = self.try_on_index(logical_agg, logical_scan.clone(), &order) {
-                Some(p)
+                OResult::Ok(p)
             } else {
-                self.try_on_pk(logical_agg, logical_scan, &order)
+                OResult::Ok(self.try_on_pk(logical_agg, logical_scan, &order)?)
             }
         } else {
-            None
+            OResult::NotApplicable
         }
     }
 }

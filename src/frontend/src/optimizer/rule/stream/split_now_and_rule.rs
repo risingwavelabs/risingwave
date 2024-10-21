@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::super::OResult;
 use crate::optimizer::plan_node::{LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
@@ -41,11 +42,11 @@ use crate::utils::Condition;
 /// ```
 pub struct SplitNowAndRule {}
 impl Rule for SplitNowAndRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         let input = filter.input();
         if filter.predicate().conjunctions.len() == 1 {
-            return None;
+            return OResult::NotApplicable;
         }
 
         if filter
@@ -54,7 +55,7 @@ impl Rule for SplitNowAndRule {
             .iter()
             .all(|e| e.count_nows() == 0)
         {
-            return None;
+            return OResult::NotApplicable;
         }
 
         let [with_now, others] =
@@ -73,7 +74,7 @@ impl Rule for SplitNowAndRule {
             )
             .into();
         }
-        Some(plan)
+        OResult::Ok(plan)
     }
 }
 

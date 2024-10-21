@@ -19,6 +19,7 @@
 
 use itertools::Itertools;
 
+use super::super::OResult;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
@@ -27,12 +28,12 @@ use crate::optimizer::PlanRef;
 pub struct BatchPushLimitToScanRule {}
 
 impl Rule for BatchPushLimitToScanRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let limit: &BatchLimit = plan.as_batch_limit()?;
         let limit_input = limit.input();
         let scan: &BatchSeqScan = limit_input.as_batch_seq_scan()?;
         if scan.limit().is_some() {
-            return None;
+            return OResult::NotApplicable;
         }
         let pushed_limit = limit.limit() + limit.offset();
         let new_scan = BatchSeqScan::new_with_dist(
@@ -41,7 +42,7 @@ impl Rule for BatchPushLimitToScanRule {
             scan.scan_ranges().iter().cloned().collect_vec(),
             Some(pushed_limit),
         );
-        Some(limit.clone_with_input(new_scan.into()).into())
+        OResult::Ok(limit.clone_with_input(new_scan.into()).into())
     }
 }
 
