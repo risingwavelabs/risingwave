@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{
-    Cte, CteInner, Expr, Fetch, ObjectName, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
+    Cte, CteInner, Expr, Fetch, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
 };
 use thiserror_ext::AsReport;
 
@@ -350,11 +350,8 @@ impl Binder {
                     }
                     CteInner::ChangeLog(from_table_name) => {
                         self.push_context();
-                        let from_table_relation = self.bind_relation_by_name(
-                            ObjectName::from(vec![from_table_name]),
-                            None,
-                            None,
-                        )?;
+                        let from_table_relation =
+                            self.bind_relation_by_name(from_table_name.clone(), None, None)?;
                         self.pop_context()?;
                         self.context.cte_to_relation.insert(
                             table_name,
