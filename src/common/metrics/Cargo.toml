@@ -37,8 +37,8 @@ serde = { version = "1", features = ["derive"] }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 tonic = { workspace = true }
-tower-layer = "0.3.2"
-tower-service = "0.3.2"
+tower-layer = "0.3.3"
+tower-service = "0.3.3"
 tracing = "0.1"
 tracing-subscriber = "0.3.17"
 
