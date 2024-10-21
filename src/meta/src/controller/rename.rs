@@ -458,7 +458,7 @@ mod tests {
     fn test_alter_table_rename() {
         let definition = "CREATE TABLE foo (a int, b int)";
         let new_name = "bar";
-        let expected = "CREATE TABLE bar (a INT, b INT)";
+        let expected = "CREATE TABLE \"bar\" (a INT, b INT)";
         let actual = alter_relation_rename(definition, new_name);
         assert_eq!(expected, actual);
     }
@@ -468,7 +468,7 @@ mod tests {
         let definition = "CREATE INDEX idx1 ON foo(v1 DESC, v2)";
         let from = "foo";
         let to = "bar";
-        let expected = "CREATE INDEX idx1 ON bar(v1 DESC, v2)";
+        let expected = "CREATE INDEX idx1 ON \"bar\"(v1 DESC, v2)";
         let actual = alter_relation_rename_refs(definition, from, to);
         assert_eq!(expected, actual);
     }
@@ -480,7 +480,7 @@ mod tests {
         let from = "foo";
         let to = "bar";
         let expected =
-            "CREATE SINK sink_t FROM bar WITH (connector = 'kafka', format = 'append_only')";
+            "CREATE SINK sink_t FROM \"bar\" WITH (connector = 'kafka', format = 'append_only')";
         let actual = alter_relation_rename_refs(definition, from, to);
         assert_eq!(expected, actual);
     }
@@ -492,17 +492,17 @@ mod tests {
         let from = "foo";
         let to = "bar";
         let expected =
-            "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, foo.v2 AS m2v FROM bar AS foo";
+            "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, foo.v2 AS m2v FROM \"bar\" AS \"foo\"";
         let actual = alter_relation_rename_refs(definition, from, to);
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
-        let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM bar AS foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
+        let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM \"bar\" AS \"foo\" WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
         let actual = alter_relation_rename_refs(definition, from, to);
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM foo AS bar WHERE bar.v1 = 1";
-        let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM bar AS bar WHERE bar.v1 = 1";
+        let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM \"bar\" AS bar WHERE bar.v1 = 1";
         let actual = alter_relation_rename_refs(definition, from, to);
         assert_eq!(expected, actual);
     }
@@ -523,10 +523,10 @@ mod tests {
                           agg1(\
                             foo.v1, func2(foo.v2) \
                             ORDER BY \
-                            (SELECT foo.v3 FROM bar AS foo), \
-                            (SELECT first_value(foo.v4) OVER (PARTITION BY (SELECT foo.v5 FROM bar AS foo) ORDER BY (SELECT foo.v6 FROM bar AS foo)) FROM bar AS foo)\
+                            (SELECT foo.v3 FROM \"bar\" AS \"foo\"), \
+                            (SELECT first_value(foo.v4) OVER (PARTITION BY (SELECT foo.v5 FROM \"bar\" AS \"foo\") ORDER BY (SELECT foo.v6 FROM \"bar\" AS \"foo\")) FROM \"bar\" AS \"foo\")\
                           ) \
-                        FROM bar AS foo";
+                        FROM \"bar\" AS \"foo\"";
         let actual = alter_relation_rename_refs(definition, from, to);
         assert_eq!(expected, actual);
     }
