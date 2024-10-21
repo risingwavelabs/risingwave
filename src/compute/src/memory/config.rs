@@ -69,7 +69,7 @@ pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
         panic!(
             "reserved memory ({}) >= total memory ({}).",
             convert(reserved as _),
-            conver(opts.total_memory_bytes as _)
+            convert(opts.total_memory_bytes as _)
         );
     }
 
