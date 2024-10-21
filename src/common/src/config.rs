@@ -609,7 +609,7 @@ pub use risingwave_common_metrics::MetricLevel;
 /// the section `[storage.cache]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheConfig {
-    /// Configure the capacity of the block cache in MB explicitly. 
+    /// Configure the capacity of the block cache in MB explicitly.
     /// The overriden value will only be effective if:
     /// 1. `meta_cache_capacity_mb` and `shared_buffer_capacity_mb` are also configured explicitly.
     /// 2. `block_cache_capacity_mb` + `meta_cache_capacity_mb` + `meta_cache_capacity_mb` doesn't exceed 0.3 * non-reserved memory.
@@ -625,7 +625,7 @@ pub struct CacheConfig {
     #[config_doc(omitted)]
     pub block_cache_eviction: CacheEvictionConfig,
 
-    /// Configure the capacity of the block cache in MB explicitly. 
+    /// Configure the capacity of the block cache in MB explicitly.
     /// The overriden value will only be effective if:
     /// 1. `block_cache_capacity_mb` and `shared_buffer_capacity_mb` are also configured explicitly.
     /// 2. `block_cache_capacity_mb` + `meta_cache_capacity_mb` + `meta_cache_capacity_mb` doesn't exceed 0.3 * non-reserved memory.
@@ -682,7 +682,7 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::share_buffer_compaction_worker_threads_number")]
     pub share_buffer_compaction_worker_threads_number: u32,
 
-    /// Configure the maximum shared buffer size in MB explicitly. Writes attempting to exceed the capacity 
+    /// Configure the maximum shared buffer size in MB explicitly. Writes attempting to exceed the capacity
     /// will stall until there is enough space. The overriden value will only be effective if:
     /// 1. `block_cache_capacity_mb` and `meta_cache_capacity_mb` are also configured explicitly.
     /// 2. `block_cache_capacity_mb` + `meta_cache_capacity_mb` + `meta_cache_capacity_mb` doesn't exceed 0.3 * non-reserved memory.

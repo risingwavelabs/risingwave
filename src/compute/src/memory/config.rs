@@ -144,9 +144,9 @@ pub fn storage_memory_config(
                 (None, None, None)
             } else {
                 (
-                    block_cache_capacity_mb,
-                    meta_cache_capacity_mb,
-                    shared_buffer_capacity_mb,
+                    Some(block_cache_capacity_mb),
+                    Some(meta_cache_capacity_mb),
+                    Some(shared_buffer_capacity_mb),
                 )
             }
         }
