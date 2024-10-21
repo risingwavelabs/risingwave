@@ -682,10 +682,10 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<AlterSourceRequest>,
     ) -> Result<Response<AlterSourceResponse>, Status> {
-        let AlterSourceRequest { source } = request.into_inner();
+        let AlterSourceRequest { source, plan } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterSourceColumn(source.unwrap()))
+            .run_command(DdlCommand::AlterSource(source.unwrap(), plan))
             .await?;
         Ok(Response::new(AlterSourceResponse {
             status: None,

@@ -122,7 +122,7 @@ pub async fn handle_alter_source_column(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_source(catalog.to_prost(schema_id, db_id))
+        .alter_source(catalog.to_prost(schema_id, db_id), todo!())
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))

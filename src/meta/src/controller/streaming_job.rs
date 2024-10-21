@@ -395,6 +395,7 @@ impl CatalogController {
         Ok(table_id_map)
     }
 
+    /// Insert
     pub async fn prepare_streaming_job(
         &self,
         table_fragment: PbTableFragments,
@@ -451,7 +452,7 @@ impl CatalogController {
         }
 
         if !for_replace {
-            // // Update dml fragment id.
+            // Update dml fragment id.
             if let StreamingJob::Table(_, table, ..) = streaming_job {
                 Table::update(table::ActiveModel {
                     table_id: Set(table.id as _),
