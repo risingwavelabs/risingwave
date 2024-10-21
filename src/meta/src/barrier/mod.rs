@@ -535,14 +535,28 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
         if !is_err {
             // continue to finish the pending collected barrier.
             while let Some(task) = self.checkpoint_control.next_complete_barrier_task(None) {
-                if let Err(e) = task.complete_barrier(&self.context, self.env.clone()).await {
-                    error!(
-                        err = ?e.as_report(),
-                        "failed to complete barrier during recovery"
-                    );
-                    break;
-                } else {
-                    info!("succeed to complete barrier during recovery")
+                let (command_prev_epoch, creating_job_epochs) = (
+                    task.command_context
+                        .as_ref()
+                        .map(|(command, _)| command.barrier_info.prev_epoch.value().0),
+                    task.creating_job_epochs.clone(),
+                );
+                match task.complete_barrier(&self.context, self.env.clone()).await {
+                    Ok(hummock_version_stats) => {
+                        self.checkpoint_control
+                            .ack_completed(BarrierCompleteOutput {
+                                command_prev_epoch,
+                                creating_job_epochs,
+                                hummock_version_stats,
+                            });
+                    }
+                    Err(e) => {
+                        error!(
+                            err = ?e.as_report(),
+                            "failed to complete barrier during recovery"
+                        );
+                        break;
+                    }
                 }
             }
         }
