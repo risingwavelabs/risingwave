@@ -28,8 +28,7 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 use tracing::warn;
 
 use crate::barrier::progress::CreateMviewProgressTracker;
-use crate::barrier::state::BarrierInfo;
-use crate::barrier::{BarrierKind, TracedEpoch};
+use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
 
 #[derive(Debug)]
 pub(super) struct CreateMviewLogStoreProgressTracker {

@@ -41,7 +41,7 @@ use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightGraphInfo};
-use crate::barrier::state::BarrierInfo;
+use crate::barrier::info::BarrierInfo;
 use crate::barrier::{GlobalBarrierWorkerContext, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::{DdlType, StreamingJob};

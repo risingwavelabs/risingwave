@@ -55,11 +55,11 @@ use tracing::{debug, error, info, warn, Instrument};
 use self::command::CommandContext;
 use self::notifier::Notifier;
 use crate::barrier::creating_job::{CompleteJobType, CreatingStreamingJobControl};
-use crate::barrier::info::InflightGraphInfo;
+use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager, ControlStreamNode};
 use crate::barrier::schedule::ScheduledBarriers;
-use crate::barrier::state::{BarrierInfo, BarrierManagerState};
+use crate::barrier::state::BarrierWorkerState;
 use crate::error::MetaErrorInner;
 use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -324,7 +324,7 @@ struct GlobalBarrierWorker<C> {
 
 /// Controls the concurrent execution of commands.
 struct CheckpointControl {
-    state: BarrierManagerState,
+    state: BarrierWorkerState,
 
     /// Save the state and message of barrier in order.
     /// Key is the `prev_epoch`.
@@ -346,7 +346,7 @@ struct CheckpointControl {
 impl CheckpointControl {
     fn new(
         create_mview_tracker: CreateMviewProgressTracker,
-        state: BarrierManagerState,
+        state: BarrierWorkerState,
         hummock_version_stats: HummockVersionStats,
         env: MetaSrvEnv,
     ) -> Self {
@@ -363,6 +363,13 @@ impl CheckpointControl {
 
     fn total_command_num(&self) -> usize {
         self.command_ctx_queue.len()
+            + match &self.completing_task {
+                CompletingTask::Completing {
+                    should_pause_inject_barrier: Some(_),
+                    ..
+                } => 1,
+                _ => 0,
+            }
     }
 
     /// Update the metrics of barrier nums.
@@ -484,15 +491,33 @@ impl CheckpointControl {
         // Whether some command requires pausing concurrent barrier. If so, it must be the last one.
         let should_pause = self
             .command_ctx_queue
-            .values()
-            .any(|node| node.command_ctx.command.should_pause_inject_barrier())
-            || match &self.completing_task {
-                CompletingTask::None | CompletingTask::Err(_) => false,
+            .last_key_value()
+            .map(|(_, x)| x.command_ctx.command.should_pause_inject_barrier())
+            .or(match &self.completing_task {
+                CompletingTask::None | CompletingTask::Err(_) => None,
                 CompletingTask::Completing {
                     should_pause_inject_barrier,
                     ..
                 } => *should_pause_inject_barrier,
-            };
+            })
+            .unwrap_or(false);
+        debug_assert_eq!(
+            self.command_ctx_queue
+                .values()
+                .map(|node| node.command_ctx.command.should_pause_inject_barrier())
+                .chain(
+                    match &self.completing_task {
+                        CompletingTask::None | CompletingTask::Err(_) => None,
+                        CompletingTask::Completing {
+                            should_pause_inject_barrier,
+                            ..
+                        } => *should_pause_inject_barrier,
+                    }
+                    .into_iter()
+                )
+                .any(|should_pause| should_pause),
+            should_pause
+        );
 
         in_flight_not_full && !should_pause
     }
@@ -592,7 +617,7 @@ impl BarrierEpochState {
 enum CompletingTask {
     None,
     Completing {
-        should_pause_inject_barrier: bool,
+        should_pause_inject_barrier: Option<bool>,
         table_ids_to_finish: HashSet<TableId>,
         creating_job_epochs: Vec<(TableId, u64)>,
 
@@ -620,7 +645,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContext> {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
-        let initial_invalid_state = BarrierManagerState::new(
+        let initial_invalid_state = BarrierWorkerState::new(
             None,
             InflightGraphInfo::default(),
             InflightSubscriptionInfo::default(),
@@ -1408,8 +1433,7 @@ impl CheckpointControl {
                     let should_pause_inject_barrier = task
                         .command_context
                         .as_ref()
-                        .map(|(command, _)| command.command.should_pause_inject_barrier())
-                        .unwrap_or(false);
+                        .map(|(command, _)| command.command.should_pause_inject_barrier());
                     let table_ids_to_finish = task.table_ids_to_finish.clone();
                     let creating_job_epochs = task.creating_job_epochs.clone();
                     let context = context.clone();

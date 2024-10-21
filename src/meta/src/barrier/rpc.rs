@@ -47,8 +47,7 @@ use super::{
     Command, GlobalBarrierManagerContextTrait, GlobalBarrierWorker, GlobalBarrierWorkerContext,
     InflightSubscriptionInfo,
 };
-use crate::barrier::info::InflightGraphInfo;
-use crate::barrier::state::BarrierInfo;
+use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
 use crate::manager::MetaSrvEnv;
 use crate::{MetaError, MetaResult};
 

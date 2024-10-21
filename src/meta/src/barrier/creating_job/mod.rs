@@ -33,10 +33,9 @@ use crate::barrier::creating_job::barrier_control::CreatingStreamingJobBarrierCo
 use crate::barrier::creating_job::status::{
     CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus,
 };
-use crate::barrier::info::InflightGraphInfo;
+use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::state::BarrierInfo;
 use crate::barrier::{Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::MetaResult;

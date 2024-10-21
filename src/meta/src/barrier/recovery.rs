@@ -33,13 +33,15 @@ use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, error, info, warn, Instrument};
 
-use super::{CheckpointControl, GlobalBarrierManagerContextTrait, TracedEpoch};
-use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
+use super::{
+    CheckpointControl, GlobalBarrierManagerContextTrait, GlobalBarrierWorker, TracedEpoch,
+};
+use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightSubscriptionInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
-use crate::barrier::state::{BarrierInfo, BarrierManagerState};
-use crate::barrier::{BarrierKind, GlobalBarrierWorker, GlobalBarrierWorkerContext};
+use crate::barrier::state::BarrierWorkerState;
+use crate::barrier::{BarrierKind, GlobalBarrierWorkerContext};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, TableFragments, TableParallelism};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -382,7 +384,7 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
                     };
 
                     (
-                        BarrierManagerState::new(new_epoch, info, subscription_info, paused_reason),
+                        BarrierWorkerState::new(new_epoch, info, subscription_info, paused_reason),
                         active_streaming_nodes,
                         control_stream_manager,
                         tracker,
@@ -403,7 +405,7 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
         self.scheduled_barriers.mark_ready();
 
         let create_mview_tracker: CreateMviewProgressTracker;
-        let state: BarrierManagerState;
+        let state: BarrierWorkerState;
         let version_stats: HummockVersionStats;
         (
             state,

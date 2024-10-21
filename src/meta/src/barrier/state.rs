@@ -19,18 +19,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 
-use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
+use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightSubscriptionInfo};
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 
-#[derive(Debug, Clone)]
-pub struct BarrierInfo {
-    pub prev_epoch: TracedEpoch,
-    pub curr_epoch: TracedEpoch,
-    pub kind: BarrierKind,
-}
-
-/// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
-pub struct BarrierManagerState {
+/// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
+pub(super) struct BarrierWorkerState {
     /// The last sent `prev_epoch`
     ///
     /// There's no need to persist this field. On recovery, we will restore this from the latest
@@ -49,7 +42,7 @@ pub struct BarrierManagerState {
     paused_reason: Option<PausedReason>,
 }
 
-impl BarrierManagerState {
+impl BarrierWorkerState {
     pub fn new(
         in_flight_prev_epoch: Option<TracedEpoch>,
         inflight_graph_info: InflightGraphInfo,

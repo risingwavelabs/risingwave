@@ -19,9 +19,16 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use tracing::warn;
 
-use crate::barrier::Command;
+use crate::barrier::{BarrierKind, Command, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{ActorId, FragmentId};
+
+#[derive(Debug, Clone)]
+pub(super) struct BarrierInfo {
+    pub prev_epoch: TracedEpoch,
+    pub curr_epoch: TracedEpoch,
+    pub kind: BarrierKind,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum CommandFragmentChanges {

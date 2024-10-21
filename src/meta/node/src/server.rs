@@ -490,7 +490,7 @@ pub async fn start_service_as_election_leader(
         env.clone(),
     ));
 
-    let (barrier_manager_context, join_handle, shutdown_rx) = GlobalBarrierManager::start(
+    let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
         metadata_manager.clone(),
@@ -546,7 +546,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
-        barrier_manager_context.clone(),
+        barrier_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
     )
@@ -558,12 +558,11 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         source_manager,
         stream_manager.clone(),
-        barrier_manager_context.clone(),
+        barrier_manager.clone(),
         scale_controller.clone(),
     );
 
-    let cluster_srv =
-        ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager_context.clone());
+    let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.clone());
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
