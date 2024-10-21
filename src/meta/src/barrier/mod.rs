@@ -435,7 +435,12 @@ impl GlobalBarrierWorker {
         // join spawned completing command to finish no matter it succeeds or not.
         let is_err = match replace(&mut self.completing_task, CompletingTask::None) {
             CompletingTask::None => false,
-            CompletingTask::Completing { join_handle, .. } => {
+            CompletingTask::Completing {
+                join_handle,
+                command_prev_epoch,
+                creating_job_epochs,
+                ..
+            } => {
                 info!("waiting for completing command to finish in recovery");
                 match join_handle.await {
                     Err(e) => {
@@ -446,7 +451,15 @@ impl GlobalBarrierWorker {
                         warn!(err = ?e.as_report(), "failed to complete barrier during clear");
                         true
                     }
-                    Ok(Ok(_)) => false,
+                    Ok(Ok(hummock_version_stats)) => {
+                        self.checkpoint_control
+                            .ack_completed(BarrierCompleteOutput {
+                                command_prev_epoch,
+                                creating_job_epochs,
+                                hummock_version_stats,
+                            });
+                        false
+                    }
                 }
             }
             CompletingTask::Err(_) => true,
