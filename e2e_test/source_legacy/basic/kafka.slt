@@ -500,6 +500,16 @@ WITH (
 ) FORMAT PLAIN ENCODE JSON
 
 statement ok
+CREATE TABLE test_include_payload_only
+INCLUDE payload
+WITH (
+    connector = 'kafka',
+    topic = 'kafka_1_partition_topic',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -910,6 +920,9 @@ drop table source_with_rdkafka_props;
 
 statement ok
 drop table debezium_ignore_key;
+
+statement ok
+drop table test_include_payload_only;
 
 statement ok
 drop table test_include_payload;
