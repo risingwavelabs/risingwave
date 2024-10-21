@@ -24,8 +24,11 @@ use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::DefaultOrdered;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::window_function::{StateKey, WindowFuncCall};
+use risingwave_expr::window_function::{
+    RangeFrameBounds, RowsFrameBounds, StateKey, WindowFuncCall,
+};
 
+use super::frame_finder::merge_rows_frames;
 use super::over_partition::{
     new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
     PartitionDelta,
@@ -50,7 +53,7 @@ struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     schema: Schema,
-    calls: Vec<WindowFuncCall>,
+    calls: Calls,
     deduped_part_key_indices: Vec<usize>,
     order_key_indices: Vec<usize>,
     order_key_data_types: Vec<DataType>,
@@ -134,15 +137,66 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
     pub cache_policy: CachePolicy,
 }
 
+/// Information about the window function calls.
+/// Contains the original calls and many other information that can be derived from the calls to avoid
+/// repeated calculation.
+pub(super) struct Calls {
+    calls: Vec<WindowFuncCall>,
+
+    /// The `ROWS` frame that is the union of all `ROWS` frames.
+    pub(super) super_rows_frame_bounds: RowsFrameBounds,
+    /// All `RANGE` frames.
+    pub(super) range_frames: Vec<RangeFrameBounds>,
+    pub(super) start_is_unbounded: bool,
+    pub(super) end_is_unbounded: bool,
+}
+
+impl Calls {
+    fn new(calls: Vec<WindowFuncCall>) -> Self {
+        let rows_frames = calls
+            .iter()
+            .filter_map(|call| call.frame.bounds.as_rows())
+            .collect::<Vec<_>>();
+        let super_rows_frame_bounds = merge_rows_frames(&rows_frames);
+        let range_frames = calls
+            .iter()
+            .filter_map(|call| call.frame.bounds.as_range())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let start_is_unbounded = calls
+            .iter()
+            .any(|call| call.frame.bounds.start_is_unbounded());
+        let end_is_unbounded = calls
+            .iter()
+            .any(|call| call.frame.bounds.end_is_unbounded());
+
+        Self {
+            calls,
+            super_rows_frame_bounds,
+            range_frames,
+            start_is_unbounded,
+            end_is_unbounded,
+        }
+    }
+
+    pub(super) fn iter(&self) -> impl ExactSizeIterator<Item = &WindowFuncCall> {
+        self.calls.iter()
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.calls.len()
+    }
+}
+
 impl<S: StateStore> OverWindowExecutor<S> {
     pub fn new(args: OverWindowExecutorArgs<S>) -> Self {
+        let calls = Calls::new(args.calls);
+
         let input_info = args.input.info().clone();
         let input_schema = &input_info.schema;
 
-        let has_unbounded_frame = args
-            .calls
-            .iter()
-            .any(|call| call.frame.bounds.is_unbounded());
+        let has_unbounded_frame = calls.start_is_unbounded || calls.end_is_unbounded;
         let cache_policy = if has_unbounded_frame {
             // For unbounded frames, we finally need all entries of the partition in the cache,
             // so for simplicity we just use full cache policy for these cases.
@@ -177,7 +231,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
                 schema: args.schema,
-                calls: args.calls,
+                calls,
                 deduped_part_key_indices,
                 order_key_indices: args.order_key_indices,
                 order_key_data_types,
@@ -353,9 +407,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
             );
 
             // Build changes for current partition.
-            let (part_changes, accessed_range) = partition
-                .build_changes(&this.state_table, &this.calls, delta)
-                .await?;
+            let (part_changes, accessed_range) =
+                partition.build_changes(&this.state_table, delta).await?;
 
             for (key, record) in part_changes {
                 // Build chunk and yield if needed.

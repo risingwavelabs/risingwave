@@ -28,14 +28,12 @@ use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{Datum, Sentinelled};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
-use risingwave_expr::window_function::{
-    create_window_state, RangeFrameBounds, RowsFrameBounds, StateKey, WindowFuncCall, WindowStates,
-};
+use risingwave_expr::window_function::{create_window_state, StateKey, WindowStates};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use static_assertions::const_assert;
 
-use super::general::RowConverter;
+use super::general::{Calls, RowConverter};
 use crate::common::table::state_table::StateTable;
 use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::over_window::frame_finder::*;
@@ -294,12 +292,7 @@ pub(super) struct OverPartition<'a, S: StateStore> {
     range_cache: &'a mut PartitionCache,
     cache_policy: CachePolicy,
 
-    /// The `ROWS` frame that is the union of all `ROWS` frames of all window functions in this
-    /// over window executor.
-    super_rows_frame_bounds: RowsFrameBounds,
-    range_frames: Vec<&'a RangeFrameBounds>,
-    start_is_unbounded: bool,
-    end_is_unbounded: bool,
+    calls: &'a Calls,
     row_conv: RowConverter<'a>,
 
     stats: OverPartitionStats,
@@ -315,36 +308,15 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         deduped_part_key: &'a OwnedRow,
         cache: &'a mut PartitionCache,
         cache_policy: CachePolicy,
-        calls: &'a [WindowFuncCall],
+        calls: &'a Calls,
         row_conv: RowConverter<'a>,
     ) -> Self {
-        let rows_frames = calls
-            .iter()
-            .filter_map(|call| call.frame.bounds.as_rows())
-            .collect::<Vec<_>>();
-        // TODO(rc): maybe should avoid repeated merging
-        let super_rows_frame_bounds = merge_rows_frames(&rows_frames);
-        let range_frames = calls
-            .iter()
-            .filter_map(|call| call.frame.bounds.as_range())
-            .collect::<Vec<_>>();
-
-        let start_is_unbounded = calls
-            .iter()
-            .any(|call| call.frame.bounds.start_is_unbounded());
-        let end_is_unbounded = calls
-            .iter()
-            .any(|call| call.frame.bounds.end_is_unbounded());
-
         Self {
             deduped_part_key,
             range_cache: cache,
             cache_policy,
 
-            super_rows_frame_bounds,
-            range_frames,
-            start_is_unbounded,
-            end_is_unbounded,
+            calls,
             row_conv,
 
             stats: Default::default(),
@@ -418,13 +390,14 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     pub async fn build_changes(
         &mut self,
         table: &StateTable<S>,
-        calls: &[WindowFuncCall],
         mut delta: PartitionDelta,
     ) -> StreamExecutorResult<(
         BTreeMap<StateKey, Record<OwnedRow>>,
         Option<RangeInclusive<StateKey>>,
     )> {
-        let input_schema_len = table.get_data_types().len() - calls.len();
+        let input_schema_len = table.get_data_types().len() - self.calls.len();
+        let calls = self.calls;
+
         let mut part_changes = BTreeMap::new();
         let mut accessed_entry_count = 0;
         let mut compute_count = 0;
@@ -633,7 +606,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
 
         let range_frame_logical_curr =
-            calc_logical_curr_for_range_frames(&self.range_frames, delta_first, delta_last);
+            calc_logical_curr_for_range_frames(&self.calls.range_frames, delta_first, delta_last);
 
         loop {
             // TERMINATEABILITY: `extend_cache_leftward_by_n` and `extend_cache_rightward_by_n` keep
@@ -688,7 +661,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             // ensure everything is in the cache
             self.extend_cache_to_boundary(table).await?;
         } else {
-            // TODO(rc): later we should extend cache using `self.super_rows_frame_bounds` and
+            // TODO(rc): later we should extend cache using `self.calls.super_rows_frame_bounds` and
             // `range_frame_logical_curr` as hints.
 
             // ensure the cache covers all delta (if possible)
@@ -754,13 +727,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let first_key = part_with_delta.first_key().unwrap();
         let last_key = part_with_delta.last_key().unwrap();
 
-        let first_curr_key = if self.end_is_unbounded || delta_first_key == first_key {
+        let first_curr_key = if self.calls.end_is_unbounded || delta_first_key == first_key {
             // If the frame end is unbounded, or, the first key is in delta, then the frame corresponding
             // to the first key is always affected.
             first_key
         } else {
             let mut key = find_first_curr_for_rows_frame(
-                &self.super_rows_frame_bounds,
+                &self.calls.super_rows_frame_bounds,
                 part_with_delta,
                 delta_first_key,
             );
@@ -768,7 +741,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             if let Some((logical_first_curr, _)) = range_frame_logical_curr {
                 let logical_curr = logical_first_curr.as_normal_expect(); // otherwise should go `end_is_unbounded` branch
                 let new_key = find_left_for_range_frames(
-                    &self.range_frames,
+                    &self.calls.range_frames,
                     part_with_delta,
                     logical_curr,
                     cache_key_pk_len,
@@ -779,12 +752,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             key
         };
 
-        let last_curr_key = if self.start_is_unbounded || delta_last_key == last_key {
+        let last_curr_key = if self.calls.start_is_unbounded || delta_last_key == last_key {
             // similar to `first_curr_key`
             last_key
         } else {
             let mut key = find_last_curr_for_rows_frame(
-                &self.super_rows_frame_bounds,
+                &self.calls.super_rows_frame_bounds,
                 part_with_delta,
                 delta_last_key,
             );
@@ -792,7 +765,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             if let Some((_, logical_last_curr)) = range_frame_logical_curr {
                 let logical_curr = logical_last_curr.as_normal_expect(); // otherwise should go `start_is_unbounded` branch
                 let new_key = find_right_for_range_frames(
-                    &self.range_frames,
+                    &self.calls.range_frames,
                     part_with_delta,
                     logical_curr,
                     cache_key_pk_len,
@@ -833,18 +806,18 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
 
         let range_frame_logical_boundary = calc_logical_boundary_for_range_frames(
-            &self.range_frames,
+            &self.calls.range_frames,
             first_curr_key.as_normal_expect(),
             last_curr_key.as_normal_expect(),
         );
 
-        let first_frame_start = if self.start_is_unbounded || first_curr_key == first_key {
+        let first_frame_start = if self.calls.start_is_unbounded || first_curr_key == first_key {
             // If the frame start is unbounded, or, the first curr key is the first key, then the first key
             // always need to be included in the affected range.
             first_key
         } else {
             let mut key = find_frame_start_for_rows_frame(
-                &self.super_rows_frame_bounds,
+                &self.calls.super_rows_frame_bounds,
                 part_with_delta,
                 first_curr_key,
             );
@@ -852,7 +825,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             if let Some((logical_first_start, _)) = range_frame_logical_boundary.as_ref() {
                 let logical_boundary = logical_first_start.as_normal_expect(); // otherwise should go `end_is_unbounded` branch
                 let new_key = find_left_for_range_frames(
-                    &self.range_frames,
+                    &self.calls.range_frames,
                     part_with_delta,
                     logical_boundary,
                     cache_key_pk_len,
@@ -864,12 +837,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         };
         assert!(first_frame_start <= first_curr_key);
 
-        let last_frame_end = if self.end_is_unbounded || last_curr_key == last_key {
+        let last_frame_end = if self.calls.end_is_unbounded || last_curr_key == last_key {
             // similar to `first_frame_start`
             last_key
         } else {
             let mut key = find_frame_end_for_rows_frame(
-                &self.super_rows_frame_bounds,
+                &self.calls.super_rows_frame_bounds,
                 part_with_delta,
                 last_curr_key,
             );
@@ -877,7 +850,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             if let Some((_, logical_last_end)) = range_frame_logical_boundary.as_ref() {
                 let logical_boundary = logical_last_end.as_normal_expect(); // otherwise should go `end_is_unbounded` branch
                 let new_key = find_right_for_range_frames(
-                    &self.range_frames,
+                    &self.calls.range_frames,
                     part_with_delta,
                     logical_boundary,
                     cache_key_pk_len,
