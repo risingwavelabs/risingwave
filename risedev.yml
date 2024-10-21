@@ -874,7 +874,6 @@ profile:
         port: 5432
         address: db
         user: postgres
-        database: source_test
         user-managed: true
 
   ci-redis:
