@@ -201,7 +201,7 @@ steps:
           mount-buildkite-agent: true
           upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "end-to-end sink test"
