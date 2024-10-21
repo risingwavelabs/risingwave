@@ -99,6 +99,11 @@ impl CatalogController {
         Ok(obj.oid)
     }
 
+    /// Create catalogs for the streaming job, then notify frontend about them if the job is a
+    /// materialized view.
+    ///
+    /// Some of the fields in the given streaming job are placeholders, which will
+    /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
     pub async fn create_job_catalog(
         &self,
         streaming_job: &mut StreamingJob,
@@ -333,20 +338,23 @@ impl CatalogController {
         Ok(())
     }
 
-    /// Create catalogs for internal tables. Some of the fields in the given arguments are
-    /// placeholders will be updated later in `prepare_streaming_job`.
+    /// Create catalogs for internal tables, then notify frontend about them if the job is a
+    /// materialized view.
+    ///
+    /// Some of the fields in the given "incomplete" internal tables are placeholders, which will
+    /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
     ///
     /// Returns a mapping from the temporary table id to the actual global table id.
     pub async fn create_internal_table_catalog(
         &self,
         job: &StreamingJob,
-        incomplete_internal_tables: Vec<PbTable>,
+        mut incomplete_internal_tables: Vec<PbTable>,
     ) -> MetaResult<HashMap<u32, u32>> {
         let job_id = job.id() as ObjectId;
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let mut table_id_map = HashMap::new();
-        for table in incomplete_internal_tables {
+        for table in &mut incomplete_internal_tables {
             let table_id = Self::create_object(
                 &txn,
                 ObjectType::Table,
@@ -357,37 +365,34 @@ impl CatalogController {
             .await?
             .oid;
             table_id_map.insert(table.id, table_id as u32);
+            table.id = table_id as _;
 
             let table_model = table::ActiveModel {
                 table_id: Set(table_id as _),
                 belongs_to_job_id: Set(Some(job_id)),
                 fragment_id: NotSet,
-                ..table.into()
+                ..table.clone().into()
             };
             Table::insert(table_model).exec(&txn).await?;
         }
         txn.commit().await?;
 
+        if job.is_materialized_view() {
+            self.notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: incomplete_internal_tables
+                        .iter()
+                        .map(|table| Relation {
+                            relation_info: Some(RelationInfo::Table(table.clone())),
+                        })
+                        .collect(),
+                }),
+            )
+            .await;
+        }
+
         Ok(table_id_map)
-    }
-
-    /// Notify frontend about the given internal tables before the streaming job finishes creating.
-    /// Should only be called for materialized views.
-    pub async fn pre_notify_internal_tables(&self, internal_tables: &[PbTable]) -> MetaResult<()> {
-        self.notify_frontend(
-            Operation::Add,
-            Info::RelationGroup(RelationGroup {
-                relations: internal_tables
-                    .iter()
-                    .map(|table| Relation {
-                        relation_info: Some(RelationInfo::Table(table.clone())),
-                    })
-                    .collect(),
-            }),
-        )
-        .await;
-
-        Ok(())
     }
 
     pub async fn prepare_streaming_job(
@@ -575,10 +580,8 @@ impl CatalogController {
         txn.commit().await?;
 
         if !objs.is_empty() {
-            // We **may** also have notified the frontend about these objects,
+            // We also have notified the frontend about these objects,
             // so we need to notify the frontend to delete them here.
-            // The frontend will ignore the request if the object does not exist,
-            // so it's safe to always notify.
             self.notify_frontend(Operation::Delete, build_relation_group_for_delete(objs))
                 .await;
         }

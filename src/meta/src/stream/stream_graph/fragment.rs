@@ -420,7 +420,7 @@ impl StreamFragmentGraph {
         })
     }
 
-    /// Retrieve the internal tables map of the whole graph.
+    /// Retrieve the **incomplete** internal tables map of the whole graph.
     ///
     /// Note that some fields in the table catalogs are not filled during the current phase, e.g.,
     /// `fragment_id`, `vnode_count`. They will be all filled after a `TableFragments` is built.
