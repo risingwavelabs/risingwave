@@ -335,12 +335,9 @@ impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.cte_inner {
             CteInner::Query(query) => write!(f, "{} AS ({})", self.alias, query)?,
-            CteInner::ChangeLog(obj_name) => write!(
-                f,
-                "{} AS changelog from {}",
-                self.alias,
-                obj_name.real_value()
-            )?,
+            CteInner::ChangeLog(obj_name) => {
+                write!(f, "{} AS changelog from {}", self.alias, obj_name)?
+            }
         }
         Ok(())
     }
