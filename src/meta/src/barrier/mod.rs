@@ -315,6 +315,10 @@ struct GlobalBarrierWorker<C> {
 
     checkpoint_control: CheckpointControl,
 
+    /// Command that has been collected but is still completing.
+    /// The join handle of the completing future is stored.
+    completing_task: CompletingTask,
+
     request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
 
     active_streaming_nodes: ActiveStreamingWorkerNodes,
@@ -329,18 +333,15 @@ struct CheckpointControl {
     /// Save the state and message of barrier in order.
     /// Key is the `prev_epoch`.
     command_ctx_queue: BTreeMap<u64, EpochNode>,
+    /// The barrier that are completing.
+    /// Some((`prev_epoch`, `should_pause_inject_barrier`))
+    completing_barrier: Option<(u64, bool)>,
 
     creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
-
-    /// Command that has been collected but is still completing.
-    /// The join handle of the completing future is stored.
-    completing_task: CompletingTask,
 
     hummock_version_stats: HummockVersionStats,
 
     create_mview_tracker: CreateMviewProgressTracker,
-
-    env: MetaSrvEnv,
 }
 
 impl CheckpointControl {
@@ -348,27 +349,22 @@ impl CheckpointControl {
         create_mview_tracker: CreateMviewProgressTracker,
         state: BarrierWorkerState,
         hummock_version_stats: HummockVersionStats,
-        env: MetaSrvEnv,
     ) -> Self {
         Self {
             state,
             command_ctx_queue: Default::default(),
+            completing_barrier: None,
             creating_streaming_job_controls: Default::default(),
-            completing_task: CompletingTask::None,
             hummock_version_stats,
             create_mview_tracker,
-            env,
         }
     }
 
     fn total_command_num(&self) -> usize {
         self.command_ctx_queue.len()
-            + match &self.completing_task {
-                CompletingTask::Completing {
-                    should_pause_inject_barrier: Some(_),
-                    ..
-                } => 1,
-                _ => 0,
+            + match &self.completing_barrier {
+                Some(_) => 1,
+                None => 0,
             }
     }
 
@@ -493,27 +489,18 @@ impl CheckpointControl {
             .command_ctx_queue
             .last_key_value()
             .map(|(_, x)| x.command_ctx.command.should_pause_inject_barrier())
-            .or(match &self.completing_task {
-                CompletingTask::None | CompletingTask::Err(_) => None,
-                CompletingTask::Completing {
-                    should_pause_inject_barrier,
-                    ..
-                } => *should_pause_inject_barrier,
-            })
+            .or(self
+                .completing_barrier
+                .map(|(_, should_pause)| should_pause))
             .unwrap_or(false);
         debug_assert_eq!(
             self.command_ctx_queue
                 .values()
                 .map(|node| node.command_ctx.command.should_pause_inject_barrier())
                 .chain(
-                    match &self.completing_task {
-                        CompletingTask::None | CompletingTask::Err(_) => None,
-                        CompletingTask::Completing {
-                            should_pause_inject_barrier,
-                            ..
-                        } => *should_pause_inject_barrier,
-                    }
-                    .into_iter()
+                    self.completing_barrier
+                        .map(|(_, should_pause)| should_pause)
+                        .into_iter()
                 )
                 .any(|should_pause| should_pause),
             should_pause
@@ -521,13 +508,11 @@ impl CheckpointControl {
 
         in_flight_not_full && !should_pause
     }
+}
 
+impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
     /// We need to make sure there are no changes when doing recovery
-    pub async fn clear_on_err(
-        &mut self,
-        err: &MetaError,
-        context: &impl GlobalBarrierManagerContextTrait,
-    ) {
+    pub async fn clear_on_err(&mut self, err: &MetaError) {
         // join spawned completing command to finish no matter it succeeds or not.
         let is_err = match replace(&mut self.completing_task, CompletingTask::None) {
             CompletingTask::None => false,
@@ -549,8 +534,8 @@ impl CheckpointControl {
         };
         if !is_err {
             // continue to finish the pending collected barrier.
-            while let Some(task) = self.next_complete_barrier_task(None) {
-                if let Err(e) = Self::complete_barrier(context, task, self.env.clone()).await {
+            while let Some(task) = self.checkpoint_control.next_complete_barrier_task(None) {
+                if let Err(e) = task.complete_barrier(&self.context, self.env.clone()).await {
                     error!(
                         err = ?e.as_report(),
                         "failed to complete barrier during recovery"
@@ -561,15 +546,17 @@ impl CheckpointControl {
                 }
             }
         }
-        for (_, node) in take(&mut self.command_ctx_queue) {
+        for (_, node) in take(&mut self.checkpoint_control.command_ctx_queue) {
             for notifier in node.notifiers {
                 notifier.notify_failed(err.clone());
             }
             node.enqueue_time.observe_duration();
         }
-        self.create_mview_tracker.abort_all();
+        self.checkpoint_control.create_mview_tracker.abort_all();
     }
+}
 
+impl CheckpointControl {
     /// Return the earliest command waiting on the `worker_id`.
     fn barrier_wait_collect_from_worker(&self, worker_id: WorkerId) -> Option<&BarrierInfo> {
         for epoch_node in self.command_ctx_queue.values() {
@@ -617,8 +604,7 @@ impl BarrierEpochState {
 enum CompletingTask {
     None,
     Completing {
-        should_pause_inject_barrier: Option<bool>,
-        table_ids_to_finish: HashSet<TableId>,
+        command_prev_epoch: Option<u64>,
         creating_job_epochs: Vec<(TableId, u64)>,
 
         // The join handle of a spawned task that completes the barrier.
@@ -673,7 +659,6 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContext> {
             tracker,
             initial_invalid_state,
             context.hummock_manager.get_version_stats().await,
-            context.env.clone(),
         );
 
         Self {
@@ -684,6 +669,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContext> {
             status,
             env,
             checkpoint_control,
+            completing_task: CompletingTask::None,
             request_rx,
             active_streaming_nodes,
             control_stream_manager,
@@ -847,6 +833,24 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
                         _ => {}
                     }
                 }
+                complete_result = self
+                    .completing_task
+                    .next_completed_barrier(
+                        &mut self.scheduled_barriers,
+                        &mut self.checkpoint_control,
+                        &mut self.control_stream_manager,
+                        &self.context,
+                        &self.env,
+                ) => {
+                    match complete_result {
+                        Ok(output) => {
+                            self.checkpoint_control.ack_completed(output);
+                        }
+                        Err(e) => {
+                            self.failure_recovery(e).await;
+                        }
+                    }
+                },
                 (worker_id, resp_result) = self.control_stream_manager.next_complete_barrier_response() => {
                     if let  Err(e) = resp_result.and_then(|resp| self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager)) {
                         {
@@ -866,20 +870,6 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
                         }
                     }
                 }
-                complete_result = self.checkpoint_control.next_completed_barrier(&mut self.scheduled_barriers, &self.context) => {
-                    match complete_result {
-                        Ok(output) => {
-                            if !output.table_ids_to_finish.is_empty() {
-                                self.control_stream_manager.remove_partial_graph(
-                                    output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            self.failure_recovery(e).await;
-                        }
-                    }
-                },
                 scheduled = self.scheduled_barriers.next_barrier(),
                     if self
                         .checkpoint_control
@@ -1053,9 +1043,7 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
     }
 
     async fn failure_recovery(&mut self, err: MetaError) {
-        self.checkpoint_control
-            .clear_on_err(&err, &self.context)
-            .await;
+        self.clear_on_err(&err).await;
 
         if self.enable_recovery {
             self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
@@ -1086,9 +1074,7 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
 
     async fn adhoc_recovery(&mut self) {
         let err = MetaErrorInner::AdhocRecovery.into();
-        self.checkpoint_control
-            .clear_on_err(&err, &self.context)
-            .await;
+        self.clear_on_err(&err).await;
 
         self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
         let span = tracing::info_span!(
@@ -1119,7 +1105,6 @@ pub struct CompleteBarrierTask {
     notifiers: Vec<Notifier>,
     /// Some((`command_ctx`, `enqueue_time`))
     command_context: Option<(CommandContext, HistogramTimer)>,
-    table_ids_to_finish: HashSet<TableId>,
     creating_job_epochs: Vec<(TableId, u64)>,
 }
 
@@ -1156,18 +1141,18 @@ impl GlobalBarrierWorkerContext {
     }
 }
 
-impl CheckpointControl {
+impl CompleteBarrierTask {
     async fn complete_barrier(
+        self,
         context: &impl GlobalBarrierManagerContextTrait,
-        task: CompleteBarrierTask,
         env: MetaSrvEnv,
     ) -> MetaResult<HummockVersionStats> {
         let result: MetaResult<HummockVersionStats> = try {
             let wait_commit_timer = GLOBAL_META_METRICS
                 .barrier_wait_commit_latency
                 .start_timer();
-            let version_stats = context.commit_epoch(task.commit_info).await?;
-            if let Some((command_ctx, _)) = &task.command_context {
+            let version_stats = context.commit_epoch(self.commit_info).await?;
+            if let Some((command_ctx, _)) = &self.command_context {
                 context.post_collect_command(command_ctx).await?;
             }
 
@@ -1179,22 +1164,22 @@ impl CheckpointControl {
             let version_stats = match result {
                 Ok(version_stats) => version_stats,
                 Err(e) => {
-                    for notifier in task.notifiers {
+                    for notifier in self.notifiers {
                         notifier.notify_collection_failed(e.clone());
                     }
                     return Err(e);
                 }
             };
-            task.notifiers.into_iter().for_each(|notifier| {
+            self.notifiers.into_iter().for_each(|notifier| {
                 notifier.notify_collected();
             });
             try_join_all(
-                task.finished_jobs
+                self.finished_jobs
                     .into_iter()
                     .map(|finished_job| context.finish_creating_job(finished_job)),
             )
             .await?;
-            if let Some((command_ctx, enqueue_time)) = task.command_context {
+            if let Some((command_ctx, enqueue_time)) = self.command_context {
                 let duration_sec = enqueue_time.stop_and_record();
                 Self::report_complete_event(env, duration_sec, &command_ctx);
                 GLOBAL_META_METRICS
@@ -1249,7 +1234,7 @@ impl CreateMviewProgressTracker {
     }
 }
 
-impl CheckpointControl {
+impl CompleteBarrierTask {
     fn report_complete_event(env: MetaSrvEnv, duration_sec: f64, command_ctx: &CommandContext) {
         // Record barrier latency in event log.
         use risingwave_pb::meta::event_log;
@@ -1266,7 +1251,9 @@ impl CheckpointControl {
 }
 
 struct BarrierCompleteOutput {
-    table_ids_to_finish: HashSet<TableId>,
+    command_prev_epoch: Option<u64>,
+    creating_job_epochs: Vec<(TableId, u64)>,
+    hummock_version_stats: HummockVersionStats,
 }
 
 impl CheckpointControl {
@@ -1297,7 +1284,7 @@ impl CheckpointControl {
 
     fn next_complete_barrier_task(
         &mut self,
-        mut scheduled_barriers: Option<&mut ScheduledBarriers>,
+        mut context: Option<(&mut ScheduledBarriers, &mut ControlStreamManager)>,
     ) -> Option<CompleteBarrierTask> {
         // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
         let mut creating_jobs_task = vec![];
@@ -1323,6 +1310,16 @@ impl CheckpointControl {
                     creating_jobs_task.push((*table_id, epoch, resps, is_first_time));
                 }
             }
+            if !finished_jobs.is_empty()
+                && let Some((_, control_stream_manager)) = &mut context
+            {
+                control_stream_manager.remove_partial_graph(
+                    finished_jobs
+                        .iter()
+                        .map(|(table_id, _, _)| table_id.table_id)
+                        .collect(),
+                );
+            }
             for (table_id, epoch, resps) in finished_jobs {
                 let epoch_state = &mut self
                     .command_ctx_queue
@@ -1345,6 +1342,7 @@ impl CheckpointControl {
             }
         }
         let mut task = None;
+        assert!(self.completing_barrier.is_none());
         while let Some((_, EpochNode { state, .. })) = self.command_ctx_queue.first_key_value()
             && !state.is_inflight()
         {
@@ -1360,7 +1358,7 @@ impl CheckpointControl {
                     node.notifiers.into_iter().for_each(|notifier| {
                         notifier.notify_collected();
                     });
-                    if let Some(scheduled_barriers) = &mut scheduled_barriers
+                    if let Some((scheduled_barriers, _)) = &mut context
                         && self.create_mview_tracker.has_pending_finished_jobs()
                         && self
                             .command_ctx_queue
@@ -1371,30 +1369,30 @@ impl CheckpointControl {
                     }
                     continue;
                 }
-                let table_ids_to_finish = node
-                    .state
+                node.state
                     .finished_jobs
                     .drain()
-                    .map(|(table_id, (info, resps))| {
+                    .for_each(|(_, (info, resps))| {
                         node.state.resps.extend(resps);
                         finished_jobs.push(TrackingJob::New(TrackingCommand {
                             info,
                             replace_table_info: None,
                         }));
-                        table_id
-                    })
-                    .collect();
+                    });
                 let commit_info = collect_commit_epoch_info(
                     take(&mut node.state.resps),
                     &node.command_ctx,
                     self.collect_backfill_pinned_upstream_log_epoch(),
                 );
+                self.completing_barrier = Some((
+                    node.command_ctx.barrier_info.prev_epoch.value().0,
+                    node.command_ctx.command.should_pause_inject_barrier(),
+                ));
                 task = Some(CompleteBarrierTask {
                     commit_info,
                     finished_jobs,
                     notifiers: node.notifiers,
                     command_context: Some((node.command_ctx, node.enqueue_time)),
-                    table_ids_to_finish,
                     creating_job_epochs: vec![],
                 });
                 break;
@@ -1419,33 +1417,36 @@ impl CheckpointControl {
         }
         task
     }
+}
 
+impl CompletingTask {
     pub(super) fn next_completed_barrier<'a>(
         &'a mut self,
         scheduled_barriers: &mut ScheduledBarriers,
+        checkpoint_control: &mut CheckpointControl,
+        control_stream_manager: &mut ControlStreamManager,
         context: &impl GlobalBarrierManagerContextTrait,
+        env: &MetaSrvEnv,
     ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
         // If there is no completing barrier, try to start completing the earliest barrier if
         // it has been collected.
-        if let CompletingTask::None = &self.completing_task {
-            if let Some(task) = self.next_complete_barrier_task(Some(scheduled_barriers)) {
+        if let CompletingTask::None = self {
+            if let Some(task) = checkpoint_control
+                .next_complete_barrier_task(Some((scheduled_barriers, control_stream_manager)))
+            {
                 {
-                    let should_pause_inject_barrier = task
+                    let creating_job_epochs = task.creating_job_epochs.clone();
+                    let command_prev_epoch = task
                         .command_context
                         .as_ref()
-                        .map(|(command, _)| command.command.should_pause_inject_barrier());
-                    let table_ids_to_finish = task.table_ids_to_finish.clone();
-                    let creating_job_epochs = task.creating_job_epochs.clone();
+                        .map(|(command, _)| command.barrier_info.prev_epoch.value().0);
                     let context = context.clone();
-                    let env = self.env.clone();
+                    let env = env.clone();
                     let join_handle =
-                        tokio::spawn(
-                            async move { Self::complete_barrier(&context, task, env).await },
-                        );
-                    self.completing_task = CompletingTask::Completing {
-                        should_pause_inject_barrier,
+                        tokio::spawn(async move { task.complete_barrier(&context, env).await });
+                    *self = CompletingTask::Completing {
+                        command_prev_epoch,
                         join_handle,
-                        table_ids_to_finish,
                         creating_job_epochs,
                     };
                 }
@@ -1456,11 +1457,11 @@ impl CheckpointControl {
     }
 
     async fn next_completed_barrier_inner(&mut self) -> MetaResult<BarrierCompleteOutput> {
-        let CompletingTask::Completing { join_handle, .. } = &mut self.completing_task else {
+        let CompletingTask::Completing { join_handle, .. } = self else {
             return pending().await;
         };
 
-        let (table_ids_to_finish, creating_job_epochs) = {
+        {
             {
                 let join_result: MetaResult<_> = try {
                     join_handle
@@ -1474,29 +1475,41 @@ impl CheckpointControl {
                 } else {
                     CompletingTask::None
                 };
-                let completed_command =
-                    replace(&mut self.completing_task, next_completing_command_status);
-                self.hummock_version_stats = join_result?;
+                let completed_command = replace(self, next_completing_command_status);
+                let hummock_version_stats = join_result?;
 
                 must_match!(completed_command, CompletingTask::Completing {
-                    table_ids_to_finish,
                     creating_job_epochs,
+                    command_prev_epoch,
                     ..
-                } => (table_ids_to_finish, creating_job_epochs))
+                } => {
+                    Ok(BarrierCompleteOutput {
+                        command_prev_epoch,
+                        creating_job_epochs,
+                        hummock_version_stats,
+                    })
+                })
             }
-        };
+        }
+    }
+}
 
+impl CheckpointControl {
+    fn ack_completed(&mut self, output: BarrierCompleteOutput) {
         {
-            for (table_id, epoch) in creating_job_epochs {
+            self.hummock_version_stats = output.hummock_version_stats;
+            assert_eq!(
+                self.completing_barrier
+                    .take()
+                    .map(|(prev_epoch, _)| prev_epoch),
+                output.command_prev_epoch
+            );
+            for (table_id, epoch) in output.creating_job_epochs {
                 self.creating_streaming_job_controls
                     .get_mut(&table_id)
                     .expect("should exist")
                     .ack_completed(epoch)
             }
-
-            Ok(BarrierCompleteOutput {
-                table_ids_to_finish,
-            })
         }
     }
 }

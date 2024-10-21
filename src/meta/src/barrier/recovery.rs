@@ -422,7 +422,7 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
         );
 
         self.checkpoint_control =
-            CheckpointControl::new(create_mview_tracker, state, version_stats, self.env.clone());
+            CheckpointControl::new(create_mview_tracker, state, version_stats);
 
         self.env
             .notification_manager()
