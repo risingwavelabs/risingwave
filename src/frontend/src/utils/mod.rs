@@ -13,7 +13,7 @@
 // limitations under the License.
 
 mod pretty_serde;
-use pretty_serde::PrettySerde;
+pub use pretty_serde::PrettySerde;
 mod column_index_mapping;
 use std::any::Any;
 use std::hash::{Hash, Hasher};

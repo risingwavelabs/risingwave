@@ -107,6 +107,7 @@ impl OptimizationStage {
 }
 
 use std::sync::LazyLock;
+use risingwave_sqlparser::ast::ExplainFormat;
 
 pub struct LogicalOptimizer {}
 
@@ -684,7 +685,14 @@ impl LogicalOptimizer {
         InputRefValidator.validate(plan.clone());
 
         if ctx.is_explain_logical() {
-            ctx.store_logical(plan.explain_to_string());
+            match ctx.explain_format() {
+                ExplainFormat::Text => {
+                    ctx.store_logical(plan.explain_to_string());
+                }
+                ExplainFormat::Json => {
+                    ctx.store_logical(plan.explain_to_json());
+                }
+            }
         }
 
         Ok(plan)
@@ -789,7 +797,14 @@ impl LogicalOptimizer {
         InputRefValidator.validate(plan.clone());
 
         if ctx.is_explain_logical() {
-            ctx.store_logical(plan.explain_to_string());
+            match ctx.explain_format() {
+                ExplainFormat::Text => {
+                    ctx.store_logical(plan.explain_to_string());
+                }
+                ExplainFormat::Json => {
+                    ctx.store_logical(plan.explain_to_json());
+                }
+            }
         }
 
         Ok(plan)
