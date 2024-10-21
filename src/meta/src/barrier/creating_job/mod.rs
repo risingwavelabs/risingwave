@@ -38,7 +38,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::state::BarrierInfo;
 use crate::barrier::{Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo};
-use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::MetaResult;
 
 #[derive(Debug)]
@@ -61,7 +61,6 @@ impl CreatingStreamingJobControl {
         snapshot_backfill_info: SnapshotBackfillInfo,
         backfill_epoch: u64,
         version_stat: &HummockVersionStats,
-        metrics: &MetaMetrics,
         initial_mutation: Mutation,
     ) -> Self {
         info!(
@@ -82,11 +81,7 @@ impl CreatingStreamingJobControl {
         Self {
             info,
             snapshot_backfill_info,
-            barrier_control: CreatingStreamingJobBarrierControl::new(
-                table_id,
-                backfill_epoch,
-                metrics,
-            ),
+            barrier_control: CreatingStreamingJobBarrierControl::new(table_id, backfill_epoch),
             backfill_epoch,
             graph_info: InflightGraphInfo::new(fragment_info),
             status: CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -99,7 +94,7 @@ impl CreatingStreamingJobControl {
                 pending_non_checkpoint_barriers: vec![],
                 initial_barrier_info: Some((actors_to_create, initial_mutation)),
             },
-            upstream_lag: metrics
+            upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&table_id_str]),
         }

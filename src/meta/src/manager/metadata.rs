@@ -26,6 +26,7 @@ use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode,
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
@@ -58,24 +59,27 @@ pub(crate) enum ActiveStreamingWorkerChange {
 pub struct ActiveStreamingWorkerNodes {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     rx: UnboundedReceiver<LocalNotification>,
+    metadata_manager: MetadataManager,
 }
 
 impl ActiveStreamingWorkerNodes {
-    pub(crate) fn uninitialized() -> Self {
+    pub(crate) fn uninitialized(metadata_manager: MetadataManager) -> Self {
         Self {
             worker_nodes: Default::default(),
             rx: unbounded_channel().1,
+            metadata_manager,
         }
     }
 
     /// Return an uninitialized one as a placeholder for future initialized
-    pub(crate) async fn new_snapshot(meta_manager: MetadataManager) -> MetaResult<Self> {
-        let (nodes, rx) = meta_manager
+    pub(crate) async fn new_snapshot(metadata_manager: MetadataManager) -> MetaResult<Self> {
+        let (nodes, rx) = metadata_manager
             .subscribe_active_streaming_compute_nodes()
             .await?;
         Ok(Self {
             worker_nodes: nodes.into_iter().map(|node| (node.id as _, node)).collect(),
             rx,
+            metadata_manager,
         })
     }
 
@@ -188,6 +192,50 @@ impl ActiveStreamingWorkerNodes {
                 }
             }
         };
+
+        #[cfg(debug_assertions)]
+        {
+            use risingwave_pb::common::WorkerNode;
+            match self
+                .metadata_manager
+                .list_active_streaming_compute_nodes()
+                .await
+            {
+                Ok(worker_nodes) => {
+                    let ignore_irrelevant_info = |node: &WorkerNode| {
+                        (
+                            node.id,
+                            WorkerNode {
+                                id: node.id,
+                                r#type: node.r#type,
+                                host: node.host.clone(),
+                                parallelism: node.parallelism,
+                                property: node.property.clone(),
+                                resource: node.resource.clone(),
+                                ..Default::default()
+                            },
+                        )
+                    };
+                    let worker_nodes: HashMap<_, _> =
+                        worker_nodes.iter().map(ignore_irrelevant_info).collect();
+                    let curr_worker_nodes: HashMap<_, _> = self
+                        .current()
+                        .values()
+                        .map(ignore_irrelevant_info)
+                        .collect();
+                    if worker_nodes != curr_worker_nodes {
+                        warn!(
+                            ?worker_nodes,
+                            ?curr_worker_nodes,
+                            "different to global snapshot"
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
+                }
+            }
+        }
 
         ret
     }
