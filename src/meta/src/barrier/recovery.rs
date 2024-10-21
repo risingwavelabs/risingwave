@@ -21,6 +21,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{StreamingParallelism, WorkerId};
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -40,14 +41,24 @@ use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::{BarrierInfo, BarrierManagerState};
 use crate::barrier::{BarrierKind, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{TableFragments, TableParallelism};
+use crate::model::{ActorId, TableFragments, TableParallelism};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::{model, MetaError, MetaResult};
 
-impl GlobalBarrierManagerContext {
-    // Migration timeout.
-    const RECOVERY_FORCE_MIGRATION_TIMEOUT: Duration = Duration::from_secs(300);
+impl<C> GlobalBarrierManager<C> {
+    // Retry base interval in milliseconds.
+    const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
+    // Retry max interval.
+    const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(5);
+
+    #[inline(always)]
+    /// Initialize a retry strategy for operation in recovery.
+    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
+        ExponentialBackoff::from_millis(Self::RECOVERY_RETRY_BASE_INTERVAL)
+            .max_delay(Self::RECOVERY_RETRY_MAX_INTERVAL)
+            .map(jitter)
+    }
 }
 
 impl GlobalBarrierManagerContext {
@@ -123,96 +134,36 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierManager<C> {
     /// the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
-    pub(super) async fn recovery(
-        &mut self,
-        paused_reason: Option<PausedReason>,
-        err: Option<MetaError>,
-    ) {
+    pub async fn recovery(&mut self, paused_reason: Option<PausedReason>, err: Option<MetaError>) {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering");
         // Clear all control streams to release resources (connections to compute nodes) first.
         self.control_stream_manager.clear();
-        tracing::info!("recovery start!");
 
-        // We take retry into consideration because this is the latency user sees for a cluster to
-        // get recovered.
-        let recovery_timer = GLOBAL_META_METRICS.recovery_latency.start_timer();
-        let new_state = self
-            .context
-            .recovery(
-                || self.scheduled_barriers.pre_apply_drop_cancel(),
-                paused_reason,
-                err,
-            )
-            .await;
-        recovery_timer.observe_duration();
-        self.scheduled_barriers.mark_ready();
-
-        let create_mview_tracker: CreateMviewProgressTracker;
-        let state: BarrierManagerState;
-        let version_stats: HummockVersionStats;
-        (
-            state,
-            self.active_streaming_nodes,
-            self.control_stream_manager,
-            create_mview_tracker,
-            version_stats,
-        ) = new_state;
-
-        tracing::info!(
-            epoch = state.in_flight_prev_epoch().map(|epoch| epoch.value().0),
-            paused = ?state.paused_reason(),
-            "recovery success"
-        );
-
-        self.checkpoint_control =
-            CheckpointControl::new(create_mview_tracker, state, version_stats, self.env.clone());
-
-        self.env
-            .notification_manager()
-            .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
+        self.recovery_inner(paused_reason, err).await
     }
 }
 
 impl GlobalBarrierManagerContext {
-    pub(super) async fn recovery_inner(
+    pub(super) async fn reload_runtime_info_impl(
         &self,
         pre_apply_drop_cancel: impl Fn() -> bool,
-        paused_reason: Option<PausedReason>,
-        err: Option<MetaError>,
-    ) -> (
-        BarrierManagerState,
+    ) -> MetaResult<(
         ActiveStreamingWorkerNodes,
         ControlStreamManager,
+        InflightGraphInfo,
+        InflightSubscriptionInfo,
+        Option<TracedEpoch>,
+        HashMap<WorkerId, Vec<StreamActor>>,
+        HashMap<ActorId, Vec<SplitImpl>>,
         CreateMviewProgressTracker,
         HummockVersionStats,
-    ) {
-        // Retry base interval in milliseconds.
-        const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
-        // Retry max interval.
-        const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(5);
-        #[inline(always)]
-        /// Initialize a retry strategy for operation in recovery.
-        fn get_retry_strategy() -> impl Iterator<Item = Duration> {
-            ExponentialBackoff::from_millis(RECOVERY_RETRY_BASE_INTERVAL)
-                .max_delay(RECOVERY_RETRY_MAX_INTERVAL)
-                .map(jitter)
-        }
-        let retry_strategy = get_retry_strategy();
-
-        tokio_retry::Retry::spawn(retry_strategy, || {
-            async {
-                let recovery_result: MetaResult<_> = try {
-                    if let Some(err) = &err {
-                        self
-                            .metadata_manager
-                            .notify_finish_failed(err)
-                            .await;
-                    }
-
-                    self
-                        .clean_dirty_streaming_jobs()
+    )> {
+        {
+            {
+                {
+                    self.clean_dirty_streaming_jobs()
                         .await
                         .context("clean dirty streaming jobs")?;
 
@@ -227,10 +178,9 @@ impl GlobalBarrierManagerContext {
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = pre_apply_drop_cancel();
 
-                    let mut active_streaming_nodes = ActiveStreamingWorkerNodes::new_snapshot(
-                        self.metadata_manager.clone(),
-                    )
-                    .await?;
+                    let mut active_streaming_nodes =
+                        ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
+                            .await?;
 
                     let background_streaming_jobs = self
                         .metadata_manager
@@ -244,8 +194,7 @@ impl GlobalBarrierManagerContext {
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control
                         && background_streaming_jobs.is_empty()
                     {
-                        self
-                            .scale_actors(&active_streaming_nodes)
+                        self.scale_actors(&active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "scale actors failed");
@@ -256,16 +205,14 @@ impl GlobalBarrierManagerContext {
                         })?
                     } else {
                         // Migrate actors in expired CN to newly joined one.
-                        self
-                            .migrate_actors(&mut active_streaming_nodes)
+                        self.migrate_actors(&mut active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "migrate actors failed");
                             })?
                     };
 
-                    if pre_apply_drop_cancel()
-                    {
+                    if pre_apply_drop_cancel() {
                         info = self.resolve_graph_info().await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "resolve actor info failed");
                         })?
@@ -273,8 +220,7 @@ impl GlobalBarrierManagerContext {
 
                     let info = info;
 
-                    self
-                        .purge_state_table_from_hummock(&info.existing_table_ids().collect())
+                    self.purge_state_table_from_hummock(&info.existing_table_ids().collect())
                         .await
                         .context("purge state table from hummock")?;
 
@@ -321,11 +267,7 @@ impl GlobalBarrierManagerContext {
 
                     let reset_start_time = Instant::now();
                     control_stream_manager
-                        .reset(
-                            &subscription_info,
-                            active_streaming_nodes.current(),
-                            self,
-                        )
+                        .reset(&subscription_info, active_streaming_nodes.current(), self)
                         .await
                         .inspect_err(|err| {
                             warn!(error = %err.as_report(), "reset compute nodes failed");
@@ -343,8 +285,58 @@ impl GlobalBarrierManagerContext {
                         })?;
 
                     // get split assignments for all actors
-                    let source_split_assignments =
-                        self.source_manager.list_assignments().await;
+                    let source_split_assignments = self.source_manager.list_assignments().await;
+                    Ok((
+                        active_streaming_nodes,
+                        control_stream_manager,
+                        info,
+                        subscription_info,
+                        prev_epoch,
+                        node_actors,
+                        source_split_assignments,
+                        tracker,
+                        self.hummock_manager.get_version_stats().await,
+                    ))
+                }
+            }
+        }
+    }
+}
+
+impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierManager<C> {
+    async fn recovery_inner(
+        &mut self,
+        paused_reason: Option<PausedReason>,
+        err: Option<MetaError>,
+    ) {
+        tracing::info!("recovery start!");
+        let retry_strategy = Self::get_retry_strategy();
+
+        // We take retry into consideration because this is the latency user sees for a cluster to
+        // get recovered.
+        let recovery_timer = GLOBAL_META_METRICS.recovery_latency.start_timer();
+
+        let new_state = tokio_retry::Retry::spawn(retry_strategy, || async {
+            if let Some(err) = &err {
+                self.context.notify_creating_job_failed(err).await;
+            };
+            let (
+                active_streaming_nodes,
+                mut control_stream_manager,
+                info,
+                subscription_info,
+                prev_epoch,
+                node_actors,
+                source_split_assignments,
+                tracker,
+                version_stats,
+            ) = self
+                .context
+                .reload_runtime_info(|| self.scheduled_barriers.pre_apply_drop_cancel())
+                .await?;
+
+            let recovery_result: MetaResult<_> = try {
+                {
                     let mutation = Mutation::Add(AddMutation {
                         // Actors built during recovery is not treated as newly added actors.
                         actor_dispatchers: Default::default(),
@@ -394,19 +386,51 @@ impl GlobalBarrierManagerContext {
                         active_streaming_nodes,
                         control_stream_manager,
                         tracker,
-                        self.hummock_manager.get_version_stats().await,
+                        version_stats,
                     )
-                };
-                if recovery_result.is_err() {
-                    GLOBAL_META_METRICS.recovery_failure_cnt.inc();
                 }
-                recovery_result
+            };
+            if recovery_result.is_err() {
+                GLOBAL_META_METRICS.recovery_failure_cnt.inc();
             }
-            .instrument(tracing::info_span!("recovery_attempt"))
+            recovery_result
         })
+        .instrument(tracing::info_span!("recovery_attempt"))
         .await
-        .expect("Retry until recovery success.")
+        .expect("Retry until recovery success.");
+
+        recovery_timer.observe_duration();
+        self.scheduled_barriers.mark_ready();
+
+        let create_mview_tracker: CreateMviewProgressTracker;
+        let state: BarrierManagerState;
+        let version_stats: HummockVersionStats;
+        (
+            state,
+            self.active_streaming_nodes,
+            self.control_stream_manager,
+            create_mview_tracker,
+            version_stats,
+        ) = new_state;
+
+        tracing::info!(
+            epoch = state.in_flight_prev_epoch().map(|epoch| epoch.value().0),
+            paused = ?state.paused_reason(),
+            "recovery success"
+        );
+
+        self.checkpoint_control =
+            CheckpointControl::new(create_mview_tracker, state, version_stats, self.env.clone());
+
+        self.env
+            .notification_manager()
+            .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
     }
+}
+
+impl GlobalBarrierManagerContext {
+    // Migration timeout.
+    const RECOVERY_FORCE_MIGRATION_TIMEOUT: Duration = Duration::from_secs(300);
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
     async fn migrate_actors(

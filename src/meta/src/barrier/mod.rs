@@ -29,6 +29,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::{bail, must_match};
+use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
@@ -41,6 +42,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
+use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
@@ -64,6 +66,7 @@ use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
     MetadataManager,
 };
+use crate::model::ActorId;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -207,6 +210,8 @@ trait GlobalBarrierManagerContextTrait: Clone + Send + Sync + 'static {
         command: &'a CommandContext,
     ) -> impl Future<Output = MetaResult<()>> + Send + 'a;
 
+    async fn notify_creating_job_failed(&self, err: &MetaError);
+
     fn finish_creating_job(
         &self,
         job: TrackingJob,
@@ -218,18 +223,20 @@ trait GlobalBarrierManagerContextTrait: Clone + Send + Sync + 'static {
         mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
     ) -> MetaResult<ControlStreamNode>;
 
-    async fn recovery(
+    async fn reload_runtime_info(
         &self,
         pre_apply_drop_cancel: impl Fn() -> bool,
-        paused_reason: Option<PausedReason>,
-        err: Option<MetaError>,
-    ) -> (
-        BarrierManagerState,
+    ) -> MetaResult<(
         ActiveStreamingWorkerNodes,
         ControlStreamManager,
+        InflightGraphInfo,
+        InflightSubscriptionInfo,
+        Option<TracedEpoch>,
+        HashMap<WorkerId, Vec<StreamActor>>,
+        HashMap<ActorId, Vec<SplitImpl>>,
         CreateMviewProgressTracker,
         HummockVersionStats,
-    );
+    )>;
 }
 
 impl GlobalBarrierManagerContextTrait for GlobalBarrierManagerContext {
@@ -240,6 +247,10 @@ impl GlobalBarrierManagerContextTrait for GlobalBarrierManagerContext {
 
     async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
         command.post_collect(self).await
+    }
+
+    async fn notify_creating_job_failed(&self, err: &MetaError) {
+        self.metadata_manager.notify_finish_failed(err).await
     }
 
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
@@ -255,20 +266,21 @@ impl GlobalBarrierManagerContextTrait for GlobalBarrierManagerContext {
             .await
     }
 
-    async fn recovery(
+    async fn reload_runtime_info(
         &self,
         pre_apply_drop_cancel: impl Fn() -> bool,
-        paused_reason: Option<PausedReason>,
-        err: Option<MetaError>,
-    ) -> (
-        BarrierManagerState,
+    ) -> MetaResult<(
         ActiveStreamingWorkerNodes,
         ControlStreamManager,
+        InflightGraphInfo,
+        InflightSubscriptionInfo,
+        Option<TracedEpoch>,
+        HashMap<WorkerId, Vec<StreamActor>>,
+        HashMap<ActorId, Vec<SplitImpl>>,
         CreateMviewProgressTracker,
         HummockVersionStats,
-    ) {
-        self.recovery_inner(pre_apply_drop_cancel, paused_reason, err)
-            .await
+    )> {
+        self.reload_runtime_info_impl(pre_apply_drop_cancel).await
     }
 }
 
