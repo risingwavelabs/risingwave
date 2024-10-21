@@ -44,9 +44,8 @@ use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use super::{Command, GlobalBarrierManagerContext, InflightSubscriptionInfo};
-use crate::barrier::info::InflightGraphInfo;
-use crate::barrier::state::BarrierInfo;
+use super::{Command, GlobalBarrierWorkerContext, InflightSubscriptionInfo};
+use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -57,12 +56,12 @@ struct ControlStreamNode {
 }
 
 pub(super) struct ControlStreamManager {
-    context: GlobalBarrierManagerContext,
+    context: GlobalBarrierWorkerContext,
     nodes: HashMap<WorkerId, ControlStreamNode>,
 }
 
 impl ControlStreamManager {
-    pub(super) fn new(context: GlobalBarrierManagerContext) -> Self {
+    pub(super) fn new(context: GlobalBarrierWorkerContext) -> Self {
         Self {
             context,
             nodes: Default::default(),
@@ -436,7 +435,7 @@ impl ControlStreamManager {
     }
 }
 
-impl GlobalBarrierManagerContext {
+impl GlobalBarrierWorkerContext {
     async fn new_control_stream_node(
         &self,
         node: WorkerNode,

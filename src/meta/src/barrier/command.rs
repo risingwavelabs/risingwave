@@ -41,8 +41,7 @@ use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightGraphInfo};
-use crate::barrier::state::BarrierInfo;
-use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
+use crate::barrier::{BarrierInfo, GlobalBarrierWorkerContext, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::{DdlType, StreamingJob};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
@@ -206,7 +205,7 @@ pub enum CreateStreamingJobType {
     SnapshotBackfill(SnapshotBackfillInfo),
 }
 
-/// [`Command`] is the input of [`crate::barrier::GlobalBarrierManager`]. For different commands,
+/// [`Command`] is the input of [`crate::barrier::GlobalBarrierWorker`]. For different commands,
 /// it will build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
 #[derive(Debug, Clone, strum::Display)]
@@ -927,7 +926,7 @@ impl Command {
 impl CommandContext {
     pub async fn wait_epoch_commit(
         &self,
-        barrier_manager_context: &GlobalBarrierManagerContext,
+        barrier_manager_context: &GlobalBarrierWorkerContext,
     ) -> MetaResult<()> {
         let table_id = self.table_ids_to_commit.iter().next().cloned();
         // try wait epoch on an existing random table id
@@ -957,7 +956,7 @@ impl CommandContext {
     /// the given command.
     pub async fn post_collect(
         &self,
-        barrier_manager_context: &GlobalBarrierManagerContext,
+        barrier_manager_context: &GlobalBarrierWorkerContext,
     ) -> MetaResult<()> {
         match &self.command {
             Command::Plain(_) => {}

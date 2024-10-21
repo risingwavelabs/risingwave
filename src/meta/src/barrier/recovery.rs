@@ -31,19 +31,19 @@ use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, error, info, warn, Instrument};
 
-use super::{CheckpointControl, TracedEpoch};
-use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
+use super::{CheckpointControl, GlobalBarrierWorker, GlobalBarrierWorkerContext, TracedEpoch};
+use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightSubscriptionInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
-use crate::barrier::state::{BarrierInfo, BarrierManagerState};
-use crate::barrier::{BarrierKind, GlobalBarrierManager, GlobalBarrierManagerContext};
+use crate::barrier::state::BarrierWorkerState;
+use crate::barrier::BarrierKind;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::{model, MetaError, MetaResult};
 
-impl GlobalBarrierManager {
+impl GlobalBarrierWorker {
     // Migration timeout.
     const RECOVERY_FORCE_MIGRATION_TIMEOUT: Duration = Duration::from_secs(300);
     // Retry base interval in milliseconds.
@@ -60,7 +60,7 @@ impl GlobalBarrierManager {
     }
 }
 
-impl GlobalBarrierManagerContext {
+impl GlobalBarrierWorkerContext {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
     async fn clean_dirty_streaming_jobs(&self) -> MetaResult<()> {
         self.metadata_manager
@@ -123,7 +123,7 @@ impl GlobalBarrierManagerContext {
     }
 }
 
-impl GlobalBarrierManager {
+impl GlobalBarrierWorker {
     /// Recovery the whole cluster from the latest epoch.
     ///
     /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
@@ -347,7 +347,7 @@ impl GlobalBarrierManager {
                     };
 
                     (
-                        BarrierManagerState::new(new_epoch, info, subscription_info, paused_reason),
+                        BarrierWorkerState::new(new_epoch, info, subscription_info, paused_reason),
                         active_streaming_nodes,
                         control_stream_manager,
                         tracker,
@@ -368,7 +368,7 @@ impl GlobalBarrierManager {
 
         let create_mview_tracker: CreateMviewProgressTracker;
 
-        let state: BarrierManagerState;
+        let state: BarrierWorkerState;
         (
             state,
             self.active_streaming_nodes,
@@ -391,7 +391,7 @@ impl GlobalBarrierManager {
     }
 }
 
-impl GlobalBarrierManagerContext {
+impl GlobalBarrierWorkerContext {
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
     async fn migrate_actors(
         &self,
@@ -450,7 +450,7 @@ impl GlobalBarrierManagerContext {
             let mut available_size = new_worker_slots.len();
 
             if available_size < to_migration_size
-                && start.elapsed() > GlobalBarrierManager::RECOVERY_FORCE_MIGRATION_TIMEOUT
+                && start.elapsed() > GlobalBarrierWorker::RECOVERY_FORCE_MIGRATION_TIMEOUT
             {
                 let mut factor = 2;
 
@@ -510,7 +510,7 @@ impl GlobalBarrierManagerContext {
             let changed = active_nodes
                 .wait_changed(
                     Duration::from_millis(5000),
-                    GlobalBarrierManager::RECOVERY_FORCE_MIGRATION_TIMEOUT,
+                    GlobalBarrierWorker::RECOVERY_FORCE_MIGRATION_TIMEOUT,
                     |active_nodes| {
                         let current_nodes = active_nodes
                             .current()
@@ -754,7 +754,7 @@ mod tests {
         // total 10, assigned custom, actual 5, default full -> fixed(5)
         assert_eq!(
             TableParallelism::Fixed(5),
-            GlobalBarrierManagerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
                 Some(5),
@@ -765,7 +765,7 @@ mod tests {
         // total 10, assigned custom, actual 10, default full -> adaptive
         assert_eq!(
             TableParallelism::Adaptive,
-            GlobalBarrierManagerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
                 Some(10),
@@ -776,7 +776,7 @@ mod tests {
         // total 10, assigned custom, actual 11, default full -> adaptive
         assert_eq!(
             TableParallelism::Adaptive,
-            GlobalBarrierManagerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
                 Some(11),
@@ -787,7 +787,7 @@ mod tests {
         // total 10, assigned fixed(5), actual _, default full -> fixed(5)
         assert_eq!(
             TableParallelism::Adaptive,
-            GlobalBarrierManagerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
                 None,
@@ -798,7 +798,7 @@ mod tests {
         // total 10, assigned adaptive, actual _, default full -> adaptive
         assert_eq!(
             TableParallelism::Adaptive,
-            GlobalBarrierManagerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Adaptive,
                 None,
@@ -809,7 +809,7 @@ mod tests {
         // total 10, assigned adaptive, actual 5, default 5 -> fixed(5)
         assert_eq!(
             TableParallelism::Fixed(5),
-            GlobalBarrierManagerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Adaptive,
                 Some(5),
@@ -820,7 +820,7 @@ mod tests {
         // total 10, assigned adaptive, actual 6, default 5 -> adaptive
         assert_eq!(
             TableParallelism::Adaptive,
-            GlobalBarrierManagerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Adaptive,
                 Some(6),
