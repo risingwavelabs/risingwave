@@ -23,7 +23,7 @@ use risingwave_connector::source::SplitId;
 use risingwave_pb::catalog::PbTable;
 use risingwave_storage::StateStore;
 
-use super::source_backfill_executor::{BackfillStateWithCnt, BackfillStates};
+use super::source_backfill_executor::{BackfillStateWithProgress, BackfillStates};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
@@ -56,7 +56,7 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
     }
 
     /// XXX: we might get stale data for other actors' writes, but it's fine?
-    pub async fn scan(&self) -> StreamExecutorResult<Vec<BackfillStateWithCnt>> {
+    pub async fn scan(&self) -> StreamExecutorResult<Vec<BackfillStateWithProgress>> {
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
 
         let state_table_iter = self
@@ -70,7 +70,7 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
             let row = item?.into_owned_row();
             let state = match row.datum_at(1) {
                 Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                    BackfillStateWithCnt::restore_from_json(jsonb_ref.to_owned_scalar())?
+                    BackfillStateWithProgress::restore_from_json(jsonb_ref.to_owned_scalar())?
                 }
                 _ => unreachable!(),
             };
@@ -80,7 +80,11 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
         Ok(ret)
     }
 
-    async fn set(&mut self, key: SplitId, state: BackfillStateWithCnt) -> StreamExecutorResult<()> {
+    async fn set(
+        &mut self,
+        key: SplitId,
+        state: BackfillStateWithProgress,
+    ) -> StreamExecutorResult<()> {
         let row = [
             Some(Self::string_to_scalar(key.as_ref())),
             Some(ScalarImpl::Jsonb(state.encode_to_json())),
@@ -126,13 +130,13 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
     pub async fn try_recover_from_state_store(
         &mut self,
         split_id: &SplitId,
-    ) -> StreamExecutorResult<Option<BackfillStateWithCnt>> {
+    ) -> StreamExecutorResult<Option<BackfillStateWithProgress>> {
         Ok(self
             .get(split_id)
             .await?
             .map(|row| match row.datum_at(1) {
                 Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                    BackfillStateWithCnt::restore_from_json(jsonb_ref.to_owned_scalar())
+                    BackfillStateWithProgress::restore_from_json(jsonb_ref.to_owned_scalar())
                 }
                 _ => unreachable!(),
             })

@@ -54,15 +54,21 @@ pub enum BackfillState {
     SourceCachingUp(String),
     Finished,
 }
-pub type BackfillStates = HashMap<SplitId, BackfillStateWithCnt>;
+pub type BackfillStates = HashMap<SplitId, BackfillStateWithProgress>;
 
+/// Only `state` field is the real state for fail-over.
+/// Other fields are for observability (but we still need to persist them).
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct BackfillStateWithCnt {
+pub struct BackfillStateWithProgress {
     pub state: BackfillState,
     pub num_consumed_rows: u64,
+    /// The latest offset from upstream (inclusive). After we reach this offset, we can stop backfilling.
+    /// This is initialized with the latest available offset in the connector (if the connector provides the ability to fetch it)
+    /// so that we can finish backfilling even when upstream doesn't emit any data.
+    pub target_offset: Option<String>,
 }
 
-impl BackfillStateWithCnt {
+impl BackfillStateWithProgress {
     pub fn encode_to_json(self) -> JsonbVal {
         serde_json::to_value(self).unwrap().into()
     }
@@ -114,10 +120,6 @@ struct BackfillStage {
     ///
     /// Note: the offsets are not updated. Should use `state`'s offset to update before using it (`get_latest_unfinished_splits`).
     splits: Vec<SplitImpl>,
-    /// The latest offset from upstream (inclusive). After we reach this offset, we can stop backfilling.
-    /// This is initialized with the latest available offset in the connector (if the connector provides the ability to fetch it)
-    /// so that we can finish backfilling even when upstream doesn't emit any data.
-    target_offsets: HashMap<SplitId, Option<String>>,
 }
 
 impl BackfillStage {
@@ -131,10 +133,6 @@ impl BackfillStage {
                 self.splits.iter().map(|split| split.id().clone()).collect();
             assert_eq!(
                 self.states.keys().cloned().collect::<HashSet<_>>(),
-                all_splits
-            );
-            assert_eq!(
-                self.target_offsets.keys().cloned().collect::<HashSet<_>>(),
                 all_splits
             );
         }
@@ -161,8 +159,9 @@ impl BackfillStage {
     /// Updates backfill states and `target_offsets` and returns whether the row from upstream `SourceExecutor` is visible.
     fn handle_upstream_row(&mut self, split_id: &str, offset: &str) -> bool {
         let mut vis = false;
-        let state = &mut self.states.get_mut(split_id).unwrap().state;
-        match state {
+        let state = self.states.get_mut(split_id).unwrap();
+        let state_inner = &mut state.state;
+        match state_inner {
             BackfillState::Backfilling(None) => {
                 // backfilling for this split is not started yet. Ignore this row
             }
@@ -173,12 +172,12 @@ impl BackfillStage {
                     }
                     Ordering::Equal => {
                         // backfilling for this split is finished just right.
-                        *state = BackfillState::Finished;
+                        *state_inner = BackfillState::Finished;
                     }
                     Ordering::Greater => {
                         // backfilling for this split produced more data than current source's progress.
                         // We should stop backfilling, and filter out rows from upstream with offset <= backfill_offset.
-                        *state = BackfillState::SourceCachingUp(backfill_offset.clone());
+                        *state_inner = BackfillState::SourceCachingUp(backfill_offset.clone());
                     }
                 }
             }
@@ -188,11 +187,11 @@ impl BackfillStage {
                         // Source caught up, but doesn't contain the last backfilled row.
                         // This may happen e.g., if Kafka performed compaction.
                         vis = true;
-                        *state = BackfillState::Finished;
+                        *state_inner = BackfillState::Finished;
                     }
                     Ordering::Equal => {
                         // Source just caught up with backfilling.
-                        *state = BackfillState::Finished;
+                        *state_inner = BackfillState::Finished;
                     }
                     Ordering::Greater => {
                         // Source is still behind backfilling.
@@ -204,11 +203,11 @@ impl BackfillStage {
                 // This split's backfilling is finished, we are waiting for other splits
             }
         }
-        if matches!(state, BackfillState::Backfilling(_)) {
-            *self.target_offsets.get_mut(split_id).unwrap() = Some(offset.to_string());
+        if matches!(state_inner, BackfillState::Backfilling(_)) {
+            state.target_offset = Some(offset.to_string());
         }
         if vis {
-            debug_assert_eq!(*state, BackfillState::Finished);
+            debug_assert_eq!(*state_inner, BackfillState::Finished);
         }
         vis
     }
@@ -217,11 +216,10 @@ impl BackfillStage {
     fn handle_backfill_row(&mut self, split_id: &str, offset: &str) -> bool {
         let state = self.states.get_mut(split_id).unwrap();
         state.num_consumed_rows += 1;
-        let state = &mut state.state;
-        match state {
+        let state_inner = &mut state.state;
+        match state_inner {
             BackfillState::Backfilling(_old_offset) => {
-                let target_offset = self.target_offsets.get(split_id).unwrap();
-                if let Some(target_offset) = target_offset
+                if let Some(target_offset) = &state.target_offset
                     && compare_kafka_offset(offset, target_offset).is_ge()
                 {
                     // Note1: If target_offset = offset, it seems we can mark the state as Finished without waiting for upstream to catch up
@@ -233,9 +231,9 @@ impl BackfillStage {
                     //
                     // Note3: if target_offset is None (e.g., when upstream doesn't emit messages at all), we will
                     // keep backfilling.
-                    *state = BackfillState::SourceCachingUp(offset.to_string());
+                    *state_inner = BackfillState::SourceCachingUp(offset.to_string());
                 } else {
-                    *state = BackfillState::Backfilling(Some(offset.to_string()));
+                    *state_inner = BackfillState::Backfilling(Some(offset.to_string()));
                 }
                 true
             }
@@ -354,18 +352,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 .backfill_state_store
                 .try_recover_from_state_store(&split_id)
                 .await?
-                .unwrap_or(BackfillStateWithCnt {
+                .unwrap_or(BackfillStateWithProgress {
                     state: BackfillState::Backfilling(None),
                     num_consumed_rows: 0,
+                    target_offset: None, // init with None
                 });
             backfill_states.insert(split_id, backfill_state);
         }
         let mut backfill_stage = BackfillStage {
-            // init with None
-            target_offsets: backfill_states
-                .keys()
-                .map(|split_id| (split_id.clone(), None))
-                .collect(),
             states: backfill_states,
             splits: owned_splits,
         };
@@ -382,15 +376,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .instrument_await("source_build_reader")
             .await?;
         for (split_id, info) in &backfill_info {
+            let state = backfill_stage.states.get_mut(split_id).unwrap();
             match info {
                 BackfillInfo::NoDataToBackfill => {
-                    backfill_stage.states.get_mut(split_id).unwrap().state =
-                        BackfillState::Finished;
+                    state.state = BackfillState::Finished;
                 }
                 BackfillInfo::HasDataToBackfill { latest_offset } => {
                     // Note: later we will override it with the offset from the source message, and it's possible to become smaller than this value.
-                    *backfill_stage.target_offsets.get_mut(split_id).unwrap() =
-                        Some(latest_offset.clone());
+                    state.target_offset = Some(latest_offset.clone());
                 }
             }
         }
@@ -841,9 +834,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         // Note that this branch is different from the initial barrier (BackfillStateInner::Backfilling(None) there).
                         target_state.insert(
                             split_id,
-                            BackfillStateWithCnt {
+                            BackfillStateWithProgress {
                                 state: BackfillState::Finished,
                                 num_consumed_rows: 0,
+                                target_offset: None,
                             },
                         );
                     }
@@ -879,17 +873,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
         stage.states = target_state;
         stage.splits = target_splits;
-        let old_target_offsets = std::mem::take(&mut stage.target_offsets);
-        stage.target_offsets = stage
-            .states
-            .keys()
-            .map(|split_id| {
-                (
-                    split_id.clone(),
-                    old_target_offsets.get(split_id).cloned().flatten(),
-                )
-            })
-            .collect();
         stage.debug_assert_consistent();
         Ok(split_changed)
     }
@@ -955,9 +938,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 }
                 states.insert(
                     split_id.clone(),
-                    backfill_state.unwrap_or(BackfillStateWithCnt {
+                    backfill_state.unwrap_or(BackfillStateWithProgress {
                         state: BackfillState::Finished,
                         num_consumed_rows: 0,
+                        target_offset: None,
                     }),
                 );
             }
@@ -995,9 +979,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         .map(|split_id| {
                             (
                                 split_id,
-                                BackfillStateWithCnt {
+                                BackfillStateWithProgress {
                                     state: BackfillState::Finished,
                                     num_consumed_rows: 0,
+                                    target_offset: None,
                                 },
                             )
                         })
