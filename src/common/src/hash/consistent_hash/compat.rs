@@ -51,6 +51,23 @@ impl VnodeCount {
         Self::set(VirtualNode::COUNT_FOR_TEST)
     }
 
+    /// Converts from protobuf representation of `maybe_vnode_count`. If the value is not set,
+    /// call `compat_is_singleton` to determine whether it should be treated as a singleton
+    /// when it comes to backward compatibility.
+    fn from_protobuf(v: Option<u32>, compat_is_singleton: impl FnOnce() -> bool) -> Self {
+        match v {
+            Some(0) => VnodeCount::Placeholder,
+            Some(v) => VnodeCount::set(v as usize),
+            None => {
+                if compat_is_singleton() {
+                    VnodeCount::CompatSingleton
+                } else {
+                    VnodeCount::CompatHash
+                }
+            }
+        }
+    }
+
     /// Converts to protobuf representation for `maybe_vnode_count`.
     pub fn to_protobuf(self) -> Option<u32> {
         // Effectively fills the compatibility cases with values.
@@ -102,46 +119,26 @@ pub trait VnodeCountCompat {
 
 impl VnodeCountCompat for risingwave_pb::catalog::Table {
     fn vnode_count_inner(&self) -> VnodeCount {
-        if let Some(vnode_count) = self.maybe_vnode_count {
-            VnodeCount::set(vnode_count)
-        } else
-        // Compatibility: derive vnode count from distribution.
-        if self.distribution_key.is_empty()
-            && self.dist_key_in_pk.is_empty()
-            && self.vnode_col_index.is_none()
-        {
-            VnodeCount::CompatSingleton
-        } else {
-            VnodeCount::CompatHash
-        }
+        VnodeCount::from_protobuf(self.maybe_vnode_count, || {
+            self.distribution_key.is_empty()
+                && self.dist_key_in_pk.is_empty()
+                && self.vnode_col_index.is_none()
+        })
     }
 }
 
 impl VnodeCountCompat for risingwave_pb::plan_common::StorageTableDesc {
     fn vnode_count_inner(&self) -> VnodeCount {
-        if let Some(vnode_count) = self.maybe_vnode_count {
-            VnodeCount::set(vnode_count)
-        } else
-        // Compatibility: derive vnode count from distribution.
-        if self.dist_key_in_pk_indices.is_empty() && self.vnode_col_idx_in_pk.is_none() {
-            VnodeCount::CompatSingleton
-        } else {
-            VnodeCount::CompatHash
-        }
+        VnodeCount::from_protobuf(self.maybe_vnode_count, || {
+            self.dist_key_in_pk_indices.is_empty() && self.vnode_col_idx_in_pk.is_none()
+        })
     }
 }
 
 impl VnodeCountCompat for risingwave_pb::meta::table_fragments::Fragment {
     fn vnode_count_inner(&self) -> VnodeCount {
-        if let Some(vnode_count) = self.maybe_vnode_count {
-            VnodeCount::set(vnode_count)
-        } else {
-            // Compatibility: derive vnode count from distribution.
-            match self.distribution_type() {
-                FragmentDistributionType::Unspecified => unreachable!(),
-                FragmentDistributionType::Single => VnodeCount::CompatSingleton,
-                FragmentDistributionType::Hash => VnodeCount::CompatHash,
-            }
-        }
+        VnodeCount::from_protobuf(self.maybe_vnode_count, || {
+            matches!(self.distribution_type(), FragmentDistributionType::Single)
+        })
     }
 }
