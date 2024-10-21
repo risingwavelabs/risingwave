@@ -183,6 +183,7 @@ impl LocalFrontend {
         res
     }
 
+    /// Creates a new session
     pub fn session_ref(&self) -> Arc<SessionImpl> {
         self.session_user_ref(
             DEFAULT_DATABASE_NAME.to_string(),
