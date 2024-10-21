@@ -66,10 +66,11 @@ use tracing::info;
 use super::utils::{check_subscription_name_duplicate, get_fragment_ids_by_jobs};
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
-    build_relation_group, check_connection_name_duplicate, check_database_name_duplicate,
-    check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
-    check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
-    ensure_user_id, extract_external_table_name_from_definition, get_referring_objects,
+    build_relation_group_for_delete, check_connection_name_duplicate,
+    check_database_name_duplicate, check_function_signature_duplicate,
+    check_relation_name_duplicate, check_schema_name_duplicate, check_secret_name_duplicate,
+    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
+    extract_external_table_name_from_definition, get_referring_objects,
     get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
     resolve_source_register_info_for_jobs, PartialObject,
 };
@@ -891,7 +892,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let relation_group = build_relation_group(
+        let relation_group = build_relation_group_for_delete(
             dirty_mview_objs
                 .into_iter()
                 .chain(dirty_mview_internal_table_objs.into_iter())
@@ -2305,7 +2306,7 @@ impl CatalogController {
 
         // notify about them.
         self.notify_users_update(user_infos).await;
-        let relation_group = build_relation_group(to_drop_objects);
+        let relation_group = build_relation_group_for_delete(to_drop_objects);
 
         let version = self
             .notify_frontend(NotificationOperation::Delete, relation_group)

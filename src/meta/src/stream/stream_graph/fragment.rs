@@ -349,6 +349,9 @@ impl StreamFragmentGraph {
     ) -> MetaResult<Self> {
         let fragment_id_gen =
             GlobalFragmentIdGen::new(env.id_gen_manager(), proto.fragments.len() as u64);
+        // Note: in SQL backend, the ids generated here are fake and will be overwritten again
+        // with `refill_internal_table_ids` later.
+        // TODO: refactor the code to remove this step.
         let table_id_gen = GlobalTableIdGen::new(env.id_gen_manager(), proto.table_ids_cnt as u64);
 
         // Create nodes.
@@ -417,8 +420,14 @@ impl StreamFragmentGraph {
         })
     }
 
-    /// Retrieve the internal tables map of the whole graph.
-    pub fn internal_tables(&self) -> BTreeMap<u32, Table> {
+    /// Retrieve the **incomplete** internal tables map of the whole graph.
+    ///
+    /// Note that some fields in the table catalogs are not filled during the current phase, e.g.,
+    /// `fragment_id`, `vnode_count`. They will be all filled after a `TableFragments` is built.
+    /// Be careful when using the returned values.
+    ///
+    /// See also [`crate::model::TableFragments::internal_tables`].
+    pub fn incomplete_internal_tables(&self) -> BTreeMap<u32, Table> {
         let mut tables = BTreeMap::new();
         for fragment in self.fragments.values() {
             for table in fragment.extract_internal_tables() {
@@ -431,6 +440,8 @@ impl StreamFragmentGraph {
         tables
     }
 
+    /// Refill the internal tables' `table_id`s according to the given map, typically obtained from
+    /// `create_internal_table_catalog`.
     pub fn refill_internal_table_ids(&mut self, table_id_map: HashMap<u32, u32>) {
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
