@@ -25,7 +25,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common_service::{MetricsManager, TracingExtractLayer};
-use risingwave_meta::barrier::GlobalBarrierManagerContext;
+use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
 use risingwave_meta::controller::IN_MEMORY_STORE;
@@ -490,7 +490,7 @@ pub async fn start_service_as_election_leader(
         env.clone(),
     ));
 
-    let (barrier_manager_context, join_handle, shutdown_rx) = GlobalBarrierManagerContext::start(
+    let (barrier_manager_context, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
         metadata_manager.clone(),

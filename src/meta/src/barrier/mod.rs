@@ -36,7 +36,7 @@ use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
-use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId, LocalSstableInfo};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -46,6 +46,7 @@ use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -150,16 +151,12 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
     }
 }
 
-pub enum BarrierManagerRequest {
+pub(crate) enum BarrierManagerRequest {
     GetDdlProgress(Sender<HashMap<u32, DdlProgress>>),
 }
 
 #[derive(Clone)]
-pub struct GlobalBarrierManagerContext {
-    status: Arc<ArcSwap<BarrierManagerStatus>>,
-
-    request_tx: mpsc::UnboundedSender<BarrierManagerRequest>,
-
+struct GlobalBarrierWorkerContext {
     metadata_manager: MetadataManager,
 
     hummock_manager: HummockManagerRef,
@@ -173,7 +170,7 @@ pub struct GlobalBarrierManagerContext {
     env: MetaSrvEnv,
 }
 
-impl GlobalBarrierManagerContext {
+impl GlobalBarrierManager {
     pub async fn start(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
@@ -182,8 +179,9 @@ impl GlobalBarrierManagerContext {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         scale_controller: ScaleControllerRef,
-    ) -> (Self, JoinHandle<()>, oneshot::Sender<()>) {
-        let barrier_manager = GlobalBarrierManager::new(
+    ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
+        let (request_tx, request_rx) = unbounded_channel();
+        let barrier_manager = GlobalBarrierWorker::new(
             scheduled_barriers,
             env,
             metadata_manager,
@@ -191,11 +189,17 @@ impl GlobalBarrierManagerContext {
             source_manager,
             sink_manager,
             scale_controller,
+            request_rx,
         )
         .await;
-        let context = barrier_manager.context.clone();
+        let manager = Self {
+            status: barrier_manager.status.clone(),
+            hummock_manager: barrier_manager.context.hummock_manager.clone(),
+            request_tx,
+            metadata_manager: barrier_manager.context.metadata_manager.clone(),
+        };
         let (join_handle, shutdown_tx) = barrier_manager.start();
-        (context, join_handle, shutdown_tx)
+        (Arc::new(manager), join_handle, shutdown_tx)
     }
 }
 
@@ -239,7 +243,7 @@ trait GlobalBarrierManagerContextTrait: Clone + Send + Sync + 'static {
     )>;
 }
 
-impl GlobalBarrierManagerContextTrait for GlobalBarrierManagerContext {
+impl GlobalBarrierManagerContextTrait for GlobalBarrierWorkerContext {
     async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> MetaResult<HummockVersionStats> {
         self.hummock_manager.commit_epoch(commit_info).await?;
         Ok(self.hummock_manager.get_version_stats().await)
@@ -284,16 +288,16 @@ impl GlobalBarrierManagerContextTrait for GlobalBarrierManagerContext {
     }
 }
 
-/// [`crate::barrier::GlobalBarrierManager`] sends barriers to all registered compute nodes and
+/// [`crate::barrier::GlobalBarrierWorker`] sends barriers to all registered compute nodes and
 /// collect them, with monotonic increasing epoch numbers. On compute nodes, `LocalBarrierManager`
 /// in `risingwave_stream` crate will serve these requests and dispatch them to source actors.
 ///
 /// Configuration change in our system is achieved by the mutation in the barrier. Thus,
-/// [`crate::barrier::GlobalBarrierManager`] provides a set of interfaces like a state machine,
+/// [`crate::barrier::GlobalBarrierWorker`] provides a set of interfaces like a state machine,
 /// accepting [`Command`] that carries info to build `Mutation`. To keep the consistency between
 /// barrier manager and meta store, some actions like "drop materialized view" or "create mv on mv"
 /// must be done in barrier manager transactional using [`Command`].
-struct GlobalBarrierManager<C> {
+struct GlobalBarrierWorker<C> {
     /// Enable recovery or not when failover.
     enable_recovery: bool,
 
@@ -601,8 +605,8 @@ enum CompletingTask {
     Err(MetaError),
 }
 
-impl GlobalBarrierManager<GlobalBarrierManagerContext> {
-    /// Create a new [`crate::barrier::GlobalBarrierManager`].
+impl GlobalBarrierWorker<GlobalBarrierWorkerContext> {
+    /// Create a new [`crate::barrier::GlobalBarrierWorker`].
     pub async fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
@@ -611,6 +615,7 @@ impl GlobalBarrierManager<GlobalBarrierManagerContext> {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         scale_controller: ScaleControllerRef,
+        request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
@@ -627,13 +632,9 @@ impl GlobalBarrierManager<GlobalBarrierManagerContext> {
 
         let tracker = CreateMviewProgressTracker::default();
 
-        let (request_tx, request_rx) = mpsc::unbounded_channel();
-
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
 
-        let context = GlobalBarrierManagerContext {
-            status: status.clone(),
-            request_tx,
+        let context = GlobalBarrierWorkerContext {
             metadata_manager,
             hummock_manager,
             source_manager,
@@ -753,7 +754,7 @@ impl GlobalBarrierManager<GlobalBarrierManagerContext> {
     }
 }
 
-impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierManager<C> {
+impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
     async fn run_inner(mut self, mut shutdown_rx: Receiver<()>) {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -1020,7 +1021,7 @@ impl CheckpointControl {
     }
 }
 
-impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierManager<C> {
+impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
     /// Set barrier manager status.
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
@@ -1097,7 +1098,7 @@ pub struct CompleteBarrierTask {
     creating_job_epochs: Vec<(TableId, u64)>,
 }
 
-impl GlobalBarrierManagerContext {
+impl GlobalBarrierWorkerContext {
     fn collect_creating_job_commit_epoch_info(
         commit_info: &mut CommitEpochInfo,
         epoch: u64,
@@ -1377,7 +1378,7 @@ impl CheckpointControl {
         if !creating_jobs_task.is_empty() {
             let task = task.get_or_insert_default();
             for (table_id, epoch, resps, is_first_time) in creating_jobs_task {
-                GlobalBarrierManagerContext::collect_creating_job_commit_epoch_info(
+                GlobalBarrierWorkerContext::collect_creating_job_commit_epoch_info(
                     &mut task.commit_info,
                     epoch,
                     resps,
@@ -1476,7 +1477,7 @@ impl CheckpointControl {
     }
 }
 
-impl GlobalBarrierManagerContext {
+impl GlobalBarrierManager {
     /// Check the status of barrier manager, return error if it is not `Running`.
     pub fn check_status_running(&self) -> MetaResult<()> {
         let status = self.status.load();
@@ -1498,7 +1499,9 @@ impl GlobalBarrierManagerContext {
     pub fn get_recovery_status(&self) -> PbRecoveryStatus {
         (&**self.status.load()).into()
     }
+}
 
+impl GlobalBarrierWorkerContext {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
@@ -1517,7 +1520,18 @@ impl GlobalBarrierManagerContext {
                 .collect(),
         ))
     }
+}
 
+pub struct GlobalBarrierManager {
+    status: Arc<ArcSwap<BarrierManagerStatus>>,
+    hummock_manager: HummockManagerRef,
+    request_tx: mpsc::UnboundedSender<BarrierManagerRequest>,
+    metadata_manager: MetadataManager,
+}
+
+pub type BarrierManagerRef = Arc<GlobalBarrierManager>;
+
+impl GlobalBarrierManager {
     /// Serving `SHOW JOBS / SELECT * FROM rw_ddl_progress`
     pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
         let mut ddl_progress = {
@@ -1548,12 +1562,10 @@ impl GlobalBarrierManagerContext {
         Ok(ddl_progress.into_values().collect())
     }
 
-    pub fn hummock_manager(&self) -> &HummockManagerRef {
-        &self.hummock_manager
+    pub async fn get_hummock_version_id(&self) -> HummockVersionId {
+        self.hummock_manager.get_version_id().await
     }
 }
-
-pub type BarrierManagerRef = GlobalBarrierManagerContext;
 
 #[expect(clippy::type_complexity)]
 fn collect_resp_info(

@@ -40,7 +40,7 @@ pub struct InflightSubscriptionInfo {
 }
 
 /// [`InflightGraphInfo`] resolves the actor info read from meta store for
-/// [`crate::barrier::GlobalBarrierManager`].
+/// [`crate::barrier::GlobalBarrierWorker`].
 #[derive(Default, Clone, Debug)]
 pub struct InflightGraphInfo {
     /// `node_id` => actors

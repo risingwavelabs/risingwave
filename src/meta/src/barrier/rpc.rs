@@ -44,7 +44,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::{
-    Command, GlobalBarrierManager, GlobalBarrierManagerContext, GlobalBarrierManagerContextTrait,
+    Command, GlobalBarrierManagerContextTrait, GlobalBarrierWorker, GlobalBarrierWorkerContext,
     InflightSubscriptionInfo,
 };
 use crate::barrier::info::InflightGraphInfo;
@@ -54,7 +54,7 @@ use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub struct ControlStreamNode {
+pub(super) struct ControlStreamNode {
     worker: WorkerNode,
     handle: StreamingControlHandle,
 }
@@ -424,7 +424,7 @@ impl ControlStreamManager {
     }
 }
 
-impl GlobalBarrierManagerContext {
+impl GlobalBarrierWorkerContext {
     pub(super) async fn new_control_stream_node_inner(
         &self,
         node: WorkerNode,
@@ -448,7 +448,7 @@ impl GlobalBarrierManagerContext {
     }
 }
 
-impl<C> GlobalBarrierManager<C> {
+impl<C> GlobalBarrierWorker<C> {
     /// Send barrier-complete-rpc and wait for responses from all CNs
     pub(super) fn report_collect_failure(&self, barrier_info: &BarrierInfo, error: &MetaError) {
         // Record failure in event log.
