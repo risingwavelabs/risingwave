@@ -119,7 +119,6 @@ WITH
   s3.region_name = 'us-east-1',
   s3.bucket_name = 'test',
   s3.path = '',
-  s3.file_type = 'parquet',
   type = 'append-only',
   force_append_only='true'
 ) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');
