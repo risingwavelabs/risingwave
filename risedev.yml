@@ -874,6 +874,7 @@ profile:
         port: 5432
         address: db
         user: postgres
+        password: postgres
         user-managed: true
 
   ci-redis:
