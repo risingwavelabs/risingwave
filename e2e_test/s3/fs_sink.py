@@ -139,7 +139,6 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         s3.credentials.secret = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_parquet_sink/',
-        s3.file_type = 'parquet',
         type = 'append-only',
         force_append_only='true'
     ) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');''')
@@ -208,7 +207,6 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         snowflake.aws_secret_access_key = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_json_sink/',
-        s3.file_type = 'json',
         type = 'append-only',
         force_append_only='true'
     ) FORMAT PLAIN ENCODE JSON(force_append_only='true');''')
