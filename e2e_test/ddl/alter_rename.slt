@@ -281,6 +281,35 @@ DROP TABLE t2;
 statement ok
 DROP TABLE t_as_1;
 
+# BEGIN uppercase
+
+statement ok
+CREATE TABLE "aBc" (f1 int);
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS SELECT "aBc".f1 FROM "aBc";
+
+statement ok
+ALTER TABLE "aBc" RENAME TO "dEf";
+
+query TT
+SHOW CREATE TABLE "dEf";
+----
+public.dEf CREATE TABLE "dEf" (f1 INT)
+
+query TT
+SHOW CREATE MATERIALIZED VIEW mv;
+----
+public.mv CREATE MATERIALIZED VIEW mv AS SELECT "aBc".f1 FROM "dEf" AS "aBc"
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP TABLE "dEf";
+
+# END uppercase
+
 # BEGIN references in changelog
 
 statement ok
