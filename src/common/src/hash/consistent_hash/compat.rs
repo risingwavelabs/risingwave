@@ -14,6 +14,8 @@
 
 use std::num::NonZeroUsize;
 
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
+
 use super::vnode::VirtualNode;
 
 /// The different cases of `maybe_vnode_count` field in the protobuf message.
@@ -24,8 +26,12 @@ pub enum VnodeCount {
     Placeholder,
     /// The field is set to a specific value.
     Set(NonZeroUsize),
-    /// The field is unset because it's persisted in an older version.
-    Compat,
+    /// The field is unset because the table/fragment is persisted as hash-distributed
+    /// in an older version.
+    CompatHash,
+    /// The field is unset because the table/fragment is persisted as singleton
+    /// in an older version.
+    CompatSingleton,
 }
 
 impl VnodeCount {
@@ -47,20 +53,9 @@ impl VnodeCount {
 
     /// Converts to protobuf representation for `maybe_vnode_count`.
     pub fn to_protobuf(self) -> Option<u32> {
-        match self {
-            VnodeCount::Placeholder => Some(0),
-            VnodeCount::Set(v) => Some(v.get() as _),
-            VnodeCount::Compat => None,
-        }
-    }
-
-    /// Converts from protobuf representation of `maybe_vnode_count`.
-    pub fn from_protobuf(v: Option<u32>) -> Self {
-        match v {
-            Some(0) => VnodeCount::Placeholder,
-            Some(v) => VnodeCount::set(v as usize),
-            None => VnodeCount::Compat,
-        }
+        // Effectively fills the compatibility cases with values.
+        self.value_opt()
+            .map_or(Some(0) /* placeholder */, |v| Some(v as _))
     }
 
     /// Returns the value of the vnode count, or `None` if it's a placeholder.
@@ -68,7 +63,8 @@ impl VnodeCount {
         match self {
             VnodeCount::Placeholder => None,
             VnodeCount::Set(v) => Some(v.get()),
-            VnodeCount::Compat => Some(VirtualNode::COUNT_FOR_COMPAT),
+            VnodeCount::CompatHash => Some(VirtualNode::COUNT_FOR_COMPAT),
+            VnodeCount::CompatSingleton => Some(1),
         }
     }
 
@@ -104,60 +100,48 @@ pub trait VnodeCountCompat {
     }
 }
 
-/// Implement the trait for given types by delegating to the `maybe_vnode_count` field.
-///
-/// The reason why there's a `maybe_` prefix is that, a getter method with the same name
-/// as the field will be generated for `prost` structs. Directly naming it `vnode_count`
-/// will lead to the method `vnode_count()` returning `0` when the field is unset, which
-/// can be misleading sometimes.
-///
-/// Instead, we name the field as `maybe_vnode_count` and provide the method `vnode_count`
-/// through this trait, ensuring that backward compatibility is handled properly.
-macro_rules! impl_maybe_vnode_count_compat {
-    ($($ty:ty),* $(,)?) => {
-        $(
-            impl VnodeCountCompat for $ty {
-                fn vnode_count_inner(&self) -> VnodeCount {
-                    VnodeCount::from_protobuf(self.maybe_vnode_count)
-                }
-            }
-        )*
-    };
+impl VnodeCountCompat for risingwave_pb::catalog::Table {
+    fn vnode_count_inner(&self) -> VnodeCount {
+        if let Some(vnode_count) = self.maybe_vnode_count {
+            VnodeCount::set(vnode_count)
+        } else
+        // Compatibility: derive vnode count from distribution.
+        if self.distribution_key.is_empty()
+            && self.dist_key_in_pk.is_empty()
+            && self.vnode_col_index.is_none()
+        {
+            VnodeCount::CompatSingleton
+        } else {
+            VnodeCount::CompatHash
+        }
+    }
 }
 
-// TODO!!!!!!!!!!!!!!!!!
+impl VnodeCountCompat for risingwave_pb::plan_common::StorageTableDesc {
+    fn vnode_count_inner(&self) -> VnodeCount {
+        if let Some(vnode_count) = self.maybe_vnode_count {
+            VnodeCount::set(vnode_count)
+        } else
+        // Compatibility: derive vnode count from distribution.
+        if self.dist_key_in_pk_indices.is_empty() && self.vnode_col_idx_in_pk.is_none() {
+            VnodeCount::CompatSingleton
+        } else {
+            VnodeCount::CompatHash
+        }
+    }
+}
 
-// impl VnodeCountCompat for risingwave_pb::catalog::Table {
-//     fn vnode_count(&self) -> usize {
-//         if let Some(vnode_count) = self.maybe_vnode_count {
-//             return vnode_count as _;
-//         }
-
-//         // Compatibility: derive vnode count from distribution.
-//         if self.distribution_key.is_empty()
-//             && self.dist_key_in_pk.is_empty()
-//             && self.vnode_col_index.is_none()
-//         {
-//             // Singleton table.
-//             1
-//         } else {
-//             VirtualNode::COUNT_FOR_COMPAT
-//         }
-//     }
-// }
-
-// impl VnodeCountCompat for risingwave_pb::plan_common::StorageTableDesc {
-//     fn vnode_count(&self) -> usize {
-//         if let Some(vnode_count) = self.maybe_vnode_count {
-//             return vnode_count as _;
-//         }
-
-//         // Compatibility: derive vnode count from distribution.
-//         if self.dist_key_in_pk_indices.is_empty() && self.vnode_col_idx_in_pk.is_none() {
-//             // Singleton table.
-//             1
-//         } else {
-//             VirtualNode::COUNT_FOR_COMPAT
-//         }
-//     }
-// }
+impl VnodeCountCompat for risingwave_pb::meta::table_fragments::Fragment {
+    fn vnode_count_inner(&self) -> VnodeCount {
+        if let Some(vnode_count) = self.maybe_vnode_count {
+            VnodeCount::set(vnode_count)
+        } else {
+            // Compatibility: derive vnode count from distribution.
+            match self.distribution_type() {
+                FragmentDistributionType::Unspecified => unreachable!(),
+                FragmentDistributionType::Single => VnodeCount::CompatSingleton,
+                FragmentDistributionType::Hash => VnodeCount::CompatHash,
+            }
+        }
+    }
+}
