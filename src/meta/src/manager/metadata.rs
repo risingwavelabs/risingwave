@@ -26,7 +26,6 @@ use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode,
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
-use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
@@ -59,6 +58,7 @@ pub(crate) enum ActiveStreamingWorkerChange {
 pub struct ActiveStreamingWorkerNodes {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     rx: UnboundedReceiver<LocalNotification>,
+    #[cfg_attr(not(debug_assertions), expect(dead_code))]
     metadata_manager: MetadataManager,
 }
 
@@ -196,6 +196,7 @@ impl ActiveStreamingWorkerNodes {
         #[cfg(debug_assertions)]
         {
             use risingwave_pb::common::WorkerNode;
+            use thiserror_ext::AsReport;
             match self
                 .metadata_manager
                 .list_active_streaming_compute_nodes()
