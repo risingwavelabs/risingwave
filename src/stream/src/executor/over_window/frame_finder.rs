@@ -1204,13 +1204,13 @@ mod tests {
             let order_type = OrderType::ascending();
 
             let range_frames = [
-                &create_range_frame(
+                create_range_frame(
                     order_data_type.clone(),
                     order_type,
                     Preceding(3i64),
                     Preceding(2i64),
                 ),
-                &create_range_frame(
+                create_range_frame(
                     order_data_type.clone(),
                     order_type,
                     Preceding(1i64),
@@ -1252,7 +1252,7 @@ mod tests {
             let order_data_type = DataType::Timestamp;
             let order_type = OrderType::descending_nulls_first();
 
-            let range_frames = [&create_range_frame(
+            let range_frames = [create_range_frame(
                 order_data_type.clone(),
                 order_type,
                 Preceding(Interval::from_month_day_usec(1, 2, 3 * 1000 * 1000)),
@@ -1320,7 +1320,7 @@ mod tests {
             expected_left: Sentinelled<ScalarImpl>,
             expected_right: Sentinelled<ScalarImpl>,
         ) {
-            let frames = if matches!(order_data_type, DataType::Int32) {
+            let range_frames = if matches!(order_data_type, DataType::Int32) {
                 [create_range_frame(
                     order_data_type.clone(),
                     order_type,
@@ -1330,7 +1330,6 @@ mod tests {
             } else {
                 panic!()
             };
-            let range_frames = frames.iter().collect::<Vec<_>>();
             let logical_order_value = Some(logical_order_value);
             let cache_key_pk_len = 1;
 
