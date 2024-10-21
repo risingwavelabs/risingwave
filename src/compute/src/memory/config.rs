@@ -152,8 +152,8 @@ pub fn storage_memory_config(
         }
         c => {
             tracing::warn!(
-                "config (block_cache_capacity_mb, meta_cache_capacity_mb, shared_buffer_capacity_mb): {} should be set altogether. These configs will be ignored.",
-                c
+                "config (block_cache_capacity_mb, meta_cache_capacity_mb, shared_buffer_capacity_mb): ({}, {}, {}) should be set altogether. These configs will be ignored.",
+                c.0, c.1, c.2
             );
             (None, None, None)
         }
