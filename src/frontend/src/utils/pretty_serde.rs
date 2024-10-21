@@ -22,6 +22,7 @@
 //! So we just wrap `Pretty` in a newtype and implement `Serialize` and `Deserialize` on that,
 //! since it's a good enough intermediate representation.
 
+use std::collections::BTreeMap;
 use pretty_xmlish::Pretty;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -45,7 +46,7 @@ impl<'a> Serialize for PrettySerde<'a> {
                         .fields
                         .iter()
                         .map(|(k, v)| (k.as_ref(), PrettySerde(v.clone())))
-                        .collect::<Vec<_>>(),
+                        .collect::<BTreeMap<_, _>>(),
                 )?;
                 state.serialize_field(
                     "children",
@@ -79,7 +80,9 @@ impl<'a> Serialize for PrettySerde<'a> {
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
+
     use expect_test::{expect, Expect};
+
     use super::*;
 
     fn check(actual: impl Debug, expect: Expect) {
