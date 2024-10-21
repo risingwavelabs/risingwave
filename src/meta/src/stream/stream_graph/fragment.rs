@@ -24,6 +24,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{
     generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM,
 };
+use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
@@ -1115,7 +1116,7 @@ impl CompleteStreamFragmentGraph {
             actors,
             state_table_ids,
             upstream_fragment_ids,
-            maybe_vnode_count: Some(vnode_count as _),
+            maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
         }
     }
 
