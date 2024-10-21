@@ -58,28 +58,24 @@ pub(crate) enum ActiveStreamingWorkerChange {
 pub struct ActiveStreamingWorkerNodes {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     rx: UnboundedReceiver<LocalNotification>,
-    #[cfg_attr(not(debug_assertions), expect(dead_code))]
-    metadata_manager: MetadataManager,
 }
 
 impl ActiveStreamingWorkerNodes {
-    pub(crate) fn uninitialized(metadata_manager: MetadataManager) -> Self {
+    pub(crate) fn uninitialized() -> Self {
         Self {
             worker_nodes: Default::default(),
             rx: unbounded_channel().1,
-            metadata_manager,
         }
     }
 
     /// Return an uninitialized one as a placeholder for future initialized
-    pub(crate) async fn new_snapshot(metadata_manager: MetadataManager) -> MetaResult<Self> {
-        let (nodes, rx) = metadata_manager
+    pub(crate) async fn new_snapshot(meta_manager: MetadataManager) -> MetaResult<Self> {
+        let (nodes, rx) = meta_manager
             .subscribe_active_streaming_compute_nodes()
             .await?;
         Ok(Self {
             worker_nodes: nodes.into_iter().map(|node| (node.id as _, node)).collect(),
             rx,
-            metadata_manager,
         })
     }
 
@@ -192,51 +188,6 @@ impl ActiveStreamingWorkerNodes {
                 }
             }
         };
-
-        #[cfg(debug_assertions)]
-        {
-            use risingwave_pb::common::WorkerNode;
-            use thiserror_ext::AsReport;
-            match self
-                .metadata_manager
-                .list_active_streaming_compute_nodes()
-                .await
-            {
-                Ok(worker_nodes) => {
-                    let ignore_irrelevant_info = |node: &WorkerNode| {
-                        (
-                            node.id,
-                            WorkerNode {
-                                id: node.id,
-                                r#type: node.r#type,
-                                host: node.host.clone(),
-                                parallelism: node.parallelism,
-                                property: node.property.clone(),
-                                resource: node.resource.clone(),
-                                ..Default::default()
-                            },
-                        )
-                    };
-                    let worker_nodes: HashMap<_, _> =
-                        worker_nodes.iter().map(ignore_irrelevant_info).collect();
-                    let curr_worker_nodes: HashMap<_, _> = self
-                        .current()
-                        .values()
-                        .map(ignore_irrelevant_info)
-                        .collect();
-                    if worker_nodes != curr_worker_nodes {
-                        warn!(
-                            ?worker_nodes,
-                            ?curr_worker_nodes,
-                            "different to global snapshot"
-                        );
-                    }
-                }
-                Err(e) => {
-                    warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
-                }
-            }
-        }
 
         ret
     }

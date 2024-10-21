@@ -652,8 +652,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContext> {
             None,
         );
 
-        let active_streaming_nodes =
-            ActiveStreamingWorkerNodes::uninitialized(metadata_manager.clone());
+        let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
 
         let tracker = CreateMviewProgressTracker::default();
 
@@ -821,6 +820,52 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
                 }
 
                 changed_worker = self.active_streaming_nodes.changed() => {
+                    if cfg!(debug_assertions)
+                        && let Some(context) = (&self.context as &dyn std::any::Any).downcast_ref::<GlobalBarrierWorkerContext>() {
+                        info!("downcast to GlobalBarrierWorkerContext success");
+                        use risingwave_pb::common::WorkerNode;
+                        match context
+                            .metadata_manager
+                            .list_active_streaming_compute_nodes()
+                            .await
+                        {
+                            Ok(worker_nodes) => {
+                                let ignore_irrelevant_info = |node: &WorkerNode| {
+                                    (
+                                        node.id,
+                                        WorkerNode {
+                                            id: node.id,
+                                            r#type: node.r#type,
+                                            host: node.host.clone(),
+                                            parallelism: node.parallelism,
+                                            property: node.property.clone(),
+                                            resource: node.resource.clone(),
+                                            ..Default::default()
+                                        },
+                                    )
+                                };
+                                let worker_nodes: HashMap<_, _> =
+                                    worker_nodes.iter().map(ignore_irrelevant_info).collect();
+                                let curr_worker_nodes: HashMap<_, _> = self
+                                    .active_streaming_nodes
+                                    .current()
+                                    .values()
+                                    .map(ignore_irrelevant_info)
+                                    .collect();
+                                if worker_nodes != curr_worker_nodes {
+                                    warn!(
+                                        ?worker_nodes,
+                                        ?curr_worker_nodes,
+                                        "different to global snapshot"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
+                            }
+                        }
+                    }
+
                     info!(?changed_worker, "worker changed");
 
                     self.checkpoint_control.state.inflight_graph_info
