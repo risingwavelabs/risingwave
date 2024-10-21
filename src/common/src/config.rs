@@ -1080,8 +1080,7 @@ pub struct StreamingDeveloperConfig {
     /// Enable arrangement backfill
     /// If false, the arrangement backfill will be disabled,
     /// even if session variable set.
-    /// If true, it will be enabled by default, but session variable
-    /// can override it.
+    /// If true, it's decided by session variable `streaming_use_arrangement_backfill` (default true)
     pub enable_arrangement_backfill: bool,
 
     #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
@@ -1101,6 +1100,13 @@ pub struct StreamingDeveloperConfig {
     /// A flag to allow disabling the auto schema change handling
     #[serde(default = "default::developer::stream_enable_auto_schema_change")]
     pub enable_auto_schema_change: bool,
+
+    #[serde(default = "default::developer::enable_shared_source")]
+    /// Enable shared source
+    /// If false, the shared source will be disabled,
+    /// even if session variable set.
+    /// If true, it's decided by session variable `streaming_use_shared_source` (default true)
+    pub enable_shared_source: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2025,6 +2031,10 @@ pub mod default {
         }
 
         pub fn stream_enable_arrangement_backfill() -> bool {
+            true
+        }
+
+        pub fn enable_shared_source() -> bool {
             true
         }
 

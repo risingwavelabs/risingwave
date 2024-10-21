@@ -30,7 +30,7 @@ hyper = { version = "0.14", features = ["tcp", "client"] }                    # 
 hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = { workspace = true }
-madsim = "0.2.30"
+madsim = "0.2.31"
 opendal = { workspace = true, features = [
     "executors-tokio",
     "services-azblob",

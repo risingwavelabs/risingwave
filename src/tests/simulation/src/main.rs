@@ -14,8 +14,6 @@
 
 #![cfg_attr(not(madsim), allow(dead_code))]
 
-use std::path::PathBuf;
-
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 
@@ -124,10 +122,6 @@ pub struct Args {
     #[clap(long)]
     run_differential_tests: bool,
 
-    /// dir to store sqlite backend data of meta node
-    #[clap(long)]
-    sqlite_data_dir: Option<PathBuf>,
-
     #[arg(short, long)]
     e2e_extended_test: bool,
 
@@ -166,7 +160,6 @@ async fn main() {
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
         meta_nodes: args.meta_nodes,
-        sqlite_data_dir: args.sqlite_data_dir,
         per_session_queries: if args.use_arrangement_backfill {
             vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_string()].into()
         } else {
