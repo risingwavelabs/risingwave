@@ -150,6 +150,48 @@ impl<T: AsRef<[u8]>> Deref for KeyedRow<T> {
     }
 }
 
+#[derive(Debug)]
+pub struct KeyedChangeLogRow<T: AsRef<[u8]>> {
+    vnode_prefixed_key: TableKey<T>,
+    row: ChangeLogRow,
+}
+
+impl<T: AsRef<[u8]>> KeyedChangeLogRow<T> {
+    pub fn new(table_key: TableKey<T>, row: ChangeLogRow) -> Self {
+        Self {
+            vnode_prefixed_key: table_key,
+            row,
+        }
+    }
+
+    pub fn into_owned_row(self) -> ChangeLogRow {
+        self.row
+    }
+    // pub fn into_owned_row(self) -> OwnedRow {
+    //     self.row
+    // }
+
+    // pub fn into_owned_row_key(self) -> (TableKey<T>, OwnedRow) {
+    //     (self.vnode_prefixed_key, self.row)
+    // }
+
+    // pub fn vnode(&self) -> VirtualNode {
+    //     self.vnode_prefixed_key.vnode_part()
+    // }
+
+    // pub fn key(&self) -> &[u8] {
+    //     self.vnode_prefixed_key.key_part()
+    // }
+
+    // pub fn row(&self) -> &OwnedRow {
+    //     &self.row
+    // }
+
+    // pub fn into_parts(self) -> (TableKey<T>, OwnedRow) {
+    //     (self.vnode_prefixed_key, self.row)
+    // }
+}
+
 pub type ChangeLogRow = ChangeLogValue<OwnedRow>;
 
 pub fn deserialize_log_stream<'a>(

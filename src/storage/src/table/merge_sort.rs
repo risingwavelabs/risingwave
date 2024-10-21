@@ -19,17 +19,36 @@ use std::error::Error;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 
-use super::KeyedRow;
+use super::{KeyedChangeLogRow, KeyedRow};
 
-struct Node<K: AsRef<[u8]>, S> {
+pub trait NodePeek<R> {
+    fn key(&self) -> &[u8] {
+        self.key()
+    }
+    fn into_row(self) -> R;
+}
+
+impl<K: AsRef<[u8]>> NodePeek<KeyedRow<K>> for KeyedRow<K> {
+    fn into_row(self) -> KeyedRow<K> {
+        self
+    }
+}
+
+impl<K: AsRef<[u8]>> NodePeek<KeyedChangeLogRow<K>> for KeyedChangeLogRow<K> {
+    fn into_row(self) -> KeyedChangeLogRow<K> {
+        self
+    }
+}
+
+struct Node<S, R> {
     stream: S,
 
     /// The next item polled from `stream` previously. Since the `eq` and `cmp` must be synchronous
     /// functions, we need to implement peeking manually.
-    peeked: KeyedRow<K>,
+    peeked: Box<dyn NodePeek<R>>,
 }
 
-impl<K: AsRef<[u8]>, S> PartialEq for Node<K, S> {
+impl<R, S> PartialEq for Node<S, R> {
     fn eq(&self, other: &Self) -> bool {
         match self.peeked.key() == other.peeked.key() {
             true => unreachable!("primary key from different iters should be unique"),
@@ -37,39 +56,43 @@ impl<K: AsRef<[u8]>, S> PartialEq for Node<K, S> {
         }
     }
 }
-impl<K: AsRef<[u8]>, S> Eq for Node<K, S> {}
+impl<S, R> Eq for Node<S, R> {}
 
-impl<K: AsRef<[u8]>, S> PartialOrd for Node<K, S> {
+impl<S, R> PartialOrd for Node<S, R> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<K: AsRef<[u8]>, S> Ord for Node<K, S> {
+impl<S, R> Ord for Node<S, R> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // The heap is a max heap, so we need to reverse the order.
         self.peeked.key().cmp(other.peeked.key()).reverse()
     }
 }
 
-#[try_stream(ok=KeyedRow<K>, error=E)]
-pub async fn merge_sort<'a, K, E, R>(streams: Vec<R>)
+#[try_stream(ok=Box<NP>, error=E)]
+pub async fn merge_sort<'a, KO, E, NP, R>(streams: Vec<R>)
 where
-    K: AsRef<[u8]> + 'a,
+    // K: AsRef<[u8]> + 'a,
+    NP: NodePeek<KO> + 'a,
     E: Error + 'a,
-    R: Stream<Item = Result<KeyedRow<K>, E>> + 'a + Unpin,
+    R: Stream<Item = Result<NP, E>> + 'a + Unpin,
 {
     let mut heap = BinaryHeap::new();
     for mut stream in streams {
         if let Some(peeked) = stream.next().await.transpose()? {
-            heap.push(Node { stream, peeked });
+            heap.push(Node {
+                stream,
+                peeked: Box::new(peeked),
+            });
         }
     }
     while let Some(mut node) = heap.peek_mut() {
         // Note: If the `next` returns `Err`, we'll fail to yield the previous item.
         yield match node.stream.next().await.transpose()? {
             // There still remains data in the stream, take and update the peeked value.
-            Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked),
+            Some(new_peeked) => std::mem::replace(&mut node.peeked, Box::new(new_peeked)),
             // This stream is exhausted, remove it from the heap.
             None => PeekMut::pop(node).peeked,
         };
