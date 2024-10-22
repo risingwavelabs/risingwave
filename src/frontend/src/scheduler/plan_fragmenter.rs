@@ -1235,7 +1235,8 @@ fn derive_partitions(
         assert!(
             table_desc.vnode_count == 1,
             "fragment vnode count {} does not match table vnode count {}",
-            vnode_mapping.len(), table_desc.vnode_count,
+            vnode_mapping.len(),
+            table_desc.vnode_count,
         );
         &WorkerSlotMapping::new_single(vnode_mapping.iter().next().unwrap())
     } else {
