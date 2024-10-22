@@ -82,11 +82,11 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
                 internal_rpc_host_addr: p.internal_rpc_host_addr.clone().unwrap_or_default(),
+                node_label: p.label.clone(),
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: info.2.resource,
             started_at: info.2.started_at,
-            node_label: "".to_string(),
         }
     }
 }
@@ -452,7 +452,6 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
             total_cpu_cores: total_cpu_available() as _,
         }),
         started_at,
-        node_label: "".to_string(),
     }
 }
 
@@ -685,6 +684,7 @@ impl ClusterControllerInner {
                     is_serving: Set(add_property.is_serving),
                     is_unschedulable: Set(add_property.is_unschedulable),
                     internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
+                    label: Set(None),
                 };
                 WorkerProperty::insert(worker_property).exec(&txn).await?;
                 txn.commit().await?;
@@ -720,6 +720,11 @@ impl ClusterControllerInner {
                 is_serving: Set(add_property.is_serving),
                 is_unschedulable: Set(add_property.is_unschedulable),
                 internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
+                label: if r#type == PbWorkerType::ComputeNode {
+                    Set(add_property.label.clone())
+                } else {
+                    Set(None)
+                },
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }

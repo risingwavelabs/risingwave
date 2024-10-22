@@ -129,6 +129,7 @@ pub async fn compute_node_serve(
             is_serving: opts.role.for_serving(),
             is_unschedulable: false,
             internal_rpc_host_addr: "".to_string(),
+            label: Some(opts.node_label.clone()),
         },
         &config.meta,
     )
