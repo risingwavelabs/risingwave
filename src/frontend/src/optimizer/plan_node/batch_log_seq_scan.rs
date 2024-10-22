@@ -88,6 +88,9 @@ impl Distill for BatchLogSeqScan {
             });
             vec.push(("distribution", dist));
         }
+        vec.push(("old_epoch", Pretty::from(self.core.old_epoch.to_string())));
+        vec.push(("new_epoch", Pretty::from(self.core.new_epoch.to_string())));
+        vec.push(("version_id", Pretty::from(self.core.version_id.to_string())));
 
         childless_record("BatchLogSeqScan", vec)
     }

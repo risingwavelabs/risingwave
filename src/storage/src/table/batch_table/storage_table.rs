@@ -51,7 +51,7 @@ use crate::store::{
     PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter, StateStoreIterExt,
     TryWaitEpochOptions,
 };
-use crate::table::merge_sort::{merge_sort, NodePeek};
+use crate::table::merge_sort::merge_sort;
 use crate::table::{ChangeLogRow, KeyedChangeLogRow, KeyedRow, TableDistribution, TableIter};
 use crate::StateStore;
 
@@ -541,8 +541,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     .flatten_unordered(1024)
             }
             // Merge all iterators if to preserve order.
-            _ => merge_sort(iterators.into_iter().map(Box::pin).collect())
-                .map(|row| row.map(|row| row.into_row())),
+            _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
         };
 
         Ok(iter)
@@ -756,8 +755,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         &self,
         start_epoch: u64,
         end_epoch: HummockReadEpoch,
-    ) -> StorageResult<impl Stream<Item = StorageResult<KeyedChangeLogRow<Bytes>>> + Send + 'static>
-    {
+        ordered: bool,
+    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
         let pk_prefix = OwnedRow::default();
         let start_key = self.serialize_pk_bound(&pk_prefix, Unbounded, true);
         let end_key = self.serialize_pk_bound(&pk_prefix, Unbounded, false);
@@ -798,10 +797,15 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let iter = match iterators.len() {
             0 => unreachable!(),
             1 => iterators.into_iter().next().unwrap(),
-            // All need merge
-            _ => merge_sort(iterators.into_iter().map(Box::pin).collect())
-                .map(|row| row.map(|row| row.into_row())),
-        };
+            // Concat all iterators if not to preserve order.
+            _ if !ordered => {
+                futures::stream::iter(iterators.into_iter().map(Box::pin).collect_vec())
+                    .flatten_unordered(1024)
+            }
+            // Merge all iterators if to preserve order.
+            _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
+        }
+        .map(|row| row.map(|key_row| key_row.into_owned_row()));
 
         Ok(iter)
     }

@@ -222,6 +222,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         .run_future(self.upstream_table.batch_iter_log_with_pk_bounds(
                             barrier_epoch.prev,
                             HummockReadEpoch::Committed(barrier_epoch.prev),
+                            false,
                         ))
                         .await?;
                     let data_types = self.upstream_table.schema().data_types();

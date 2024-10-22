@@ -217,6 +217,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             .batch_iter_log_with_pk_bounds(
                 old_epoch,
                 HummockReadEpoch::BatchQueryCommitted(new_epoch, version_id),
+                true,
             )
             .await?
             .flat_map(|r| {
