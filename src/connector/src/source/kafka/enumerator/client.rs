@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
@@ -32,6 +33,16 @@ use crate::source::kafka::{
 };
 use crate::source::SourceEnumeratorContextRef;
 
+pub static SHARED_KAFKA_CLIENT: LazyLock<tokio::sync::Mutex<HashMap<String, SharedKafkaItem>>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
+
+#[derive(Clone)]
+pub struct SharedKafkaItem {
+    pub client: Arc<BaseConsumer<RwConsumerContext>>,
+    pub ref_count: i32,
+    pub props: KafkaProperties,
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum KafkaEnumeratorOffset {
     Earliest,
@@ -44,7 +55,7 @@ pub struct KafkaSplitEnumerator {
     context: SourceEnumeratorContextRef,
     broker_address: String,
     topic: String,
-    client: BaseConsumer<RwConsumerContext>,
+    client: Arc<BaseConsumer<RwConsumerContext>>,
     start_offset: KafkaEnumeratorOffset,
 
     // maybe used in the future for batch processing
@@ -94,36 +105,56 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        // don't need kafka metrics from enumerator
-        let ctx_common = KafkaContextCommon::new(
-            broker_rewrite_map,
-            None,
-            None,
-            properties.aws_auth_props,
-            common_props.is_aws_msk_iam(),
-        )
-        .await?;
-        let client_ctx = RwConsumerContext::new(ctx_common);
-        let client: BaseConsumer<RwConsumerContext> =
-            config.create_with_context(client_ctx).await?;
+        let kafka_client: Arc<BaseConsumer<RwConsumerContext>>;
+        if let Some(item) = SHARED_KAFKA_CLIENT
+            .lock()
+            .await
+            .get_mut(broker_address.as_str())
+        {
+            kafka_client = item.client.clone();
+            item.ref_count += 1;
+        } else {
+            // don't need kafka metrics from enumerator
+            let ctx_common = KafkaContextCommon::new(
+                broker_rewrite_map,
+                None,
+                None,
+                properties.aws_auth_props.clone(),
+                common_props.is_aws_msk_iam(),
+            )
+            .await?;
+            let client_ctx = RwConsumerContext::new(ctx_common);
+            let client: BaseConsumer<RwConsumerContext> =
+                config.create_with_context(client_ctx).await?;
 
-        // Note that before any SASL/OAUTHBEARER broker connection can succeed the application must call
-        // rd_kafka_oauthbearer_set_token() once – either directly or, more typically, by invoking either
-        // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
-        // of an initial token to occur.
-        // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
-        if common_props.is_aws_msk_iam() {
-            #[cfg(not(madsim))]
-            client.poll(Duration::from_secs(10)); // note: this is a blocking call
-            #[cfg(madsim)]
-            client.poll(Duration::from_secs(10)).await;
+            // Note that before any SASL/OAUTHBEARER broker connection can succeed the application must call
+            // rd_kafka_oauthbearer_set_token() once – either directly or, more typically, by invoking either
+            // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
+            // of an initial token to occur.
+            // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
+            if common_props.is_aws_msk_iam() {
+                #[cfg(not(madsim))]
+                client.poll(Duration::from_secs(10)); // note: this is a blocking call
+                #[cfg(madsim)]
+                client.poll(Duration::from_secs(10)).await;
+            }
+
+            kafka_client = Arc::new(client);
+            SHARED_KAFKA_CLIENT.lock().await.insert(
+                broker_address.clone(),
+                SharedKafkaItem {
+                    client: kafka_client.clone(),
+                    ref_count: 1,
+                    props: properties.clone(),
+                },
+            );
         }
 
         Ok(Self {
             context,
             broker_address,
             topic,
-            client,
+            client: kafka_client,
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
             sync_call_timeout: properties.common.sync_call_timeout,

@@ -24,6 +24,7 @@ use anyhow::Context;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::error::ConnectorResult;
+use risingwave_connector::source::kafka::SHARED_KAFKA_CLIENT;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
@@ -110,6 +111,7 @@ pub async fn create_source_worker_handle(
     let current_splits_ref = splits.clone();
 
     let connector_properties = extract_prop_from_new_source(source)?;
+    let share_client_entry = get_kafka_bootstrap_addr(&connector_properties);
     let enable_scale_in = connector_properties.enable_split_scale_in();
     let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = dispatch_source_prop!(connector_properties, prop, {
@@ -144,6 +146,7 @@ pub async fn create_source_worker_handle(
         sync_call_tx,
         splits,
         enable_scale_in,
+        share_client_entry,
     })
 }
 
@@ -264,6 +267,7 @@ pub struct ConnectorSourceWorkerHandle {
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
     enable_scale_in: bool,
+    pub share_client_entry: Option<String>,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -1033,6 +1037,15 @@ impl SourceManager {
         for source_id in source_ids {
             if let Some(handle) = core.managed_sources.remove(&source_id) {
                 handle.handle.abort();
+                if let Some(entry) = handle.share_client_entry {
+                    let mut share_client_guard = SHARED_KAFKA_CLIENT.lock().await;
+                    if let Some(item) = share_client_guard.get_mut(&entry) {
+                        item.ref_count -= 1;
+                        if item.ref_count == 0 {
+                            share_client_guard.remove(&entry);
+                        }
+                    }
+                }
             }
         }
     }
@@ -1050,6 +1063,9 @@ impl SourceManager {
         let source_id = source.id;
 
         let connector_properties = extract_prop_from_existing_source(&source)?;
+
+        let share_client_entry = get_kafka_bootstrap_addr(&connector_properties);
+
         let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
@@ -1089,6 +1105,7 @@ impl SourceManager {
                 sync_call_tx,
                 splits,
                 enable_scale_in,
+                share_client_entry,
             },
         );
         Ok(())
@@ -1178,6 +1195,16 @@ pub fn build_actor_split_impls(
             )
         })
         .collect()
+}
+
+fn get_kafka_bootstrap_addr(connector_properties: &ConnectorProperties) -> Option<String> {
+    {
+        // for kafka source: extract the bootstrap servers from the source properties as shared source entry (on meta)
+        if let ConnectorProperties::Kafka(kafka_props) = connector_properties {
+            return Some(kafka_props.common.brokers.clone());
+        }
+        None
+    }
 }
 
 #[cfg(test)]
