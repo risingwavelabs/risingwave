@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
     AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnTimestamp,
-    AdditionalColumnTopic, AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName,
+    AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
@@ -87,10 +87,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                     "collection_name",
                 ]),
             ),
-            (
-                MQTT_CONNECTOR,
-                HashSet::from(["topic", "offset", "partition"]),
-            ),
+            (MQTT_CONNECTOR, HashSet::from(["offset", "partition"])),
         ])
     });
 
@@ -268,14 +265,6 @@ pub fn build_additional_column_desc(
                 column_type: Some(AdditionalColumnType::CollectionName(
                     AdditionalCollectionName {},
                 )),
-            },
-        ),
-        "topic" => ColumnDesc::named_with_additional_column(
-            column_name,
-            column_id,
-            DataType::Varchar,
-            AdditionalColumn {
-                column_type: Some(AdditionalColumnType::Topic(AdditionalColumnTopic {})),
             },
         ),
         _ => unreachable!(),

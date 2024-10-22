@@ -494,14 +494,6 @@ impl SourceStreamChunkRowWriter<'_> {
                     // do special logic in `KvEvent::access_field`
                     parse_field(desc)
                 }
-                (_, &Some(AdditionalColumnType::Topic(_))) => {
-                    // topic is used as partition in mqtt connector
-                    return Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
-                    ));
-                }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
                     parse_field(desc)
