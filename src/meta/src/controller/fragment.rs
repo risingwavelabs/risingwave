@@ -19,7 +19,7 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::{VnodeCountCompat, WorkerSlotId};
+use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_meta_model::actor::ActorStatus;
@@ -496,7 +496,7 @@ impl CatalogController {
             actors: pb_actors,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
-            maybe_vnode_count: Some(vnode_count as _),
+            maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
         };
 
         Ok((pb_fragment, pb_actor_status, pb_actor_splits))
@@ -1497,7 +1497,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use itertools::Itertools;
-    use risingwave_common::hash::{ActorMapping, VirtualNode};
+    use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCount};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
     use risingwave_meta_model::actor::ActorStatus;
@@ -1627,7 +1627,7 @@ mod tests {
                 .values()
                 .flat_map(|m| m.keys().map(|x| *x as _))
                 .collect(),
-            maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as _),
+            maybe_vnode_count: VnodeCount::for_test().to_protobuf(),
         };
 
         let pb_actor_status = (0..actor_count)

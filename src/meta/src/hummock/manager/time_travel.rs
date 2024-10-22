@@ -448,7 +448,7 @@ impl HummockManager {
         }
         let written = write_sstable_infos(
             delta
-                .newly_added_sst_infos(&select_groups)
+                .newly_added_sst_infos(Some(&select_groups))
                 .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
             txn,
         )

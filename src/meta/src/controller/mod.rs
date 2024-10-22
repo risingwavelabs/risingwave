@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
     connection, database, function, index, object, schema, secret, sink, source, subscription,
@@ -164,7 +165,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             created_at_cluster_version: value.1.created_at_cluster_version,
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
             cdc_table_id: value.0.cdc_table_id,
-            maybe_vnode_count: Some(value.0.vnode_count as _),
+            maybe_vnode_count: VnodeCount::set(value.0.vnode_count).to_protobuf(),
         }
     }
 }
