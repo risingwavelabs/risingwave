@@ -98,7 +98,7 @@ mod tests {
         let serialized = serde_json::to_string(&pretty_serde).unwrap();
         check(
             serialized,
-            expect![[r#""{\"name\":\"root\",\"fields\":[[\"a\",\"1\"]],\"children\":[]}""#]],
+            expect![[r#""{\"name\":\"root\",\"fields\":{\"a\":\"1\"},\"children\":[]}""#]],
         );
     }
 }
