@@ -92,6 +92,17 @@ impl VnodeCount {
     }
 }
 
+/// A trait for checking whether a table/fragment is a singleton.
+pub trait IsSingleton {
+    /// Returns `true` if the table/fragment is a singleton.
+    ///
+    /// By singleton, we mean that all data read from or written to the storage belongs to
+    /// the only `SINGLETON_VNODE`. This must be consistent with the behavior of
+    /// [`TableDistribution`](crate::hash::table_distribution::TableDistribution::new).
+    /// As a result, the `vnode_count` of such table/fragment can be `1`.
+    fn is_singleton(&self) -> bool;
+}
+
 /// A trait for accessing the vnode count field with backward compatibility.
 ///
 /// # `maybe_`?
@@ -117,28 +128,37 @@ pub trait VnodeCountCompat {
     }
 }
 
+impl IsSingleton for risingwave_pb::catalog::Table {
+    fn is_singleton(&self) -> bool {
+        self.distribution_key.is_empty()
+            && self.dist_key_in_pk.is_empty()
+            && self.vnode_col_index.is_none()
+    }
+}
 impl VnodeCountCompat for risingwave_pb::catalog::Table {
     fn vnode_count_inner(&self) -> VnodeCount {
-        VnodeCount::from_protobuf(self.maybe_vnode_count, || {
-            self.distribution_key.is_empty()
-                && self.dist_key_in_pk.is_empty()
-                && self.vnode_col_index.is_none()
-        })
+        VnodeCount::from_protobuf(self.maybe_vnode_count, || self.is_singleton())
     }
 }
 
+impl IsSingleton for risingwave_pb::plan_common::StorageTableDesc {
+    fn is_singleton(&self) -> bool {
+        self.dist_key_in_pk_indices.is_empty() && self.vnode_col_idx_in_pk.is_none()
+    }
+}
 impl VnodeCountCompat for risingwave_pb::plan_common::StorageTableDesc {
     fn vnode_count_inner(&self) -> VnodeCount {
-        VnodeCount::from_protobuf(self.maybe_vnode_count, || {
-            self.dist_key_in_pk_indices.is_empty() && self.vnode_col_idx_in_pk.is_none()
-        })
+        VnodeCount::from_protobuf(self.maybe_vnode_count, || self.is_singleton())
     }
 }
 
+impl IsSingleton for risingwave_pb::meta::table_fragments::Fragment {
+    fn is_singleton(&self) -> bool {
+        matches!(self.distribution_type(), FragmentDistributionType::Single)
+    }
+}
 impl VnodeCountCompat for risingwave_pb::meta::table_fragments::Fragment {
     fn vnode_count_inner(&self) -> VnodeCount {
-        VnodeCount::from_protobuf(self.maybe_vnode_count, || {
-            matches!(self.distribution_type(), FragmentDistributionType::Single)
-        })
+        VnodeCount::from_protobuf(self.maybe_vnode_count, || self.is_singleton())
     }
 }
