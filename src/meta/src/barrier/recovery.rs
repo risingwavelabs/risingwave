@@ -40,6 +40,7 @@ use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierWorkerState;
 use crate::barrier::{BarrierKind, GlobalBarrierWorkerContextImpl};
+use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, TableFragments, TableParallelism};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -359,8 +360,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             None,
                             Some(mutation),
                             &barrier_info,
-                            &info,
-                            Some(&info),
+                            info.fragment_infos(),
+                            info.fragment_infos(),
                             Some(node_actors),
                             vec![],
                             vec![],
@@ -753,7 +754,8 @@ impl GlobalBarrierWorkerContextImpl {
         info: &InflightGraphInfo,
         active_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<HashMap<WorkerId, Vec<StreamActor>>> {
-        if info.actor_map.is_empty() {
+        let actor_map = InflightFragmentInfo::actor_ids_to_collect(info.fragment_infos());
+        if actor_map.is_empty() {
             tracing::debug!("no actor to update, skipping.");
             return Ok(HashMap::new());
         }
@@ -763,8 +765,7 @@ impl GlobalBarrierWorkerContextImpl {
         // Check if any actors were dropped after info resolved.
         if all_node_actors.iter().any(|(node_id, node_actors)| {
             !active_nodes.current().contains_key(node_id)
-                || info
-                    .actor_map
+                || actor_map
                     .get(node_id)
                     .map(|actors| actors.len() != node_actors.len())
                     .unwrap_or(true)
@@ -773,7 +774,7 @@ impl GlobalBarrierWorkerContextImpl {
         }
 
         {
-            for (node_id, actors) in &info.actor_map {
+            for (node_id, actors) in &actor_map {
                 if !actors.is_empty() && !all_node_actors.contains_key(node_id) {
                     return Err(anyhow!("streaming job dropped during update").into());
                 }
