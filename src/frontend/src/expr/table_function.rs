@@ -350,6 +350,128 @@ impl TableFunction {
         }
     }
 
+    pub fn new_mysql_query(args: Vec<ExprImpl>) -> RwResult<Self> {
+        static MYSQL_ARGS_LEN: usize = 7;
+        let args = {
+            if args.len() != MYSQL_ARGS_LEN {
+                return Err(BindError("postgres_query function only accepts 7 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, server_id varchar, postgres_query varchar)".to_string()).into());
+            }
+            let mut cast_args = Vec::with_capacity(MYSQL_ARGS_LEN);
+            for arg in args {
+                let arg = arg.cast_implicit(DataType::Varchar)?;
+                cast_args.push(arg);
+            }
+            cast_args
+        };
+        let evaled_args = {
+            let mut evaled_args: Vec<String> = Vec::with_capacity(MYSQL_ARGS_LEN);
+            for arg in &args {
+                match arg.try_fold_const() {
+                    Some(Ok(value)) => {
+                        let Some(scalar) = value else {
+                            return Err(BindError(
+                                "postgres_query function does not accept null arguments"
+                                    .to_string(),
+                            )
+                                .into());
+                        };
+                        evaled_args.push(scalar.into_utf8().into());
+                    }
+                    Some(Err(err)) => {
+                        return Err(err);
+                    }
+                    None => {
+                        return Err(BindError(
+                            "postgres_query function only accepts constant arguments".to_string(),
+                        )
+                            .into());
+                    }
+                }
+            }
+            evaled_args
+        };
+
+        #[cfg(madsim)]
+        {
+            return Err(crate::error::ErrorCode::BindError(
+                "postgres_query can't be used in the madsim mode".to_string(),
+            )
+                .into());
+        }
+
+        #[cfg(not(madsim))]
+        {
+            let schema = tokio::task::block_in_place(|| {
+                RUNTIME.block_on(async {
+                    let (client, connection) = tokio_postgres::connect(
+                        format!(
+                            "host={} port={} user={} password={} dbname={}",
+                            evaled_args[0],
+                            evaled_args[1],
+                            evaled_args[2],
+                            evaled_args[3],
+                            evaled_args[4]
+                        )
+                            .as_str(),
+                        tokio_postgres::NoTls,
+                    )
+                        .await?;
+
+                    tokio::spawn(async move {
+                        if let Err(e) = connection.await {
+                            tracing::error!(
+                                "postgres_query_executor: connection error: {:?}",
+                                e.as_report()
+                            );
+                        }
+                    });
+
+                    let statement = client.prepare(evaled_args[5].as_str()).await?;
+
+                    let mut rw_types = vec![];
+                    for column in statement.columns() {
+                        let name = column.name().to_string();
+                        let data_type = match *column.type_() {
+                            TokioPgType::BOOL => DataType::Boolean,
+                            TokioPgType::INT2 => DataType::Int16,
+                            TokioPgType::INT4 => DataType::Int32,
+                            TokioPgType::INT8 => DataType::Int64,
+                            TokioPgType::FLOAT4 => DataType::Float32,
+                            TokioPgType::FLOAT8 => DataType::Float64,
+                            TokioPgType::NUMERIC => DataType::Decimal,
+                            TokioPgType::DATE => DataType::Date,
+                            TokioPgType::TIME => DataType::Time,
+                            TokioPgType::TIMESTAMP => DataType::Timestamp,
+                            TokioPgType::TIMESTAMPTZ => DataType::Timestamptz,
+                            TokioPgType::TEXT | TokioPgType::VARCHAR => DataType::Varchar,
+                            TokioPgType::INTERVAL => DataType::Interval,
+                            TokioPgType::JSONB => DataType::Jsonb,
+                            TokioPgType::BYTEA => DataType::Bytea,
+                            _ => {
+                                return Err(crate::error::ErrorCode::BindError(
+                                    format!("unsupported column type: {}", column.type_())
+                                        .to_string(),
+                                )
+                                    .into());
+                            }
+                        };
+                        rw_types.push((name, data_type));
+                    }
+                    Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
+                        StructType::new(rw_types),
+                    ))
+                })
+            })?;
+
+            Ok(TableFunction {
+                args,
+                return_type: schema,
+                function_type: TableFunctionType::PostgresQuery,
+                user_defined: None,
+            })
+        }
+    }
+
     pub fn to_protobuf(&self) -> PbTableFunction {
         PbTableFunction {
             function_type: self.function_type as i32,
