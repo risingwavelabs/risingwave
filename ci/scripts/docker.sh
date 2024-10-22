@@ -29,6 +29,10 @@ docker buildx create \
   --name container \
   --driver=docker-container
 
+if [[ -n "${ALWAYS_PULL+x} "]]; then
+  PULL_PARAM="--pull"
+fi
+
 docker buildx build -f docker/Dockerfile \
   --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" \
   --build-arg "CARGO_PROFILE=${CARGO_PROFILE}" \
@@ -36,6 +40,7 @@ docker buildx build -f docker/Dockerfile \
   --progress plain \
   --builder=container \
   --load \
+  ${PULL_PARAM} \
   --cache-to "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
   --cache-from "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
   .
