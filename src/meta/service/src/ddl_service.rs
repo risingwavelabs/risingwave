@@ -222,11 +222,6 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
         let source = req.get_source()?.clone();
 
-        // validate connection before starting the DDL procedure
-        if let Some(connection_id) = source.connection_id {
-            self.validate_connection(connection_id).await?;
-        }
-
         match req.fragment_graph {
             None => {
                 let version = self
@@ -287,11 +282,6 @@ impl DdlService for DdlServiceImpl {
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let affected_table_change = req.get_affected_table_change().cloned().ok();
-
-        // validate connection before starting the DDL procedure
-        if let Some(connection_id) = sink.connection_id {
-            self.validate_connection(connection_id).await?;
-        }
 
         let stream_job = match &affected_table_change {
             None => StreamingJob::Sink(sink, None),
@@ -739,9 +729,9 @@ impl DdlService for DdlServiceImpl {
         }
 
         return match req.payload.unwrap() {
-            create_connection_request::Payload::PrivateLink(_) => Err(Status::unavailable(
-                "Private Link is deprecated, please use Cloud Portal",
-            )),
+            create_connection_request::Payload::PrivateLink(_) => {
+                panic!("Private Link Connection has been deprecated")
+            }
         };
     }
 
@@ -1034,10 +1024,7 @@ impl DdlServiceImpl {
             .get_connection_by_id(connection_id as _)
             .await?;
         if let Some(connection::Info::PrivateLinkService(_)) = &connection.info {
-            return Err(MetaError::from(MetaErrorInner::Deprecated(
-                "CREATE CONNECTION to Private Link".to_string(),
-                "RisingWave Cloud Portal".to_string(),
-            )));
+            panic!("Private Link Connection has been deprecated")
         }
         Ok(())
     }
