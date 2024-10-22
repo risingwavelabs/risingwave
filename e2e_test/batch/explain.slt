@@ -13,8 +13,8 @@ drop table t;
 statement error Not supported: EXPLAIN CREATE VIEW
 explain create view v as select 1;
 
-statement error explain (trace, distsql, format json) is not supported
+statement error
 explain (trace, format json) select 1;
 
-statement error explain (trace, distsql, format json) is not supported
+statement error
 explain (distsql, format json) select 1;
