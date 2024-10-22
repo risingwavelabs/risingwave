@@ -28,7 +28,6 @@ use risingwave_sqlparser::ast::{
 };
 
 use super::OverwriteOptions;
-use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ConnectionId;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::session::SessionImpl;
