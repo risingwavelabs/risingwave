@@ -1,0 +1,8 @@
+- name: test json output format
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - logical_plan_json
+    - batch_plan_json
+    - stream_plan_json
