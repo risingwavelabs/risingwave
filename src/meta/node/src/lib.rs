@@ -367,6 +367,7 @@ pub fn start(
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
                 full_gc_interval_sec: config.meta.full_gc_interval_sec,
                 full_gc_object_limit: config.meta.full_gc_object_limit,
+                gc_history_retention_time_sec: config.meta.gc_history_retention_time_sec,
                 max_inflight_time_travel_query: config.meta.max_inflight_time_travel_query,
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,

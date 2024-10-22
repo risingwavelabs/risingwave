@@ -27,7 +27,7 @@ CLUSTER_PROFILE='ci-1cn-1fe-user-kafka-with-recovery'
 echo "--- Configuring cluster profiles"
 if [[ -n "${BUILDKITE:-}" ]]; then
   echo "Running in buildkite"
-  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe'
+  RUNTIME_CLUSTER_PROFILE='ci-backfill-3cn-1fe'
   MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-minio-rate-limit'
 else
   echo "Running locally"

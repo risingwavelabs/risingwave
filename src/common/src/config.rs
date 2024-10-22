@@ -195,6 +195,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_object_limit")]
     pub full_gc_object_limit: u64,
 
+    /// Duration in seconds to retain garbage collection history data.
+    #[serde(default = "default::meta::gc_history_retention_time_sec")]
+    pub gc_history_retention_time_sec: u64,
+
     /// Max number of inflight time travel query.
     #[serde(default = "default::meta::max_inflight_time_travel_query")]
     pub max_inflight_time_travel_query: u64,
@@ -1039,8 +1043,7 @@ pub struct StreamingDeveloperConfig {
     /// Enable arrangement backfill
     /// If false, the arrangement backfill will be disabled,
     /// even if session variable set.
-    /// If true, it will be enabled by default, but session variable
-    /// can override it.
+    /// If true, it's decided by session variable `streaming_use_arrangement_backfill` (default true)
     pub enable_arrangement_backfill: bool,
 
     #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
@@ -1060,6 +1063,13 @@ pub struct StreamingDeveloperConfig {
     /// A flag to allow disabling the auto schema change handling
     #[serde(default = "default::developer::stream_enable_auto_schema_change")]
     pub enable_auto_schema_change: bool,
+
+    #[serde(default = "default::developer::enable_shared_source")]
+    /// Enable shared source
+    /// If false, the shared source will be disabled,
+    /// even if session variable set.
+    /// If true, it's decided by session variable `streaming_use_shared_source` (default true)
+    pub enable_shared_source: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1353,6 +1363,10 @@ pub mod default {
 
         pub fn min_sst_retention_time_sec() -> u64 {
             3600 * 3
+        }
+
+        pub fn gc_history_retention_time_sec() -> u64 {
+            3600 * 6
         }
 
         pub fn full_gc_interval_sec() -> u64 {
@@ -1953,6 +1967,10 @@ pub mod default {
         }
 
         pub fn stream_enable_arrangement_backfill() -> bool {
+            true
+        }
+
+        pub fn enable_shared_source() -> bool {
             true
         }
 

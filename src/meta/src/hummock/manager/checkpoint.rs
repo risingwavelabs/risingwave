@@ -17,10 +17,8 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, summarize_group_deltas,
-};
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
+use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
@@ -140,7 +138,6 @@ impl HummockManager {
             drop(versioning_guard);
             let versioning = self.versioning.read().await;
             let context_info = self.context_info.read().await;
-            versioning.mark_objects_for_deletion(&context_info, &self.delete_object_tracker);
             let min_pinned_version_id = context_info.min_pinned_version_id();
             trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
             return Ok(0);
@@ -156,13 +153,27 @@ impl HummockManager {
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
-            for (group_id, group_deltas) in &version_delta.group_deltas {
-                let summary = summarize_group_deltas(group_deltas, *group_id);
+            for group_deltas in version_delta.group_deltas.values() {
                 object_sizes.extend(
-                    summary
-                        .insert_table_infos
+                    group_deltas
+                        .group_deltas
                         .iter()
-                        .map(|t| (t.object_id, t.file_size))
+                        .flat_map(|delta| {
+                            match delta {
+                                GroupDeltaCommon::IntraLevel(level_delta) => {
+                                    Some(level_delta.inserted_table_infos.iter())
+                                }
+                                GroupDeltaCommon::NewL0SubLevel(inserted_table_infos) => {
+                                    Some(inserted_table_infos.iter())
+                                }
+                                GroupDeltaCommon::GroupConstruct(_)
+                                | GroupDeltaCommon::GroupDestroy(_)
+                                | GroupDeltaCommon::GroupMerge(_) => None,
+                            }
+                            .into_iter()
+                            .flatten()
+                            .map(|t| (t.object_id, t.file_size))
+                        })
                         .chain(
                             version_delta
                                 .change_log_delta
@@ -209,12 +220,9 @@ impl HummockManager {
                     .collect(),
             });
         }
-        // Whenever data archive or time travel is enabled, we can directly discard reference to stale objects that will no longer be used.
-        if self.env.opts.enable_hummock_data_archive || self.time_travel_enabled().await {
-            let context_info = self.context_info.read().await;
-            let min_pinned_version_id = context_info.min_pinned_version_id();
-            stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
-        }
+        // We can directly discard reference to stale objects that will no longer be used.
+        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
         let new_checkpoint = HummockVersionCheckpoint {
             version: current_version.clone(),
             stale_objects,
@@ -234,15 +242,9 @@ impl HummockManager {
         // 3. hold write lock and update in memory state
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
-        let context_info = self.context_info.read().await;
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
-        // Not delete stale objects when archive or time travel is enabled
-        if !self.env.opts.enable_hummock_data_archive && !self.time_travel_enabled().await {
-            versioning.mark_objects_for_deletion(&context_info, &self.delete_object_tracker);
-        }
-
-        let min_pinned_version_id = context_info.min_pinned_version_id();
+        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
         trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
         trigger_split_stat(&self.metrics, &versioning.current_version);
         drop(versioning_guard);

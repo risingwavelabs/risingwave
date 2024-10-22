@@ -28,6 +28,7 @@ message BarrierCompleteResponse {
     bool done = 2;
     uint64 consumed_epoch = 3;
     uint64 consumed_rows = 4;
+    uint32 pending_barrier_num = 5;
   }
   string request_id = 1;
   common.Status status = 2;
@@ -85,9 +86,15 @@ message StreamingControlStreamResponse {
   }
 }
 
+message GetMinUncommittedSstIdRequest {}
+message GetMinUncommittedSstIdResponse {
+  uint64 min_uncommitted_sst_id = 1;
+}
+
 service StreamService {
   rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
+  rpc GetMinUncommittedSstId(GetMinUncommittedSstIdRequest) returns (GetMinUncommittedSstIdResponse);
 }
 
 // TODO: Lifecycle management for actors.

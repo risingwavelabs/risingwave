@@ -83,7 +83,7 @@ e2e_test/iceberg/metastore_db
 **/*.sqlite
 **/*.sqlite-journal
 
-*.slt.temp
+*.slt*.temp
 
 .direnv/
 

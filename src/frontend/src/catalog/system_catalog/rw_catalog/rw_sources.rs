@@ -40,6 +40,7 @@ struct RwSource {
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
+    is_shared: bool,
 }
 
 #[system_catalog(table, "rw_catalog.rw_sources")]
@@ -83,6 +84,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                 created_at: source.created_at_epoch.map(|e| e.as_timestamptz()),
                 initialized_at_cluster_version: source.initialized_at_cluster_version.clone(),
                 created_at_cluster_version: source.created_at_cluster_version.clone(),
+                is_shared: source.info.is_shared(),
             })
         })
         .collect())

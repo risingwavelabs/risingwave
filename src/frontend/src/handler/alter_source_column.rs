@@ -165,13 +165,31 @@ pub mod tests {
         let session = frontend.session_ref();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
+        let sql = r#"create source s_shared (v1 int) with (
+            connector = 'kafka',
+            topic = 'abc',
+            properties.bootstrap.server = 'localhost:29092',
+        ) FORMAT PLAIN ENCODE JSON;"#;
+
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
+
+        frontend
+            .run_sql_with_session(session.clone(), "SET streaming_use_shared_source TO false;")
+            .await
+            .unwrap();
         let sql = r#"create source s (v1 int) with (
             connector = 'kafka',
             topic = 'abc',
             properties.bootstrap.server = 'localhost:29092',
           ) FORMAT PLAIN ENCODE JSON;"#;
 
-        frontend.run_sql(sql).await.unwrap();
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
 
         let get_source = || {
             let catalog_reader = session.env().catalog_reader().read_guard();
@@ -189,6 +207,8 @@ pub mod tests {
             .map(|col| (col.name(), (col.data_type().clone(), col.column_id())))
             .collect();
 
+        let sql = "alter source s_shared add column v2 varchar;";
+        assert_eq!("Feature is not yet implemented: alter shared source\nTracking issue: https://github.com/risingwavelabs/risingwave/issues/16003", &frontend.run_sql(sql).await.unwrap_err().to_string());
         let sql = "alter source s add column v2 varchar;";
         frontend.run_sql(sql).await.unwrap();
 

@@ -1,5 +1,8 @@
 control substitution on
 
+statement ok
+SET streaming_use_shared_source TO false;
+
 system ok
 rpk topic delete 'glue-sample-my-event'
 
@@ -13,6 +16,8 @@ EOF
 
 statement ok
 ALTER SYSTEM SET license_key TO '';
+
+sleep 1s
 
 statement error
 create source t with (
@@ -146,3 +151,6 @@ drop source t;
 
 system ok
 rpk topic delete 'glue-sample-my-event'
+
+statement ok
+SET streaming_use_shared_source TO true;

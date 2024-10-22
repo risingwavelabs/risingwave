@@ -2585,9 +2585,12 @@ async fn test_commit_multi_epoch() {
     let initial_epoch = INVALID_EPOCH;
 
     let commit_epoch =
-        |epoch, sst: SstableInfo, new_table_fragment_info, tables_to_commit: &[TableId]| {
+        |epoch, sst: SstableInfo, new_table_fragment_infos, tables_to_commit: &[TableId]| {
             let manager = &test_env.manager;
-            let tables_to_commit = tables_to_commit.iter().cloned().collect();
+            let tables_to_commit = tables_to_commit
+                .iter()
+                .map(|table_id| (*table_id, epoch))
+                .collect();
             async move {
                 manager
                     .commit_epoch(CommitEpochInfo {
@@ -2610,9 +2613,8 @@ async fn test_commit_multi_epoch() {
                             sst_info: sst,
                             created_at: u64::MAX,
                         }],
-                        new_table_fragment_info,
+                        new_table_fragment_infos,
                         change_log_delta: Default::default(),
-                        committed_epoch: epoch,
                         tables_to_commit,
                     })
                     .await
@@ -2633,10 +2635,10 @@ async fn test_commit_multi_epoch() {
     commit_epoch(
         epoch1,
         sst1_epoch1.clone(),
-        NewTableFragmentInfo::Normal {
+        vec![NewTableFragmentInfo::Normal {
             mv_table_id: None,
             internal_table_ids: vec![existing_table_id],
-        },
+        }],
         &[existing_table_id],
     )
     .await;
@@ -2678,13 +2680,7 @@ async fn test_commit_multi_epoch() {
 
     let epoch2 = epoch1.next_epoch();
 
-    commit_epoch(
-        epoch2,
-        sst1_epoch2.clone(),
-        NewTableFragmentInfo::None,
-        &[existing_table_id],
-    )
-    .await;
+    commit_epoch(epoch2, sst1_epoch2.clone(), vec![], &[existing_table_id]).await;
 
     {
         let version = test_env.manager.get_current_version().await;
@@ -2727,9 +2723,9 @@ async fn test_commit_multi_epoch() {
     commit_epoch(
         epoch1,
         sst2_epoch1.clone(),
-        NewTableFragmentInfo::NewCompactionGroup {
+        vec![NewTableFragmentInfo::NewCompactionGroup {
             table_ids: HashSet::from_iter([new_table_id]),
-        },
+        }],
         &[new_table_id],
     )
     .await;
@@ -2764,13 +2760,7 @@ async fn test_commit_multi_epoch() {
         ..Default::default()
     };
 
-    commit_epoch(
-        epoch2,
-        sst2_epoch2.clone(),
-        NewTableFragmentInfo::None,
-        &[new_table_id],
-    )
-    .await;
+    commit_epoch(epoch2, sst2_epoch2.clone(), vec![], &[new_table_id]).await;
 
     {
         let version = test_env.manager.get_current_version().await;
@@ -2804,7 +2794,7 @@ async fn test_commit_multi_epoch() {
     commit_epoch(
         epoch3,
         sst_epoch3.clone(),
-        NewTableFragmentInfo::None,
+        vec![],
         &[existing_table_id, new_table_id],
     )
     .await;
