@@ -200,10 +200,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: LazyLock<OptimizationStage> =
         OptimizationStage::new(
             "General Unnesting(Translate Apply)",
             vec![
-                TranslateApplyRule::create(true),
-                // Separate the project from a join if necessary because `ApplyJoinTransposeRule`
-                // can't handle a join with `output_indices`.
-                ProjectJoinSeparateRule::create(),
+                TranslateApplyRule::create(true)
             ],
             ApplyOrder::TopDown,
         )
@@ -214,10 +211,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: LazyLock<OptimizationStage> 
         OptimizationStage::new(
             "General Unnesting(Translate Apply)",
             vec![
-                TranslateApplyRule::create(false),
-                // Separate the project from a join if necessary because `ApplyJoinTransposeRule`
-                // can't handle a join with `output_indices`.
-                ProjectJoinSeparateRule::create(),
+                TranslateApplyRule::create(false)
             ],
             ApplyOrder::TopDown,
         )
