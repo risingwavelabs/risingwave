@@ -22,10 +22,13 @@ mkdir -p scout
 function docker-scout {
     docker run -it -e DOCKER_SCOUT_HUB_USER=risingwavelabs -e DOCKER_SCOUT_HUB_PASSWORD=$DOCKER_TOKEN -u root -v /var/run/docker.sock:/var/run/docker.sock -v $PWD/scout:/scout docker/scout-cli "$@"
 }
-docker-scout quickview ${image}
+echo "--- scout quickview"
+docker-scout quickview ${image} -o /scout/quickview.output
+cat /scout/quickview.output
+echo "--- scout recommendations"
 docker-scout recommendations "${image}"
-docker-scout cves --format sarif -o /scout/scout.sarif "${image}"
+echo "--- scout cves"
+docker-scout cves "${image}"
 
 echo "--- scout report"
-export SCOUT_REPORT=$(cat scout/scout.sarif)
-echo ${SCOUT_REPORT}
+export SCOUT_REPORT=$(cat /scout/quickview.output)
