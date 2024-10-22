@@ -25,7 +25,6 @@ use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::PausedReason;
@@ -44,8 +43,12 @@ use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use super::{Command, GlobalBarrierWorkerContext, InflightSubscriptionInfo};
+use super::{
+    Command, GlobalBarrierWorker, GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl,
+    InflightSubscriptionInfo,
+};
 use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
+use crate::manager::MetaSrvEnv;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -56,15 +59,15 @@ struct ControlStreamNode {
 }
 
 pub(super) struct ControlStreamManager {
-    context: GlobalBarrierWorkerContext,
     nodes: HashMap<WorkerId, ControlStreamNode>,
+    env: MetaSrvEnv,
 }
 
 impl ControlStreamManager {
-    pub(super) fn new(context: GlobalBarrierWorkerContext) -> Self {
+    pub(super) fn new(env: MetaSrvEnv) -> Self {
         Self {
-            context,
             nodes: Default::default(),
+            env,
         }
     }
 
@@ -72,34 +75,34 @@ impl ControlStreamManager {
         &mut self,
         node: WorkerNode,
         subscription: &InflightSubscriptionInfo,
+        context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
         if self.nodes.contains_key(&node_id) {
             warn!(id = node.id, host = ?node.host, "node already exists");
             return;
         }
-        let version_id = self
-            .context
-            .hummock_manager
-            .on_current_version(|version| version.id)
-            .await;
         let node_host = node.host.clone().unwrap();
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
             .factor(5);
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
-            match self
-                .context
-                .new_control_stream_node(
-                    node.clone(),
-                    version_id,
-                    &subscription.mv_depended_subscriptions,
-                )
+            match context
+                .new_control_stream(&node, &subscription.mv_depended_subscriptions)
                 .await
             {
-                Ok(stream_node) => {
-                    assert!(self.nodes.insert(node_id, stream_node).is_none());
+                Ok(handle) => {
+                    assert!(self
+                        .nodes
+                        .insert(
+                            node_id,
+                            ControlStreamNode {
+                                worker: node.clone(),
+                                handle,
+                            }
+                        )
+                        .is_none());
                     info!(?node_host, "add control stream worker");
                     return;
                 }
@@ -117,20 +120,21 @@ impl ControlStreamManager {
 
     pub(super) async fn reset(
         &mut self,
-        version_id: HummockVersionId,
         subscriptions: &InflightSubscriptionInfo,
         nodes: &HashMap<WorkerId, WorkerNode>,
+        context: &impl GlobalBarrierWorkerContext,
     ) -> MetaResult<()> {
-        let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async {
-            let node = self
-                .context
-                .new_control_stream_node(
-                    node.clone(),
-                    version_id,
-                    &subscriptions.mv_depended_subscriptions,
-                )
+        let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async move {
+            let handle = context
+                .new_control_stream(node, &subscriptions.mv_depended_subscriptions)
                 .await?;
-            Result::<_, MetaError>::Ok((*worker_id, node))
+            Result::<_, MetaError>::Ok((
+                *worker_id,
+                ControlStreamNode {
+                    worker: node.clone(),
+                    handle,
+                },
+            ))
         }))
         .await?;
         self.nodes.clear();
@@ -143,7 +147,7 @@ impl ControlStreamManager {
 
     /// Clear all nodes and response streams in the manager.
     pub(super) fn clear(&mut self) {
-        *self = Self::new(self.context.clone());
+        *self = Self::new(self.env.clone());
     }
 
     async fn next_response(
@@ -406,8 +410,7 @@ impl ControlStreamManager {
                     cur_epoch: barrier_info.curr_epoch.value().0,
                     error: e.to_report_string(),
                 };
-                self.context
-                    .env
+                self.env
                     .event_log_manager_ref()
                     .add_event_logs(vec![event_log::Event::InjectBarrierFail(event)]);
             })?;
@@ -435,26 +438,28 @@ impl ControlStreamManager {
     }
 }
 
-impl GlobalBarrierWorkerContext {
-    async fn new_control_stream_node(
+impl GlobalBarrierWorkerContextImpl {
+    pub(super) async fn new_control_stream_impl(
         &self,
-        node: WorkerNode,
-        initial_version_id: HummockVersionId,
+        node: &WorkerNode,
         mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
-    ) -> MetaResult<ControlStreamNode> {
+    ) -> MetaResult<StreamingControlHandle> {
+        let initial_version_id = self
+            .hummock_manager
+            .on_current_version(|version| version.id)
+            .await;
         let handle = self
             .env
             .stream_client_pool()
-            .get(&node)
+            .get(node)
             .await?
             .start_streaming_control(initial_version_id, mv_depended_subscriptions)
             .await?;
-        Ok(ControlStreamNode {
-            worker: node.clone(),
-            handle,
-        })
+        Ok(handle)
     }
+}
 
+impl<C> GlobalBarrierWorker<C> {
     /// Send barrier-complete-rpc and wait for responses from all CNs
     pub(super) fn report_collect_failure(&self, barrier_info: &BarrierInfo, error: &MetaError) {
         // Record failure in event log.
