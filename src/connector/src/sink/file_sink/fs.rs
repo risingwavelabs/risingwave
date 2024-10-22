@@ -21,6 +21,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
+use super::opendal_sink::BatchingStrategy;
 use crate::sink::file_sink::opendal_sink::{FileSink, OpendalSinkBackend};
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
@@ -37,6 +38,8 @@ pub struct FsCommon {
 pub struct FsConfig {
     #[serde(flatten)]
     pub common: FsCommon,
+    #[serde(flatten)]
+    pub batching_strategy: BatchingStrategy,
 
     pub r#type: String, // accept "append-only"
 
@@ -55,9 +58,7 @@ pub const FS_SINK: &str = "fs";
 impl<S: OpendalSinkBackend> FileSink<S> {
     pub fn new_fs_sink(config: FsConfig) -> Result<Operator> {
         // Create fs builder.
-        let mut builder = Fs::default();
-        // Create fs backend builder.
-        builder.root(&config.common.path);
+        let builder = Fs::default().root(&config.common.path);
         let operator: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
@@ -98,5 +99,13 @@ impl OpendalSinkBackend for FsSink {
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
         super::opendal_sink::EngineType::Fs
+    }
+
+    fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy {
+        BatchingStrategy {
+            max_row_count: properties.batching_strategy.max_row_count,
+            rollover_seconds: properties.batching_strategy.rollover_seconds,
+            path_partition_prefix: properties.batching_strategy.path_partition_prefix,
+        }
     }
 }

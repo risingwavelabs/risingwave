@@ -14,12 +14,10 @@
 
 pub mod cloud_provider;
 pub mod ddl_controller;
-mod ddl_controller_v2;
 pub mod election;
 pub mod intercept;
 pub mod metrics;
 
 pub type ElectionClientRef = std::sync::Arc<dyn ElectionClient>;
 
-pub use election::etcd::EtcdElectionClient;
 pub use election::{ElectionClient, ElectionMember};

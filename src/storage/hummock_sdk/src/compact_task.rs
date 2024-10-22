@@ -26,6 +26,7 @@ use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
+use crate::HummockSstableObjectId;
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
@@ -34,8 +35,6 @@ pub struct CompactTask {
     /// In ideal case, the compaction will generate `splits.len()` tables which have key range
     /// corresponding to that in `splits`, respectively
     pub splits: Vec<KeyRange>,
-    /// low watermark in 'ts-aware compaction'
-    pub watermark: u64,
     /// compaction output, which will be added to `target_level` of LSM after compaction
     pub sorted_output_ssts: Vec<SstableInfo>,
     /// task id assigned by hummock storage service
@@ -133,7 +132,6 @@ impl From<PbCompactTask> for CompactTask {
                     right_exclusive: pb_keyrange.right_exclusive,
                 })
                 .collect_vec(),
-            watermark: pb_compact_task.watermark,
             sorted_output_ssts: pb_compact_task
                 .sorted_output_ssts
                 .into_iter()
@@ -187,7 +185,6 @@ impl From<&PbCompactTask> for CompactTask {
                     right_exclusive: pb_keyrange.right_exclusive,
                 })
                 .collect_vec(),
-            watermark: pb_compact_task.watermark,
             sorted_output_ssts: pb_compact_task
                 .sorted_output_ssts
                 .iter()
@@ -241,7 +238,6 @@ impl From<CompactTask> for PbCompactTask {
                     right_exclusive: keyrange.right_exclusive,
                 })
                 .collect_vec(),
-            watermark: compact_task.watermark,
             sorted_output_ssts: compact_task
                 .sorted_output_ssts
                 .into_iter()
@@ -293,7 +289,6 @@ impl From<&CompactTask> for PbCompactTask {
                     right_exclusive: keyrange.right_exclusive,
                 })
                 .collect_vec(),
-            watermark: compact_task.watermark,
             sorted_output_ssts: compact_task
                 .sorted_output_ssts
                 .iter()
@@ -331,7 +326,6 @@ impl From<&CompactTask> for PbCompactTask {
 pub struct ValidationTask {
     pub sst_infos: Vec<SstableInfo>,
     pub sst_id_to_worker_id: HashMap<u64, u32>,
-    pub epoch: u64,
 }
 
 impl From<PbValidationTask> for ValidationTask {
@@ -343,7 +337,6 @@ impl From<PbValidationTask> for ValidationTask {
                 .map(SstableInfo::from)
                 .collect_vec(),
             sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.clone(),
-            epoch: pb_validation_task.epoch,
         }
     }
 }
@@ -357,7 +350,6 @@ impl From<ValidationTask> for PbValidationTask {
                 .map(|sst| sst.into())
                 .collect_vec(),
             sst_id_to_worker_id: validation_task.sst_id_to_worker_id.clone(),
-            epoch: validation_task.epoch,
         }
     }
 }
@@ -379,6 +371,7 @@ pub struct ReportTask {
     pub task_id: u64,
     pub task_status: TaskStatus,
     pub sorted_output_ssts: Vec<SstableInfo>,
+    pub object_timestamps: HashMap<HummockSstableObjectId, u64>,
 }
 
 impl From<PbReportTask> for ReportTask {
@@ -392,6 +385,7 @@ impl From<PbReportTask> for ReportTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }
@@ -407,6 +401,7 @@ impl From<ReportTask> for PbReportTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }

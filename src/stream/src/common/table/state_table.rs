@@ -523,196 +523,6 @@ where
         }
     }
 
-    /// Create a state table without distribution, used for unit tests.
-    pub async fn new_without_distribution(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_with_distribution(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            TableDistribution::singleton(),
-            None,
-        )
-        .await
-    }
-
-    /// Create a state table without distribution, with given `value_indices`, used for unit tests.
-    pub async fn new_without_distribution_with_value_indices(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        value_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_with_distribution(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            TableDistribution::singleton(),
-            Some(value_indices),
-        )
-        .await
-    }
-
-    /// Create a state table without distribution, used for unit tests.
-    pub async fn new_without_distribution_inconsistent_op(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_with_distribution_inner(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            TableDistribution::singleton(),
-            None,
-            false,
-        )
-        .await
-    }
-
-    /// Create a state table with distribution specified with `distribution`. Should use
-    /// `Distribution::fallback()` for tests.
-    pub async fn new_with_distribution(
-        store: S,
-        table_id: TableId,
-        table_columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        distribution: TableDistribution,
-        value_indices: Option<Vec<usize>>,
-    ) -> Self {
-        Self::new_with_distribution_inner(
-            store,
-            table_id,
-            table_columns,
-            order_types,
-            pk_indices,
-            distribution,
-            value_indices,
-            true,
-        )
-        .await
-    }
-
-    /// Create a state table with distribution and without sanity check, used for unit tests.
-    pub async fn new_with_distribution_inconsistent_op(
-        store: S,
-        table_id: TableId,
-        table_columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        distribution: TableDistribution,
-        value_indices: Option<Vec<usize>>,
-    ) -> Self {
-        Self::new_with_distribution_inner(
-            store,
-            table_id,
-            table_columns,
-            order_types,
-            pk_indices,
-            distribution,
-            value_indices,
-            false,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn new_with_distribution_inner(
-        store: S,
-        table_id: TableId,
-        table_columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        distribution: TableDistribution,
-        value_indices: Option<Vec<usize>>,
-        is_consistent_op: bool,
-    ) -> Self {
-        let make_row_serde = || {
-            SD::new(
-                Arc::from(
-                    value_indices
-                        .clone()
-                        .unwrap_or_else(|| (0..table_columns.len()).collect_vec())
-                        .into_boxed_slice(),
-                ),
-                Arc::from(table_columns.clone().into_boxed_slice()),
-            )
-        };
-        let op_consistency_level = if is_consistent_op {
-            let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde, false)
-        } else {
-            OpConsistencyLevel::Inconsistent
-        };
-        let local_state_store = store
-            .new_local(NewLocalOptions::new(
-                table_id,
-                op_consistency_level,
-                TableOption::default(),
-                distribution.vnodes().clone(),
-            ))
-            .await;
-        let row_serde = make_row_serde();
-        let data_types: Vec<DataType> = table_columns
-            .iter()
-            .map(|col| col.data_type.clone())
-            .collect();
-        let pk_data_types = pk_indices
-            .iter()
-            .map(|i| table_columns[*i].data_type.clone())
-            .collect();
-        let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
-
-        // TODO: let's not restore watermark in unit tests for now, to avoid complexity.
-        let committed_watermark = None;
-
-        let watermark_cache = if USE_WATERMARK_CACHE {
-            StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
-        } else {
-            StateTableWatermarkCache::new(0)
-        };
-
-        Self {
-            table_id,
-            local_store: local_state_store,
-            store,
-            pk_serde,
-            row_serde,
-            pk_indices,
-            distribution,
-            prefix_hint_len: 0,
-            table_option: Default::default(),
-            value_indices,
-            pending_watermark: None,
-            committed_watermark,
-            watermark_cache,
-            data_types,
-            output_indices: vec![],
-            i2o_mapping: ColIndexMapping::new(vec![], 0),
-            op_consistency_level: if is_consistent_op {
-                StateTableOpConsistencyLevel::ConsistentOldValue
-            } else {
-                StateTableOpConsistencyLevel::Inconsistent
-            },
-        }
-    }
-
     pub fn get_data_types(&self) -> &[DataType] {
         &self.data_types
     }
@@ -1196,21 +1006,21 @@ where
             "commit state table"
         );
 
-        if !self.is_dirty() {
-            // If the state table is not modified, go fast path.
-            self.local_store.seal_current_epoch(
-                new_epoch.curr,
-                SealCurrentEpochOptions {
-                    table_watermarks: None,
-                    switch_op_consistency_level,
-                },
-            );
-            return Ok(());
-        } else {
-            self.seal_current_epoch(new_epoch.curr, switch_op_consistency_level)
-                .instrument(tracing::info_span!("state_table_commit"))
+        let mut table_watermarks = None;
+        if self.is_dirty() {
+            self.local_store
+                .flush()
+                .instrument(tracing::info_span!("state_table_flush"))
                 .await?;
+            table_watermarks = self.commit_pending_watermark();
         }
+        self.local_store.seal_current_epoch(
+            new_epoch.curr,
+            SealCurrentEpochOptions {
+                table_watermarks,
+                switch_op_consistency_level,
+            },
+        );
 
         // Refresh watermark cache if it is out of sync.
         if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
@@ -1263,12 +1073,8 @@ where
         Ok(())
     }
 
-    /// Write to state store.
-    async fn seal_current_epoch(
-        &mut self,
-        next_epoch: u64,
-        switch_op_consistency_level: Option<OpConsistencyLevel>,
-    ) -> StreamExecutorResult<()> {
+    /// Commit pending watermark and return vnode bitmap-watermark pairs to seal.
+    fn commit_pending_watermark(&mut self) -> Option<(WatermarkDirection, Vec<VnodeWatermark>)> {
         let watermark = self.pending_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
@@ -1354,18 +1160,7 @@ where
             self.watermark_cache.clear();
         }
 
-        self.local_store.flush().await?;
-        let table_watermarks =
-            seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]));
-
-        self.local_store.seal_current_epoch(
-            next_epoch,
-            SealCurrentEpochOptions {
-                table_watermarks,
-                switch_op_consistency_level,
-            },
-        );
-        Ok(())
+        seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]))
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {

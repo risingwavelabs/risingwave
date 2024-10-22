@@ -14,7 +14,7 @@
 
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
@@ -64,7 +64,7 @@ impl ClusterService for ClusterServiceImpl {
         let cluster_id = self.metadata_manager.cluster_id().to_string();
 
         Ok(Response::new(AddWorkerNodeResponse {
-            node_id: Some(worker_id),
+            node_id: Some(worker_id as _),
             cluster_id,
         }))
     }
@@ -79,21 +79,13 @@ impl ClusterService for ClusterServiceImpl {
         let schedulability = req.get_schedulability()?;
         let worker_ids = req.worker_ids;
 
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                mgr.cluster_manager
-                    .update_schedulability(worker_ids, schedulability)
-                    .await?
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.cluster_controller
-                    .update_schedulability(
-                        worker_ids.into_iter().map(|id| id as WorkerId).collect(),
-                        schedulability,
-                    )
-                    .await?
-            }
-        }
+        self.metadata_manager
+            .cluster_controller
+            .update_schedulability(
+                worker_ids.into_iter().map(|id| id as WorkerId).collect(),
+                schedulability,
+            )
+            .await?;
 
         Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
             status: None,
@@ -116,14 +108,10 @@ impl ClusterService for ClusterServiceImpl {
             })?;
             info!(?socket_addr, ?host, "resolve host addr");
         }
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.cluster_manager.activate_worker_node(host).await?,
-            MetadataManager::V2(mgr) => {
-                mgr.cluster_controller
-                    .activate_worker(req.node_id as _)
-                    .await?
-            }
-        }
+        self.metadata_manager
+            .cluster_controller
+            .activate_worker(req.node_id as _)
+            .await?;
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
     }
 
@@ -134,10 +122,11 @@ impl ClusterService for ClusterServiceImpl {
         let req = request.into_inner();
         let host = req.get_host()?.clone();
 
-        let worker_node = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.cluster_manager.delete_worker_node(host).await?,
-            MetadataManager::V2(mgr) => mgr.cluster_controller.delete_worker(host).await?,
-        };
+        let worker_node = self
+            .metadata_manager
+            .cluster_controller
+            .delete_worker(host)
+            .await?;
         tracing::info!(
             host = ?worker_node.host,
             id = worker_node.id,

@@ -43,7 +43,7 @@ use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{ConnectionId, MetaSrvEnv, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{
     DdlCommand, DdlController, DropMode, ReplaceTableInfo, StreamingJobId,
@@ -147,7 +147,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropDatabase(database_id))
+            .run_command(DdlCommand::DropDatabase(database_id as _))
             .await?;
 
         Ok(Response::new(DropDatabaseResponse {
@@ -185,7 +185,7 @@ impl DdlService for DdlServiceImpl {
         let secret_id = req.get_secret_id();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSecret(secret_id))
+            .run_command(DdlCommand::DropSecret(secret_id as _))
             .await?;
 
         Ok(Response::new(DropSecretResponse { version }))
@@ -216,7 +216,7 @@ impl DdlService for DdlServiceImpl {
         let schema_id = req.get_schema_id();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSchema(schema_id))
+            .run_command(DdlCommand::DropSchema(schema_id as _))
             .await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
@@ -240,7 +240,7 @@ impl DdlService for DdlServiceImpl {
             None => {
                 let version = self
                     .ddl_controller
-                    .run_command(DdlCommand::CreateSource(source))
+                    .run_command(DdlCommand::CreateSourceWithoutStreamingJob(source))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
@@ -276,7 +276,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSource(source_id, drop_mode))
+            .run_command(DdlCommand::DropSource(source_id as _, drop_mode))
             .await?;
 
         Ok(Response::new(DropSourceResponse {
@@ -335,7 +335,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
         let command = DdlCommand::DropStreamingJob(
-            StreamingJobId::Sink(sink_id),
+            StreamingJobId::Sink(sink_id as _),
             drop_mode,
             request
                 .affected_table_change
@@ -381,7 +381,7 @@ impl DdlService for DdlServiceImpl {
         let subscription_id = request.subscription_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
-        let command = DdlCommand::DropSubscription(subscription_id, drop_mode);
+        let command = DdlCommand::DropSubscription(subscription_id as _, drop_mode);
 
         let version = self.ddl_controller.run_command(command).await?;
 
@@ -432,7 +432,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::MaterializedView(table_id),
+                StreamingJobId::MaterializedView(table_id as _),
                 drop_mode,
                 None,
             ))
@@ -484,7 +484,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::Index(index_id),
+                StreamingJobId::Index(index_id as _),
                 drop_mode,
                 None,
             ))
@@ -522,7 +522,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropFunction(request.function_id))
+            .run_command(DdlCommand::DropFunction(request.function_id as _))
             .await?;
 
         Ok(Response::new(DropFunctionResponse {
@@ -570,7 +570,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id), table_id),
+                StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id as _), table_id as _),
                 drop_mode,
                 None,
             ))
@@ -609,7 +609,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropView(view_id, drop_mode))
+            .run_command(DdlCommand::DropView(view_id as _, drop_mode))
             .await?;
         Ok(Response::new(DropViewResponse {
             status: None,
@@ -621,10 +621,11 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<RisectlListStateTablesRequest>,
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
-        let tables = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_tables().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_all_state_tables().await?,
-        };
+        let tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_all_state_tables()
+            .await?;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 
@@ -652,30 +653,11 @@ impl DdlService for DdlServiceImpl {
         request: Request<GetTableRequest>,
     ) -> Result<Response<GetTableResponse>, Status> {
         let req = request.into_inner();
-        let table = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let database = mgr
-                    .catalog_manager
-                    .list_databases()
-                    .await
-                    .into_iter()
-                    .find(|db| db.name == req.database_name);
-                if let Some(db) = database {
-                    mgr.catalog_manager
-                        .list_tables()
-                        .await
-                        .into_iter()
-                        .find(|t| t.name == req.table_name && t.database_id == db.id)
-                } else {
-                    None
-                }
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .get_table_by_name(&req.database_name, &req.table_name)
-                    .await?
-            }
-        };
+        let table = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_by_name(&req.database_name, &req.table_name)
+            .await?;
 
         Ok(Response::new(GetTableResponse { table }))
     }
@@ -695,6 +677,7 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    /// Only support add column for now.
     async fn alter_source(
         &self,
         request: Request<AlterSourceRequest>,
@@ -717,7 +700,7 @@ impl DdlService for DdlServiceImpl {
         let AlterOwnerRequest { object, owner_id } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterObjectOwner(object.unwrap(), owner_id))
+            .run_command(DdlCommand::AlterObjectOwner(object.unwrap(), owner_id as _))
             .await?;
         Ok(Response::new(AlterOwnerResponse {
             status: None,
@@ -735,7 +718,10 @@ impl DdlService for DdlServiceImpl {
         } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterSetSchema(object.unwrap(), new_schema_id))
+            .run_command(DdlCommand::AlterSetSchema(
+                object.unwrap(),
+                new_schema_id as _,
+            ))
             .await?;
         Ok(Response::new(AlterSetSchemaResponse {
             status: None,
@@ -825,10 +811,11 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<ListConnectionsRequest>,
     ) -> Result<Response<ListConnectionsResponse>, Status> {
-        let conns = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_connections().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_connections().await?,
-        };
+        let conns = self
+            .metadata_manager
+            .catalog_controller
+            .list_connections()
+            .await?;
 
         Ok(Response::new(ListConnectionsResponse {
             connections: conns,
@@ -843,7 +830,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(req.connection_id))
+            .run_command(DdlCommand::DropConnection(req.connection_id as _))
             .await?;
 
         Ok(Response::new(DropConnectionResponse {
@@ -881,25 +868,18 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<GetTablesRequest>,
     ) -> Result<Response<GetTablesResponse>, Status> {
-        let ret = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                mgr.catalog_manager
-                    .get_tables(&request.into_inner().table_ids)
-                    .await
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .get_table_by_ids(
-                        request
-                            .into_inner()
-                            .table_ids
-                            .into_iter()
-                            .map(|id| id as _)
-                            .collect(),
-                    )
-                    .await?
-            }
-        };
+        let ret = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_by_ids(
+                request
+                    .into_inner()
+                    .table_ids
+                    .into_iter()
+                    .map(|id| id as _)
+                    .collect(),
+            )
+            .await?;
 
         let mut tables = HashMap::default();
         for table in ret {
@@ -1109,19 +1089,12 @@ impl DdlService for DdlServiceImpl {
 }
 
 impl DdlServiceImpl {
-    async fn validate_connection(&self, connection_id: ConnectionId) -> MetaResult<()> {
-        let connection = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                mgr.catalog_manager
-                    .get_connection_by_id(connection_id)
-                    .await?
-            }
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .get_connection_by_id(connection_id as _)
-                    .await?
-            }
-        };
+    async fn validate_connection(&self, connection_id: u32) -> MetaResult<()> {
+        let connection = self
+            .metadata_manager
+            .catalog_controller
+            .get_connection_by_id(connection_id as _)
+            .await?;
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info {
             // skip all checks for mock connection
             if svc.get_provider()? == PrivateLinkProvider::Mock {

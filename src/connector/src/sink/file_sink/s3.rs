@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use super::opendal_sink::FileSink;
+use super::opendal_sink::{BatchingStrategy, FileSink};
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
@@ -50,6 +50,9 @@ pub struct S3Config {
     #[serde(flatten)]
     pub common: S3Common,
 
+    #[serde(flatten)]
+    pub batching_strategy: BatchingStrategy,
+
     pub r#type: String, // accept "append-only"
 
     #[serde(flatten)]
@@ -61,16 +64,16 @@ pub const S3_SINK: &str = "s3";
 impl<S: OpendalSinkBackend> FileSink<S> {
     pub fn new_s3_sink(config: S3Config) -> Result<Operator> {
         // Create s3 builder.
-        let mut builder = S3::default();
-        builder.bucket(&config.common.bucket_name);
-        builder.region(&config.common.region_name);
+        let mut builder = S3::default()
+            .bucket(&config.common.bucket_name)
+            .region(&config.common.region_name);
 
         if let Some(endpoint_url) = config.common.endpoint_url {
-            builder.endpoint(&endpoint_url);
+            builder = builder.endpoint(&endpoint_url);
         }
 
         if let Some(access) = config.common.access {
-            builder.access_key_id(&access);
+            builder = builder.access_key_id(&access);
         } else {
             tracing::error!(
                 "access key id of aws s3 is not set, bucket {}",
@@ -79,7 +82,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
         }
 
         if let Some(secret) = config.common.secret {
-            builder.secret_access_key(&secret);
+            builder = builder.secret_access_key(&secret);
         } else {
             tracing::error!(
                 "secret access key of aws s3 is not set, bucket {}",
@@ -88,9 +91,9 @@ impl<S: OpendalSinkBackend> FileSink<S> {
         }
 
         if let Some(assume_role) = config.common.assume_role {
-            builder.role_arn(&assume_role);
+            builder = builder.role_arn(&assume_role);
         }
-        builder.disable_config_load();
+        builder = builder.disable_config_load();
         let operator: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
@@ -138,5 +141,13 @@ impl OpendalSinkBackend for S3Sink {
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
         super::opendal_sink::EngineType::S3
+    }
+
+    fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy {
+        BatchingStrategy {
+            max_row_count: properties.batching_strategy.max_row_count,
+            rollover_seconds: properties.batching_strategy.rollover_seconds,
+            path_partition_prefix: properties.batching_strategy.path_partition_prefix,
+        }
     }
 }

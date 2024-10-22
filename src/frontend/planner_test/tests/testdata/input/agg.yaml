@@ -296,20 +296,26 @@
   expected_outputs:
   - logical_plan
   - batch_plan
-- name: distinct on
+- name: distinct on order by distinct columns
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select distinct on (v1, v3) v1, v2 from t order by v1, v3;
   expected_outputs:
   - logical_plan
   - batch_plan
-- name: distinct on
+- name: distinct on order by part of the distinct columns
   sql: |
     create table t (v1 int, v2 int);
     select distinct on (v1) v1, v2 from t order by v1;
   expected_outputs:
   - logical_plan
-- name: distinct on
+- name: distinct on order by distinct columns and additional sorting columns
+  sql: |
+    create table t (id int, ts timestamp, foo int, bar varchar);
+    select distinct on (id) * from t order by id, ts desc;
+  expected_outputs:
+    - logical_plan
+- name: distinct on with expression
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select distinct on(v1) v2 + v3 from t order by v1;
@@ -758,7 +764,7 @@
 - name: enable two phase aggregation with simple agg should have two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
-    SET RW_ENABLE_TWO_PHASE_AGG=true;
+    SET ENABLE_TWO_PHASE_AGG=true;
     create table t(v1 int, v2 int);
     select min(v1), sum(v2) from t;
   expected_outputs:
@@ -767,7 +773,7 @@
 - name: disable two phase aggregation with simple agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
-    SET RW_ENABLE_TWO_PHASE_AGG=false;
+    SET ENABLE_TWO_PHASE_AGG=false;
     create table t(v1 int, v2 int);
     select min(v1), sum(v2) from t;
   expected_outputs:
@@ -1101,3 +1107,21 @@
     - logical_plan
     - batch_plan
     - stream_plan
+- name: test approx percentile with invalid relative_error
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.0) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - binder_error
+- name: test approx percentile with invalid relative_error 0.0
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.0) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - binder_error
+- name: test approx percentile with invalid relative_error 1.0 with group by.
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT approx_percentile(0.0, 1.0) WITHIN GROUP (order by v1) from t group by v2;
+  expected_outputs:
+    - binder_error

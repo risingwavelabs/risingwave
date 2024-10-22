@@ -16,6 +16,7 @@
 
 mod agg_common;
 mod append_only_dedup;
+mod asof_join;
 mod barrier_recv;
 mod batch_query;
 mod cdc_filter;
@@ -66,6 +67,7 @@ use risingwave_storage::StateStore;
 use self::append_only_dedup::*;
 use self::approx_percentile::global::*;
 use self::approx_percentile::local::*;
+use self::asof_join::AsOfJoinExecutorBuilder;
 use self::barrier_recv::*;
 use self::batch_query::*;
 use self::cdc_filter::CdcFilterExecutorBuilder;
@@ -80,7 +82,7 @@ use self::hash_join::*;
 use self::hop_window::*;
 use self::lookup::*;
 use self::lookup_union::*;
-use self::merge::*;
+pub(crate) use self::merge::MergeExecutorBuilder;
 use self::mview::*;
 use self::no_op::*;
 use self::now::NowExecutorBuilder;
@@ -185,5 +187,6 @@ pub async fn create_executor(
         NodeBody::GlobalApproxPercentile => GlobalApproxPercentileExecutorBuilder,
         NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
         NodeBody::RowMerge => RowMergeExecutorBuilder,
+        NodeBody::AsOfJoin => AsOfJoinExecutorBuilder,
     }
 }

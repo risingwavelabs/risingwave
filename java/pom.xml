@@ -71,14 +71,14 @@
         <log4j.version>2.20.0</log4j.version>
         <slf4j.version>2.0.9</slf4j.version>
         <commons.cli.version>1.5.0</commons.cli.version>
-        <commons.io.version>2.11.0</commons.io.version>
+        <commons.io.version>2.14.0</commons.io.version>
         <commons.text.version>1.10.0</commons.text.version>
         <commons.lang3.version>3.12.0</commons.lang3.version>
         <debezium.version>2.6.2.Final</debezium.version>
         <jackson.version>2.15.0</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.4.0</hadoop.version>
-        <elasticsearch.version>7.17.19</elasticsearch.version>
+        <elasticsearch.version>7.17.23</elasticsearch.version>
         <opensearch.version>2.11.1</opensearch.version>
         <datastax.version>4.15.0</datastax.version>
         <flink.version>1.18.0</flink.version>
@@ -575,7 +575,9 @@
                     </execution>
                 </executions>
                 <configuration>
-                    <excludePackageNames>com.risingwave.connector.*</excludePackageNames>
+                    <excludePackageNames>
+                        com.risingwave.connector.*:io.debezium.*:com.risingwave.connector.cdc.debezium.*
+                    </excludePackageNames>
                 </configuration>
             </plugin>
 

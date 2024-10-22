@@ -248,9 +248,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let state_pk_indices_l = input_l.pk_indices().to_vec();
         let state_pk_indices_r = input_r.pk_indices().to_vec();
 
-        let state_order_key_indices_l = state_table_l.pk_indices();
-        let state_order_key_indices_r = state_table_r.pk_indices();
-
         let state_join_key_indices_l = params_l.join_key_indices;
         let state_join_key_indices_r = params_r.join_key_indices;
 
@@ -285,19 +282,25 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         assert_eq!(join_key_data_types_l, join_key_data_types_r);
 
-        let degree_all_data_types_l = state_order_key_indices_l
-            .iter()
-            .map(|idx| state_all_data_types_l[*idx].clone())
-            .collect_vec();
-        let degree_all_data_types_r = state_order_key_indices_r
-            .iter()
-            .map(|idx| state_all_data_types_r[*idx].clone())
-            .collect_vec();
-
         let null_matched = K::Bitmap::from_bool_vec(null_safe);
 
         let need_degree_table_l = need_left_degree(T) && !pk_contained_in_jk_r;
         let need_degree_table_r = need_right_degree(T) && !pk_contained_in_jk_l;
+
+        let degree_state_l = need_degree_table_l.then(|| {
+            TableInner::new(
+                degree_pk_indices_l,
+                degree_join_key_indices_l,
+                degree_state_table_l,
+            )
+        });
+        let degree_state_r = need_degree_table_r.then(|| {
+            TableInner::new(
+                degree_pk_indices_r,
+                degree_join_key_indices_r,
+                degree_state_table_r,
+            )
+        });
 
         let (left_to_output, right_to_output) = {
             let (left_len, right_len) = if is_left_semi_or_anti(T) {
@@ -389,13 +392,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     state_all_data_types_l.clone(),
                     state_table_l,
                     params_l.deduped_pk_indices,
-                    degree_join_key_indices_l,
-                    degree_all_data_types_l,
-                    degree_state_table_l,
-                    degree_pk_indices_l,
+                    degree_state_l,
                     null_matched.clone(),
-                    need_degree_table_l,
                     pk_contained_in_jk_l,
+                    None,
                     metrics.clone(),
                     ctx.id,
                     ctx.fragment_id,
@@ -419,13 +419,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     state_all_data_types_r.clone(),
                     state_table_r,
                     params_r.deduped_pk_indices,
-                    degree_join_key_indices_r,
-                    degree_all_data_types_r,
-                    degree_state_table_r,
-                    degree_pk_indices_r,
+                    degree_state_r,
                     null_matched,
-                    need_degree_table_r,
                     pk_contained_in_jk_r,
+                    None,
                     metrics.clone(),
                     ctx.id,
                     ctx.fragment_id,
@@ -944,14 +941,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
 
                         if append_only_optimize && let Some(row) = append_only_matched_row {
-                            side_match.ht.delete(key, row)?;
+                            if side_match.need_degree_table {
+                                side_match.ht.delete(key, row)?;
+                            } else {
+                                side_match.ht.delete_row(key, row.row)?;
+                            }
                         } else if side_update.need_degree_table {
-                            side_update
-                                .ht
-                                .insert(key, JoinRow::new(row, degree))
-                                .await?;
+                            side_update.ht.insert(key, JoinRow::new(row, degree))?;
                         } else {
-                            side_update.ht.insert_row(key, row).await?;
+                            side_update.ht.insert_row(key, row)?;
                         }
                     } else {
                         // Row which violates null-safe bitmap will never be matched so we need not
@@ -1078,6 +1076,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
 
@@ -1093,12 +1092,16 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table = StateTable::new_without_distribution(
+        let state_table = StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::new(table_id),
+                column_descs,
+                order_types.to_vec(),
+                pk_indices.to_vec(),
+                0,
+            ),
             mem_state.clone(),
-            TableId::new(table_id),
-            column_descs,
-            order_types.to_vec(),
-            pk_indices.to_vec(),
+            None,
         )
         .await;
 
@@ -1114,12 +1117,16 @@ mod tests {
             ColumnId::new(pk_indices.len() as i32),
             DataType::Int64,
         ));
-        let degree_state_table = StateTable::new_without_distribution(
+        let degree_state_table = StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::new(table_id + 1),
+                degree_table_column_descs,
+                order_types.to_vec(),
+                pk_indices.to_vec(),
+                0,
+            ),
             mem_state,
-            TableId::new(table_id + 1),
-            degree_table_column_descs,
-            order_types.to_vec(),
-            pk_indices.to_vec(),
+            None,
         )
         .await;
         (state_table, degree_state_table)

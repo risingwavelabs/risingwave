@@ -63,11 +63,11 @@ macro_rules! impl_fmt_display {
     }};
     ($field:ident => [$($arr:tt)+], $v:ident, $self:ident) => {
         if $self.$field {
-            $v.push(format!("{}", AstVec([$($arr)+].to_vec())));
+            $v.push(format!("{}", display_separated(&[$($arr)+], " ")));
         }
     };
     ([$($arr:tt)+], $v:ident) => {
-        $v.push(format!("{}", AstVec([$($arr)+].to_vec())));
+        $v.push(format!("{}", display_separated(&[$($arr)+], " ")));
     };
 }
 
@@ -219,6 +219,7 @@ impl Encode {
     }
 }
 
+/// `FORMAT ... ENCODE ... [(a=b, ...)] [KEY ENCODE ...]`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ConnectorSchema {
@@ -412,6 +413,7 @@ pub(super) fn fmt_create_items(
         || !watermarks.is_empty()
         || wildcard_idx.is_some();
     has_items.then(|| write!(&mut items, "("));
+
     if let Some(wildcard_idx) = wildcard_idx {
         let (columns_l, columns_r) = columns.split_at(wildcard_idx);
         write!(&mut items, "{}", display_comma_separated(columns_l))?;
@@ -426,14 +428,21 @@ pub(super) fn fmt_create_items(
     } else {
         write!(&mut items, "{}", display_comma_separated(columns))?;
     }
-    if !columns.is_empty() && (!constraints.is_empty() || !watermarks.is_empty()) {
+    let mut leading_items = !columns.is_empty() || wildcard_idx.is_some();
+
+    if leading_items && !constraints.is_empty() {
         write!(&mut items, ", ")?;
     }
     write!(&mut items, "{}", display_comma_separated(constraints))?;
-    if !columns.is_empty() && !constraints.is_empty() && !watermarks.is_empty() {
+    leading_items |= !constraints.is_empty();
+
+    if leading_items && !watermarks.is_empty() {
         write!(&mut items, ", ")?;
     }
     write!(&mut items, "{}", display_comma_separated(watermarks))?;
+    // uncomment this when adding more sections below
+    // leading_items |= !watermarks.is_empty();
+
     has_items.then(|| write!(&mut items, ")"));
     Ok(items)
 }
@@ -454,6 +463,9 @@ impl fmt::Display for CreateSourceStatement {
             v.push(items);
         }
 
+        for item in &self.include_column_options {
+            v.push(format!("{}", item));
+        }
         impl_fmt_display!(with_properties, v, self);
         impl_fmt_display!(source_schema, v, self);
         v.iter().join(" ").fmt(f)
@@ -708,6 +720,7 @@ impl fmt::Display for DeclareCursorStatement {
 pub struct FetchCursorStatement {
     pub cursor_name: ObjectName,
     pub count: u32,
+    pub with_properties: WithProperties,
 }
 
 impl ParseTo for FetchCursorStatement {
@@ -719,8 +732,13 @@ impl ParseTo for FetchCursorStatement {
         };
         p.expect_keyword(Keyword::FROM)?;
         impl_parse_to!(cursor_name: ObjectName, p);
+        impl_parse_to!(with_properties: WithProperties, p);
 
-        Ok(Self { cursor_name, count })
+        Ok(Self {
+            cursor_name,
+            count,
+            with_properties,
+        })
     }
 }
 
@@ -849,16 +867,6 @@ impl fmt::Display for CreateSecretStatement {
             impl_fmt_display!(credential, v, self);
         }
         v.iter().join(" ").fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct AstVec<T>(pub Vec<T>);
-
-impl<T: fmt::Display> fmt::Display for AstVec<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.iter().join(" ").fmt(f)
     }
 }
 

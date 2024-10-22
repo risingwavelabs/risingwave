@@ -21,11 +21,19 @@ use risingwave_pb::plan_common::ExprContext;
 define_context! {
     pub TIME_ZONE: String,
     pub FRAGMENT_ID: u32,
+    pub VNODE_COUNT: usize,
 }
 
 pub fn capture_expr_context() -> ExprResult<ExprContext> {
     let time_zone = TIME_ZONE::try_with(ToOwned::to_owned)?;
     Ok(ExprContext { time_zone })
+}
+
+/// Get the vnode count from the context.
+///
+/// Always returns `Ok` in streaming mode and `Err` in batch mode.
+pub fn vnode_count() -> ExprResult<usize> {
+    VNODE_COUNT::try_with(|&x| x)
 }
 
 pub async fn expr_context_scope<Fut>(expr_context: ExprContext, future: Fut) -> Fut::Output

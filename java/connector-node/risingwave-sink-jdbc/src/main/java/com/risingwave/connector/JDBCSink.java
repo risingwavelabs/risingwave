@@ -40,6 +40,7 @@ public class JDBCSink implements SinkWriter {
 
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
     public static final String JDBC_DATA_TYPE_KEY = "DATA_TYPE";
+    public static final String JDBC_TYPE_NAME_KEY = "TYPE_NAME";
 
     private boolean updateFlag = false;
 
@@ -71,12 +72,13 @@ public class JDBCSink implements SinkWriter {
                             .collect(Collectors.toList());
 
             LOG.info(
-                    "schema = {}, table = {}, tableSchema = {}, columnSqlTypes = {}, pkIndices = {}",
+                    "schema = {}, table = {}, tableSchema = {}, columnSqlTypes = {}, pkIndices = {}, queryTimeout = {}",
                     config.getSchemaName(),
                     config.getTableName(),
                     tableSchema,
                     columnSqlTypes,
-                    pkIndices);
+                    pkIndices,
+                    config.getQueryTimeout());
 
             if (factory.isPresent()) {
                 this.jdbcDialect = factory.get().create(columnSqlTypes, pkIndices);
@@ -92,7 +94,7 @@ public class JDBCSink implements SinkWriter {
             // Commit the `getTransactionIsolation`
             conn.commit();
 
-            jdbcStatements = new JdbcStatements(conn);
+            jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -109,9 +111,16 @@ public class JDBCSink implements SinkWriter {
                     conn.getMetaData().getColumns(null, schemaName, tableName, null);
 
             while (columnResultSet.next()) {
-                columnTypeMap.put(
-                        columnResultSet.getString(JDBC_COLUMN_NAME_KEY),
-                        columnResultSet.getInt(JDBC_DATA_TYPE_KEY));
+                var typeName = columnResultSet.getString(JDBC_TYPE_NAME_KEY);
+                int dt = columnResultSet.getInt(JDBC_DATA_TYPE_KEY);
+                // NOTE: Workaround a known issue of pgjdbc
+                // See also https://github.com/pgjdbc/pgjdbc/issues/1766
+                if (dt == Types.TIMESTAMP
+                        && (typeName.equalsIgnoreCase("timestamptz")
+                                || typeName.equalsIgnoreCase("timestamp with time zone"))) {
+                    dt = Types.TIMESTAMP_WITH_TIMEZONE;
+                }
+                columnTypeMap.put(columnResultSet.getString(JDBC_COLUMN_NAME_KEY), dt);
             }
         } catch (SQLException e) {
             throw Status.INTERNAL
@@ -173,7 +182,7 @@ public class JDBCSink implements SinkWriter {
                         conn = JdbcUtils.getConnection(config.getJdbcUrl());
                         // reset the flag since we will retry to prepare the batch again
                         updateFlag = false;
-                        jdbcStatements = new JdbcStatements(conn);
+                        jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
                     } else {
                         throw io.grpc.Status.INTERNAL
                                 .withDescription(
@@ -206,13 +215,15 @@ public class JDBCSink implements SinkWriter {
      * across multiple batches if only the JDBC connection is valid.
      */
     class JdbcStatements implements AutoCloseable {
+        private final int queryTimeoutSecs;
         private PreparedStatement deleteStatement;
         private PreparedStatement upsertStatement;
         private PreparedStatement insertStatement;
 
         private final Connection conn;
 
-        public JdbcStatements(Connection conn) throws SQLException {
+        public JdbcStatements(Connection conn, int queryTimeoutSecs) throws SQLException {
+            this.queryTimeoutSecs = queryTimeoutSecs;
             this.conn = conn;
             var schemaTableName =
                     jdbcDialect.createSchemaTableName(
@@ -339,6 +350,9 @@ public class JDBCSink implements SinkWriter {
             if (stmt == null) {
                 return;
             }
+            // if timeout occurs, a SQLTimeoutException will be thrown
+            // and we will retry to write the stream chunk in `JDBCSink.write`
+            stmt.setQueryTimeout(queryTimeoutSecs);
             LOG.debug("Executing statement: {}", stmt);
             stmt.executeBatch();
             stmt.clearParameters();

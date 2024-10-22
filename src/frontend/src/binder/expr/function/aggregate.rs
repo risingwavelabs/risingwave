@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::bail_not_implemented;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
+use risingwave_common::{bail, bail_not_implemented};
+use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
 use risingwave_sqlparser::ast::{self, FunctionArgExpr};
 
 use crate::binder::Clause;
@@ -48,7 +48,7 @@ impl Binder {
 
     pub(super) fn bind_aggregate_function(
         &mut self,
-        kind: AggKind,
+        agg_type: AggType,
         distinct: bool,
         args: Vec<ExprImpl>,
         order_by: Vec<ast::OrderByExpr>,
@@ -57,10 +57,10 @@ impl Binder {
     ) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
 
-        let (direct_args, args, order_by) = if matches!(kind, agg_kinds::ordered_set!()) {
-            self.bind_ordered_set_agg(&kind, distinct, args, order_by, within_group)?
+        let (direct_args, args, order_by) = if matches!(agg_type, agg_types::ordered_set!()) {
+            self.bind_ordered_set_agg(&agg_type, distinct, args, order_by, within_group)?
         } else {
-            self.bind_normal_agg(&kind, distinct, args, order_by, within_group)?
+            self.bind_normal_agg(&agg_type, distinct, args, order_by, within_group)?
         };
 
         let filter = match filter {
@@ -86,7 +86,7 @@ impl Binder {
         };
 
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-            kind,
+            agg_type,
             args,
             distinct,
             order_by,
@@ -97,7 +97,7 @@ impl Binder {
 
     fn bind_ordered_set_agg(
         &mut self,
-        kind: &AggKind,
+        kind: &AggType,
         distinct: bool,
         args: Vec<ExprImpl>,
         order_by: Vec<ast::OrderByExpr>,
@@ -107,7 +107,7 @@ impl Binder {
         // aggregate_name ( [ expression [ , ... ] ] ) WITHIN GROUP ( order_by_clause ) [ FILTER
         // ( WHERE filter_clause ) ]
 
-        assert!(matches!(kind, agg_kinds::ordered_set!()));
+        assert!(matches!(kind, agg_types::ordered_set!()));
 
         if !order_by.is_empty() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -138,10 +138,10 @@ impl Binder {
 
         // check signature and do implicit cast
         match (kind, direct_args.len(), args.as_mut_slice()) {
-            (AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc), 1, [arg]) => {
+            (AggType::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc), 1, [arg]) => {
                 let fraction = &mut direct_args[0];
                 decimal_to_float64(fraction, kind)?;
-                if matches!(&kind, AggKind::Builtin(PbAggKind::PercentileCont)) {
+                if matches!(&kind, AggType::Builtin(PbAggKind::PercentileCont)) {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
                         ErrorCode::InvalidInputSyntax(format!(
                             "arg in `{}` must be castable to float64",
@@ -150,14 +150,25 @@ impl Binder {
                     })?;
                 }
             }
-            (AggKind::Builtin(PbAggKind::Mode), 0, [_arg]) => {}
-            (AggKind::Builtin(PbAggKind::ApproxPercentile), 1..=2, [_percentile_col]) => {
+            (AggType::Builtin(PbAggKind::Mode), 0, [_arg]) => {}
+            (AggType::Builtin(PbAggKind::ApproxPercentile), 1..=2, [_percentile_col]) => {
                 let percentile = &mut direct_args[0];
                 decimal_to_float64(percentile, kind)?;
                 match direct_args.len() {
                     2 => {
                         let relative_error = &mut direct_args[1];
                         decimal_to_float64(relative_error, kind)?;
+                        if let Some(relative_error) = relative_error.as_literal()
+                            && let Some(relative_error) = relative_error.get_data()
+                        {
+                            let relative_error = relative_error.as_float64().0;
+                            if relative_error <= 0.0 || relative_error >= 1.0 {
+                                bail!(
+                                    "relative_error={} does not satisfy 0.0 < relative_error < 1.0",
+                                    relative_error,
+                                )
+                            }
+                        }
                     }
                     1 => {
                         let relative_error: ExprImpl = Literal::new(
@@ -196,7 +207,7 @@ impl Binder {
 
     fn bind_normal_agg(
         &mut self,
-        kind: &AggKind,
+        kind: &AggType,
         distinct: bool,
         args: Vec<ExprImpl>,
         order_by: Vec<ast::OrderByExpr>,
@@ -211,7 +222,7 @@ impl Binder {
         //   filter_clause ) ]
         // aggregate_name ( * ) [ FILTER ( WHERE filter_clause ) ]
 
-        assert!(!matches!(kind, agg_kinds::ordered_set!()));
+        assert!(!matches!(kind, agg_types::ordered_set!()));
 
         if within_group.is_some() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -231,8 +242,8 @@ impl Binder {
         if distinct {
             if matches!(
                 kind,
-                AggKind::Builtin(PbAggKind::ApproxCountDistinct)
-                    | AggKind::Builtin(PbAggKind::ApproxPercentile)
+                AggType::Builtin(PbAggKind::ApproxCountDistinct)
+                    | AggType::Builtin(PbAggKind::ApproxPercentile)
             ) {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "DISTINCT is not allowed for approximate aggregation `{}`",
@@ -272,7 +283,7 @@ impl Binder {
     }
 }
 
-fn decimal_to_float64(decimal_expr: &mut ExprImpl, kind: &AggKind) -> Result<()> {
+fn decimal_to_float64(decimal_expr: &mut ExprImpl, kind: &AggType) -> Result<()> {
     if decimal_expr.cast_implicit_mut(DataType::Float64).is_err() {
         return Err(ErrorCode::InvalidInputSyntax(format!(
             "direct arg in `{}` must be castable to float64",

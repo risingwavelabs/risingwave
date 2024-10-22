@@ -61,11 +61,11 @@ pub enum Components {
     Minio,
     Hdfs,
     PrometheusAndGrafana,
-    Etcd,
     Pubsub,
     Redis,
     Tracing,
     RustComponents,
+    UseSystem,
     BuildConnectorNode,
     Dashboard,
     Release,
@@ -86,11 +86,11 @@ impl Components {
             Self::Minio => "[Component] Hummock: MinIO + MinIO-CLI",
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
-            Self::Etcd => "[Component] Etcd",
             Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
             Self::RustComponents => "[Build] Rust components",
+            Self::UseSystem => "[Build] Use system RisingWave",
             Self::Dashboard => "[Build] Dashboard",
             Self::Tracing => "[Component] Tracing: Grafana Tempo",
             Self::Release => "[Build] Enable release mode",
@@ -121,11 +121,6 @@ Required by Hummock state store."
                 "
 Required if you want to view metrics."
             }
-            Self::Etcd => {
-                "
-Required if you want to persistent meta-node data.
-                "
-            }
             Self::Pubsub => {
                 "
 Required if you want to create source from Emulated Google Pub/sub.
@@ -134,8 +129,14 @@ Required if you want to create source from Emulated Google Pub/sub.
             Self::RustComponents => {
                 "
 Required if you want to build compute-node and meta-node.
-Otherwise you will need to manually download and copy it
-to RiseDev directory."
+Otherwise you will need to enable `USE_SYSTEM_RISINGWAVE`, or
+manually download a binary and copy it to RiseDev directory."
+            }
+            Self::UseSystem => {
+                "
+Use the RisingWave installed in the PATH, instead of building it
+from source. This implies `ENABLE_BUILD_RUST` to be false.
+                "
             }
             Self::Dashboard => {
                 "
@@ -213,9 +214,9 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             "ENABLE_MINIO" => Some(Self::Minio),
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
-            "ENABLE_ETCD" => Some(Self::Etcd),
             "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
+            "USE_SYSTEM_RISINGWAVE" => Some(Self::UseSystem),
             "ENABLE_BUILD_DASHBOARD" => Some(Self::Dashboard),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
@@ -239,10 +240,10 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::Minio => "ENABLE_MINIO",
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
-            Self::Etcd => "ENABLE_ETCD",
             Self::Pubsub => "ENABLE_PUBSUB",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
+            Self::UseSystem => "USE_SYSTEM_RISINGWAVE",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",

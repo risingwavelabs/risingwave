@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use super::opendal_sink::FileSink;
+use super::opendal_sink::{BatchingStrategy, FileSink};
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
@@ -46,6 +46,9 @@ pub struct AzblobConfig {
     #[serde(flatten)]
     pub common: AzblobCommon,
 
+    #[serde(flatten)]
+    pub batching_strategy: BatchingStrategy,
+
     pub r#type: String, // accept "append-only"
 
     #[serde(flatten)]
@@ -58,12 +61,12 @@ impl<S: OpendalSinkBackend> FileSink<S> {
     pub fn new_azblob_sink(config: AzblobConfig) -> Result<Operator> {
         // Create azblob builder.
         let mut builder = Azblob::default();
-        builder.container(&config.common.container_name);
-
-        builder.endpoint(&config.common.endpoint_url);
+        builder = builder
+            .container(&config.common.container_name)
+            .endpoint(&config.common.endpoint_url);
 
         if let Some(account_name) = config.common.account_name {
-            builder.account_name(&account_name);
+            builder = builder.account_name(&account_name);
         } else {
             tracing::warn!(
                 "account_name azblob is not set, container  {}",
@@ -72,7 +75,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
         }
 
         if let Some(account_key) = config.common.account_key {
-            builder.account_key(&account_key);
+            builder = builder.account_key(&account_key);
         } else {
             tracing::warn!(
                 "account_key azblob is not set, container  {}",
@@ -127,5 +130,13 @@ impl OpendalSinkBackend for AzblobSink {
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
         super::opendal_sink::EngineType::Azblob
+    }
+
+    fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy {
+        BatchingStrategy {
+            max_row_count: properties.batching_strategy.max_row_count,
+            rollover_seconds: properties.batching_strategy.rollover_seconds,
+            path_partition_prefix: properties.batching_strategy.path_partition_prefix,
+        }
     }
 }

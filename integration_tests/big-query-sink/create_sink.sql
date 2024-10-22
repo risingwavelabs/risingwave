@@ -1,3 +1,5 @@
+set sink_decouple = false;
+
 -- create sink with local file
 CREATE SINK bhv_big_query_sink
 FROM

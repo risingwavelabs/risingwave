@@ -24,7 +24,6 @@ use mysql_async::Opts;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
@@ -38,17 +37,16 @@ use tokio::task::JoinHandle;
 use url::form_urlencoded;
 use with_options::WithOptions;
 
-use super::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
+use super::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
 use super::doris_starrocks_connector::{
     HeaderBuilder, InserterInner, StarrocksTxnRequestBuilder, STARROCKS_DELETE_SIGN,
     STARROCKS_SUCCESS_STATUS,
 };
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
-    SinkCommitCoordinator, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    SinkCommitCoordinator, SinkError, SinkParam, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
 use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
@@ -118,7 +116,7 @@ pub struct StarrocksConfig {
 }
 
 fn default_commit_checkpoint_interval() -> u64 {
-    DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
 }
 
 impl StarrocksConfig {
@@ -264,29 +262,6 @@ impl Sink for StarrocksSink {
 
     const SINK_NAME: &'static str = STARROCKS_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let commit_checkpoint_interval =
-            if let Some(interval) = desc.properties.get("commit_checkpoint_interval") {
-                interval
-                    .parse::<u64>()
-                    .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
-            } else {
-                DEFAULT_COMMIT_CHECKPOINT_INTERVAL
-            };
-
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => {
-                if commit_checkpoint_interval > 1 {
-                    return Err(SinkError::Config(anyhow!(
-                        "config conflict: Starrocks config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                    )));
-                }
-                Ok(false)
-            }
-        }
-    }
-
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
@@ -338,6 +313,8 @@ impl Sink for StarrocksSink {
             self.is_append_only,
             writer_param.executor_id,
         )?;
+
+        let metrics = SinkWriterMetrics::new(&writer_param);
         let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -356,7 +333,7 @@ impl Sink for StarrocksSink {
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
-            writer_param.sink_metrics,
+            metrics,
             commit_checkpoint_interval,
         ))
     }

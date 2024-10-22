@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use arrow_array_iceberg::{Int32Array, Int64Array, RecordBatch};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -27,6 +26,7 @@ use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
+use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, Int64Array, RecordBatch};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ROWID_PREFIX;
@@ -41,6 +41,8 @@ use crate::source::{
     into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId,
     SplitMetaData, SplitReader,
 };
+
+const PULSAR_DEFAULT_SUBSCRIPTION_PREFIX: &str = "rw-consumer";
 
 pub enum PulsarSplitReader {
     Broker(PulsarBrokerReader),
@@ -174,8 +176,12 @@ impl SplitReader for PulsarBrokerReader {
             .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
             .with_subscription(format!(
-                "rw-consumer-{}-{}",
-                source_ctx.fragment_id, source_ctx.actor_id
+                "{}-{}-{}",
+                props
+                    .subscription_name_prefix
+                    .unwrap_or(PULSAR_DEFAULT_SUBSCRIPTION_PREFIX.to_string()),
+                source_ctx.fragment_id,
+                source_ctx.actor_id
             ));
 
         let builder = match split.start_offset.clone() {

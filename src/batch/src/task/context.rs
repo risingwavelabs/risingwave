@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use prometheus::core::Atomic;
 use risingwave_common::catalog::SysCatalogReaderRef;
-use risingwave_common::config::{BatchConfig, MetricLevel};
+use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -24,11 +24,8 @@ use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_storage::StateStoreImpl;
 
-use super::TaskId;
 use crate::error::Result;
-use crate::monitor::{
-    BatchMetricsWithTaskLabels, BatchMetricsWithTaskLabelsInner, BatchSpillMetrics,
-};
+use crate::monitor::{BatchMetrics, BatchMetricsInner, BatchSpillMetrics};
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 use crate::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 
@@ -53,7 +50,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     /// Get batch metrics.
     /// None indicates that not collect task metrics.
-    fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels>;
+    fn batch_metrics(&self) -> Option<BatchMetrics>;
 
     fn spill_metrics(&self) -> Arc<BatchSpillMetrics>;
 
@@ -75,8 +72,8 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 #[derive(Clone)]
 pub struct ComputeNodeContext {
     env: BatchEnvironment,
-    // None: Local mode don't record metrics.
-    batch_metrics: Option<BatchMetricsWithTaskLabels>,
+
+    batch_metrics: BatchMetrics,
 
     mem_context: MemoryContext,
 }
@@ -104,8 +101,8 @@ impl BatchTaskContext for ComputeNodeContext {
         self.env.state_store()
     }
 
-    fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels> {
-        self.batch_metrics.clone()
+    fn batch_metrics(&self) -> Option<BatchMetrics> {
+        Some(self.batch_metrics.clone())
     }
 
     fn spill_metrics(&self) -> Arc<BatchSpillMetrics> {
@@ -124,17 +121,9 @@ impl BatchTaskContext for ComputeNodeContext {
         self.env.source_metrics()
     }
 
-    fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext {
-        if let Some(metrics) = &self.batch_metrics {
-            let executor_mem_usage = metrics
-                .executor_metrics()
-                .mem_usage
-                .with_guarded_label_values(&metrics.executor_labels(executor_id));
-            MemoryContext::new(Some(self.mem_context.clone()), executor_mem_usage)
-        } else {
-            let counter = TrAdderAtomic::new(0);
-            MemoryContext::new(Some(self.mem_context.clone()), counter)
-        }
+    fn create_executor_mem_context(&self, _executor_id: &str) -> MemoryContext {
+        let counter = TrAdderAtomic::new(0);
+        MemoryContext::new(Some(self.mem_context.clone()), counter)
     }
 
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
@@ -147,45 +136,22 @@ impl ComputeNodeContext {
     pub fn for_test() -> Self {
         Self {
             env: BatchEnvironment::for_test(),
-            batch_metrics: None,
+            batch_metrics: BatchMetricsInner::for_test(),
             mem_context: MemoryContext::none(),
         }
     }
 
-    pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
-        if env.metric_level() >= MetricLevel::Debug {
-            let batch_mem_context = env.task_manager().memory_context_ref();
-            let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(
-                env.task_manager().metrics(),
-                env.task_metrics(),
-                env.executor_metrics(),
-                task_id,
-            ));
-            let mem_context = MemoryContext::new(
-                Some(batch_mem_context),
-                batch_metrics.task_mem_usage.clone(),
-            );
-            Self {
-                env,
-                batch_metrics: Some(batch_metrics),
-                mem_context,
-            }
-        } else {
-            let batch_mem_context = env.task_manager().memory_context_ref();
-            Self {
-                env,
-                batch_metrics: None,
-                mem_context: batch_mem_context,
-            }
-        }
-    }
-
-    pub fn new_for_local(env: BatchEnvironment) -> Self {
-        let batch_mem_context = env.task_manager().memory_context_ref();
+    pub fn new(env: BatchEnvironment) -> Self {
+        let mem_context = env.task_manager().memory_context_ref();
+        let batch_metrics = Arc::new(BatchMetricsInner::new(
+            env.task_manager().metrics(),
+            env.executor_metrics(),
+            env.iceberg_scan_metrics(),
+        ));
         Self {
             env,
-            batch_metrics: None,
-            mem_context: batch_mem_context,
+            batch_metrics,
+            mem_context,
         }
     }
 }

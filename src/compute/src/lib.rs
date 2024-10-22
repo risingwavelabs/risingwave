@@ -16,7 +16,6 @@
 #![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
-#![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
@@ -103,8 +102,9 @@ pub struct ComputeNodeOpts {
     pub role: Role,
 
     /// Used for control the metrics level, similar to log level.
-    /// 0 = disable metrics
-    /// >0 = enable metrics
+    ///
+    /// level = 0: disable metrics
+    /// level > 0: enable metrics
     #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,

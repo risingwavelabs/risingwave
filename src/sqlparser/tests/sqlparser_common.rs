@@ -2837,70 +2837,6 @@ fn parse_ctes() {
 }
 
 #[test]
-fn parse_changelog_ctes() {
-    let cte_sqls = vec!["foo", "bar"];
-    let with = &format!(
-        "WITH a AS changelog from {}, b AS changelog from {} SELECT foo + bar FROM a, b",
-        cte_sqls[0], cte_sqls[1]
-    );
-
-    fn assert_changelog_ctes(expected: &[&str], sel: &Query) {
-        for (i, exp) in expected.iter().enumerate() {
-            let Cte { alias, cte_inner } = &sel.with.as_ref().unwrap().cte_tables[i];
-            if let CteInner::ChangeLog(from) = cte_inner {
-                assert_eq!(*exp, from.to_string());
-                assert_eq!(
-                    if i == 0 {
-                        Ident::new_unchecked("a")
-                    } else {
-                        Ident::new_unchecked("b")
-                    },
-                    alias.name
-                );
-                assert!(alias.columns.is_empty());
-            } else {
-                panic!("expected CteInner::ChangeLog")
-            }
-        }
-    }
-
-    // Top-level CTE
-    assert_changelog_ctes(&cte_sqls, &verified_query(with));
-    // CTE in a subquery
-    let sql = &format!("SELECT ({})", with);
-    let select = verified_only_select(sql);
-    match expr_from_projection(only(&select.projection)) {
-        Expr::Subquery(ref subquery) => {
-            assert_changelog_ctes(&cte_sqls, subquery.as_ref());
-        }
-        _ => panic!("expected subquery"),
-    }
-    // CTE in a derived table
-    let sql = &format!("SELECT * FROM ({})", with);
-    let select = verified_only_select(sql);
-    match only(select.from).relation {
-        TableFactor::Derived { subquery, .. } => {
-            assert_changelog_ctes(&cte_sqls, subquery.as_ref())
-        }
-        _ => panic!("expected derived table"),
-    }
-    // CTE in a view
-    let sql = &format!("CREATE VIEW v AS {}", with);
-    match verified_stmt(sql) {
-        Statement::CreateView { query, .. } => assert_changelog_ctes(&cte_sqls, &query),
-        _ => panic!("expected CREATE VIEW"),
-    }
-    // CTE in a CTE...
-    let sql = &format!("WITH outer_cte AS ({}) SELECT * FROM outer_cte", with);
-    let select = verified_query(sql);
-    if let CteInner::Query(query) = &only(&select.with.unwrap().cte_tables).cte_inner {
-        assert_changelog_ctes(&cte_sqls, query);
-    } else {
-        panic!("expected CteInner::Query")
-    }
-}
-
-#[test]
 fn parse_cte_renamed_columns() {
     let sql = "WITH cte (col1, col2) AS (SELECT foo, bar FROM baz) SELECT * FROM cte";
     let query = verified_query(sql);
@@ -3348,7 +3284,7 @@ fn parse_create_materialized_view_emit_immediately() {
 
 #[test]
 fn parse_create_table_on_conflict() {
-    let sql = "CREATE TABLE myschema.myview ON CONFLICT OVERWRITE AS SELECT foo FROM bar";
+    let sql = "CREATE TABLE myschema.myview ON CONFLICT DO UPDATE FULL AS SELECT foo FROM bar";
     match verified_stmt(sql) {
         Statement::CreateTable {
             name,
@@ -3358,12 +3294,12 @@ fn parse_create_table_on_conflict() {
         } => {
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
-            assert_eq!(on_conflict, Some(OnConflict::OverWrite));
+            assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
         }
         _ => unreachable!(),
     }
 
-    let sql = "CREATE TABLE myschema.myview ON CONFLICT IGNORE AS SELECT foo FROM bar";
+    let sql = "CREATE TABLE myschema.myview ON CONFLICT DO NOTHING AS SELECT foo FROM bar";
     match verified_stmt(sql) {
         Statement::CreateTable {
             name,
@@ -3373,7 +3309,7 @@ fn parse_create_table_on_conflict() {
         } => {
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
-            assert_eq!(on_conflict, Some(OnConflict::Ignore));
+            assert_eq!(on_conflict, Some(OnConflict::Nothing));
         }
         _ => unreachable!(),
     }
@@ -3396,7 +3332,7 @@ fn parse_create_table_on_conflict() {
 
 #[test]
 fn parse_create_table_on_conflict_with_version_column() {
-    let sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN(v2)";
+    let sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(v2)";
     match verified_stmt(sql1) {
         Statement::CreateTable {
             name,
@@ -3405,21 +3341,21 @@ fn parse_create_table_on_conflict_with_version_column() {
             ..
         } => {
             assert_eq!("t", name.to_string());
-            assert_eq!(on_conflict, Some(OnConflict::OverWrite));
+            assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
             assert_eq!(with_version_column, Some("v2".to_string()));
         }
         _ => unreachable!(),
     }
 
-    let invalid_sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN(v2";
+    let invalid_sql1 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(v2";
     let res = parse_sql_statements(invalid_sql1);
     assert!(res.is_err());
 
-    let invalid_sql2 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH VERSION COLUMN";
+    let invalid_sql2 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN";
     let res = parse_sql_statements(invalid_sql2);
     assert!(res.is_err());
 
-    let invalid_sql3 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT OVERWRITE WITH COLUMN";
+    let invalid_sql3 = "CREATE TABLE t (v1 INT, v2 INT, v3 INT, PRIMARY KEY (v1)) ON CONFLICT DO UPDATE FULL WITH COLUMN";
     let res = parse_sql_statements(invalid_sql3);
     assert!(res.is_err());
 }

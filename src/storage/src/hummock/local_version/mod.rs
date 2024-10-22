@@ -13,3 +13,4 @@
 // limitations under the License.
 
 pub mod pinned_version;
+pub mod recent_versions;

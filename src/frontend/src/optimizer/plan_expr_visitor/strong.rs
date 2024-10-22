@@ -291,6 +291,7 @@ impl Strong {
             | ExprType::JsonbPopulateRecord
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
+            | ExprType::JsonbPopulateMap
             | ExprType::MapFromEntries
             | ExprType::MapAccess
             | ExprType::MapKeys
@@ -303,6 +304,7 @@ impl Strong {
             | ExprType::MapInsert
             | ExprType::MapLength
             | ExprType::Vnode
+            | ExprType::VnodeUser
             | ExprType::TestPaidTier
             | ExprType::Proctime
             | ExprType::PgSleep

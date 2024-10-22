@@ -89,8 +89,8 @@ pub fn differential_sql_gen<R: Rng>(
 /// generated query when `QUERY_MODE=local`.
 pub fn session_sql_gen<R: Rng>(rng: &mut R) -> String {
     [
-        "SET RW_ENABLE_TWO_PHASE_AGG TO TRUE",
-        "SET RW_ENABLE_TWO_PHASE_AGG TO FALSE",
+        "SET ENABLE_TWO_PHASE_AGG TO TRUE",
+        "SET ENABLE_TWO_PHASE_AGG TO FALSE",
         "SET RW_FORCE_TWO_PHASE_AGG TO TRUE",
         "SET RW_FORCE_TWO_PHASE_AGG TO FALSE",
     ]

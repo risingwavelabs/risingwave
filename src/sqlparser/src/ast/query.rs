@@ -335,8 +335,8 @@ impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.cte_inner {
             CteInner::Query(query) => write!(f, "{} AS ({})", self.alias, query)?,
-            CteInner::ChangeLog(ident) => {
-                write!(f, "{} AS changelog from {}", self.alias, ident.value)?
+            CteInner::ChangeLog(obj_name) => {
+                write!(f, "{} AS changelog from {}", self.alias, obj_name)?
             }
         }
         Ok(())
@@ -347,7 +347,7 @@ impl fmt::Display for Cte {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CteInner {
     Query(Query),
-    ChangeLog(Ident),
+    ChangeLog(ObjectName),
 }
 
 /// One item of the comma-separated list following `SELECT`
@@ -584,6 +584,20 @@ impl fmt::Display for Join {
                 suffix(constraint)
             ),
             JoinOperator::CrossJoin => write!(f, " CROSS JOIN {}", self.relation),
+            JoinOperator::AsOfInner(constraint) => write!(
+                f,
+                " {}ASOF JOIN {}{}",
+                prefix(constraint),
+                self.relation,
+                suffix(constraint)
+            ),
+            JoinOperator::AsOfLeft(constraint) => write!(
+                f,
+                " {}ASOF LEFT JOIN {}{}",
+                prefix(constraint),
+                self.relation,
+                suffix(constraint)
+            ),
         }
     }
 }
@@ -596,6 +610,8 @@ pub enum JoinOperator {
     RightOuter(JoinConstraint),
     FullOuter(JoinConstraint),
     CrossJoin,
+    AsOfInner(JoinConstraint),
+    AsOfLeft(JoinConstraint),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -1,0 +1,377 @@
+
+query I
+select cnt from products_cnt;
+----
+11
+
+query I
+select cnt from orders_cnt;
+----
+4
+
+query I
+select cnt from shipments_cnt;
+----
+4
+
+query ITTTT
+SELECT id,name,email_address,credit_card,city from person_new order by id;
+----
+1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne
+1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise
+1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles
+1100 noris ypl@qbxfg.com 1864 2539 enne
+1101 white myc@xpmpe.com 8157 6974 se
+1102 spencer wip@dkaap.com 9481 6270 angeles
+1203 张三 kedmrpz@xiauh.com 5536 1959 5460 2096 北京
+1204 李四 egpemle@lrhcg.com 0052 8113 1582 4430 上海
+
+# 2 rows inserted after cluster is stopped
+query I
+SELECT * from person_new_cnt
+----
+8
+
+query ITTTTT
+select order_id,order_date,customer_name,product_id,order_status from orders order by order_id;
+----
+10001 2020-07-30 10:08:22 Jark 102 0
+10002 2020-07-30 10:11:09 Sally 105 0
+10003 2020-07-30 12:00:30 Edward 106 0
+10004 2022-12-01 15:08:22 Sam 110 0
+
+
+query III
+select order_id, product_id, shipment_id from enriched_orders order by order_id;
+----
+10001  102   1001
+10002  105   1002
+10003  106   1003
+10004  110   1004
+
+query IIT
+select v1, v2, v3 from mytable order by v1;
+----
+2 2 yes
+3 3 no
+4 4 no
+
+# shared cdc source
+query I
+SELECT * from products_test_cnt
+----
+13
+
+query I
+SELECT * from orders_test_cnt
+----
+5
+
+query ITT
+SELECT id,name,description FROM rw.products_test order by id limit 3
+----
+101 RW Small 2-wheel scooter
+102 RW 12V car battery
+103 RW 12-pack of drill bits with sizes ranging from #40 to #3
+
+query TTTT
+select order_date,customer_name,product_id,order_status from orders_no_backfill order by order_id;
+----
+2022-12-01 15:08:22 Sam 110 0
+
+query II
+select * from numeric_to_varchar order by id;
+----
+1   3.14
+2   57896044618658097711785492504343953926634992332820282019728792003956564819967
+3   57896044618658097711785492504343953926634992332820282019728792003956564819968
+4   115792089237316195423570985008687907853269984665640564039457584007913129639936
+5   115792089237316195423570985008687907853269984665640564039457584007913129639936.555555
+6   NAN
+7   POSITIVE_INFINITY
+102 57896044618658097711785492504343953926634992332820282019728792003956564819967
+103 57896044618658097711785492504343953926634992332820282019728792003956564819968
+104 115792089237316195423570985008687907853269984665640564039457584007913129639936
+105 115792089237316195423570985008687907853269984665640564039457584007913129639936.555555
+106 NAN
+107 POSITIVE_INFINITY
+
+# The invalid data for rw_int256 is converted to NULL
+query II
+select * from numeric_to_rw_int256 order by id;
+----
+1   NULL
+2   57896044618658097711785492504343953926634992332820282019728792003956564819967
+3   NULL
+4   NULL
+5   NULL
+6   NULL
+7   NULL
+102 57896044618658097711785492504343953926634992332820282019728792003956564819967
+103 NULL
+104 NULL
+105 NULL
+106 NULL
+107 NULL
+
+query II
+select * from enum_to_varchar order by id;
+----
+1 happy
+2 ok
+3 sad
+
+query II
+select id, my_int from list_with_null_shared order by id;
+----
+1 {1,2,NULL}
+2 {NULL,3,4}
+3 {NULL,-3,-4}
+4 {-4,-5,-6}
+5 NULL
+6 NULL
+
+# my_num: varchar[]
+query II
+select id, my_num from list_with_null_shared order by id;
+----
+1 NULL
+2 {2.2,0,NULL}
+3 NULL
+4 {NULL,-99999999999999999.9999}
+5 NULL
+6 NULL
+
+# my_num1: numeric[]
+query II
+select id, my_num_1 from list_with_null_shared order by id;
+----
+1 NULL
+2 {2.2,0,NULL}
+3 NULL
+4 {NULL,-99999999999999999.9999}
+5 NULL
+6 NULL
+
+# my_num2: rw_int256[]
+query II
+select id, my_num_2 from list_with_null_shared order by id;
+----
+1 NULL
+2 NULL
+3 NULL
+4 NULL
+5 NULL
+6 NULL
+
+# Due to the bug in Debezium, if a enum list contains `NULL`, the list will be converted to `NULL`
+query II
+select id, my_mood from list_with_null_shared order by id;
+----
+1 NULL
+2 {happy,ok,sad}
+3 NULL
+4 NULL
+5 NULL
+6 NULL
+
+query II
+select id, my_uuid from list_with_null_shared order by id;
+----
+1 {bb488f9b-330d-4012-b849-12adeb49e57e,bb488f9b-330d-4012-b849-12adeb49e57f,NULL}
+2 {2de296df-eda7-4202-a81f-1036100ef4f6,2977afbc-0b12-459c-a36f-f623fc9e9840}
+3 {NULL,471acecf-a4b4-4ed3-a211-7fb2291f159f,9bc35adf-fb11-4130-944c-e7eadb96b829}
+4 {b2e4636d-fa03-4ad4-bf16-029a79dca3e2}
+5 NULL
+6 NULL
+
+query II
+select id, my_bytea from list_with_null_shared order by id;
+----
+1 {"\\x00","\\x01",NULL}
+2 {"\\x00","\\x01","\\x02"}
+3 {NULL,"\\x99","\\xaa"}
+4 {"\\x88","\\x99","\\xaa"}
+5 NULL
+6 NULL
+
+query TTTTTTT
+SELECT c_boolean, c_smallint, c_integer, c_bigint, c_decimal, c_real, c_double_precision
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+f -32767 -2147483647 -9223372036854775807 -10.0 -10000 -10000
+f 0      0           0                    0      0      0
+f NULL   NULL        1                    NULL   NULL   NULL
+f 1      123         1234567890           123.45 123.45 123.456
+t -32767 -2147483647 -9223372036854775807 -10.0  -10000 -10000
+t 0      0           0                    0      0      0
+t NULL   NULL        1                    NULL   NULL   NULL
+t 1      123         1234567890           123.45 123.45 123.456
+
+query TTTTTTT
+SELECT c_varchar, c_bytea
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+d       \x00
+(empty) \x00
+NULL    NULL
+example \xdeadbeef
+d       \x00
+(empty) \x00
+NULL    NULL
+example \xdeadbeef
+
+query TTTTTTT
+SELECT c_date, c_time, c_timestamp, c_timestamptz, c_interval
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00
+0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00
+0024-05-19 NULL     NULL                NULL                      NULL
+0024-01-01 12:34:56 2024-05-19 12:34:56 2024-05-19 12:34:56+00:00 1 day
+0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00
+0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00
+0024-05-19 NULL     NULL                NULL                      NULL
+0024-01-01 12:34:56 2024-05-19 12:34:56 2024-05-19 12:34:56+00:00 1 day
+
+query TTTTTTT
+SELECT c_jsonb, c_uuid, c_enum
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{}               bb488f9b-330d-4012-b849-12adeb49e57e happy
+{}               NULL                                 sad
+NULL             NULL                                 NULL
+{"key": "value"} 123e4567-e89b-12d3-a456-426614174000 happy
+{}               bb488f9b-330d-4012-b849-12adeb49e57e happy
+{}               NULL                                 sad
+NULL             NULL                                 NULL
+{"key": "value"} 123e4567-e89b-12d3-a456-426614174000 happy
+
+query TTTTTTT
+SELECT c_boolean_array, c_smallint_array, c_integer_array, c_bigint_array
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{f}        {-32767}       {-2147483647}     {-9223372036854775807}
+{}         {}             {}                {}
+NULL       NULL           NULL              NULL
+{NULL,t}   {NULL,1}       {NULL,123}        {NULL,1234567890}
+{f}        {-32767}       {-2147483647}     {-9223372036854775807}
+{}         {}             {}                {}
+NULL       NULL           NULL              NULL
+{NULL,t}   {NULL,1}       {NULL,123}        {NULL,1234567890}
+
+
+query TTTTTTT
+SELECT c_decimal_array, c_real_array, c_double_precision_array
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{-10.0}        {-10000}       {-10000}
+{}             {}             {}
+NULL           NULL           NULL
+{NULL,123.45}  {NULL,123.45}  {NULL,123.456}
+{-10.0}        {-10000}       {-10000}
+{}             {}             {}
+NULL           NULL           NULL
+{NULL,123.45}  {NULL,123.45}  {NULL,123.456}
+
+query TTTTTTT
+SELECT c_varchar_array, c_bytea_array
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{""}           {"\\x00"}
+{}             {}
+NULL           NULL
+{NULL,example} {NULL,"\\xdeadbeef"}
+{""}           {"\\x00"}
+{}             {}
+NULL           NULL
+{NULL,example} {NULL,"\\xdeadbeef"}
+
+query TTTTTTT
+SELECT c_date_array, c_time_array, c_timestamp_array, c_timestamptz_array, c_interval_array
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{0001-01-01}      {00:00:00}      {"2001-01-01 00:00:00"}      {"2001-01-01 08:00:00+00:00"}      NULL
+{}                {}              {}                           {}                                 NULL
+NULL              NULL            NULL                         NULL                               NULL
+{NULL,2024-05-19} {NULL,12:34:56} {NULL,"2024-05-19 12:34:56"} {NULL,"2024-05-19 12:34:56+00:00"} NULL
+{0001-01-01}      {00:00:00}      {"2001-01-01 00:00:00"}      {"2001-01-01 08:00:00+00:00"}      NULL
+{}                {}              {}                           {}                                 NULL
+NULL              NULL            NULL                         NULL                               NULL
+{NULL,2024-05-19} {NULL,12:34:56} {NULL,"2024-05-19 12:34:56"} {NULL,"2024-05-19 12:34:56+00:00"} NULL
+
+query TTTTTTT
+SELECT c_jsonb_array, c_uuid_array, c_enum_array
+FROM postgres_all_types
+ORDER BY c_boolean, c_bigint, c_date;
+----
+{"{}"}                        {bb488f9b-330d-4012-b849-12adeb49e57e}      NULL
+{}                            {}                                          {}
+NULL                          NULL                                        NULL
+{NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} NULL
+{"{}"}                        {bb488f9b-330d-4012-b849-12adeb49e57e}      NULL
+{}                            {}                                          {}
+NULL                          NULL                                        NULL
+{NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} NULL
+
+query TTT
+SELECT * FROM partitioned_timestamp_table ORDER BY c_boolean, c_int;
+----
+1 f 2023-02-01 10:30:00
+2 f 2023-05-15 11:45:00
+3 f 2023-11-03 12:15:00
+4 f 2024-01-04 13:00:00
+5 f 2024-03-05 09:30:00
+6 f 2024-06-06 14:20:00
+7 f 2024-09-07 16:45:00
+8 f 2025-01-08 18:30:00
+9 f 2025-07-09 07:10:00
+11 t 2023-02-01 10:30:00
+12 t 2023-05-15 11:45:00
+13 t 2023-11-03 12:15:00
+14 t 2024-01-04 13:00:00
+15 t 2024-03-05 09:30:00
+16 t 2024-06-06 14:20:00
+17 t 2024-09-07 16:45:00
+18 t 2025-01-08 18:30:00
+19 t 2025-07-09 07:10:00
+
+query TTT
+SELECT * FROM partitioned_timestamp_table_2023 ORDER BY c_boolean, c_int;
+----
+1 f 2023-02-01 10:30:00
+2 f 2023-05-15 11:45:00
+3 f 2023-11-03 12:15:00
+11 t 2023-02-01 10:30:00
+12 t 2023-05-15 11:45:00
+13 t 2023-11-03 12:15:00
+
+query TTT
+SELECT * FROM partitioned_timestamp_table_shared ORDER BY c_boolean, c_int;
+----
+1 f 2023-02-01 10:30:00
+2 f 2023-05-15 11:45:00
+3 f 2023-11-03 12:15:00
+4 f 2024-01-04 13:00:00
+5 f 2024-03-05 09:30:00
+6 f 2024-06-06 14:20:00
+7 f 2024-09-07 16:45:00
+8 f 2025-01-08 18:30:00
+9 f 2025-07-09 07:10:00
+11 t 2023-02-01 10:30:00
+12 t 2023-05-15 11:45:00
+13 t 2023-11-03 12:15:00
+14 t 2024-01-04 13:00:00
+15 t 2024-03-05 09:30:00
+16 t 2024-06-06 14:20:00
+17 t 2024-09-07 16:45:00
+18 t 2025-01-08 18:30:00
+19 t 2025-07-09 07:10:00

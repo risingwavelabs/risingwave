@@ -28,14 +28,12 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal azblob source.
     pub fn new_azblob_source(azblob_properties: AzblobProperties) -> ConnectorResult<Self> {
         // Create azblob builder.
-        let mut builder = Azblob::default();
-
-        builder.container(&azblob_properties.container_name);
-
-        builder.endpoint(&azblob_properties.endpoint_url);
+        let mut builder = Azblob::default()
+            .container(&azblob_properties.container_name)
+            .endpoint(&azblob_properties.endpoint_url);
 
         if let Some(account_name) = azblob_properties.account_name {
-            builder.account_name(&account_name);
+            builder = builder.account_name(&account_name);
         } else {
             tracing::warn!(
                 "account_name azblob is not set, container  {}",
@@ -44,7 +42,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         }
 
         if let Some(account_key) = azblob_properties.account_key {
-            builder.account_key(&account_key);
+            builder = builder.account_key(&account_key);
         } else {
             tracing::warn!(
                 "account_key azblob is not set, container  {}",
@@ -66,7 +64,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         };
 
         let compression_format = azblob_properties.compression_format;
-
         Ok(Self {
             op,
             prefix,

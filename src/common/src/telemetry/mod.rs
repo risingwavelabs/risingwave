@@ -39,6 +39,8 @@ pub const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
 pub const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
 pub const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
 
+pub use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
+
 pub fn telemetry_cluster_type_from_env_var() -> PbTelemetryClusterType {
     let cluster_type = match env::var(TELEMETRY_CLUSTER_TYPE) {
         Ok(cluster_type) => cluster_type,
@@ -71,7 +73,7 @@ pub enum TelemetryNodeType {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TelemetryReportBase {
-    /// `tracking_id` is persistent in etcd
+    /// `tracking_id` is persistent in metastore
     pub tracking_id: String,
     /// `session_id` is reset every time node restarts
     pub session_id: String,

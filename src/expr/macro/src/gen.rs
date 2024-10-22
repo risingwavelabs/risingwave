@@ -61,15 +61,8 @@ impl FunctionAttr {
         }
         let args = self.args.iter().map(|ty| types::expand_type_wildcard(ty));
         let ret = types::expand_type_wildcard(&self.ret);
-        // multi_cartesian_product should emit an empty set if the input is empty.
-        let args_cartesian_product =
-            args.multi_cartesian_product()
-                .chain(match self.args.is_empty() {
-                    true => vec![vec![]],
-                    false => vec![],
-                });
         let mut attrs = Vec::new();
-        for (args, mut ret) in args_cartesian_product.cartesian_product(ret) {
+        for (args, mut ret) in args.multi_cartesian_product().cartesian_product(ret) {
             if ret == "auto" {
                 ret = types::min_compatible_type(&args);
             }
@@ -668,7 +661,7 @@ impl FunctionAttr {
             true => self.append_only,
         };
 
-        let pb_type = format_ident!("{}", utils::to_camel_case(&name));
+        let pb_kind = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = match append_only {
             false => format_ident!("{}", self.ident_name()),
             true => format_ident!("{}_append_only", self.ident_name()),
@@ -707,7 +700,7 @@ impl FunctionAttr {
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
                 FuncSign {
-                    name: risingwave_pb::expr::agg_call::Type::#pb_type.into(),
+                    name: risingwave_pb::expr::agg_call::PbKind::#pb_kind.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,

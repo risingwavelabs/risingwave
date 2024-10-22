@@ -1,18 +1,21 @@
 control substitution on
 
-system ok
-rpk topic delete sr_pb_test || true; \
-(rpk sr subject delete 'sr_pb_test-value' && rpk sr subject delete 'sr_pb_test-value' --permanent) || true;
+statement ok
+SET streaming_use_shared_source TO false;
 
 system ok
-python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 20 user
+rpk topic delete pb_alter_source_test || true; \
+(rpk sr subject delete 'pb_alter_source_test-value' && rpk sr subject delete 'pb_alter_source_test-value' --permanent) || true;
+
+system ok
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_test" 20 user
 
 statement ok
 CREATE SOURCE src_user
 INCLUDE timestamp -- include explicitly here to test a bug found in https://github.com/risingwavelabs/risingwave/pull/17293
 WITH (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
-    topic = 'sr_pb_test',
+    topic = 'pb_alter_source_test',
     scan.startup.mode = 'earliest'
 )
 FORMAT PLAIN ENCODE PROTOBUF(
@@ -26,7 +29,7 @@ CREATE MATERIALIZED VIEW mv_user AS SELECT * FROM src_user;
 statement ok
 CREATE TABLE t_user WITH (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
-    topic = 'sr_pb_test',
+    topic = 'pb_alter_source_test',
     scan.startup.mode = 'earliest'
 )
 FORMAT PLAIN ENCODE PROTOBUF(
@@ -42,7 +45,7 @@ SELECT age FROM t_user;
 
 # Push more events with extended fields
 system ok
-python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 5 user_with_more_fields
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_test" 5 user_with_more_fields
 
 sleep 5s
 
@@ -69,7 +72,7 @@ SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM t_user;
 
 # Push more events with extended fields
 system ok
-python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 5 user_with_more_fields
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_test" 5 user_with_more_fields
 
 sleep 5s
 
@@ -89,3 +92,6 @@ DROP MATERIALIZED VIEW mv_user;
 
 statement ok
 DROP SOURCE src_user;
+
+statement ok
+SET streaming_use_shared_source TO true;

@@ -16,12 +16,14 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_connector::source::SplitMetaData;
 use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
-use risingwave_meta::stream::ThrottleConfig;
-use risingwave_meta_model_v2::{SourceId, StreamingParallelism};
+use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
+use risingwave_meta_model::{SourceId, StreamingParallelism};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
+use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -69,35 +71,27 @@ impl StreamManagerService for StreamServiceImpl {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();
 
-        let snapshot = self.barrier_scheduler.flush(req.checkpoint).await?;
+        let version_id = self.barrier_scheduler.flush(req.checkpoint).await?;
         Ok(Response::new(FlushResponse {
             status: None,
-            snapshot: Some(snapshot),
+            hummock_version_id: version_id.to_u64(),
         }))
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        let i = self
-            .barrier_scheduler
+        self.barrier_scheduler
             .run_command(Command::pause(PausedReason::Manual))
             .await?;
-        Ok(Response::new(PauseResponse {
-            prev: i.prev_paused_reason.map(Into::into),
-            curr: i.curr_paused_reason.map(Into::into),
-        }))
+        Ok(Response::new(PauseResponse {}))
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        let i = self
-            .barrier_scheduler
+        self.barrier_scheduler
             .run_command(Command::resume(PausedReason::Manual))
             .await?;
-        Ok(Response::new(ResumeResponse {
-            prev: i.prev_paused_reason.map(Into::into),
-            curr: i.curr_paused_reason.map(Into::into),
-        }))
+        Ok(Response::new(ResumeResponse {}))
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -128,6 +122,7 @@ impl StreamManagerService for StreamServiceImpl {
             }
         };
 
+        // TODO: check whether shared source is correct
         let mutation: ThrottleConfig = actor_to_apply
             .iter()
             .map(|(fragment_id, actors)| {
@@ -154,20 +149,14 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> TonicResponse<CancelCreatingJobsResponse> {
         let req = request.into_inner();
         let table_ids = match req.jobs.unwrap() {
-            Jobs::Infos(infos) => match &self.metadata_manager {
-                MetadataManager::V1(mgr) => {
-                    mgr.catalog_manager
-                        .find_creating_streaming_job_ids(infos.infos)
-                        .await
-                }
-                MetadataManager::V2(mgr) => mgr
-                    .catalog_controller
-                    .find_creating_streaming_job_ids(infos.infos)
-                    .await?
-                    .into_iter()
-                    .map(|id| id as _)
-                    .collect(),
-            },
+            Jobs::Infos(infos) => self
+                .metadata_manager
+                .catalog_controller
+                .find_creating_streaming_job_ids(infos.infos)
+                .await?
+                .into_iter()
+                .map(|id| id as _)
+                .collect(),
             Jobs::Ids(jobs) => jobs.job_ids,
         };
 
@@ -192,71 +181,36 @@ impl StreamManagerService for StreamServiceImpl {
         let req = request.into_inner();
         let table_ids = HashSet::<u32>::from_iter(req.table_ids);
 
-        let info = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let core = mgr.fragment_manager.get_fragment_read_guard().await;
-                core.table_fragments()
-                    .values()
-                    .filter(|tf| table_ids.contains(&tf.table_id().table_id))
-                    .map(|tf| {
-                        (
-                            tf.table_id().table_id,
-                            TableFragmentInfo {
-                                fragments: tf
-                                    .fragments
-                                    .iter()
-                                    .map(|(&id, fragment)| FragmentInfo {
-                                        id,
-                                        actors: fragment
-                                            .actors
-                                            .iter()
-                                            .map(|actor| ActorInfo {
-                                                id: actor.actor_id,
-                                                node: actor.nodes.clone(),
-                                                dispatcher: actor.dispatcher.clone(),
-                                            })
-                                            .collect_vec(),
-                                    })
-                                    .collect_vec(),
-                                ctx: Some(tf.ctx.to_protobuf()),
-                            },
-                        )
-                    })
-                    .collect()
-            }
-            MetadataManager::V2(mgr) => {
-                let mut info = HashMap::new();
-                for job_id in table_ids {
-                    let pb_table_fragments = mgr
-                        .catalog_controller
-                        .get_job_fragments_by_id(job_id as _)
-                        .await?;
-                    info.insert(
-                        pb_table_fragments.table_id,
-                        TableFragmentInfo {
-                            fragments: pb_table_fragments
-                                .fragments
+        let mut info = HashMap::new();
+        for job_id in table_ids {
+            let pb_table_fragments = self
+                .metadata_manager
+                .catalog_controller
+                .get_job_fragments_by_id(job_id as _)
+                .await?;
+            info.insert(
+                pb_table_fragments.table_id,
+                TableFragmentInfo {
+                    fragments: pb_table_fragments
+                        .fragments
+                        .into_iter()
+                        .map(|(id, fragment)| FragmentInfo {
+                            id,
+                            actors: fragment
+                                .actors
                                 .into_iter()
-                                .map(|(id, fragment)| FragmentInfo {
-                                    id,
-                                    actors: fragment
-                                        .actors
-                                        .into_iter()
-                                        .map(|actor| ActorInfo {
-                                            id: actor.actor_id,
-                                            node: actor.nodes,
-                                            dispatcher: actor.dispatcher,
-                                        })
-                                        .collect_vec(),
+                                .map(|actor| ActorInfo {
+                                    id: actor.actor_id,
+                                    node: actor.nodes,
+                                    dispatcher: actor.dispatcher,
                                 })
                                 .collect_vec(),
-                            ctx: pb_table_fragments.ctx,
-                        },
-                    );
-                }
-                info
-            }
-        };
+                        })
+                        .collect_vec(),
+                    ctx: pb_table_fragments.ctx,
+                },
+            );
+        }
 
         Ok(Response::new(ListTableFragmentsResponse {
             table_fragments: info,
@@ -268,42 +222,28 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListTableFragmentStatesRequest>,
     ) -> Result<Response<ListTableFragmentStatesResponse>, Status> {
-        let states = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let core = mgr.fragment_manager.get_fragment_read_guard().await;
-                core.table_fragments()
-                    .values()
-                    .map(
-                        |tf| list_table_fragment_states_response::TableFragmentState {
-                            table_id: tf.table_id().table_id,
-                            state: tf.state() as i32,
-                            parallelism: Some(tf.assigned_parallelism.into()),
-                        },
-                    )
-                    .collect_vec()
-            }
-            MetadataManager::V2(mgr) => {
-                let job_states = mgr.catalog_controller.list_streaming_job_states().await?;
-                job_states
-                    .into_iter()
-                    .map(|(table_id, state, parallelism)| {
-                        let parallelism = match parallelism {
-                            StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
-                            StreamingParallelism::Custom => model::TableParallelism::Custom,
-                            StreamingParallelism::Fixed(n) => {
-                                model::TableParallelism::Fixed(n as _)
-                            }
-                        };
+        let job_states = self
+            .metadata_manager
+            .catalog_controller
+            .list_streaming_job_states()
+            .await?;
+        let states = job_states
+            .into_iter()
+            .map(|(table_id, state, parallelism, max_parallelism)| {
+                let parallelism = match parallelism {
+                    StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                    StreamingParallelism::Custom => model::TableParallelism::Custom,
+                    StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
+                };
 
-                        list_table_fragment_states_response::TableFragmentState {
-                            table_id: table_id as _,
-                            state: PbState::from(state) as _,
-                            parallelism: Some(parallelism.into()),
-                        }
-                    })
-                    .collect_vec()
-            }
-        };
+                list_table_fragment_states_response::TableFragmentState {
+                    table_id: table_id as _,
+                    state: PbState::from(state) as _,
+                    parallelism: Some(parallelism.into()),
+                    max_parallelism: max_parallelism as _,
+                }
+            })
+            .collect_vec();
 
         Ok(Response::new(ListTableFragmentStatesResponse { states }))
     }
@@ -313,49 +253,28 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListFragmentDistributionRequest>,
     ) -> Result<Response<ListFragmentDistributionResponse>, Status> {
-        let distributions = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let core = mgr.fragment_manager.get_fragment_read_guard().await;
-                core.table_fragments()
-                    .values()
-                    .flat_map(|tf| {
-                        let table_id = tf.table_id().table_id;
-                        tf.fragments.iter().map(move |(&fragment_id, fragment)| {
-                            list_fragment_distribution_response::FragmentDistribution {
-                                fragment_id,
-                                table_id,
-                                distribution_type: fragment.distribution_type,
-                                state_table_ids: fragment.state_table_ids.clone(),
-                                upstream_fragment_ids: fragment.upstream_fragment_ids.clone(),
-                                fragment_type_mask: fragment.fragment_type_mask,
-                                parallelism: fragment.actors.len() as _,
-                            }
-                        })
-                    })
-                    .collect_vec()
-            }
-            MetadataManager::V2(mgr) => {
-                let fragment_descs = mgr.catalog_controller.list_fragment_descs().await?;
-                fragment_descs
-                    .into_iter()
-                    .map(|fragment_desc| {
-                        list_fragment_distribution_response::FragmentDistribution {
-                            fragment_id: fragment_desc.fragment_id as _,
-                            table_id: fragment_desc.job_id as _,
-                            distribution_type: PbFragmentDistributionType::from(
-                                fragment_desc.distribution_type,
-                            ) as _,
-                            state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
-                            upstream_fragment_ids: fragment_desc
-                                .upstream_fragment_id
-                                .into_u32_array(),
-                            fragment_type_mask: fragment_desc.fragment_type_mask as _,
-                            parallelism: fragment_desc.parallelism as _,
-                        }
-                    })
-                    .collect_vec()
-            }
-        };
+        let fragment_descs = self
+            .metadata_manager
+            .catalog_controller
+            .list_fragment_descs()
+            .await?;
+        let distributions = fragment_descs
+            .into_iter()
+            .map(
+                |fragment_desc| list_fragment_distribution_response::FragmentDistribution {
+                    fragment_id: fragment_desc.fragment_id as _,
+                    table_id: fragment_desc.job_id as _,
+                    distribution_type: PbFragmentDistributionType::from(
+                        fragment_desc.distribution_type,
+                    ) as _,
+                    state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
+                    upstream_fragment_ids: fragment_desc.upstream_fragment_id.into_u32_array(),
+                    fragment_type_mask: fragment_desc.fragment_type_mask as _,
+                    parallelism: fragment_desc.parallelism as _,
+                    vnode_count: fragment_desc.vnode_count as _,
+                },
+            )
+            .collect_vec();
 
         Ok(Response::new(ListFragmentDistributionResponse {
             distributions,
@@ -367,37 +286,20 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListActorStatesRequest>,
     ) -> Result<Response<ListActorStatesResponse>, Status> {
-        let states = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let core = mgr.fragment_manager.get_fragment_read_guard().await;
-                core.table_fragments()
-                    .values()
-                    .flat_map(|tf| {
-                        let actor_to_fragment = tf.actor_fragment_mapping();
-                        tf.actor_status.iter().map(move |(&actor_id, status)| {
-                            list_actor_states_response::ActorState {
-                                actor_id,
-                                fragment_id: actor_to_fragment[&actor_id],
-                                state: status.state,
-                                worker_id: status.worker_id(),
-                            }
-                        })
-                    })
-                    .collect_vec()
-            }
-            MetadataManager::V2(mgr) => {
-                let actor_locations = mgr.catalog_controller.list_actor_locations().await?;
-                actor_locations
-                    .into_iter()
-                    .map(|actor_location| list_actor_states_response::ActorState {
-                        actor_id: actor_location.actor_id as _,
-                        fragment_id: actor_location.fragment_id as _,
-                        state: PbActorState::from(actor_location.status) as _,
-                        worker_id: actor_location.worker_id as _,
-                    })
-                    .collect_vec()
-            }
-        };
+        let actor_locations = self
+            .metadata_manager
+            .catalog_controller
+            .list_actor_locations()
+            .await?;
+        let states = actor_locations
+            .into_iter()
+            .map(|actor_location| list_actor_states_response::ActorState {
+                actor_id: actor_location.actor_id as _,
+                fragment_id: actor_location.fragment_id as _,
+                state: PbActorState::from(actor_location.status) as _,
+                worker_id: actor_location.worker_id as _,
+            })
+            .collect_vec();
 
         Ok(Response::new(ListActorStatesResponse { states }))
     }
@@ -407,10 +309,11 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListObjectDependenciesRequest>,
     ) -> Result<Response<ListObjectDependenciesResponse>, Status> {
-        let dependencies = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_object_dependencies().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_object_dependencies().await?,
-        };
+        let dependencies = self
+            .metadata_manager
+            .catalog_controller
+            .list_object_dependencies()
+            .await?;
 
         Ok(Response::new(ListObjectDependenciesResponse {
             dependencies,
@@ -427,5 +330,88 @@ impl StreamManagerService for StreamServiceImpl {
             .notify_local_subscribers(LocalNotification::AdhocRecovery)
             .await;
         Ok(Response::new(RecoverResponse {}))
+    }
+
+    async fn list_actor_splits(
+        &self,
+        _request: Request<ListActorSplitsRequest>,
+    ) -> Result<Response<ListActorSplitsResponse>, Status> {
+        let SourceManagerRunningInfo {
+            source_fragments,
+            backfill_fragments,
+            mut actor_splits,
+        } = self.stream_manager.source_manager.get_running_info().await;
+
+        let source_actors = self
+            .metadata_manager
+            .catalog_controller
+            .list_source_actors()
+            .await?;
+
+        let is_shared_source = self
+            .metadata_manager
+            .catalog_controller
+            .list_source_id_with_shared_types()
+            .await?;
+
+        let fragment_to_source: HashMap<_, _> = source_fragments
+            .into_iter()
+            .flat_map(|(source_id, fragment_ids)| {
+                let source_type = if is_shared_source
+                    .get(&(source_id as _))
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    FragmentType::SharedSource
+                } else {
+                    FragmentType::NonSharedSource
+                };
+
+                fragment_ids
+                    .into_iter()
+                    .map(move |fragment_id| (fragment_id, (source_id, source_type)))
+            })
+            .chain(
+                backfill_fragments
+                    .into_iter()
+                    .flat_map(|(source_id, fragment_ids)| {
+                        fragment_ids.into_iter().flat_map(
+                            move |(fragment_id, upstream_fragment_id)| {
+                                [
+                                    (fragment_id, (source_id, FragmentType::SharedSourceBackfill)),
+                                    (
+                                        upstream_fragment_id,
+                                        (source_id, FragmentType::SharedSource),
+                                    ),
+                                ]
+                            },
+                        )
+                    }),
+            )
+            .collect();
+
+        let actor_splits = source_actors
+            .into_iter()
+            .flat_map(|(actor_id, fragment_id)| {
+                let (source_id, fragment_type) = fragment_to_source
+                    .get(&(fragment_id as _))
+                    .copied()
+                    .unwrap_or_default();
+
+                actor_splits
+                    .remove(&(actor_id as _))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |split| list_actor_splits_response::ActorSplit {
+                        actor_id: actor_id as _,
+                        source_id: source_id as _,
+                        fragment_id: fragment_id as _,
+                        split_id: split.id().to_string(),
+                        fragment_type: fragment_type.into(),
+                    })
+            })
+            .collect_vec();
+
+        Ok(Response::new(ListActorSplitsResponse { actor_splits }))
     }
 }

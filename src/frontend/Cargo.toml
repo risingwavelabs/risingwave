@@ -17,8 +17,6 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-schema = { workspace = true }
-arrow-schema-iceberg = { workspace = true }
 async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
@@ -49,7 +47,7 @@ md5 = "0.7.0"
 memcomparable = "0.2"
 num-integer = "0.1"
 parking_lot = { workspace = true }
-parse-display = "0.9"
+parse-display = "0.10"
 paste = "1"
 petgraph = "0.6"
 pgwire = { path = "../utils/pgwire" }
@@ -93,6 +91,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"

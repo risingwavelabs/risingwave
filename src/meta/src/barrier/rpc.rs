@@ -14,84 +14,50 @@
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::future::Future;
+use std::future::poll_fn;
+use std::task::Poll;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
-use futures::stream::{BoxStream, FuturesUnordered};
-use futures::{pin_mut, FutureExt, StreamExt};
+use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
-use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
+use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};
 use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
-    BuildActorInfo, DropActorsRequest, InjectBarrierRequest, StreamingControlStreamRequest,
-    StreamingControlStreamResponse,
+    InjectBarrierRequest, StreamingControlStreamRequest,
 };
-use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::StreamClient;
+use risingwave_rpc_client::StreamingControlHandle;
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{sleep, timeout};
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::command::CommandContext;
-use super::{BarrierKind, GlobalBarrierManagerContext, TracedEpoch};
+use super::{BarrierKind, GlobalBarrierManagerContext, InflightSubscriptionInfo, TracedEpoch};
 use crate::barrier::info::InflightGraphInfo;
-use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
 
 struct ControlStreamNode {
     worker: WorkerNode,
-    sender: UnboundedSender<StreamingControlStreamRequest>,
+    handle: StreamingControlHandle,
 }
-
-fn into_future(
-    worker_id: WorkerId,
-    stream: BoxStream<
-        'static,
-        risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
-    >,
-) -> ResponseStreamFuture {
-    stream.into_future().map(move |(opt, stream)| {
-        (
-            worker_id,
-            stream,
-            opt.ok_or_else(|| anyhow!("end of stream").into())
-                .and_then(|result| result.map_err(|e| e.into())),
-        )
-    })
-}
-
-type ResponseStreamFuture = impl Future<
-        Output = (
-            WorkerId,
-            BoxStream<
-                'static,
-                risingwave_rpc_client::error::Result<StreamingControlStreamResponse>,
-            >,
-            MetaResult<StreamingControlStreamResponse>,
-        ),
-    > + 'static;
 
 pub(super) struct ControlStreamManager {
     context: GlobalBarrierManagerContext,
     nodes: HashMap<WorkerId, ControlStreamNode>,
-    response_streams: FuturesUnordered<ResponseStreamFuture>,
 }
 
 impl ControlStreamManager {
@@ -99,12 +65,16 @@ impl ControlStreamManager {
         Self {
             context,
             nodes: Default::default(),
-            response_streams: FuturesUnordered::new(),
         }
     }
 
-    pub(super) async fn add_worker(&mut self, node: WorkerNode) {
-        if self.nodes.contains_key(&node.id) {
+    pub(super) async fn add_worker(
+        &mut self,
+        node: WorkerNode,
+        subscription: &InflightSubscriptionInfo,
+    ) {
+        let node_id = node.id as WorkerId;
+        if self.nodes.contains_key(&node_id) {
             warn!(id = node.id, host = ?node.host, "node already exists");
             return;
         }
@@ -113,7 +83,6 @@ impl ControlStreamManager {
             .hummock_manager
             .on_current_version(|version| version.id)
             .await;
-        let node_id = node.id;
         let node_host = node.host.clone().unwrap();
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
@@ -122,13 +91,15 @@ impl ControlStreamManager {
         for i in 1..=MAX_RETRY {
             match self
                 .context
-                .new_control_stream_node(node.clone(), version_id)
+                .new_control_stream_node(
+                    node.clone(),
+                    version_id,
+                    &subscription.mv_depended_subscriptions,
+                )
                 .await
             {
-                Ok((stream_node, response_stream)) => {
-                    let _ = self.nodes.insert(node_id, stream_node);
-                    self.response_streams
-                        .push(into_future(node_id, response_stream));
+                Ok(stream_node) => {
+                    assert!(self.nodes.insert(node_id, stream_node).is_none());
                     info!(?node_host, "add control stream worker");
                     return;
                 }
@@ -147,22 +118,24 @@ impl ControlStreamManager {
     pub(super) async fn reset(
         &mut self,
         version_id: HummockVersionId,
+        subscriptions: &InflightSubscriptionInfo,
         nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async {
             let node = self
                 .context
-                .new_control_stream_node(node.clone(), version_id)
+                .new_control_stream_node(
+                    node.clone(),
+                    version_id,
+                    &subscriptions.mv_depended_subscriptions,
+                )
                 .await?;
             Result::<_, MetaError>::Ok((*worker_id, node))
         }))
         .await?;
         self.nodes.clear();
-        self.response_streams.clear();
-        for (worker_id, (node, response_stream)) in nodes {
-            self.nodes.insert(worker_id, node);
-            self.response_streams
-                .push(into_future(worker_id, response_stream));
+        for (worker_id, node) in nodes {
+            assert!(self.nodes.insert(worker_id, node).is_none());
         }
 
         Ok(())
@@ -175,17 +148,56 @@ impl ControlStreamManager {
 
     async fn next_response(
         &mut self,
-    ) -> Option<(WorkerId, MetaResult<StreamingControlStreamResponse>)> {
-        let (worker_id, response_stream, result) = self.response_streams.next().await?;
+    ) -> Option<(
+        WorkerId,
+        MetaResult<streaming_control_stream_response::Response>,
+    )> {
+        if self.nodes.is_empty() {
+            return None;
+        }
+        let (worker_id, result) = poll_fn(|cx| {
+            for (worker_id, node) in &mut self.nodes {
+                match node.handle.response_stream.poll_next_unpin(cx) {
+                    Poll::Ready(result) => {
+                        return Poll::Ready((
+                            *worker_id,
+                            result
+                                .ok_or_else(|| anyhow!("end of stream").into())
+                                .and_then(|result| {
+                                    result.map_err(Into::<MetaError>::into).and_then(|resp| {
+                                        match resp
+                                            .response
+                                            .ok_or_else(||anyhow!("empty response"))?
+                                        {
+                                            streaming_control_stream_response::Response::Shutdown(_) => Err(anyhow!(
+                                                "worker node {worker_id} is shutting down"
+                                            )
+                                            .into()),
+                                            streaming_control_stream_response::Response::Init(_) => {
+                                                // This arm should be unreachable.
+                                                Err(anyhow!("get unexpected init response").into())
+                                            }
+                                            resp => Ok(resp),
+                                        }
+                                    })
+                                }),
+                        ));
+                    }
+                    Poll::Pending => {
+                        continue;
+                    }
+                }
+            }
+            Poll::Pending
+        })
+        .await;
 
-        match result.as_ref().map(|r| r.response.as_ref().unwrap()) {
-            Ok(streaming_control_stream_response::Response::Shutdown(_)) | Err(_) => {
-                // Do not add it back to the `response_streams` so that it will not be polled again.
-            }
-            _ => {
-                self.response_streams
-                    .push(into_future(worker_id, response_stream));
-            }
+        if let Err(err) = &result {
+            let node = self
+                .nodes
+                .remove(&worker_id)
+                .expect("should exist when get shutdown resp");
+            warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
         }
 
         Some((worker_id, result))
@@ -198,30 +210,16 @@ impl ControlStreamManager {
 
         {
             let (worker_id, result) = pending_on_none(self.next_response()).await;
-            let result = match result {
-                Ok(resp) => match resp.response.unwrap() {
-                    Response::CompleteBarrier(resp) => {
-                        assert_eq!(worker_id, resp.worker_id);
-                        Ok(resp)
+
+            (
+                worker_id,
+                result.map(|resp| match resp {
+                    Response::CompleteBarrier(resp) => resp,
+                    Response::Shutdown(_) | Response::Init(_) => {
+                        unreachable!("should be treated as error")
                     }
-                    Response::Shutdown(_) => {
-                        Err(anyhow!("worker node {worker_id} is shutting down").into())
-                    }
-                    Response::Init(_) => {
-                        // This arm should be unreachable.
-                        Err(anyhow!("get unexpected init response").into())
-                    }
-                },
-                Err(err) => Err(err),
-            };
-            if let Err(err) = &result {
-                let node = self
-                    .nodes
-                    .remove(&worker_id)
-                    .expect("should exist when get shutdown resp");
-                warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
-            }
-            (worker_id, result)
+                }),
+            )
         }
     }
 
@@ -253,49 +251,28 @@ impl ControlStreamManager {
         command_ctx: &CommandContext,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
-        actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
     ) -> MetaResult<HashSet<WorkerId>> {
+        let mutation = command_ctx.to_mutation();
+        let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
+            add.subscriptions_to_add.clone()
+        } else {
+            vec![]
+        };
+        let subscriptions_to_remove = if let Some(Mutation::DropSubscriptions(drop)) = &mutation {
+            drop.info.clone()
+        } else {
+            vec![]
+        };
         self.inject_barrier(
             None,
-            command_ctx.to_mutation(),
+            mutation,
             (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
             &command_ctx.kind,
             pre_applied_graph_info,
             applied_graph_info,
-            actor_ids_to_pre_sync_mutation,
-            command_ctx.actors_to_create().map(|actors_to_create| {
-                actors_to_create
-                    .into_iter()
-                    .map(|(worker_id, actors)| {
-                        (
-                            worker_id,
-                            actors
-                                .into_iter()
-                                .map(|actor| BuildActorInfo {
-                                    actor: Some(actor),
-                                    // TODO: consider subscriber of backfilling mv
-                                    related_subscriptions: command_ctx
-                                        .subscription_info
-                                        .mv_depended_subscriptions
-                                        .iter()
-                                        .map(|(table_id, subscriptions)| {
-                                            (
-                                                table_id.table_id,
-                                                SubscriptionIds {
-                                                    subscription_ids: subscriptions
-                                                        .keys()
-                                                        .cloned()
-                                                        .collect(),
-                                                },
-                                            )
-                                        })
-                                        .collect(),
-                                })
-                                .collect_vec(),
-                        )
-                    })
-                    .collect()
-            }),
+            command_ctx.command.actors_to_create(),
+            subscriptions_to_add,
+            subscriptions_to_remove,
         )
     }
 
@@ -307,18 +284,16 @@ impl ControlStreamManager {
         kind: &BarrierKind,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
-        actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
-        mut new_actors: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
+        mut new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
+        subscriptions_to_add: Vec<SubscriptionUpstreamInfo>,
+        subscriptions_to_remove: Vec<SubscriptionUpstreamInfo>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
         ));
 
         let partial_graph_id = creating_table_id
-            .map(|table_id| {
-                assert!(actor_ids_to_pre_sync_mutation.is_empty());
-                table_id.table_id
-            })
+            .map(|table_id| table_id.table_id)
             .unwrap_or(u32::MAX);
 
         for worker_id in pre_applied_graph_info
@@ -334,7 +309,7 @@ impl ControlStreamManager {
                     .flat_map(|new_actors| new_actors.keys().cloned()),
             )
         {
-            if !self.nodes.contains_key(&worker_id) {
+            if !self.nodes.contains_key(&(worker_id as _)) {
                 return Err(anyhow!("unconnected worker node {}", worker_id).into());
             }
         }
@@ -345,10 +320,10 @@ impl ControlStreamManager {
             .flatten()
             .flat_map(|(worker_id, actor_infos)| {
                 actor_infos.iter().map(|actor_info| ActorInfo {
-                    actor_id: actor_info.actor.as_ref().unwrap().actor_id,
+                    actor_id: actor_info.actor_id,
                     host: self
                         .nodes
-                        .get(worker_id)
+                        .get(&(*worker_id as _))
                         .expect("have checked exist previously")
                         .worker
                         .host
@@ -358,10 +333,10 @@ impl ControlStreamManager {
             .collect_vec();
 
         self.nodes
-            .iter_mut()
-            .map(|(node_id, node)| {
+            .iter()
+            .try_for_each(|(node_id, node)| {
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
-                    .actor_ids_to_collect(*node_id)
+                    .actor_ids_to_collect(*node_id as _)
                     .collect();
                 let table_ids_to_sync = if let Some(graph_info) = applied_graph_info {
                     graph_info
@@ -385,31 +360,27 @@ impl ControlStreamManager {
                         passed_actors: vec![],
                     };
 
-                    node.sender
+                    node.handle
+                        .request_sender
                         .send(StreamingControlStreamRequest {
                             request: Some(
                                 streaming_control_stream_request::Request::InjectBarrier(
                                     InjectBarrierRequest {
-                                        request_id: StreamRpcManager::new_request_id(),
+                                        request_id: Uuid::new_v4().to_string(),
                                         barrier: Some(barrier),
                                         actor_ids_to_collect,
                                         table_ids_to_sync,
                                         partial_graph_id,
-                                        actor_ids_to_pre_sync_barrier_mutation:
-                                            actor_ids_to_pre_sync_mutation
-                                                .get(node_id)
-                                                .into_iter()
-                                                .flatten()
-                                                .cloned()
-                                                .collect(),
                                         broadcast_info: new_actors_location_to_broadcast.clone(),
                                         actors_to_build: new_actors
                                             .as_mut()
-                                            .map(|new_actors| new_actors.remove(node_id))
+                                            .map(|new_actors| new_actors.remove(&(*node_id as _)))
                                             .into_iter()
                                             .flatten()
                                             .flatten()
                                             .collect(),
+                                        subscriptions_to_add: subscriptions_to_add.clone(),
+                                        subscriptions_to_remove: subscriptions_to_remove.clone(),
                                     },
                                 ),
                             ),
@@ -422,11 +393,10 @@ impl ControlStreamManager {
                             ))
                         })?;
 
-                    node_need_collect.insert(*node_id);
+                    node_need_collect.insert(*node_id as WorkerId);
                     Result::<_, MetaError>::Ok(())
                 }
             })
-            .try_collect()
             .inspect_err(|e| {
                 // Record failure in event log.
                 use risingwave_pb::meta::event_log;
@@ -444,22 +414,21 @@ impl ControlStreamManager {
     }
 
     pub(super) fn remove_partial_graph(&mut self, partial_graph_ids: Vec<u32>) {
-        self.nodes.retain(|_, node| {
-            if node
-                .sender
+        self.nodes.iter().for_each(|(_, node)| {
+            if node.handle
+                .request_sender
                 .send(StreamingControlStreamRequest {
                     request: Some(
                         streaming_control_stream_request::Request::RemovePartialGraph(
-                            RemovePartialGraphRequest { partial_graph_ids: partial_graph_ids.clone() },
+                            RemovePartialGraphRequest {
+                                partial_graph_ids: partial_graph_ids.clone(),
+                            },
                         ),
                     ),
                 })
-                .is_ok()
+                .is_err()
             {
-                true
-            } else {
-                warn!(id = node.worker.id, host = ?node.worker.host, ?partial_graph_ids, "fail to remove_partial_graph request, node removed");
-                false
+                warn!(worker_id = node.worker.id,node = ?node.worker.host,"failed to send remove partial graph request");
             }
         })
     }
@@ -470,24 +439,19 @@ impl GlobalBarrierManagerContext {
         &self,
         node: WorkerNode,
         initial_version_id: HummockVersionId,
-    ) -> MetaResult<(
-        ControlStreamNode,
-        BoxStream<'static, risingwave_rpc_client::error::Result<StreamingControlStreamResponse>>,
-    )> {
+        mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+    ) -> MetaResult<ControlStreamNode> {
         let handle = self
             .env
             .stream_client_pool()
             .get(&node)
             .await?
-            .start_streaming_control(initial_version_id)
+            .start_streaming_control(initial_version_id, mv_depended_subscriptions)
             .await?;
-        Ok((
-            ControlStreamNode {
-                worker: node.clone(),
-                sender: handle.request_sender,
-            },
-            handle.response_stream,
-        ))
+        Ok(ControlStreamNode {
+            worker: node.clone(),
+            handle,
+        })
     }
 
     /// Send barrier-complete-rpc and wait for responses from all CNs
@@ -507,95 +471,6 @@ impl GlobalBarrierManagerContext {
             .event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
     }
-}
-
-#[derive(Clone)]
-pub struct StreamRpcManager {
-    env: MetaSrvEnv,
-}
-
-impl StreamRpcManager {
-    pub fn new(env: MetaSrvEnv) -> Self {
-        Self { env }
-    }
-
-    async fn make_request<REQ, RSP, Fut: Future<Output = Result<RSP, RpcError>> + 'static>(
-        &self,
-        request: impl Iterator<Item = (&WorkerNode, REQ)>,
-        f: impl Fn(StreamClient, REQ) -> Fut,
-    ) -> MetaResult<Vec<RSP>> {
-        let pool = self.env.stream_client_pool();
-        let f = &f;
-        let iters = request.map(|(node, input)| async move {
-            let client = pool.get(node).await.map_err(|e| (node.id, e))?;
-            f(client, input).await.map_err(|e| (node.id, e))
-        });
-        let result = try_join_all_with_error_timeout(iters, COLLECT_ERROR_TIMEOUT).await;
-        result.map_err(|results_err| merge_node_rpc_errors("merged RPC Error", results_err))
-    }
-
-    fn new_request_id() -> String {
-        Uuid::new_v4().to_string()
-    }
-
-    pub async fn drop_actors(
-        &self,
-        node_map: &HashMap<WorkerId, WorkerNode>,
-        node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
-    ) -> MetaResult<()> {
-        self.make_request(
-            node_actors
-                .map(|(worker_id, actor_ids)| (node_map.get(&worker_id).unwrap(), actor_ids)),
-            |client, actor_ids| async move {
-                client
-                    .drop_actors(DropActorsRequest {
-                        request_id: Self::new_request_id(),
-                        actor_ids,
-                    })
-                    .await
-            },
-        )
-        .await?;
-        Ok(())
-    }
-}
-
-/// This function is similar to `try_join_all`, but it attempts to collect as many error as possible within `error_timeout`.
-async fn try_join_all_with_error_timeout<I, RSP, E, F>(
-    iters: I,
-    error_timeout: Duration,
-) -> Result<Vec<RSP>, Vec<E>>
-where
-    I: IntoIterator<Item = F>,
-    F: Future<Output = Result<RSP, E>>,
-{
-    let stream = FuturesUnordered::from_iter(iters);
-    pin_mut!(stream);
-    let mut results_ok = vec![];
-    let mut results_err = vec![];
-    while let Some(result) = stream.next().await {
-        match result {
-            Ok(rsp) => {
-                results_ok.push(rsp);
-            }
-            Err(err) => {
-                results_err.push(err);
-                break;
-            }
-        }
-    }
-    if results_err.is_empty() {
-        return Ok(results_ok);
-    }
-    let _ = timeout(error_timeout, async {
-        while let Some(result) = stream.next().await {
-            if let Err(err) = result {
-                results_err.push(err);
-            }
-        }
-    })
-    .await;
-    Err(results_err)
 }
 
 pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(

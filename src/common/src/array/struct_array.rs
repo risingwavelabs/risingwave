@@ -337,17 +337,14 @@ impl StructValue {
             .map(Self::new)
     }
 
-    /// Construct an array from literal string.
+    /// Construct a struct from literal string.
     ///
     /// # Example
     ///
     /// ```
     /// # use risingwave_common::types::{StructValue, StructType, DataType, ScalarImpl};
     ///
-    /// let ty = DataType::Struct(StructType::unnamed(vec![
-    ///     DataType::Int32,
-    ///     DataType::Float64,
-    /// ]));
+    /// let ty = StructType::unnamed(vec![DataType::Int32, DataType::Float64]);
     /// let s = StructValue::from_str("(1, 2.0)", &ty).unwrap();
     /// assert_eq!(s.fields()[0], Some(ScalarImpl::Int32(1)));
     /// assert_eq!(s.fields()[1], Some(ScalarImpl::Float64(2.0.into())));
@@ -356,11 +353,8 @@ impl StructValue {
     /// assert_eq!(s.fields()[0], None);
     /// assert_eq!(s.fields()[1], None);
     /// ```
-    pub fn from_str(s: &str, data_type: &DataType) -> Result<Self, BoxedError> {
+    pub fn from_str(s: &str, ty: &StructType) -> Result<Self, BoxedError> {
         // FIXME(runji): this is a trivial implementation which does not support nested struct.
-        let DataType::Struct(ty) = data_type else {
-            return Err(format!("Expect struct type, got {:?}", data_type).into());
-        };
         if !s.starts_with('(') {
             return Err("Missing left parenthesis".into());
         }

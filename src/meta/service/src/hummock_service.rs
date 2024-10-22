@@ -146,11 +146,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(
-                HummockVersionId::new(req.start_id),
-                req.num_limit,
-                req.committed_epoch_limit,
-            )
+            .list_version_deltas(HummockVersionId::new(req.start_id), req.num_limit)
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(PbHummockVersionDeltas {
@@ -161,53 +157,6 @@ impl HummockManagerService for HummockServiceImpl {
             }),
         };
         Ok(Response::new(resp))
-    }
-
-    async fn pin_specific_snapshot(
-        &self,
-        request: Request<PinSpecificSnapshotRequest>,
-    ) -> Result<Response<PinSnapshotResponse>, Status> {
-        let req = request.into_inner();
-        let hummock_snapshot = self
-            .hummock_manager
-            .pin_specific_snapshot(req.context_id, req.epoch)
-            .await?;
-        Ok(Response::new(PinSnapshotResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
-        }))
-    }
-
-    async fn pin_snapshot(
-        &self,
-        request: Request<PinSnapshotRequest>,
-    ) -> Result<Response<PinSnapshotResponse>, Status> {
-        let req = request.into_inner();
-        let hummock_snapshot = self.hummock_manager.pin_snapshot(req.context_id).await?;
-        Ok(Response::new(PinSnapshotResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
-        }))
-    }
-
-    async fn unpin_snapshot(
-        &self,
-        request: Request<UnpinSnapshotRequest>,
-    ) -> Result<Response<UnpinSnapshotResponse>, Status> {
-        let req = request.into_inner();
-        self.hummock_manager.unpin_snapshot(req.context_id).await?;
-        Ok(Response::new(UnpinSnapshotResponse { status: None }))
-    }
-
-    async fn unpin_snapshot_before(
-        &self,
-        request: Request<UnpinSnapshotBeforeRequest>,
-    ) -> Result<Response<UnpinSnapshotBeforeResponse>, Status> {
-        let req = request.into_inner();
-        self.hummock_manager
-            .unpin_snapshot_before(req.context_id, req.min_snapshot.unwrap())
-            .await?;
-        Ok(Response::new(UnpinSnapshotBeforeResponse { status: None }))
     }
 
     async fn get_new_sst_ids(
@@ -296,35 +245,30 @@ impl HummockManagerService for HummockServiceImpl {
         }))
     }
 
-    async fn get_epoch(
-        &self,
-        _request: Request<GetEpochRequest>,
-    ) -> Result<Response<GetEpochResponse>, Status> {
-        let hummock_snapshot = self.hummock_manager.latest_snapshot();
-        Ok(Response::new(GetEpochResponse {
-            status: None,
-            snapshot: Some(hummock_snapshot),
-        }))
-    }
-
     async fn report_full_scan_task(
         &self,
         request: Request<ReportFullScanTaskRequest>,
     ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
         let req = request.into_inner();
         let hummock_manager = self.hummock_manager.clone();
-        hummock_manager
-            .metrics
-            .total_object_count
-            .set(req.total_object_count as _);
-        hummock_manager
-            .metrics
-            .total_object_size
-            .set(req.total_object_size as _);
+        hummock_manager.update_paged_metrics(
+            req.start_after,
+            req.next_start_after.clone(),
+            req.total_object_count,
+            req.total_object_size,
+        );
+        let pinned_by_metadata_backup = self.vacuum_manager.backup_manager.list_pinned_ssts();
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {
-            match hummock_manager.complete_full_gc(req.object_ids).await {
+            match hummock_manager
+                .complete_full_gc(
+                    req.object_ids,
+                    req.next_start_after,
+                    pinned_by_metadata_backup,
+                )
+                .await
+            {
                 Ok(number) => {
                     tracing::info!("Full GC results {} SSTs to delete", number);
                 }
@@ -342,7 +286,8 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .start_full_gc(Duration::from_secs(req.sst_retention_time_sec), req.prefix)?;
+            .start_full_gc(Duration::from_secs(req.sst_retention_time_sec), req.prefix)
+            .await?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
@@ -358,23 +303,6 @@ impl HummockManagerService for HummockServiceImpl {
         Ok(Response::new(RiseCtlGetPinnedVersionsSummaryResponse {
             summary: Some(PinnedVersionsSummary {
                 pinned_versions,
-                workers,
-            }),
-        }))
-    }
-
-    async fn rise_ctl_get_pinned_snapshots_summary(
-        &self,
-        _request: Request<RiseCtlGetPinnedSnapshotsSummaryRequest>,
-    ) -> Result<Response<RiseCtlGetPinnedSnapshotsSummaryResponse>, Status> {
-        let pinned_snapshots = self.hummock_manager.list_pinned_snapshot().await;
-        let workers = self
-            .hummock_manager
-            .list_workers(&pinned_snapshots.iter().map(|p| p.context_id).collect_vec())
-            .await?;
-        Ok(Response::new(RiseCtlGetPinnedSnapshotsSummaryResponse {
-            summary: Some(PinnedSnapshotsSummary {
-                pinned_snapshots,
                 workers,
             }),
         }))
@@ -434,8 +362,7 @@ impl HummockManagerService for HummockServiceImpl {
         } = request.into_inner();
 
         self.hummock_manager
-            .init_metadata_for_version_replay(tables, compaction_groups)
-            .await?;
+            .init_metadata_for_version_replay(tables, compaction_groups)?;
         Ok(Response::new(InitMetadataForReplayResponse {}))
     }
 
@@ -457,8 +384,13 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let new_group_id = self
             .hummock_manager
-            .split_compaction_group(req.group_id, &req.table_ids)
-            .await?;
+            .move_state_tables_to_dedicated_compaction_group(
+                req.group_id,
+                &req.table_ids,
+                req.partition_vnode_count,
+            )
+            .await?
+            .0;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
 
@@ -603,12 +535,11 @@ impl HummockManagerService for HummockServiceImpl {
             min_delta_log_num_for_hummock_version_checkpoint,
             min_sst_retention_time_sec,
             full_gc_interval_sec,
-            collect_gc_watermark_spin_interval_sec,
             periodic_compaction_interval_sec,
             periodic_space_reclaim_compaction_interval_sec,
             periodic_ttl_reclaim_compaction_interval_sec,
             periodic_tombstone_reclaim_compaction_interval_sec,
-            periodic_split_compact_group_interval_sec,
+            periodic_scheduling_compaction_group_interval_sec,
             split_group_size_limit,
             min_table_split_size,
             do_not_config_object_storage_lifecycle,
@@ -690,31 +621,29 @@ impl HummockManagerService for HummockServiceImpl {
         return Ok(response);
     }
 
-    async fn list_change_log_epochs(
-        &self,
-        request: Request<ListChangeLogEpochsRequest>,
-    ) -> Result<Response<ListChangeLogEpochsResponse>, Status> {
-        let ListChangeLogEpochsRequest {
-            table_id,
-            min_epoch,
-            max_count,
-        } = request.into_inner();
-        let epochs = self
-            .hummock_manager
-            .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await;
-        Ok(Response::new(ListChangeLogEpochsResponse { epochs }))
-    }
-
     async fn get_version_by_epoch(
         &self,
         request: Request<GetVersionByEpochRequest>,
     ) -> Result<Response<GetVersionByEpochResponse>, Status> {
-        let GetVersionByEpochRequest { epoch } = request.into_inner();
-        let version = self.hummock_manager.epoch_to_version(epoch).await?;
+        let GetVersionByEpochRequest { epoch, table_id } = request.into_inner();
+        let version = self
+            .hummock_manager
+            .epoch_to_version(epoch, table_id)
+            .await?;
         Ok(Response::new(GetVersionByEpochResponse {
             version: Some(version.to_protobuf()),
         }))
+    }
+
+    async fn merge_compaction_group(
+        &self,
+        request: Request<MergeCompactionGroupRequest>,
+    ) -> Result<Response<MergeCompactionGroupResponse>, Status> {
+        let req = request.into_inner();
+        self.hummock_manager
+            .merge_compaction_group(req.left_group_id, req.right_group_id)
+            .await?;
+        Ok(Response::new(MergeCompactionGroupResponse {}))
     }
 }
 

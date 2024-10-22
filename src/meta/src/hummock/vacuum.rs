@@ -35,7 +35,7 @@ pub type VacuumManagerRef = Arc<VacuumManager>;
 pub struct VacuumManager {
     env: MetaSrvEnv,
     hummock_manager: HummockManagerRef,
-    backup_manager: BackupManagerRef,
+    pub backup_manager: BackupManagerRef,
     /// Use the `CompactorManager` to dispatch `VacuumTask`.
     compactor_manager: CompactorManagerRef,
     /// SST object ids which have been dispatched to vacuum nodes but are not replied yet.
@@ -112,8 +112,7 @@ impl VacuumManager {
                 pending_object_ids
             } else {
                 // 2. If no pending SST objects, then fetch new ones.
-                let mut objects_to_delete = self.hummock_manager.get_objects_to_delete();
-                self.filter_out_pinned_ssts(&mut objects_to_delete).await?;
+                let objects_to_delete = self.hummock_manager.get_objects_to_delete();
                 if objects_to_delete.is_empty() {
                     return Ok(vec![]);
                 }
@@ -178,29 +177,6 @@ impl VacuumManager {
         Ok(sent_batch)
     }
 
-    async fn filter_out_pinned_ssts(
-        &self,
-        objects_to_delete: &mut Vec<HummockSstableObjectId>,
-    ) -> MetaResult<()> {
-        if objects_to_delete.is_empty() {
-            return Ok(());
-        }
-        let reject = self.backup_manager.list_pinned_ssts();
-        // Ack these SSTs immediately, because they tend to be pinned for long time.
-        // They will be GCed during full GC when they are no longer pinned.
-        let to_ack = objects_to_delete
-            .iter()
-            .filter(|s| reject.contains(s))
-            .cloned()
-            .collect_vec();
-        if to_ack.is_empty() {
-            return Ok(());
-        }
-        self.hummock_manager.ack_deleted_objects(&to_ack).await?;
-        objects_to_delete.retain(|s| !reject.contains(s));
-        Ok(())
-    }
-
     /// Acknowledges deletion of SSTs and deletes corresponding metadata.
     pub async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> MetaResult<()> {
         let deleted_object_ids = self
@@ -225,20 +201,27 @@ impl VacuumManager {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::HummockVersionId;
     use risingwave_pb::hummock::VacuumTask;
+    use risingwave_rpc_client::HummockMetaClient;
 
     use crate::backup_restore::BackupManager;
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
-    use crate::hummock::VacuumManager;
+    use crate::hummock::{MockHummockMetaClient, VacuumManager};
 
     #[tokio::test]
     async fn test_vacuum() {
-        let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-        let context_id = worker_node.id;
+        let (env, hummock_manager, _cluster_manager, worker_id) = setup_compute_env(80).await;
+        let context_id = worker_id as _;
+        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+            hummock_manager.clone(),
+            context_id,
+        ));
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         let backup_manager =
             Arc::new(BackupManager::for_test(env.clone(), hummock_manager.clone()).await);
@@ -251,7 +234,13 @@ mod tests {
         assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
         assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
         hummock_manager.pin_version(context_id).await.unwrap();
-        let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
+        let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
+        let sst_infos = add_test_tables(
+            hummock_manager.as_ref(),
+            hummock_meta_client.clone(),
+            compaction_group_id,
+        )
+        .await;
         assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
         hummock_manager.create_version_checkpoint(1).await.unwrap();
         assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 6);
@@ -263,7 +252,31 @@ mod tests {
             .await
             .unwrap();
         hummock_manager.create_version_checkpoint(0).await.unwrap();
-        assert!(!hummock_manager.get_objects_to_delete().is_empty());
+        assert!(hummock_manager.get_objects_to_delete().is_empty());
+        hummock_manager
+            .complete_full_gc(
+                sst_infos
+                    .iter()
+                    .flat_map(|ssts| ssts.iter().map(|s| s.object_id))
+                    .collect(),
+                None,
+                HashSet::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(hummock_manager.get_objects_to_delete().len(), 3);
+        assert_eq!(
+            hummock_manager
+                .get_objects_to_delete()
+                .into_iter()
+                .sorted()
+                .collect::<Vec<_>>(),
+            sst_infos[0]
+                .iter()
+                .map(|s| s.object_id)
+                .sorted()
+                .collect::<Vec<_>>()
+        );
         // No SST deletion is scheduled because no available worker.
         assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
         let _receiver = compactor_manager.add_compactor(context_id);

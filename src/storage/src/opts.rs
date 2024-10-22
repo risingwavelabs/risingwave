@@ -63,6 +63,8 @@ pub struct StorageOpts {
     /// max memory usage for large query.
     pub prefetch_buffer_capacity_mb: usize,
 
+    pub max_cached_recent_versions_number: usize,
+
     pub max_prefetch_block_number: usize,
 
     pub disable_remote_compactor: bool,
@@ -90,8 +92,9 @@ pub struct StorageOpts {
     pub data_file_cache_recover_concurrency: usize,
     pub data_file_cache_insert_rate_limit_mb: usize,
     pub data_file_cache_indexer_shards: usize,
-    pub data_file_cache_compression: String,
+    pub data_file_cache_compression: foyer::Compression,
     pub data_file_cache_flush_buffer_threshold_mb: usize,
+    pub data_file_cache_runtime_config: foyer::RuntimeOptions,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
@@ -110,8 +113,9 @@ pub struct StorageOpts {
     pub meta_file_cache_recover_concurrency: usize,
     pub meta_file_cache_insert_rate_limit_mb: usize,
     pub meta_file_cache_indexer_shards: usize,
-    pub meta_file_cache_compression: String,
+    pub meta_file_cache_compression: foyer::Compression,
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
+    pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
 
     /// The storage url for storing backups.
     pub backup_storage_url: String,
@@ -134,7 +138,10 @@ pub struct StorageOpts {
 
     pub compactor_concurrent_uploading_sst_count: Option<usize>,
 
+    pub compactor_max_overlap_sst_count: usize,
+
     pub object_store_config: ObjectStoreConfig,
+    pub time_travel_version_cache_capacity: u64,
 }
 
 impl Default for StorageOpts {
@@ -170,6 +177,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_cache_shard_num: s.meta_cache_shard_num,
             meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
+            max_cached_recent_versions_number: c.storage.max_cached_recent_versions_number,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
@@ -187,8 +195,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_recover_concurrency: c.storage.data_file_cache.recover_concurrency,
             data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
             data_file_cache_indexer_shards: c.storage.data_file_cache.indexer_shards,
-            data_file_cache_compression: c.storage.data_file_cache.compression.clone(),
+            data_file_cache_compression: c.storage.data_file_cache.compression,
             data_file_cache_flush_buffer_threshold_mb: s.block_file_cache_flush_buffer_threshold_mb,
+            data_file_cache_runtime_config: c.storage.data_file_cache.runtime_config.clone(),
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
@@ -198,8 +207,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_recover_concurrency: c.storage.meta_file_cache.recover_concurrency,
             meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
             meta_file_cache_indexer_shards: c.storage.meta_file_cache.indexer_shards,
-            meta_file_cache_compression: c.storage.meta_file_cache.compression.clone(),
+            meta_file_cache_compression: c.storage.meta_file_cache.compression,
             meta_file_cache_flush_buffer_threshold_mb: s.meta_file_cache_flush_buffer_threshold_mb,
+            meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,
@@ -231,6 +241,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_concurrent_uploading_sst_count: c
                 .storage
                 .compactor_concurrent_uploading_sst_count,
+            time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
+            compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
         }
     }
 }

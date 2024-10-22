@@ -66,7 +66,8 @@
 //!   possible that every lookup path produces different distribution. We need to shuffle them
 //!   before feeding data to union.
 
-#![expect(dead_code)]
+// FIXME: https://github.com/rust-lang/rust-analyzer/issues/17685
+#![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
 

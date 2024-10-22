@@ -66,7 +66,8 @@ impl WithOptions for i32 {}
 impl WithOptions for i64 {}
 impl WithOptions for f64 {}
 impl WithOptions for std::time::Duration {}
-impl WithOptions for crate::connector_common::mqtt_common::QualityOfService {}
+impl WithOptions for crate::connector_common::MqttQualityOfService {}
+impl WithOptions for crate::sink::file_sink::opendal_sink::PathPartitionPrefix {}
 impl WithOptions for crate::sink::kafka::CompressionCodec {}
 impl WithOptions for crate::source::filesystem::file_common::CompressionFormat {}
 impl WithOptions for nexmark::config::RateShape {}
@@ -124,6 +125,10 @@ pub trait WithPropertiesExt: Get + Sized {
 
     fn enable_transaction_metadata(&self) -> bool {
         CdcTableType::from_properties(self).enable_transaction_metadata()
+    }
+
+    fn is_shareable_non_cdc_connector(&self) -> bool {
+        self.is_kafka_connector()
     }
 
     #[inline(always)]

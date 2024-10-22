@@ -13,24 +13,21 @@
 // limitations under the License.
 
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use risingwave_common::config::{
-    CompactionConfig, DefaultParallelism, MetaBackend, ObjectStoreConfig,
-};
+use risingwave_common::config::{CompactionConfig, DefaultParallelism, ObjectStoreConfig};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::{bail, system_param};
+use risingwave_meta_model::prelude::Cluster;
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
-use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
 };
 use sea_orm::EntityTrait;
 
-use super::{
-    SessionParamsManager, SessionParamsManagerRef, SystemParamsManager, SystemParamsManagerRef,
-};
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
 };
@@ -39,85 +36,25 @@ use crate::controller::system_param::{SystemParamsController, SystemParamsContro
 use crate::controller::SqlMetaStore;
 use crate::hummock::sequence::SequenceGenerator;
 use crate::manager::event_log::{start_event_log_manager, EventLogManagerRef};
-use crate::manager::{
-    IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
-    NotificationManagerRef,
-};
+use crate::manager::{IdleManager, IdleManagerRef, NotificationManager, NotificationManagerRef};
 use crate::model::ClusterId;
-use crate::storage::{MetaStore, MetaStoreRef};
 use crate::MetaResult;
-
-#[derive(Clone)]
-pub enum IdGenManagerImpl {
-    Kv(IdGeneratorManagerRef),
-    Sql(SqlIdGeneratorManagerRef),
-}
-
-impl IdGenManagerImpl {
-    pub fn as_kv(&self) -> &IdGeneratorManagerRef {
-        match self {
-            IdGenManagerImpl::Kv(mgr) => mgr,
-            _ => panic!("expect kv id generator manager"),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum MetaStoreImpl {
-    Kv(MetaStoreRef),
-    Sql(SqlMetaStore),
-}
-
-impl MetaStoreImpl {
-    pub fn as_kv(&self) -> &MetaStoreRef {
-        match self {
-            MetaStoreImpl::Kv(mgr) => mgr,
-            _ => panic!("expect kv meta store"),
-        }
-    }
-
-    pub fn as_sql(&self) -> &SqlMetaStore {
-        match self {
-            MetaStoreImpl::Sql(mgr) => mgr,
-            _ => panic!("expect sql meta store"),
-        }
-    }
-
-    pub fn backend(&self) -> MetaBackend {
-        match self {
-            MetaStoreImpl::Kv(meta_store) => meta_store.meta_store_type(),
-            MetaStoreImpl::Sql(_) => MetaBackend::Sql,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum SystemParamsManagerImpl {
-    Kv(SystemParamsManagerRef),
-    Sql(SystemParamsControllerRef),
-}
-
-#[derive(Clone)]
-pub enum SessionParamsManagerImpl {
-    Kv(SessionParamsManagerRef),
-    Sql(SessionParamsControllerRef),
-}
 
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
 #[derive(Clone)]
 pub struct MetaSrvEnv {
     /// id generator manager.
-    id_gen_manager_impl: IdGenManagerImpl,
+    id_gen_manager_impl: SqlIdGeneratorManagerRef,
 
     /// system param manager.
-    system_param_manager_impl: SystemParamsManagerImpl,
+    system_param_manager_impl: SystemParamsControllerRef,
 
     /// session param manager.
-    session_param_manager_impl: SessionParamsManagerImpl,
+    session_param_manager_impl: SessionParamsControllerRef,
 
     /// meta store.
-    meta_store_impl: MetaStoreImpl,
+    meta_store_impl: SqlMetaStore,
 
     /// notification manager.
     notification_manager: NotificationManagerRef,
@@ -136,7 +73,7 @@ pub struct MetaSrvEnv {
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
 
-    pub hummock_seq: Option<Arc<SequenceGenerator>>,
+    pub hummock_seq: Arc<SequenceGenerator>,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -176,6 +113,7 @@ pub struct MetaOpts {
     pub hummock_version_checkpoint_interval_sec: u64,
     pub enable_hummock_data_archive: bool,
     pub hummock_time_travel_snapshot_interval: u64,
+    pub hummock_time_travel_sst_info_fetch_batch_size: usize,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -186,8 +124,12 @@ pub struct MetaOpts {
     pub min_sst_retention_time_sec: u64,
     /// Interval of automatic hummock full GC.
     pub full_gc_interval_sec: u64,
-    /// The spin interval when collecting global GC watermark in hummock
-    pub collect_gc_watermark_spin_interval_sec: u64,
+    /// Max number of object per full GC job can fetch.
+    pub full_gc_object_limit: u64,
+    /// Duration in seconds to retain garbage collection history data.
+    pub gc_history_retention_time_sec: u64,
+    /// Max number of inflight time travel query.
+    pub max_inflight_time_travel_query: u64,
     /// Enable sanity check when SSTs are committed
     pub enable_committed_sst_sanity_check: bool,
     /// Schedule compaction for all compaction groups with this interval.
@@ -227,8 +169,8 @@ pub struct MetaOpts {
     /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule `split_compaction_group` for all compaction groups with this interval.
-    pub periodic_split_compact_group_interval_sec: u64,
+    /// Schedule `periodic_scheduling_compaction_group_interval_sec` for all compaction groups with this interval.
+    pub periodic_scheduling_compaction_group_interval_sec: u64,
 
     /// The size limit to split a large compaction group.
     pub split_group_size_limit: u64,
@@ -248,9 +190,6 @@ pub struct MetaOpts {
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_task_max_progress_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
-
-    /// The size limit to split a state-table to independent sstable.
-    pub cut_table_size_limit: u64,
 
     /// hybird compaction group config
     ///
@@ -294,6 +233,12 @@ pub struct MetaOpts {
     pub temp_secret_file_dir: String,
 
     pub table_info_statistic_history_times: usize,
+
+    // Cluster limits
+    pub actor_cnt_per_worker_parallelism_hard_limit: usize,
+    pub actor_cnt_per_worker_parallelism_soft_limit: usize,
+
+    pub license_key_path: Option<PathBuf>,
 }
 
 impl MetaOpts {
@@ -314,10 +259,13 @@ impl MetaOpts {
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             hummock_time_travel_snapshot_interval: 0,
+            hummock_time_travel_sst_info_fetch_batch_size: 10_000,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
-            collect_gc_watermark_spin_interval_sec: 5,
+            full_gc_object_limit: 100_000,
+            gc_history_retention_time_sec: 3600 * 24 * 7,
+            max_inflight_time_travel_query: 1000,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
@@ -330,7 +278,7 @@ impl MetaOpts {
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
-            periodic_split_compact_group_interval_sec: 60,
+            periodic_scheduling_compaction_group_interval_sec: 60,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
@@ -342,7 +290,6 @@ impl MetaOpts {
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_task_max_progress_interval_secs: 1,
             compaction_config: None,
-            cut_table_size_limit: 1024 * 1024 * 1024,
             hybrid_partition_node_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
@@ -358,6 +305,9 @@ impl MetaOpts {
             secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
             temp_secret_file_dir: "./secrets".to_string(),
             table_info_statistic_history_times: 240,
+            actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
+            actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
+            license_key_path: None,
         }
     }
 }
@@ -386,7 +336,7 @@ impl MetaSrvEnv {
         opts: MetaOpts,
         mut init_system_params: SystemParams,
         init_session_config: SessionConfig,
-        meta_store_impl: MetaStoreImpl,
+        meta_store_impl: SqlMetaStore,
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let stream_client_pool = Arc::new(StreamClientPool::new(1)); // typically no need for plural clients
@@ -396,135 +346,82 @@ impl MetaSrvEnv {
             opts.event_log_channel_max_size,
         ));
 
-        let env = match &meta_store_impl {
-            MetaStoreImpl::Kv(meta_store) => {
-                let notification_manager =
-                    Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
-                let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-                let (cluster_id, cluster_first_launch) =
-                    if let Some(id) = ClusterId::from_meta_store(meta_store).await? {
-                        (id, false)
-                    } else {
-                        (ClusterId::new(), true)
-                    };
+        // When license key path is specified, license key from system parameters can be easily
+        // overwritten. So we simply reject this case.
+        if opts.license_key_path.is_some()
+            && init_system_params.license_key
+                != system_param::default::license_key_opt().map(Into::into)
+        {
+            bail!(
+                "argument `--license-key-path` (or env var `RW_LICENSE_KEY_PATH`) and \
+                 system parameter `license_key` (or env var `RW_LICENSE_KEY`) may not \
+                 be set at the same time"
+            );
+        }
 
-                // For new clusters, the name of the object store needs to be prefixed according to the object id.
-                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
+        let cluster_first_launch =
+            is_first_launch_for_sql_backend_cluster(&meta_store_impl).await?;
+        // Try to upgrade if any new model changes are added.
+        Migrator::up(&meta_store_impl.conn, None)
+            .await
+            .expect("Failed to upgrade models in meta store");
 
-                init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
-                let system_params_manager = Arc::new(
-                    SystemParamsManager::new(
-                        meta_store.clone(),
-                        notification_manager.clone(),
-                        init_system_params.clone(),
-                        cluster_first_launch,
-                    )
-                    .await?,
-                );
-                let session_params_manager = Arc::new(
-                    SessionParamsManager::new(
-                        meta_store.clone(),
-                        init_session_config.clone(),
-                        notification_manager.clone(),
-                        cluster_first_launch,
-                    )
-                    .await?,
-                );
+        let notification_manager =
+            Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
+        let cluster_id = Cluster::find()
+            .one(&meta_store_impl.conn)
+            .await?
+            .map(|c| c.cluster_id.to_string().into())
+            .unwrap();
 
-                // Persist params before starting services so that invalid params that cause meta node
-                // to crash will not be persisted.
-                system_params_manager.flush_params().await?;
-                session_params_manager.flush_params().await?;
-                cluster_id.put_at_meta_store(meta_store).await?;
+        // For new clusters:
+        // - the name of the object store needs to be prefixed according to the object id.
+        //
+        // For old clusters
+        // - the prefix is ​​not divided for the sake of compatibility.
+        init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
 
-                Self {
-                    id_gen_manager_impl: IdGenManagerImpl::Kv(id_gen_manager),
-                    system_param_manager_impl: SystemParamsManagerImpl::Kv(system_params_manager),
-                    session_param_manager_impl: SessionParamsManagerImpl::Kv(
-                        session_params_manager,
-                    ),
-                    meta_store_impl: meta_store_impl.clone(),
-                    notification_manager,
-                    stream_client_pool,
-                    frontend_client_pool,
-                    idle_manager,
-                    event_log_manager,
-                    cluster_id,
-                    hummock_seq: None,
-                    opts: opts.into(),
-                }
-            }
-            MetaStoreImpl::Sql(sql_meta_store) => {
-                let is_sql_backend_cluster_first_launch =
-                    is_first_launch_for_sql_backend_cluster(sql_meta_store).await?;
-                // Try to upgrade if any new model changes are added.
-                Migrator::up(&sql_meta_store.conn, None)
-                    .await
-                    .expect("Failed to upgrade models in meta store");
-
-                let notification_manager =
-                    Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
-                let cluster_id = Cluster::find()
-                    .one(&sql_meta_store.conn)
-                    .await?
-                    .map(|c| c.cluster_id.to_string().into())
-                    .unwrap();
-                init_system_params.use_new_object_prefix_strategy =
-                    Some(is_sql_backend_cluster_first_launch);
-                // For new clusters, the name of the object store needs to be prefixed according to the object id.
-                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
-                let system_param_controller = Arc::new(
-                    SystemParamsController::new(
-                        sql_meta_store.clone(),
-                        notification_manager.clone(),
-                        init_system_params,
-                    )
-                    .await?,
-                );
-                let session_param_controller = Arc::new(
-                    SessionParamsController::new(
-                        sql_meta_store.clone(),
-                        notification_manager.clone(),
-                        init_session_config,
-                    )
-                    .await?,
-                );
-                Self {
-                    id_gen_manager_impl: IdGenManagerImpl::Sql(Arc::new(
-                        SqlIdGeneratorManager::new(&sql_meta_store.conn).await?,
-                    )),
-                    system_param_manager_impl: SystemParamsManagerImpl::Sql(
-                        system_param_controller,
-                    ),
-                    session_param_manager_impl: SessionParamsManagerImpl::Sql(
-                        session_param_controller,
-                    ),
-                    meta_store_impl: meta_store_impl.clone(),
-                    notification_manager,
-                    stream_client_pool,
-                    frontend_client_pool,
-                    idle_manager,
-                    event_log_manager,
-                    cluster_id,
-                    hummock_seq: Some(Arc::new(SequenceGenerator::new(
-                        sql_meta_store.conn.clone(),
-                    ))),
-                    opts: opts.into(),
-                }
-            }
-        };
-        Ok(env)
+        let system_param_controller = Arc::new(
+            SystemParamsController::new(
+                meta_store_impl.clone(),
+                notification_manager.clone(),
+                init_system_params,
+            )
+            .await?,
+        );
+        let session_param_controller = Arc::new(
+            SessionParamsController::new(
+                meta_store_impl.clone(),
+                notification_manager.clone(),
+                init_session_config,
+            )
+            .await?,
+        );
+        Ok(Self {
+            id_gen_manager_impl: Arc::new(SqlIdGeneratorManager::new(&meta_store_impl.conn).await?),
+            system_param_manager_impl: system_param_controller,
+            session_param_manager_impl: session_param_controller,
+            meta_store_impl: meta_store_impl.clone(),
+            notification_manager,
+            stream_client_pool,
+            frontend_client_pool,
+            idle_manager,
+            event_log_manager,
+            cluster_id,
+            hummock_seq: Arc::new(SequenceGenerator::new(meta_store_impl.conn.clone())),
+            opts: opts.into(),
+        })
     }
 
-    pub fn meta_store(&self) -> MetaStoreImpl {
+    pub fn meta_store(&self) -> SqlMetaStore {
         self.meta_store_impl.clone()
     }
 
-    pub fn meta_store_ref(&self) -> &MetaStoreImpl {
+    pub fn meta_store_ref(&self) -> &SqlMetaStore {
         &self.meta_store_impl
     }
 
-    pub fn id_gen_manager(&self) -> &IdGenManagerImpl {
+    pub fn id_gen_manager(&self) -> &SqlIdGeneratorManagerRef {
         &self.id_gen_manager_impl
     }
 
@@ -545,17 +442,14 @@ impl MetaSrvEnv {
     }
 
     pub async fn system_params_reader(&self) -> SystemParamsReader {
-        match &self.system_param_manager_impl {
-            SystemParamsManagerImpl::Kv(mgr) => mgr.get_params().await,
-            SystemParamsManagerImpl::Sql(mgr) => mgr.get_params().await,
-        }
+        self.system_param_manager_impl.get_params().await
     }
 
-    pub fn system_params_manager_impl_ref(&self) -> SystemParamsManagerImpl {
+    pub fn system_params_manager_impl_ref(&self) -> SystemParamsControllerRef {
         self.system_param_manager_impl.clone()
     }
 
-    pub fn session_params_manager_impl_ref(&self) -> SessionParamsManagerImpl {
+    pub fn session_params_manager_impl_ref(&self) -> SessionParamsControllerRef {
         self.session_param_manager_impl.clone()
     }
 
@@ -587,27 +481,12 @@ impl MetaSrvEnv {
         Self::for_test_opts(MetaOpts::test(false)).await
     }
 
-    // Instance for test with sql meta store.
-    #[cfg(not(madsim))]
-    pub async fn for_test_with_sql_meta_store() -> Self {
-        Self::new(
-            MetaOpts::test(false),
-            risingwave_common::system_param::system_params_for_test(),
-            Default::default(),
-            MetaStoreImpl::Sql(SqlMetaStore::for_test().await),
-        )
-        .await
-        .unwrap()
-    }
-
     pub async fn for_test_opts(opts: MetaOpts) -> Self {
-        use crate::storage::{MemStore, MetaStoreBoxExt};
-
         Self::new(
             opts,
             risingwave_common::system_param::system_params_for_test(),
             Default::default(),
-            MetaStoreImpl::Kv(MemStore::default().into_ref()),
+            SqlMetaStore::for_test().await,
         )
         .await
         .unwrap()

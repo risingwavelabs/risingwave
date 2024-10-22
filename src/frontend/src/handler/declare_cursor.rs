@@ -82,7 +82,7 @@ async fn handle_declare_subscription_cursor(
         risingwave_sqlparser::ast::Since::Full => None,
     };
     // Create cursor based on the response
-    session
+    if let Err(e) = session
         .get_cursor_manager()
         .add_subscription_cursor(
             cursor_name.clone(),
@@ -91,7 +91,15 @@ async fn handle_declare_subscription_cursor(
             subscription,
             &handle_args,
         )
-        .await?;
+        .await
+    {
+        session
+            .env()
+            .cursor_metrics
+            .subscription_cursor_error_count
+            .inc();
+        return Err(e);
+    }
 
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
@@ -149,6 +157,7 @@ pub async fn create_chunk_stream_for_cursor(
         plan_fragmenter,
         query_mode,
         schema,
+        read_storage_tables,
         ..
     } = plan_fragmenter_result;
 
@@ -161,10 +170,22 @@ pub async fn create_chunk_stream_for_cursor(
         match query_mode {
             QueryMode::Auto => unreachable!(),
             QueryMode::Local => CursorDataChunkStream::LocalDataChunk(Some(
-                local_execute(session.clone(), query, can_timeout_cancel).await?,
+                local_execute(
+                    session.clone(),
+                    query,
+                    can_timeout_cancel,
+                    &read_storage_tables,
+                )
+                .await?,
             )),
             QueryMode::Distributed => CursorDataChunkStream::DistributedDataChunk(Some(
-                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
+                distribute_execute(
+                    session.clone(),
+                    query,
+                    can_timeout_cancel,
+                    read_storage_tables,
+                )
+                .await?,
             )),
         },
         schema.fields.clone(),

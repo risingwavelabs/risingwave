@@ -23,7 +23,7 @@ http = "1"
 hyper = "1"
 itertools = { workspace = true }
 lru = { workspace = true }
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12.0", features = ["future"] }
 paste = "1"
 rand = { workspace = true }
 risingwave_common = { workspace = true }
@@ -45,7 +45,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tower = "0.4"
+tower = "0.5"
 tracing = "0.1"
 url = "2.5.0"
 

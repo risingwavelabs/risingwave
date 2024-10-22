@@ -21,7 +21,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
@@ -42,7 +42,6 @@ use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
     CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY,
     CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR,
@@ -62,12 +61,11 @@ use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
     ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
 };
-use risingwave_sqlparser::parser::IncludeOption;
+use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
@@ -595,8 +593,43 @@ fn bind_columns_from_source_for_cdc(
     Ok((Some(columns), stream_source_info))
 }
 
+// check the additional column compatibility with the format and encode
+fn check_additional_column_compatibility(
+    column_def: &IncludeOptionItem,
+    source_schema: Option<&ConnectorSchema>,
+) -> Result<()> {
+    // only allow header column have inner field
+    if column_def.inner_field.is_some()
+        && !column_def
+            .column_type
+            .real_value()
+            .eq_ignore_ascii_case("header")
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "Only header column can have inner field, but got {:?}",
+            column_def.column_type.real_value(),
+        ))));
+    }
+
+    // Payload column only allowed when encode is JSON
+    if let Some(schema) = source_schema
+        && column_def
+            .column_type
+            .real_value()
+            .eq_ignore_ascii_case("payload")
+        && !matches!(schema.row_encode, Encode::Json)
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "INCLUDE payload is only allowed when using ENCODE JSON, but got ENCODE {:?}",
+            schema.row_encode
+        ))));
+    }
+    Ok(())
+}
+
 /// add connector-spec columns to the end of column catalog
 pub fn handle_addition_columns(
+    source_schema: Option<&ConnectorSchema>,
     with_properties: &BTreeMap<String, String>,
     mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
@@ -613,35 +646,27 @@ pub fn handle_addition_columns(
         ))));
     }
 
-    let latest_col_id: ColumnId = columns
-        .iter()
-        .map(|col| col.column_desc.column_id)
-        .max()
-        .unwrap(); // there must be at least one column in the column catalog
-
     while let Some(item) = additional_columns.pop() {
-        {
-            // only allow header column have inner field
-            if item.inner_field.is_some()
-                && !item.column_type.real_value().eq_ignore_ascii_case("header")
-            {
-                return Err(RwError::from(ProtocolError(format!(
-                    "Only header column can have inner field, but got {:?}",
-                    item.column_type.real_value(),
-                ))));
-            }
-        }
+        check_additional_column_compatibility(&item, source_schema)?;
 
-        let data_type_name: Option<String> = item
+        let data_type = item
             .header_inner_expect_type
-            .map(|dt| format!("{:?}", dt).to_lowercase());
+            .map(|dt| bind_data_type(&dt))
+            .transpose()?;
+        if let Some(dt) = &data_type
+            && !matches!(dt, DataType::Bytea | DataType::Varchar)
+        {
+            return Err(
+                ErrorCode::BindError(format!("invalid additional column data type: {dt}")).into(),
+            );
+        }
         let col = build_additional_column_desc(
-            latest_col_id.next(),
+            ColumnId::placeholder(),
             connector_name.as_str(),
             item.column_type.real_value().as_str(),
             item.column_alias.map(|alias| alias.real_value()),
             item.inner_field.as_deref(),
-            data_type_name.as_deref(),
+            data_type.as_ref(),
             true,
             is_cdc_backfill_table,
         )?;
@@ -689,12 +714,6 @@ pub(crate) fn bind_all_columns(
             return Err(RwError::from(NotSupported(
                 "Wildcard in user-defined schema is only allowed when there exists columns from external schema".to_string(),
                 "Remove the wildcard or use a source with external schema".to_string(),
-            )));
-        }
-        // FIXME(yuhao): cols_from_sql should be None is no `()` is given.
-        if cols_from_sql.is_empty() {
-            return Err(RwError::from(ProtocolError(
-                "Schema definition is required, either from SQL or schema registry.".to_string(),
             )));
         }
         let non_generated_sql_defined_columns = non_generated_sql_columns(col_defs_from_sql);
@@ -1327,8 +1346,7 @@ pub async fn extract_iceberg_columns(
 ) -> anyhow::Result<Vec<ColumnCatalog>> {
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
-        let iceberg_config: IcebergConfig = properties.to_iceberg_config();
-        let table = iceberg_config.load_table_v2().await?;
+        let table = properties.load_table_v2().await?;
         let iceberg_schema: arrow_schema_iceberg::Schema =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
@@ -1370,8 +1388,6 @@ pub async fn check_iceberg_source(
         )));
     };
 
-    let iceberg_config = properties.to_iceberg_config();
-
     let schema = Schema {
         fields: columns
             .iter()
@@ -1380,7 +1396,7 @@ pub async fn check_iceberg_source(
             .collect(),
     };
 
-    let table = iceberg_config.load_table_v2().await?;
+    let table = properties.load_table_v2().await?;
 
     let iceberg_schema = iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
@@ -1513,11 +1529,19 @@ pub async fn bind_create_source_or_table_with_connector(
 
     // add additional columns before bind pk, because `format upsert` requires the key column
     handle_addition_columns(
+        Some(&source_schema),
         &with_properties,
         include_column_options,
         &mut columns,
         false,
     )?;
+
+    if columns.is_empty() {
+        return Err(RwError::from(ProtocolError(
+            "Schema definition is required, either from SQL or schema registry.".to_string(),
+        )));
+    }
+
     // compatible with the behavior that add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
     if is_create_source {
         // must behind `handle_addition_columns`
@@ -1640,7 +1664,13 @@ pub async fn handle_create_source(
 
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
     let is_shared = create_cdc_source_job
-        || (with_properties.is_kafka_connector() && session.config().rw_enable_shared_source());
+        || (with_properties.is_shareable_non_cdc_connector()
+            && session
+                .env()
+                .streaming_config()
+                .developer
+                .enable_shared_source
+            && session.config().streaming_use_shared_source());
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema)?
@@ -1696,22 +1726,12 @@ pub async fn handle_create_source(
             )?;
 
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
-            let mut graph = build_graph(stream_plan)?;
-            graph.parallelism =
-                session
-                    .config()
-                    .streaming_parallelism()
-                    .map(|parallelism| Parallelism {
-                        parallelism: parallelism.get(),
-                    });
-            graph
+            build_graph(stream_plan)?
         };
-        catalog_writer
-            .create_source_with_graph(source, graph)
-            .await?;
+        catalog_writer.create_source(source, Some(graph)).await?;
     } else {
         // For other sources we don't create a streaming job
-        catalog_writer.create_source(source).await?;
+        catalog_writer.create_source(source, None).await?;
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))

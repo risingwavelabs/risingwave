@@ -407,7 +407,7 @@ mod test {
         // Test parsing into standalone-level opts.
         let raw_opts = "
 --compute-opts=--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10 --temp-secret-file-dir ./compute/secrets/
---meta-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234 --temp-secret-file-dir ./meta/secrets/
+--meta-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --temp-secret-file-dir ./meta/secrets/
 --frontend-opts=--config-path=src/config/original.toml --temp-secret-file-dir ./frontend/secrets/
 --prometheus-listener-addr=127.0.0.1:1234
 --config-path=src/config/test.toml
@@ -415,7 +415,7 @@ mod test {
         let actual = StandaloneOpts::parse_from(raw_opts.lines());
         let opts = StandaloneOpts {
             compute_opts: Some("--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10 --temp-secret-file-dir ./compute/secrets/".into()),
-            meta_opts: Some("--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234 --temp-secret-file-dir ./meta/secrets/".into()),
+            meta_opts: Some("--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --temp-secret-file-dir ./meta/secrets/".into()),
             frontend_opts: Some("--config-path=src/config/original.toml --temp-secret-file-dir ./frontend/secrets/".into()),
             compactor_opts: None,
             prometheus_listener_addr: Some("127.0.0.1:1234".into()),
@@ -438,10 +438,6 @@ mod test {
                             prometheus_listener_addr: Some(
                                 "127.0.0.1:1234",
                             ),
-                            etcd_endpoints: "",
-                            etcd_auth: false,
-                            etcd_username: "",
-                            etcd_password: [REDACTED alloc::string::String],
                             sql_endpoint: None,
                             sql_username: "",
                             sql_password: [REDACTED alloc::string::String],
@@ -468,6 +464,7 @@ mod test {
                             dangerous_max_idle_secs: None,
                             connector_rpc_endpoint: None,
                             license_key: None,
+                            license_key_path: None,
                             temp_secret_file_dir: "./meta/secrets/",
                         },
                     ),

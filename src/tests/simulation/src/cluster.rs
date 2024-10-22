@@ -37,6 +37,7 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
+use tempfile::NamedTempFile;
 #[cfg(not(madsim))]
 use tokio::runtime::Handle;
 use uuid::Uuid;
@@ -86,17 +87,8 @@ pub struct Configuration {
     /// This determines `worker_node_parallelism`.
     pub compute_node_cores: usize,
 
-    /// The probability of etcd request timeout.
-    pub etcd_timeout_rate: f32,
-
-    /// Path to etcd data file.
-    pub etcd_data_path: Option<PathBuf>,
-
     /// Queries to run per session.
     pub per_session_queries: Arc<Vec<String>>,
-
-    /// dir to store SQL backend sqlite db
-    pub sqlite_data_dir: Option<PathBuf>,
 }
 
 impl Default for Configuration {
@@ -123,10 +115,7 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 1,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
             per_session_queries: vec![].into(),
-            sqlite_data_dir: None,
         }
     }
 }
@@ -148,7 +137,7 @@ impl Configuration {
             config_path: ConfigPath::Temp(config_path.into()),
             frontend_nodes: 2,
             compute_nodes: 3,
-            meta_nodes: 3,
+            meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
             ..Default::default()
@@ -158,27 +147,16 @@ impl Configuration {
     /// Provides a configuration for scale test which ensures that the arrangement backfill is disabled,
     /// so table scan will use `no_shuffle`.
     pub fn for_scale_no_shuffle() -> Self {
-        // Embed the config file and create a temporary file at runtime. The file will be deleted
-        // automatically when it's dropped.
-        let config_path = {
-            let mut file =
-                tempfile::NamedTempFile::new().expect("failed to create temp config file");
-            file.write_all(include_bytes!("risingwave-scale.toml"))
-                .expect("failed to write config file");
-            file.into_temp_path()
-        };
+        let mut conf = Self::for_scale();
+        conf.per_session_queries =
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into()].into();
+        conf
+    }
 
-        Configuration {
-            config_path: ConfigPath::Temp(config_path.into()),
-            frontend_nodes: 2,
-            compute_nodes: 3,
-            meta_nodes: 3,
-            compactor_nodes: 2,
-            compute_node_cores: 2,
-            per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into()]
-                .into(),
-            ..Default::default()
-        }
+    pub fn for_scale_shared_source() -> Self {
+        let mut conf = Self::for_scale();
+        conf.per_session_queries = vec!["SET STREAMING_USE_SHARED_SOURCE = true;".into()].into();
+        conf
     }
 
     pub fn for_auto_parallelism(
@@ -225,7 +203,6 @@ metrics_level = "Disabled"
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
             ]
                 .into(),
-            ..Default::default()
         }
     }
 
@@ -272,7 +249,6 @@ metrics_level = "Disabled"
             compute_node_cores: 1,
             per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".into()]
                 .into(),
-            ..Default::default()
         }
     }
 
@@ -296,7 +272,7 @@ metrics_level = "Disabled"
             // in a different process.
             frontend_nodes: 1,
             compute_nodes: 3,
-            meta_nodes: 3,
+            meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
             ..Default::default()
@@ -319,7 +295,6 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
-            ..Default::default()
         }
     }
 }
@@ -334,7 +309,6 @@ metrics_level = "Disabled"
 /// | frontend-x       | 192.168.2.x   |
 /// | compute-x        | 192.168.3.x   |
 /// | compactor-x      | 192.168.4.x   |
-/// | etcd             | 192.168.10.1  |
 /// | kafka-broker     | 192.168.11.1  |
 /// | kafka-producer   | 192.168.11.2  |
 /// | object_store_sim | 192.168.12.1  |
@@ -347,6 +321,8 @@ pub struct Cluster {
     pub(crate) client: NodeHandle,
     #[cfg(madsim)]
     pub(crate) ctl: NodeHandle,
+    #[cfg(madsim)]
+    pub(crate) sqlite_file_handle: NamedTempFile,
 }
 
 impl Cluster {
@@ -361,16 +337,12 @@ impl Cluster {
         println!("seed = {}", handle.seed());
         println!("{:#?}", conf);
 
-        if conf.sqlite_data_dir.is_some() && conf.etcd_data_path.is_some() {
-            bail!("sqlite_data_dir and etcd_data_path cannot be set at the same time");
-        }
+        // TODO: support mutil meta nodes
+        assert_eq!(conf.meta_nodes, 1);
 
         // setup DNS and load balance
         let net = madsim::net::NetSim::current();
         for i in 1..=conf.meta_nodes {
-            if conf.sqlite_data_dir.is_none() {
-                net.add_dns_record("etcd", "192.168.10.1".parse().unwrap());
-            }
             net.add_dns_record(
                 &format!("meta-{i}"),
                 format!("192.168.1.{i}").parse().unwrap(),
@@ -388,28 +360,6 @@ impl Cluster {
                 ServiceAddr::Tcp("192.168.2.0:4566".into()),
                 &format!("192.168.2.{i}:4566"),
             )
-        }
-
-        // etcd node
-        if conf.sqlite_data_dir.is_none() {
-            let etcd_data = conf
-                .etcd_data_path
-                .as_ref()
-                .map(|path| std::fs::read_to_string(path).unwrap());
-            handle
-                .create_node()
-                .name("etcd")
-                .ip("192.168.10.1".parse().unwrap())
-                .init(move || {
-                    let addr = "0.0.0.0:2388".parse().unwrap();
-                    let mut builder =
-                        etcd_client::SimServer::builder().timeout_rate(conf.etcd_timeout_rate);
-                    if let Some(data) = &etcd_data {
-                        builder = builder.load(data.clone());
-                    }
-                    builder.serve(addr)
-                })
-                .build();
         }
 
         // kafka broker
@@ -445,29 +395,11 @@ impl Cluster {
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
-        let mut sql_endpoint = String::new();
-        let mut backend_args = if let Some(sqlite_data_dir) = conf.sqlite_data_dir.as_ref() {
-            sql_endpoint = format!(
-                "sqlite://{}stest-{}.sqlite?mode=rwc",
-                sqlite_data_dir.display(),
-                Uuid::new_v4()
-            );
-            vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint]
-        } else {
-            vec!["--backend", "etcd", "--etcd-endpoints", "etcd:2388"]
-        };
-
-        // FIXME(kwannoel):
-        // Currently we just use the on-disk version,
-        // but it can lead to randomness due to disk io.
-        // We can use shared in-memory db instead.
-        // However sqlite cannot be started inside meta.
-        // Because if cluster stops, then this db will be dropped.
-        // We must instantiate it outside, not just pass the path in.
-        // let sqlite_path = format!(
-        //     "sqlite::file:memdb{}?mode=memory&cache=shared",
-        //     Uuid::new_v4()
-        // );
+        let sqlite_file_handle: NamedTempFile = NamedTempFile::new().unwrap();
+        let file_path = sqlite_file_handle.path().display().to_string();
+        tracing::info!(?file_path, "sqlite_file_path");
+        let sql_endpoint = format!("sqlite://{}?mode=rwc", file_path);
+        let backend_args = vec!["--backend", "sql", "--sql-endpoint", &sql_endpoint];
 
         // meta node
         for i in 1..=conf.meta_nodes {
@@ -607,6 +539,7 @@ impl Cluster {
             handle,
             client,
             ctl,
+            sqlite_file_handle,
         })
     }
 
@@ -971,7 +904,7 @@ impl KillOpts {
     /// Killing all kind of nodes.
     pub const ALL: Self = KillOpts {
         kill_rate: 1.0,
-        kill_meta: true,
+        kill_meta: false, // FIXME: make it true when multiple meta nodes are supported
         kill_frontend: true,
         kill_compute: true,
         kill_compactor: true,
@@ -979,7 +912,7 @@ impl KillOpts {
     };
     pub const ALL_FAST: Self = KillOpts {
         kill_rate: 1.0,
-        kill_meta: true,
+        kill_meta: false, // FIXME: make it true when multiple meta nodes are supported
         kill_frontend: true,
         kill_compute: true,
         kill_compactor: true,

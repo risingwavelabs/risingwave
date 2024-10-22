@@ -21,12 +21,15 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    CacheContext, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
+    CacheContext, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder,
+    HybridCacheEntry,
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
+use risingwave_hummock_sdk::{
+    HummockSstableObjectId, HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH, OBJECT_SUFFIX,
+};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
@@ -190,7 +193,7 @@ impl SstableStore {
             .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                 u64::BITS as usize / 8 + value.estimate_size()
             })
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -202,7 +205,7 @@ impl SstableStore {
                 // FIXME(MrCroxx): Calculate block weight more accurately.
                 u64::BITS as usize * 2 / 8 + value.raw().len()
             })
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -519,10 +522,21 @@ impl SstableStore {
         let obj_prefix = self
             .store
             .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
-        format!(
-            "{}/{}{}.{}",
-            self.path, obj_prefix, object_id, OBJECT_SUFFIX
-        )
+        let mut path = String::with_capacity(
+            self.path.len()
+                + "/".len()
+                + obj_prefix.len()
+                + HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH
+                + ".".len()
+                + OBJECT_SUFFIX.len(),
+        );
+        path.push_str(&self.path);
+        path.push('/');
+        path.push_str(&obj_prefix);
+        path.push_str(&object_id.to_string());
+        path.push('.');
+        path.push_str(OBJECT_SUFFIX);
+        path
     }
 
     pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
@@ -601,9 +615,11 @@ impl SstableStore {
     pub async fn list_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
+        start_after: Option<String>,
+        limit: Option<usize>,
     ) -> HummockResult<ObjectMetadataIter> {
         let list_path = format!("{}/{}", self.path, prefix.unwrap_or("".into()));
-        let raw_iter = self.store.list(&list_path).await?;
+        let raw_iter = self.store.list(&list_path, start_after, limit).await?;
         let iter = raw_iter.filter(|r| match r {
             Ok(i) => future::ready(i.key.ends_with(&format!(".{}", OBJECT_SUFFIX))),
             Err(_) => future::ready(true),

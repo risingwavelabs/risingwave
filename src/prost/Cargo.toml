@@ -9,7 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 enum-as-inner = "0.6"
-pbjson = "0.6"
+pbjson = "0.7"
 prost = { workspace = true }
 prost-helpers = { path = "helpers" }
 risingwave_error = { workspace = true }
@@ -23,7 +23,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [build-dependencies]
 fs-err = "2.11"
-pbjson-build = "0.5"
+pbjson-build = "0.7"
 prost-build = { workspace = true }
 tonic-build = { workspace = true }
 walkdir = "2"

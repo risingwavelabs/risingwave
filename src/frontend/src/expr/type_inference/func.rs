@@ -19,7 +19,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::*;
-use risingwave_pb::expr::agg_call::PbType as PbAggKind;
+use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 
 use super::{align_types, cast_ok_base, CastContext};
@@ -660,8 +660,12 @@ fn infer_type_for_special(
                 .into()),
             }
         }
-        ExprType::Vnode => {
-            ensure_arity!("vnode", 1 <= | inputs |);
+        // internal use only
+        ExprType::Vnode => Ok(Some(VirtualNode::RW_TYPE)),
+        // user-facing `rw_vnode`
+        ExprType::VnodeUser => {
+            ensure_arity!("rw_vnode", 2 <= | inputs |);
+            inputs[0].cast_explicit_mut(DataType::Int32)?; // vnode count
             Ok(Some(VirtualNode::RW_TYPE))
         }
         ExprType::Greatest | ExprType::Least => {
@@ -704,9 +708,17 @@ fn infer_type_for_special_table_function(
 ) -> Result<Option<DataType>> {
     match func_type {
         PbTableFuncType::GenerateSeries => {
-            if inputs.len() < 3 {
+            if inputs.len() < 3 || !inputs[1].is_now() {
                 // let signature map handle this
                 return Ok(None);
+            }
+            // Now we are inferring type for `generate_series(start, now(), step)`, which will
+            // be further handled by `GenerateSeriesWithNowRule`.
+            if inputs[0].is_untyped() {
+                inputs[0].cast_implicit_mut(DataType::Timestamptz)?;
+            }
+            if inputs[2].is_untyped() {
+                inputs[2].cast_implicit_mut(DataType::Interval)?;
             }
             match (
                 inputs[0].return_type(),

@@ -15,7 +15,8 @@ risingwave_meta::rpc::ddl_controller=debug,\
 risingwave_meta::barrier::mod=debug,\
 risingwave_simulation=debug,\
 risingwave_meta::stream::stream_manager=debug,\
-risingwave_meta::barrier::progress=debug"
+risingwave_meta::barrier::progress=debug,\
+sqlx=error"
 
 # Extra logs you can enable if the existing trace does not give enough info.
 #risingwave_stream::executor::backfill=trace,
@@ -43,59 +44,51 @@ filter_stack_trace_for_all_logs() {
   done
 }
 
-trap filter_stack_trace_for_all_logs ERR
+# trap filter_stack_trace_for_all_logs ERR
 
-# NOTE(kwannoel): We must use `export` here, because the variables are not substituted
-# directly via bash subtitution. Instead, the `parallel` command substitutes the variables
-# from the environment. If they are declared without `export`, `parallel` can't read them from the env.
-export EXTRA_ARGS=""
-
-if [[ -n "${USE_SQL_BACKEND:-}" ]]; then
-  export EXTRA_ARGS="--sqlite-data-dir=."
-fi
-
+export EXTRA_ARGS="${EXTRA_ARGS:-}"
 if [[ -n "${USE_ARRANGEMENT_BACKFILL:-}" ]]; then
   export EXTRA_ARGS="$EXTRA_ARGS --use-arrangement-backfill"
 fi
 
 echo "--- EXTRA_ARGS: ${EXTRA_ARGS}"
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, background_ddl"
-seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, background_ddl"
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 ${EXTRA_ARGS:-} \
 ./e2e_test/background_ddl/sim/basic.slt \
 2> $LOGDIR/recovery-background-ddl-{}.log && rm $LOGDIR/recovery-background-ddl-{}.log'
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, ddl"
-seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, ddl"
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
 ${EXTRA_ARGS:-} \
 ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/recovery-ddl-{}.log && rm $LOGDIR/recovery-ddl-{}.log'
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, streaming"
-seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, streaming"
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
 ${EXTRA_ARGS:-} \
 ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/recovery-streaming-{}.log && rm $LOGDIR/recovery-streaming-{}.log'
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, batch"
-seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, batch"
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
 ${EXTRA_ARGS:-} \
 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/recovery-batch-{}.log && rm $LOGDIR/recovery-batch-{}.log'
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, kafka source,sink"
-seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, kafka source,sink"
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
---kafka-datadir=./scripts/source/test_data \
+--kafka-datadir=./e2e_test/source_legacy/basic/scripts/test_data \
 ${EXTRA_ARGS:-} \
-./e2e_test/source/basic/kafka\*.slt 2> $LOGDIR/recovery-source-{}.log && rm $LOGDIR/recovery-source-{}.log'
+./e2e_test/source_legacy/basic/kafka\*.slt 2> $LOGDIR/recovery-source-{}.log && rm $LOGDIR/recovery-source-{}.log'

@@ -399,6 +399,7 @@ impl Binder {
                 ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
                 ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
                 ("jsonb_set", raw_call(ExprType::JsonbSet)),
+                ("jsonb_populate_map", raw_call(ExprType::JsonbPopulateMap)),
                 // map
                 ("map_from_entries", raw_call(ExprType::MapFromEntries)),
                 ("map_access",raw_call(ExprType::MapAccess)),
@@ -661,7 +662,7 @@ impl Binder {
                 ("pg_is_in_recovery", raw_call(ExprType::PgIsInRecovery)),
                 ("rw_recovery_status", raw_call(ExprType::RwRecoveryStatus)),
                 // internal
-                ("rw_vnode", raw_call(ExprType::Vnode)),
+                ("rw_vnode", raw_call(ExprType::VnodeUser)),
                 ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),

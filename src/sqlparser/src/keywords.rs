@@ -88,6 +88,7 @@ define_keywords!(
     AS,
     ASC,
     ASENSITIVE,
+    ASOF,
     ASYMMETRIC,
     ASYNC,
     AT,
@@ -345,6 +346,7 @@ define_keywords!(
     NOSCAN,
     NOSUPERUSER,
     NOT,
+    NOTHING,
     NOTNULL,
     NTH_VALUE,
     NTILE,
@@ -615,6 +617,7 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     Keyword::LEFT,
     Keyword::RIGHT,
     Keyword::NATURAL,
+    Keyword::ASOF,
     Keyword::USING,
     Keyword::CLUSTER,
     // for MSSQL-specific OUTER APPLY (seems reserved in most dialects)

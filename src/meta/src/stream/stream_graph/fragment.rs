@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
 use anyhow::{anyhow, Context};
@@ -24,9 +24,11 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{
     generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM,
 };
+use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -40,7 +42,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::barrier::SnapshotBackfillInfo;
-use crate::manager::{DdlType, IdGenManagerImpl, MetaSrvEnv, StreamingJob, WorkerId};
+use crate::manager::{DdlType, MetaSrvEnv, StreamingJob};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
@@ -100,7 +102,7 @@ impl BuildingFragment {
         tables
     }
 
-    /// Fill the information of the internal tables in the fragment.
+    /// Fill the information with the internal tables in the fragment.
     fn fill_internal_tables(
         fragment: &mut StreamFragment,
         job: &StreamingJob,
@@ -122,7 +124,7 @@ impl BuildingFragment {
         });
     }
 
-    /// Fill the information of the job in the fragment.
+    /// Fill the information with the job in the fragment.
     fn fill_job(fragment: &mut StreamFragment, job: &StreamingJob) -> bool {
         let table_id = job.id();
         let fragment_id = fragment.fragment_id;
@@ -241,6 +243,12 @@ impl Deref for BuildingFragment {
     }
 }
 
+impl DerefMut for BuildingFragment {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
 /// The ID of an edge in the fragment graph. For different types of edges, the ID will be in
 /// different variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
@@ -319,26 +327,33 @@ pub struct StreamFragmentGraph {
     /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
     /// variable. If not specified, all active worker slots will be used.
     specified_parallelism: Option<NonZeroUsize>,
+
+    /// Specified max parallelism, i.e., expected vnode count for the graph.
+    ///
+    /// The scheduler on the meta service will use this as a hint to decide the vnode count
+    /// for each fragment.
+    ///
+    /// Note that the actual vnode count may be different from this value.
+    /// For example, a no-shuffle exchange between current fragment graph and an existing
+    /// upstream fragment graph requires two fragments to be in the same distribution,
+    /// thus the same vnode count.
+    max_parallelism: usize,
 }
 
 impl StreamFragmentGraph {
     /// Create a new [`StreamFragmentGraph`] from the given [`StreamFragmentGraphProto`], with all
     /// global IDs correctly filled.
-    pub async fn new(
+    pub fn new(
         env: &MetaSrvEnv,
         proto: StreamFragmentGraphProto,
         job: &StreamingJob,
     ) -> MetaResult<Self> {
-        let (fragment_id_gen, table_id_gen) = match env.id_gen_manager() {
-            IdGenManagerImpl::Kv(mgr) => (
-                GlobalFragmentIdGen::new(mgr, proto.fragments.len() as u64).await?,
-                GlobalTableIdGen::new(mgr, proto.table_ids_cnt as u64).await?,
-            ),
-            IdGenManagerImpl::Sql(mgr) => (
-                GlobalFragmentIdGen::new_v2(mgr, proto.fragments.len() as u64),
-                GlobalTableIdGen::new_v2(mgr, proto.table_ids_cnt as u64),
-            ),
-        };
+        let fragment_id_gen =
+            GlobalFragmentIdGen::new(env.id_gen_manager(), proto.fragments.len() as u64);
+        // Note: in SQL backend, the ids generated here are fake and will be overwritten again
+        // with `refill_internal_table_ids` later.
+        // TODO: refactor the code to remove this step.
+        let table_id_gen = GlobalTableIdGen::new(env.id_gen_manager(), proto.table_ids_cnt as u64);
 
         // Create nodes.
         let fragments: HashMap<_, _> = proto
@@ -394,18 +409,27 @@ impl StreamFragmentGraph {
             None
         };
 
+        let max_parallelism = proto.max_parallelism as usize;
+
         Ok(Self {
             fragments,
             downstreams,
             upstreams,
             dependent_table_ids,
             specified_parallelism,
+            max_parallelism,
         })
     }
 
-    /// Retrieve the internal tables map of the whole graph.
-    pub fn internal_tables(&self) -> HashMap<u32, Table> {
-        let mut tables = HashMap::new();
+    /// Retrieve the **incomplete** internal tables map of the whole graph.
+    ///
+    /// Note that some fields in the table catalogs are not filled during the current phase, e.g.,
+    /// `fragment_id`, `vnode_count`. They will be all filled after a `TableFragments` is built.
+    /// Be careful when using the returned values.
+    ///
+    /// See also [`crate::model::TableFragments::internal_tables`].
+    pub fn incomplete_internal_tables(&self) -> BTreeMap<u32, Table> {
+        let mut tables = BTreeMap::new();
         for fragment in self.fragments.values() {
             for table in fragment.extract_internal_tables() {
                 let table_id = table.id;
@@ -417,6 +441,8 @@ impl StreamFragmentGraph {
         tables
     }
 
+    /// Refill the internal tables' `table_id`s according to the given map, typically obtained from
+    /// `create_internal_table_catalog`.
     pub fn refill_internal_table_ids(&mut self, table_id_map: HashMap<u32, u32>) {
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
@@ -497,6 +523,11 @@ impl StreamFragmentGraph {
     /// Get the parallelism of the job, if specified by the user.
     pub fn specified_parallelism(&self) -> Option<NonZeroUsize> {
         self.specified_parallelism
+    }
+
+    /// Get the expected vnode count of the graph. See documentation of the field for more details.
+    pub fn max_parallelism(&self) -> usize {
+        self.max_parallelism
     }
 
     /// Get downstreams of a fragment.
@@ -651,7 +682,7 @@ impl CompleteStreamFragmentGraph {
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
-        existing_actor_location: HashMap<ActorId, u32>,
+        existing_actor_location: HashMap<ActorId, WorkerId>,
         ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
@@ -671,7 +702,7 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
-        existing_actor_location: HashMap<ActorId, u32>,
+        existing_actor_location: HashMap<ActorId, WorkerId>,
         ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
@@ -690,10 +721,10 @@ impl CompleteStreamFragmentGraph {
     pub fn with_upstreams_and_downstreams(
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
-        upstream_actor_location: HashMap<ActorId, u32>,
+        upstream_actor_location: HashMap<ActorId, WorkerId>,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
-        downstream_actor_location: HashMap<ActorId, u32>,
+        downstream_actor_location: HashMap<ActorId, WorkerId>,
         ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
@@ -1069,6 +1100,8 @@ impl CompleteStreamFragmentGraph {
         } = building_fragment;
 
         let distribution_type = distribution.to_distribution_type() as i32;
+        let vnode_count = distribution.vnode_count();
+
         let materialized_fragment_id =
             if inner.fragment_type_mask & FragmentTypeFlag::Mview as u32 != 0 {
                 table_id
@@ -1094,6 +1127,7 @@ impl CompleteStreamFragmentGraph {
             actors,
             state_table_ids,
             upstream_fragment_ids,
+            maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
         }
     }
 
@@ -1147,5 +1181,17 @@ impl CompleteStreamFragmentGraph {
     /// Returns all building fragments in the graph.
     pub(super) fn building_fragments(&self) -> &HashMap<GlobalFragmentId, BuildingFragment> {
         &self.building_graph.fragments
+    }
+
+    /// Returns all building fragments in the graph, mutable.
+    pub(super) fn building_fragments_mut(
+        &mut self,
+    ) -> &mut HashMap<GlobalFragmentId, BuildingFragment> {
+        &mut self.building_graph.fragments
+    }
+
+    /// Get the expected vnode count of the building graph. See documentation of the field for more details.
+    pub(super) fn max_parallelism(&self) -> usize {
+        self.building_graph.max_parallelism()
     }
 }

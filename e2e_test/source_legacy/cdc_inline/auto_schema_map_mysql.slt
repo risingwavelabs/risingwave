@@ -1,0 +1,195 @@
+control substitution on
+
+# test case need to cover all data types
+system ok
+mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
+
+system ok
+mysql --protocol=tcp -u root mytest -e "
+    DROP TABLE IF EXISTS mysql_types_test;
+    CREATE TABLE customers(
+         id BIGINT PRIMARY KEY,
+         modified DATETIME,
+         custinfo JSON
+    );
+    ALTER TABLE customers ADD INDEX zipsa( (CAST(custinfo->'zipcode' AS UNSIGNED ARRAY)) );
+    CREATE TABLE IF NOT EXISTS mysql_types_test(
+        c_boolean boolean,
+        c_bit bit,
+        c_tinyint tinyint,
+        c_smallint smallint,
+        c_mediumint mediumint,
+        c_integer integer,
+        c_Bigint bigint,
+        c_decimal decimal,
+        c_float float,
+        c_double double,
+        c_char_255 char(255),
+        c_varchar_10000 varchar(10000),
+        c_binary_255 binary(255),
+        c_varbinary_10000 varbinary(10000),
+        c_date date,
+        c_time time,
+        c_datetime datetime,
+        c_timestamp timestamp,
+        c_enum ENUM('happy','sad','ok'),
+        c_json JSON,
+        PRIMARY KEY (c_boolean,c_Bigint,c_date)
+    );
+    INSERT INTO mysql_types_test VALUES ( False, 0, null, null, -8388608, -2147483647, 9223372036854775806, -10.0, -9999.999999, -10000.0, 'c', 'd', '', '', '1001-01-01', '-838:59:59.000000', '2000-01-01 00:00:00.000000', null, 'happy', '[1,2]');
+    INSERT INTO mysql_types_test VALUES ( True, 1, -128, -32767, -8388608, -2147483647, -9223372036854775807, -10.0, -9999.999999, -10000.0, 'a', 'b', '', '', '1001-01-01', '00:00:00', '1998-01-01 00:00:00.000000', '1970-01-01 00:00:01', 'sad', '[3,4]');
+    CREATE TABLE IF NOT EXISTS test_default(
+        id int,
+        name varchar(255) DEFAULT 'default_name',
+        age int DEFAULT 18,
+        v1 real DEFAULT 1.1,
+        v2 double precision DEFAULT 2.2,
+        v3 decimal(5,2) DEFAULT 3.3,
+        v4 boolean DEFAULT false,
+        v5 date DEFAULT '2020-01-01',
+        v6 time DEFAULT '12:34:56',
+        v7 timestamp DEFAULT '2020-01-01 12:34:56',
+        v8 datetime DEFAULT '2020-01-01 12:34:56',
+        v9 VARCHAR(255) DEFAULT (UUID()),
+        PRIMARY KEY (id)
+    );
+    INSERT INTO test_default(id) VALUES (1),(2);
+    "
+
+statement ok
+ALTER SYSTEM SET license_key TO '';
+
+statement ok
+create source mysql_source with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'root',
+ password = '${MYSQL_PWD:}',
+ database.name = 'mytest',
+ server.id = '5601'
+);
+
+statement error
+create table rw_customers (*) from mysql_source table 'mytest.customers';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Not supported: feature CdcTableSchemaMap is only available for tier Paid and above, while the current tier is Free
+
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+HINT: Please define the schema manually
+
+
+
+statement ok
+ALTER SYSTEM SET license_key TO DEFAULT;
+
+statement ok
+create table test_default (*) from mysql_source table 'mytest.test_default';
+
+sleep 3s
+
+query TTTTTTTTTTTTT
+SELECT count(*) FROM test_default;
+----
+2
+
+statement ok
+insert into test_default(id) values (4),(5);
+
+statement ok
+FLUSH;
+
+
+# uuid() default expression is not supported
+query TTTTTTTTTTTTTT
+SELECT * FROM test_default where id>=4 order by id;
+----
+4 default_name 18 1.1 2.2 3.3 0 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 2020-01-01 12:34:56 NULL
+5 default_name 18 1.1 2.2 3.3 0 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 2020-01-01 12:34:56 NULL
+
+statement ok
+create table rw_customers (*) from mysql_source table 'mytest.customers';
+
+# Name, Type, Is Hidden, Description
+query TTTT
+describe rw_customers;
+----
+id bigint false NULL
+modified timestamp without time zone false NULL
+custinfo jsonb false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_customers NULL NULL
+
+statement ok
+create table rw_mysql_types_test (*) from mysql_source table 'mytest.mysql_types_test';
+
+sleep 3s
+
+# Name, Type, Is Hidden, Description
+query TTTT
+describe rw_mysql_types_test;
+----
+c_boolean smallint false NULL
+c_bit boolean false NULL
+c_tinyint smallint false NULL
+c_smallint smallint false NULL
+c_mediumint integer false NULL
+c_integer integer false NULL
+c_bigint bigint false NULL
+c_decimal numeric false NULL
+c_float real false NULL
+c_double double precision false NULL
+c_char_255 character varying false NULL
+c_varchar_10000 character varying false NULL
+c_binary_255 bytea false NULL
+c_varbinary_10000 bytea false NULL
+c_date date false NULL
+c_time time without time zone false NULL
+c_datetime timestamp without time zone false NULL
+c_timestamp timestamp with time zone false NULL
+c_enum character varying false NULL
+c_json jsonb false NULL
+primary key c_boolean, c_bigint, c_date NULL NULL
+distribution key c_boolean, c_bigint, c_date NULL NULL
+table description rw_mysql_types_test NULL NULL
+
+query TTTTTTTTTTTTT
+SELECT
+    c_boolean,
+    c_bit,
+    c_tinyint,
+    c_smallint,
+    c_mediumint,
+    c_integer,
+    c_bigint,
+    c_decimal,
+    c_float,
+    c_double,
+    c_char_255,
+    c_varchar_10000,
+    c_binary_255
+FROM rw_mysql_types_test order by c_boolean;
+----
+0 NULL NULL NULL -8388608 -2147483647 9223372036854775806 -10 -10000 -10000 c d \x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+1 NULL -128 -32767 -8388608 -2147483647 -9223372036854775807 -10 -10000 -10000 a b \x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+
+query TTTTTTTT
+SELECT
+    c_varbinary_10000,
+    c_date,
+    c_time,
+    c_datetime,
+    c_timestamp,
+    c_enum,
+    c_json
+FROM rw_mysql_types_test order by c_boolean;
+----
+\x 1001-01-01 NULL 2000-01-01 00:00:00 NULL happy [1, 2]
+\x 1001-01-01 00:00:00 1998-01-01 00:00:00 1970-01-01 00:00:01+00:00 sad [3, 4]
+
+statement ok
+drop source mysql_source cascade;

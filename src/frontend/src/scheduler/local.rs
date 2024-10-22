@@ -41,7 +41,7 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PbTaskId, PlanFragment, PlanNode as PbPlanNode,
     TaskOutputId,
 };
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
@@ -52,7 +52,7 @@ use crate::error::RwError;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
+use crate::scheduler::{SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
 // TODO(error-handling): use a concrete error type.
@@ -61,9 +61,7 @@ pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
-    // The snapshot will be released when LocalQueryExecution is dropped.
-    // TODO
-    snapshot: ReadSnapshot,
+    batch_query_epoch: BatchQueryEpoch,
     session: Arc<SessionImpl>,
     worker_node_manager: WorkerNodeSelector,
     timeout: Option<Duration>,
@@ -74,21 +72,20 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: ReadSnapshot,
+        support_barrier_read: bool,
+        batch_query_epoch: BatchQueryEpoch,
         session: Arc<SessionImpl>,
         timeout: Option<Duration>,
     ) -> Self {
         let sql = sql.into();
-        let worker_node_manager = WorkerNodeSelector::new(
-            front_env.worker_node_manager_ref(),
-            snapshot.support_barrier_read(),
-        );
+        let worker_node_manager =
+            WorkerNodeSelector::new(front_env.worker_node_manager_ref(), support_barrier_read);
 
         Self {
             sql,
             query,
             front_env,
-            snapshot,
+            batch_query_epoch,
             session,
             worker_node_manager,
             timeout,
@@ -118,7 +115,7 @@ impl LocalQueryExecution {
             &plan_node,
             &task_id,
             context,
-            self.snapshot.batch_query_epoch(),
+            self.batch_query_epoch,
             self.shutdown_rx().clone(),
         );
         let executor = executor.build().await?;
@@ -133,7 +130,7 @@ impl LocalQueryExecution {
         let span = tracing::info_span!(
             "local_execute",
             query_id = self.query.query_id.id,
-            epoch = ?self.snapshot.batch_query_epoch(),
+            epoch = ?self.batch_query_epoch,
         );
         Box::pin(self.run_inner().instrument(span))
     }
@@ -339,7 +336,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.snapshot.batch_query_epoch()),
+                            epoch: Some(self.batch_query_epoch),
                             tracing_context: tracing_context.clone(),
                         };
                         let exchange_source = ExchangeSource {
@@ -383,7 +380,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.snapshot.batch_query_epoch()),
+                            epoch: Some(self.batch_query_epoch),
                             tracing_context: tracing_context.clone(),
                         };
                         // NOTE: select a random work node here.
@@ -422,7 +419,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.snapshot.batch_query_epoch()),
+                            epoch: Some(self.batch_query_epoch),
                             tracing_context: tracing_context.clone(),
                         };
                         // NOTE: select a random work node here.
@@ -458,7 +455,7 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        epoch: Some(self.snapshot.batch_query_epoch()),
+                        epoch: Some(self.batch_query_epoch),
                         tracing_context,
                     };
 
@@ -500,7 +497,7 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_table()
                                 .expect("PartitionInfo should be TablePartitionInfo here");
-                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                             scan_node.scan_ranges = partition.scan_ranges;
                         }
                     }
@@ -522,7 +519,7 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_table()
                                 .expect("PartitionInfo should be TablePartitionInfo here");
-                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                         }
                     }
                     _ => unreachable!(),

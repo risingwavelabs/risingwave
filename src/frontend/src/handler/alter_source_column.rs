@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::max_column_id;
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
 use risingwave_sqlparser::ast::{
@@ -59,11 +60,15 @@ pub async fn handle_alter_source_column(
     };
 
     if catalog.associated_table_id.is_some() {
-        Err(ErrorCode::NotSupported(
+        return Err(ErrorCode::NotSupported(
             "alter table with connector with ALTER SOURCE statement".to_string(),
             "try to use ALTER TABLE instead".to_string(),
-        ))?
+        )
+        .into());
     };
+    if catalog.info.is_shared() {
+        bail_not_implemented!(issue = 16003, "alter shared source");
+    }
 
     // Currently only allow source without schema registry
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;
@@ -82,13 +87,13 @@ pub async fn handle_alter_source_column(
             )
             .into());
         }
-        SourceEncode::Invalid | SourceEncode::Native => {
+        SourceEncode::Invalid | SourceEncode::Native | SourceEncode::None => {
             return Err(RwError::from(ErrorCode::NotSupported(
                 format!("alter source with encode {:?}", encode),
-                "alter source with encode JSON | BYTES | CSV".into(),
+                "Only source with encode JSON | BYTES | CSV | PARQUET can be altered".into(),
             )));
         }
-        _ => {}
+        SourceEncode::Json | SourceEncode::Csv | SourceEncode::Bytes | SourceEncode::Parquet => {}
     }
 
     let columns = &mut catalog.columns;
@@ -117,7 +122,7 @@ pub async fn handle_alter_source_column(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_source_column(catalog.to_prost(schema_id, db_id))
+        .alter_source(catalog.to_prost(schema_id, db_id))
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))
@@ -160,13 +165,31 @@ pub mod tests {
         let session = frontend.session_ref();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
+        let sql = r#"create source s_shared (v1 int) with (
+            connector = 'kafka',
+            topic = 'abc',
+            properties.bootstrap.server = 'localhost:29092',
+        ) FORMAT PLAIN ENCODE JSON;"#;
+
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
+
+        frontend
+            .run_sql_with_session(session.clone(), "SET streaming_use_shared_source TO false;")
+            .await
+            .unwrap();
         let sql = r#"create source s (v1 int) with (
             connector = 'kafka',
             topic = 'abc',
             properties.bootstrap.server = 'localhost:29092',
           ) FORMAT PLAIN ENCODE JSON;"#;
 
-        frontend.run_sql(sql).await.unwrap();
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
 
         let get_source = || {
             let catalog_reader = session.env().catalog_reader().read_guard();
@@ -184,6 +207,8 @@ pub mod tests {
             .map(|col| (col.name(), (col.data_type().clone(), col.column_id())))
             .collect();
 
+        let sql = "alter source s_shared add column v2 varchar;";
+        assert_eq!("Feature is not yet implemented: alter shared source\nTracking issue: https://github.com/risingwavelabs/risingwave/issues/16003", &frontend.run_sql(sql).await.unwrap_err().to_string());
         let sql = "alter source s add column v2 varchar;";
         frontend.run_sql(sql).await.unwrap();
 

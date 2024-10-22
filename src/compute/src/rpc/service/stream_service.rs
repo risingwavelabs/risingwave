@@ -14,9 +14,11 @@
 
 use await_tree::InstrumentAwait;
 use futures::{Stream, StreamExt, TryStreamExt};
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
+use risingwave_storage::store::TryWaitEpochOptions;
 use risingwave_stream::error::StreamError;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::mpsc::unbounded_channel;
@@ -41,32 +43,24 @@ impl StreamService for StreamServiceImpl {
         impl Stream<Item = std::result::Result<StreamingControlStreamResponse, tonic::Status>>;
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn drop_actors(
-        &self,
-        request: Request<DropActorsRequest>,
-    ) -> std::result::Result<Response<DropActorsResponse>, Status> {
-        let req = request.into_inner();
-        let actors = req.actor_ids;
-        self.mgr.drop_actors(actors).await?;
-        Ok(Response::new(DropActorsResponse {
-            request_id: req.request_id,
-            status: None,
-        }))
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
     async fn wait_epoch_commit(
         &self,
         request: Request<WaitEpochCommitRequest>,
     ) -> Result<Response<WaitEpochCommitResponse>, Status> {
-        let epoch = request.into_inner().epoch;
+        let request = request.into_inner();
+        let epoch = request.epoch;
 
         dispatch_state_store!(self.env.state_store(), store, {
             use risingwave_hummock_sdk::HummockReadEpoch;
             use risingwave_storage::StateStore;
 
             store
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .try_wait_epoch(
+                    HummockReadEpoch::Committed(epoch),
+                    TryWaitEpochOptions {
+                        table_id: request.table_id.into(),
+                    },
+                )
                 .instrument_await(format!("wait_epoch_commit (epoch {})", epoch))
                 .await
                 .map_err(StreamError::from)?;
@@ -93,5 +87,23 @@ impl StreamService for StreamServiceImpl {
         let (tx, rx) = unbounded_channel();
         self.mgr.handle_new_control_stream(tx, stream, init_request);
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
+    }
+
+    async fn get_min_uncommitted_sst_id(
+        &self,
+        _request: Request<GetMinUncommittedSstIdRequest>,
+    ) -> Result<Response<GetMinUncommittedSstIdResponse>, Status> {
+        let min_uncommitted_sst_id = if let Some(hummock) = self.mgr.env.state_store().as_hummock()
+        {
+            hummock
+                .min_uncommitted_sst_id()
+                .await
+                .unwrap_or(HummockSstableObjectId::MAX)
+        } else {
+            HummockSstableObjectId::MAX
+        };
+        Ok(Response::new(GetMinUncommittedSstIdResponse {
+            min_uncommitted_sst_id,
+        }))
     }
 }

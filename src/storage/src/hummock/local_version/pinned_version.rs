@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::iter::empty;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -77,6 +78,14 @@ pub struct PinnedVersion {
     guard: Arc<PinnedVersionGuard>,
 }
 
+impl Deref for PinnedVersion {
+    type Target = HummockVersion;
+
+    fn deref(&self) -> &Self::Target {
+        &self.version
+    }
+}
+
 impl PinnedVersion {
     pub fn new(
         version: HummockVersion,
@@ -92,22 +101,25 @@ impl PinnedVersion {
         }
     }
 
-    pub fn new_pin_version(&self, version: HummockVersion) -> Self {
+    pub fn new_pin_version(&self, version: HummockVersion) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
             version.id,
             self.version.id
         );
+        if version.id == self.version.id {
+            return None;
+        }
         let version_id = version.id;
 
-        PinnedVersion {
+        Some(PinnedVersion {
             version: Arc::new(version),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-        }
+        })
     }
 
     pub fn id(&self) -> HummockVersionId {
@@ -137,20 +149,6 @@ impl PinnedVersion {
             }
             None => empty(),
         }
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn max_committed_epoch(&self) -> u64 {
-        self.version.max_committed_epoch()
-    }
-
-    pub fn visible_table_committed_epoch(&self) -> u64 {
-        self.version.visible_table_committed_epoch()
-    }
-
-    /// ret value can't be used as `HummockVersion`. it must be modified with delta
-    pub fn version(&self) -> &HummockVersion {
-        &self.version
     }
 }
 

@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
+use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
@@ -28,7 +29,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::compact_task::{self};
-use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::hummock::CompactionConfig;
 use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
@@ -48,7 +49,6 @@ use crate::hummock::{
 };
 
 pub enum NewTableFragmentInfo {
-    None,
     Normal {
         mv_table_id: Option<TableId>,
         internal_table_ids: Vec<TableId>,
@@ -58,76 +58,41 @@ pub enum NewTableFragmentInfo {
     },
 }
 
+#[derive(Default)]
 pub struct CommitEpochInfo {
     pub sstables: Vec<LocalSstableInfo>,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-    pub new_table_fragment_info: NewTableFragmentInfo,
+    pub new_table_fragment_infos: Vec<NewTableFragmentInfo>,
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
-    pub committed_epoch: u64,
-    pub tables_to_commit: HashSet<TableId>,
-    pub is_visible_table_committed_epoch: bool,
+    /// `table_id` -> `committed_epoch`
+    pub tables_to_commit: HashMap<TableId, u64>,
 }
 
 impl HummockManager {
-    #[cfg(any(test, feature = "test"))]
-    pub async fn commit_epoch_for_test(
-        &self,
-        epoch: u64,
-        sstables: Vec<impl Into<LocalSstableInfo>>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-    ) -> Result<()> {
-        let tables = self
-            .versioning
-            .read()
-            .await
-            .current_version
-            .state_table_info
-            .info()
-            .keys()
-            .cloned()
-            .collect();
-        let info = CommitEpochInfo {
-            sstables: sstables.into_iter().map(Into::into).collect(),
-            new_table_watermarks: HashMap::new(),
-            sst_to_context,
-            new_table_fragment_info: NewTableFragmentInfo::None,
-            change_log_delta: HashMap::new(),
-            committed_epoch: epoch,
-            tables_to_commit: tables,
-            is_visible_table_committed_epoch: true,
-        };
-        self.commit_epoch(info).await?;
-        Ok(())
-    }
-
-    /// Caller should ensure `epoch` > `max_committed_epoch`
-    pub async fn commit_epoch(
-        &self,
-        commit_info: CommitEpochInfo,
-    ) -> Result<Option<HummockSnapshot>> {
+    /// Caller should ensure `epoch` > `committed_epoch` of `tables_to_commit`
+    /// if tables are not newly added via `new_table_fragment_info`
+    pub async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> Result<()> {
         let CommitEpochInfo {
             mut sstables,
             new_table_watermarks,
             sst_to_context,
-            new_table_fragment_info,
+            new_table_fragment_infos,
             change_log_delta,
-            committed_epoch,
             tables_to_commit,
-            is_visible_table_committed_epoch,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
-            return Ok(None);
+            return Ok(());
         }
+
+        assert!(!tables_to_commit.is_empty());
 
         let versioning: &mut Versioning = &mut versioning_guard;
         self.commit_epoch_sanity_check(
-            committed_epoch,
             &tables_to_commit,
-            is_visible_table_committed_epoch,
             &sstables,
             &sst_to_context,
             &versioning.current_version,
@@ -159,15 +124,18 @@ impl HummockManager {
 
         let state_table_info = &version.latest_version().state_table_info;
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
+        let mut new_table_ids = HashMap::new();
+        let mut new_compaction_groups = HashMap::new();
+        let mut compaction_group_manager_txn = None;
+        let mut compaction_group_config: Option<Arc<CompactionConfig>> = None;
 
         // Add new table
-        let (new_table_ids, new_compaction_group, compaction_group_manager_txn) =
+        for new_table_fragment_info in new_table_fragment_infos {
             match new_table_fragment_info {
                 NewTableFragmentInfo::Normal {
                     mv_table_id,
                     internal_table_ids,
                 } => {
-                    let mut new_table_ids = HashMap::new();
                     on_handle_add_new_table(
                         state_table_info,
                         &internal_table_ids,
@@ -183,24 +151,40 @@ impl HummockManager {
                         &mut table_compaction_group_mapping,
                         &mut new_table_ids,
                     )?;
-                    (new_table_ids, None, None)
                 }
                 NewTableFragmentInfo::NewCompactionGroup { table_ids } => {
-                    let compaction_group_manager_guard =
-                        self.compaction_group_manager.write().await;
-                    let compaction_group_config =
-                        compaction_group_manager_guard.default_compaction_config();
-                    let mut compaction_group_manager =
-                        CompactionGroupManager::start_owned_compaction_groups_txn(
-                            compaction_group_manager_guard,
-                        );
-                    let mut new_table_ids = HashMap::new();
+                    let (compaction_group_manager, compaction_group_config) =
+                        if let Some(compaction_group_manager) = &mut compaction_group_manager_txn {
+                            (
+                                compaction_group_manager,
+                                (*compaction_group_config
+                                    .as_ref()
+                                    .expect("must be set with compaction_group_manager_txn"))
+                                .clone(),
+                            )
+                        } else {
+                            let compaction_group_manager_guard =
+                                self.compaction_group_manager.write().await;
+                            let new_compaction_group_config =
+                                compaction_group_manager_guard.default_compaction_config();
+                            compaction_group_config = Some(new_compaction_group_config.clone());
+                            (
+                                compaction_group_manager_txn.insert(
+                                    CompactionGroupManager::start_owned_compaction_groups_txn(
+                                        compaction_group_manager_guard,
+                                    ),
+                                ),
+                                new_compaction_group_config,
+                            )
+                        };
                     let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
+                    new_compaction_groups
+                        .insert(new_compaction_group_id, compaction_group_config.clone());
                     compaction_group_manager.insert(
                         new_compaction_group_id,
                         CompactionGroup {
                             group_id: new_compaction_group_id,
-                            compaction_config: compaction_group_config.clone(),
+                            compaction_config: compaction_group_config,
                         },
                     );
 
@@ -211,43 +195,21 @@ impl HummockManager {
                         &mut table_compaction_group_mapping,
                         &mut new_table_ids,
                     )?;
-                    (
-                        new_table_ids,
-                        Some((new_compaction_group_id, (*compaction_group_config).clone())),
-                        Some(compaction_group_manager),
-                    )
                 }
-                NewTableFragmentInfo::None => (HashMap::new(), None, None),
-            };
-
-        let mut group_members_table_ids: HashMap<u64, BTreeSet<TableId>> = HashMap::new();
-        {
-            // expand group_members_table_ids
-            for (table_id, group_id) in &table_compaction_group_mapping {
-                group_members_table_ids
-                    .entry(*group_id)
-                    .or_default()
-                    .insert(*table_id);
             }
         }
 
         let commit_sstables = self
-            .correct_commit_ssts(
-                sstables,
-                &table_compaction_group_mapping,
-                &group_members_table_ids,
-            )
+            .correct_commit_ssts(sstables, &table_compaction_group_mapping)
             .await?;
 
         let modified_compaction_groups: Vec<_> = commit_sstables.keys().cloned().collect();
 
         let time_travel_delta = version.pre_commit_epoch(
-            committed_epoch,
             &tables_to_commit,
-            is_visible_table_committed_epoch,
-            new_compaction_group,
+            new_compaction_groups,
             commit_sstables,
-            new_table_ids,
+            &new_table_ids,
             new_table_watermarks,
             change_log_delta,
         );
@@ -284,9 +246,7 @@ impl HummockManager {
             );
             table_metrics.inc_write_throughput(stats_value as u64);
         }
-        if versioning.time_travel_toggle_check
-            && let Some(sql_store) = self.sql_store()
-        {
+        if versioning.time_travel_toggle_check {
             let mut time_travel_version = None;
             if versioning.time_travel_snapshot_interval_counter
                 >= self.env.opts.hummock_time_travel_snapshot_interval
@@ -304,7 +264,15 @@ impl HummockManager {
                 .values()
                 .map(|g| (g.group_id, g.parent_group_id))
                 .collect();
-            let mut txn = sql_store.conn.begin().await?;
+            let time_travel_tables_to_commit =
+                table_compaction_group_mapping
+                    .iter()
+                    .filter_map(|(table_id, cg_id)| {
+                        tables_to_commit
+                            .get(table_id)
+                            .map(|committed_epoch| (table_id, cg_id, *committed_epoch))
+                    });
+            let mut txn = self.env.meta_store_ref().conn.begin().await?;
             let version_snapshot_sst_ids = self
                 .write_time_travel_metadata(
                     &txn,
@@ -312,6 +280,7 @@ impl HummockManager {
                     time_travel_delta,
                     &group_parents,
                     &versioning.last_time_travel_snapshot_sst_ids,
+                    time_travel_tables_to_commit,
                 )
                 .await?;
             commit_multi_var_with_provided_txn!(
@@ -331,15 +300,6 @@ impl HummockManager {
                 compaction_group_manager_txn
             )?;
         }
-
-        let snapshot = if is_visible_table_committed_epoch {
-            let snapshot = HummockSnapshot { committed_epoch };
-            let prev_snapshot = self.latest_snapshot.swap(snapshot.into());
-            assert!(prev_snapshot.committed_epoch < committed_epoch);
-            Some(snapshot)
-        } else {
-            None
-        };
 
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
@@ -370,7 +330,7 @@ impl HummockManager {
         {
             self.check_state_consistency().await;
         }
-        Ok(snapshot)
+        Ok(())
     }
 
     fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
@@ -389,7 +349,6 @@ impl HummockManager {
         &self,
         sstables: Vec<LocalSstableInfo>,
         table_compaction_group_mapping: &HashMap<TableId, CompactionGroupId>,
-        group_members_table_ids: &HashMap<CompactionGroupId, BTreeSet<TableId>>,
     ) -> Result<BTreeMap<CompactionGroupId, Vec<SstableInfo>>> {
         let mut new_sst_id_number = 0;
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
@@ -413,7 +372,7 @@ impl HummockManager {
                 }
             }
 
-            new_sst_id_number += group_table_ids.len();
+            new_sst_id_number += group_table_ids.len() * 2; // `split_sst` will split the SST into two parts and consumer 2 SST IDs
             sst_to_cg_vec.push((commit_sst, group_table_ids));
         }
 
@@ -424,17 +383,16 @@ impl HummockManager {
         let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
-            for (group_id, match_ids) in group_table_ids {
-                let group_members_table_ids = group_members_table_ids.get(&group_id).unwrap();
-                if match_ids
-                    .iter()
-                    .all(|id| group_members_table_ids.contains(&TableId::new(*id)))
-                {
+            let len = group_table_ids.len();
+            for (index, (group_id, match_ids)) in group_table_ids.into_iter().enumerate() {
+                if sst.sst_info.table_ids == match_ids {
+                    // The SST contains all the tables in the group should be last key
+                    assert!(index == len - 1);
                     commit_sstables
                         .entry(group_id)
                         .or_default()
-                        .push(sst.sst_info.clone());
-                    continue;
+                        .push(sst.sst_info);
+                    break;
                 }
 
                 let origin_sst_size = sst.sst_info.sst_size;
@@ -446,7 +404,8 @@ impl HummockManager {
                     })
                     .sum();
 
-                let branch_sst = split_sst(
+                // TODO(li0k): replace with `split_sst`
+                let branch_sst = split_sst_with_table_ids(
                     &mut sst.sst_info,
                     &mut new_sst_id,
                     origin_sst_size - new_sst_size,

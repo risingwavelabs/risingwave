@@ -41,7 +41,6 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType,
@@ -700,12 +699,20 @@ fn gen_table_plan_inner(
         vec![],
     );
 
-    if append_only && row_id_index.is_none() {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "PRIMARY KEY constraint can not be applied to an append-only table.".to_owned(),
-        )
-        .into());
-    }
+    let pk_on_append_only = append_only && row_id_index.is_none();
+
+    let on_conflict = if pk_on_append_only {
+        let on_conflict = on_conflict.unwrap_or(OnConflict::Nothing);
+        if on_conflict != OnConflict::Nothing {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "When PRIMARY KEY constraint applied to an APPEND ONLY table, the ON CONFLICT behavior must be DO NOTHING.".to_owned(),
+            )
+            .into());
+        }
+        Some(on_conflict)
+    } else {
+        on_conflict
+    };
 
     if !append_only && !watermark_descs.is_empty() {
         return Err(ErrorCode::NotSupported(
@@ -757,7 +764,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     column_defs: Vec<ColumnDef>,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
-    connect_properties: WithOptionsSecResolved,
+    cdc_with_options: WithOptionsSecResolved,
     mut col_id_gen: ColumnIdGenerator,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
@@ -772,7 +779,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     // append additional columns to the end
     handle_addition_columns(
-        &connect_properties,
+        None,
+        &cdc_with_options,
         include_column_options,
         &mut columns,
         true,
@@ -812,7 +820,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
         .collect();
 
-    let (options, secret_refs) = connect_properties.into_parts();
+    let (options, secret_refs) = cdc_with_options.into_parts();
 
     let cdc_table_desc = CdcTableDesc {
         table_id,
@@ -871,7 +879,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     Ok((materialize.into(), table))
 }
 
-fn derive_connect_properties(
+fn derive_with_options_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,
     external_table_name: String,
 ) -> Result<WithOptionsSecResolved> {
@@ -901,9 +909,19 @@ fn derive_connect_properties(
                 table_name
             }
             SQL_SERVER_CDC_CONNECTOR => {
-                let (schema_name, table_name) = external_table_name
+                // SQL Server external table name is in 'databaseName.schemaName.tableName' pattern,
+                // we remove the database name prefix and split the schema name and table name
+                let schema_table_name = external_table_name
                     .split_once('.')
-                    .ok_or_else(|| anyhow!("The upstream table name must contain schema name prefix, e.g. 'dbo.table'"))?;
+                    .ok_or_else(|| {
+                        anyhow!("The upstream table name must be in 'database.schema.table' format")
+                    })?
+                    .1;
+
+                let (schema_name, table_name) =
+                    schema_table_name.split_once('.').ok_or_else(|| {
+                        anyhow!("The table name must contain schema name prefix, e.g. 'dbo.table'")
+                    })?;
 
                 // insert 'schema.name' into connect properties
                 connect_properties.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
@@ -1016,7 +1034,7 @@ pub(super) async fn handle_create_table_plan(
                     )?;
                     source.clone()
                 };
-                let connect_properties = derive_connect_properties(
+                let connect_properties = derive_with_options_for_cdc_table(
                     &source.with_properties,
                     cdc_table.external_table_name.clone(),
                 )?;
@@ -1235,6 +1253,8 @@ pub async fn handle_create_table(
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
     }
 
+    session.check_cluster_limits().await?;
+
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
         StatementType::CREATE_TABLE,
@@ -1261,14 +1281,8 @@ pub async fn handle_create_table(
         )
         .await?;
 
-        let mut graph = build_graph(plan)?;
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
+        let graph = build_graph(plan)?;
+
         (graph, source, table, job_type)
     };
 
@@ -1313,7 +1327,7 @@ pub fn check_create_table_with_source(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn generate_stream_graph_for_table(
-    session: &Arc<SessionImpl>,
+    _session: &Arc<SessionImpl>,
     table_name: ObjectName,
     original_catalog: &Arc<TableCatalog>,
     source_schema: Option<ConnectorSchema>,
@@ -1371,7 +1385,7 @@ pub async fn generate_stream_graph_for_table(
             let (source, resolved_table_name, database_id, schema_id) =
                 get_source_and_resolved_table_name(session, cdc_table.clone(), table_name.clone())?;
 
-            let connect_properties = derive_connect_properties(
+            let cdc_with_options = derive_with_options_for_cdc_table(
                 &source.with_properties,
                 cdc_table.external_table_name.clone(),
             )?;
@@ -1379,7 +1393,7 @@ pub async fn generate_stream_graph_for_table(
             let (columns, pk_names) = derive_schema_for_cdc_table(
                 &column_defs,
                 &constraints,
-                connect_properties.clone(),
+                cdc_with_options.clone(),
                 false,
                 Some(CdcSchemaChangeArgs {
                     original_catalog: original_catalog.clone(),
@@ -1397,7 +1411,7 @@ pub async fn generate_stream_graph_for_table(
                 column_defs,
                 columns,
                 pk_names,
-                connect_properties,
+                cdc_with_options,
                 col_id_gen,
                 on_conflict,
                 with_version_column,
@@ -1428,15 +1442,7 @@ pub async fn generate_stream_graph_for_table(
         ))?
     }
 
-    let graph = StreamFragmentGraph {
-        parallelism: session
-            .config()
-            .streaming_parallelism()
-            .map(|parallelism| Parallelism {
-                parallelism: parallelism.get(),
-            }),
-        ..build_graph(plan)?
-    };
+    let graph = build_graph(plan)?;
 
     // Fill the original table ID.
     let table = Table {

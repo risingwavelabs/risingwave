@@ -342,7 +342,9 @@ impl BigQuerySink {
             DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "Bigquery cannot support Int256"
             ))),
-            DataType::Map(_) => todo!(),
+            DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Bigquery cannot support Map"
+            ))),
         }
     }
 
@@ -392,7 +394,11 @@ impl BigQuerySink {
                     "Bigquery cannot support Int256"
                 )))
             }
-            DataType::Map(_) => todo!(),
+            DataType::Map(_) => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Bigquery cannot support Map"
+                )))
+            }
         };
         Ok(tfs)
     }
@@ -813,11 +819,12 @@ impl StorageWriterClient {
     }
 
     fn bigquery_grpc_auth_config() -> google_cloud_auth::project::Config<'static> {
-        google_cloud_auth::project::Config {
-            audience: Some(google_cloud_bigquery::grpc::apiv1::conn_pool::AUDIENCE),
-            scopes: Some(&google_cloud_bigquery::grpc::apiv1::conn_pool::SCOPES),
-            sub: None,
-        }
+        let mut auth_config = google_cloud_auth::project::Config::default();
+        auth_config =
+            auth_config.with_audience(google_cloud_bigquery::grpc::apiv1::conn_pool::AUDIENCE);
+        auth_config =
+            auth_config.with_scopes(&google_cloud_bigquery::grpc::apiv1::conn_pool::SCOPES);
+        auth_config
     }
 }
 

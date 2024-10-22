@@ -28,9 +28,9 @@ clap = { workspace = true }
 comfy-table = "7"
 crepe = "0.1"
 easy-ext = "1"
+educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
-etcd-client = { workspace = true }
 fail = "0.5"
 flate2 = "1"
 function_name = "0.3.0"
@@ -42,6 +42,7 @@ jsonbb = { workspace = true }
 maplit = "1.0.2"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
+notify = { version = "6", default-features = false, features = ["macos_fsevent"] }
 num-integer = "0.1"
 num-traits = "0.2"
 otlp-embedded = { workspace = true }
@@ -57,8 +58,8 @@ risingwave_connector = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_license = { workspace = true }
 risingwave_meta_dashboard = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_meta_model_migration = { workspace = true }
-risingwave_meta_model_v2 = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
@@ -73,17 +74,17 @@ sync-point = { path = "../utils/sync-point" }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
 ] }
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tower = { version = "0.4", features = ["util", "load-shed"] }
+tower = { version = "0.5", features = ["util", "load-shed"] }
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
@@ -91,10 +92,10 @@ uuid = { version = "1", features = ["v4"] }
 [target.'cfg(not(madsim))'.dependencies]
 axum = { workspace = true }
 tower-http = { version = "0.5", features = [
-  "add-extension",
-  "cors",
-  "fs",
-  "compression-gzip",
+    "add-extension",
+    "cors",
+    "fs",
+    "compression-gzip",
 ] }
 workspace-hack = { path = "../workspace-hack" }
 
@@ -102,8 +103,10 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 expect-test = "1.5"
 rand = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
+tempfile = "3"
+tracing-subscriber = "0.3"
 
 [features]
 test = []

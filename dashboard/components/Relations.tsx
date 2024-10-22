@@ -60,7 +60,7 @@ export const dependentsColumn: Column<Relation> = {
   name: "Depends",
   width: 1,
   content: (r) => (
-    <Link href={`/dependency_graph/?id=${r.id}`}>
+    <Link href={`/relation_graph/?id=${r.id}`}>
       <Button
         size="sm"
         aria-label="view dependents"

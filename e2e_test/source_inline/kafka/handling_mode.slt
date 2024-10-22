@@ -1,0 +1,145 @@
+control substitution on
+
+system ok
+rpk topic delete json_timestamptz_handling_mode || true
+
+system ok
+rpk topic create json_timestamptz_handling_mode -p 1
+
+system ok
+cat <<EOF | rpk topic produce json_timestamptz_handling_mode -f "%v\n"
+{"case":"0 number small","payload":{"after":{"case":"0 number small","at":100},"op":"r"}}
+{"case":"1 number recent","payload":{"after":{"case":"1 number recent","at":1712800800123456},"op":"r"}}
+{"case":"2 string utc","payload":{"after":{"case":"2 string utc","at":"2024-04-11T02:00:00.654321Z"},"op":"r"}}
+{"case":"3 string naive","payload":{"after":{"case":"3 string naive","at":"2024-04-11 02:00:00.234321"},"op":"r"}}
+EOF
+
+statement error unrecognized
+create table t (
+  payload struct<after struct<"case" varchar, at timestamptz>>)
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'json_timestamptz_handling_mode')
+format plain encode json (timestamptz.handling.mode = 'mili');
+
+# spelling error on config name would raise a non-fatal notice and use the default
+statement ok
+create table plain_guess (
+  "case" varchar,
+  payload struct<after struct<"case" varchar, at timestamptz>>)
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'json_timestamptz_handling_mode')
+format plain encode json (timestamptz.handling.mod = 'mili');
+
+statement ok
+create table plain_milli (
+  "case" varchar,
+  payload struct<after struct<"case" varchar, at timestamptz>>)
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'json_timestamptz_handling_mode')
+format plain encode json (timestamptz.handling.mode = 'milli');
+
+statement ok
+create table plain_micro (
+  "case" varchar,
+  payload struct<after struct<"case" varchar, at timestamptz>>)
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'json_timestamptz_handling_mode')
+format plain encode json (timestamptz.handling.mode = 'micro');
+
+statement ok
+create table plain_utc (
+  "case" varchar,
+  payload struct<after struct<"case" varchar, at timestamptz>>)
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'json_timestamptz_handling_mode')
+format plain encode json (timestamptz.handling.mode = 'utc_string');
+
+statement ok
+create table plain_naive (
+  "case" varchar,
+  payload struct<after struct<"case" varchar, at timestamptz>>)
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'json_timestamptz_handling_mode')
+format plain encode json (timestamptz.handling.mode = 'utc_without_suffix');
+
+statement ok
+create table debezium_milli (
+  "case" varchar, at timestamptz, primary key("case"))
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'json_timestamptz_handling_mode')
+format debezium encode json (timestamptz.handling.mode = 'milli');
+
+sleep 2s
+
+query TT
+select "case", (payload).after.at from plain_guess order by 1;
+----
+0 number small  1970-01-01 00:01:40+00:00
+1 number recent 2024-04-11 02:00:00.123456+00:00
+2 string utc    2024-04-11 02:00:00.654321+00:00
+3 string naive  NULL
+
+query TT
+select "case", (payload).after.at from plain_milli order by 1;
+----
+0 number small   1970-01-01 00:00:00.100+00:00
+1 number recent 56246-07-01 08:02:03.456+00:00
+2 string utc     2024-04-11 02:00:00.654321+00:00
+3 string naive   NULL
+
+query TT
+select "case", (payload).after.at from plain_micro order by 1;
+----
+0 number small  1970-01-01 00:00:00.000100+00:00
+1 number recent 2024-04-11 02:00:00.123456+00:00
+2 string utc    2024-04-11 02:00:00.654321+00:00
+3 string naive  NULL
+
+query TT
+select "case", (payload).after.at from plain_utc order by 1;
+----
+0 number small  NULL
+1 number recent NULL
+2 string utc    2024-04-11 02:00:00.654321+00:00
+3 string naive  NULL
+
+query TT
+select "case", (payload).after.at from plain_naive order by 1;
+----
+0 number small  NULL
+1 number recent NULL
+2 string utc    NULL
+3 string naive  2024-04-11 02:00:00.234321+00:00
+
+query TT
+select "case", at from debezium_milli order by 1;
+----
+0 number small   1970-01-01 00:00:00.100+00:00
+1 number recent 56246-07-01 08:02:03.456+00:00
+2 string utc     2024-04-11 02:00:00.654321+00:00
+3 string naive   NULL
+
+statement ok
+drop table plain_guess;
+
+statement ok
+drop table plain_milli;
+
+statement ok
+drop table plain_micro;
+
+statement ok
+drop table plain_utc;
+
+statement ok
+drop table plain_naive;
+
+statement ok
+drop table debezium_milli;

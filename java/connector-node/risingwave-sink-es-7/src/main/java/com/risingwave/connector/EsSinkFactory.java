@@ -47,7 +47,6 @@ public class EsSinkFactory implements SinkFactory {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
         EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
-
         // 1. check url
         HttpHost host;
         try {
@@ -55,20 +54,11 @@ public class EsSinkFactory implements SinkFactory {
         } catch (IllegalArgumentException e) {
             throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
         }
+        if (config.getRoutingColumn() != null) {
+            checkColumn(config.getRoutingColumn(), tableSchema, Data.DataType.TypeName.VARCHAR);
+        }
         if (config.getIndexColumn() != null) {
-            Data.DataType.TypeName typeName = tableSchema.getColumnType(config.getIndexColumn());
-            if (typeName == null) {
-                throw Status.INVALID_ARGUMENT
-                        .withDescription(
-                                "Index column " + config.getIndexColumn() + " not found in schema")
-                        .asRuntimeException();
-            }
-            if (!typeName.equals(Data.DataType.TypeName.VARCHAR)) {
-                throw Status.INVALID_ARGUMENT
-                        .withDescription(
-                                "Index column must be of type String, but found " + typeName)
-                        .asRuntimeException();
-            }
+            checkColumn(config.getIndexColumn(), tableSchema, Data.DataType.TypeName.VARCHAR);
             if (config.getIndex() != null) {
                 throw Status.INVALID_ARGUMENT
                         .withDescription("index and index_column cannot be set at the same time")
@@ -84,7 +74,7 @@ public class EsSinkFactory implements SinkFactory {
 
         // 2. check connection
         try {
-            if (config.getConnector().equals("elasticsearch")) {
+            if (config.getConnector().equals("elasticsearch_v1")) {
                 ElasticRestHighLevelClientAdapter esClient =
                         new ElasticRestHighLevelClientAdapter(host, config);
                 if (!esClient.ping(org.elasticsearch.client.RequestOptions.DEFAULT)) {
@@ -93,7 +83,7 @@ public class EsSinkFactory implements SinkFactory {
                             .asRuntimeException();
                 }
                 esClient.close();
-            } else if (config.getConnector().equals("opensearch")) {
+            } else if (config.getConnector().equals("opensearch_v1")) {
                 OpensearchRestHighLevelClientAdapter opensearchClient =
                         new OpensearchRestHighLevelClientAdapter(host, config);
                 if (!opensearchClient.ping(org.opensearch.client.RequestOptions.DEFAULT)) {
@@ -107,6 +97,27 @@ public class EsSinkFactory implements SinkFactory {
             }
         } catch (Exception e) {
             throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
+        }
+    }
+
+    private void checkColumn(
+            String column, TableSchema tableSchema, Data.DataType.TypeName typeName) {
+        Data.DataType.TypeName columnType = tableSchema.getColumnType(column);
+        if (columnType == null) {
+            throw Status.INVALID_ARGUMENT
+                    .withDescription("Column " + column + " not found in schema")
+                    .asRuntimeException();
+        }
+        if (!columnType.equals(typeName)) {
+            throw Status.INVALID_ARGUMENT
+                    .withDescription(
+                            "Column "
+                                    + column
+                                    + " must be of type "
+                                    + typeName
+                                    + ", but found "
+                                    + columnType)
+                    .asRuntimeException();
         }
     }
 }
