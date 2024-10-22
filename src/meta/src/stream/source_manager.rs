@@ -111,7 +111,7 @@ pub async fn create_source_worker_handle(
     let current_splits_ref = splits.clone();
 
     let connector_properties = extract_prop_from_new_source(source)?;
-    let share_client_entry = get_kafka_bootstrap_addr(&connector_properties);
+    let share_client_entry = get_kafka_connection_hash(&connector_properties);
     let enable_scale_in = connector_properties.enable_split_scale_in();
     let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = dispatch_source_prop!(connector_properties, prop, {
@@ -267,7 +267,7 @@ pub struct ConnectorSourceWorkerHandle {
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
     enable_scale_in: bool,
-    pub share_client_entry: Option<String>,
+    pub share_client_entry: Option<u64>,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -1064,7 +1064,7 @@ impl SourceManager {
 
         let connector_properties = extract_prop_from_existing_source(&source)?;
 
-        let share_client_entry = get_kafka_bootstrap_addr(&connector_properties);
+        let share_client_entry = get_kafka_connection_hash(&connector_properties);
 
         let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1197,11 +1197,11 @@ pub fn build_actor_split_impls(
         .collect()
 }
 
-fn get_kafka_bootstrap_addr(connector_properties: &ConnectorProperties) -> Option<String> {
+fn get_kafka_connection_hash(connector_properties: &ConnectorProperties) -> Option<u64> {
     {
-        // for kafka source: extract the bootstrap servers from the source properties as shared source entry (on meta)
+        // for kafka source: get the hash of connection props as shared source entry (on meta)
         if let ConnectorProperties::Kafka(kafka_props) = connector_properties {
-            return Some(kafka_props.connection.brokers.clone());
+            return Some(kafka_props.connection.get_hash());
         }
         None
     }

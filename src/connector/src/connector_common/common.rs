@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::time::Duration;
 
@@ -169,7 +170,7 @@ pub fn check_kafka_connection_identical(lhs: &KafkaProperties, rhs: &KafkaProper
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, WithOptions, PartialEq)]
+#[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash)]
 pub struct KafkaConnection {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
@@ -329,6 +330,12 @@ impl RdKafkaPropertiesCommon {
 }
 
 impl KafkaConnection {
+    pub fn get_hash(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+
     pub(crate) fn set_security_properties(&self, config: &mut ClientConfig) {
         // AWS_MSK_IAM
         if self.is_aws_msk_iam() {

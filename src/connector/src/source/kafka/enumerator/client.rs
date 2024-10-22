@@ -25,7 +25,6 @@ use rdkafka::{Offset, TopicPartitionList};
 use risingwave_common::bail;
 use risingwave_common::metrics::LabelGuardedMetric;
 
-use crate::connector_common::check_kafka_connection_identical;
 use crate::error::ConnectorResult;
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
@@ -34,14 +33,12 @@ use crate::source::kafka::{
 };
 use crate::source::SourceEnumeratorContextRef;
 
-pub static SHARED_KAFKA_CLIENT: LazyLock<tokio::sync::Mutex<HashMap<String, SharedKafkaItem>>> =
+pub static SHARED_KAFKA_CLIENT: LazyLock<tokio::sync::Mutex<HashMap<u64, SharedKafkaItem>>> =
     LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 
-#[derive(Clone)]
 pub struct SharedKafkaItem {
     pub client: Arc<BaseConsumer<RwConsumerContext>>,
     pub ref_count: i32,
-    pub props: KafkaProperties,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -81,6 +78,8 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let common_props = &properties.common;
 
         let broker_address = properties.connection.brokers.clone();
+
+        let connection_hash = properties.connection.get_hash();
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
@@ -107,12 +106,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         }
 
         let kafka_client: Arc<BaseConsumer<RwConsumerContext>>;
-        if let Some(item) = SHARED_KAFKA_CLIENT
-            .lock()
-            .await
-            .get_mut(broker_address.as_str())
-            && check_kafka_connection_identical(&item.props, &properties)
-        {
+        if let Some(item) = SHARED_KAFKA_CLIENT.lock().await.get_mut(&connection_hash) {
             kafka_client = item.client.clone();
             item.ref_count += 1;
         } else {
@@ -121,7 +115,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 broker_rewrite_map,
                 None,
                 None,
-                properties.aws_auth_props.clone(),
+                properties.aws_auth_props,
                 properties.connection.is_aws_msk_iam(),
             )
             .await?;
@@ -143,11 +137,10 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 
             kafka_client = Arc::new(client);
             SHARED_KAFKA_CLIENT.lock().await.insert(
-                broker_address.clone(),
+                connection_hash,
                 SharedKafkaItem {
                     client: kafka_client.clone(),
                     ref_count: 1,
-                    props: properties.clone(),
                 },
             );
         }
