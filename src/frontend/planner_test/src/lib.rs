@@ -56,39 +56,26 @@ pub enum TestType {
 
     /// The original logical plan
     LogicalPlan,
-    /// The original logical plan in Json format
-    LogicalPlanJson,
     /// Logical plan with optimization `.gen_optimized_logical_plan_for_batch()`
     OptimizedLogicalPlanForBatch,
     /// Logical plan with optimization `.gen_optimized_logical_plan_for_stream()`
     OptimizedLogicalPlanForStream,
 
-    /// Batch plan before planning local/distributed execution `.gen_batch_query_plan()`
+    /// Distributed batch plan `.gen_batch_query_plan()`
     BatchPlan,
-    /// Batch plan in Json format
-    BatchPlanJson,
+    /// Proto JSON of generated batch plan
+    BatchPlanProto,
     /// Batch plan for local execution `.gen_batch_local_plan()`
     BatchLocalPlan,
-    /// Batch plan for distributed execution `.gen_batch_distributed_plan()`
+    /// Batch plan for local execution `.gen_batch_distributed_plan()`
     BatchDistributedPlan,
-    /// Batch plan after protobuf serialization pass. In YAML format.
-    /// This is **different** from a batch plan in proto format.
-    /// This is the artifact of the protobuf planner pass (calling `to_batch_prost_body()`).
-    /// On the other hand **proto** format can be output for different passes,
-    /// it is just a format.
-    BatchProtoPlan,
 
     /// Create MV plan `.gen_create_mv_plan()`
     StreamPlan,
-    /// Create MV plan `.gen_create_mv_plan()`, in JSON format
-    StreamPlanJson,
     /// Create MV fragments plan
     StreamDistPlan,
-
     /// Create MV plan with EOWC semantics `.gen_create_mv_plan(.., EmitMode::OnWindowClose)`
     EowcStreamPlan,
-    /// Create MV plan `.gen_create_mv_plan()`, in JSON format
-    EowcStreamPlanJson,
     /// Create MV fragments plan with EOWC semantics
     EowcStreamDistPlan,
 
@@ -201,24 +188,17 @@ pub struct TestCaseResult {
     /// The original logical plan
     pub logical_plan: Option<String>,
 
-    /// The original logical plan in json format
-    pub logical_plan_json: Option<String>,
-
     /// Logical plan with optimization `.gen_optimized_logical_plan_for_batch()`
     pub optimized_logical_plan_for_batch: Option<String>,
 
     /// Logical plan with optimization `.gen_optimized_logical_plan_for_stream()`
     pub optimized_logical_plan_for_stream: Option<String>,
 
-    /// Batch plan before planning distributed/local execution `.gen_batch_query_plan()`
+    /// Distributed batch plan `.gen_batch_query_plan()`
     pub batch_plan: Option<String>,
 
-    /// Batch plan before planning distributed/local execution `.gen_batch_query_plan()`,
-    /// in JSON format
-    pub batch_plan_json: Option<String>,
-
-    /// Batch plan in the proto phase.
-    pub batch_proto_plan: Option<String>,
+    /// Proto JSON of generated batch plan
+    pub batch_plan_proto: Option<String>,
 
     /// Batch plan for local execution `.gen_batch_local_plan()`
     pub batch_local_plan: Option<String>,
@@ -232,18 +212,11 @@ pub struct TestCaseResult {
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
-    /// Create MV plan `.gen_create_mv_plan()` in JSON format
-    pub stream_plan_json: Option<String>,
-
     /// Create MV fragments plan
     pub stream_dist_plan: Option<String>,
 
     /// Create MV plan with EOWC semantics `.gen_create_mv_plan(.., EmitMode::OnWindowClose)`
     pub eowc_stream_plan: Option<String>,
-
-    /// Create MV plan with EOWC semantics `.gen_create_mv_plan(.., EmitMode::OnWindowClose)`,
-    /// in JSON format
-    pub eowc_stream_plan_json: Option<String>,
 
     /// Create MV fragments plan with EOWC semantics
     pub eowc_stream_dist_plan: Option<String>,
@@ -638,10 +611,6 @@ impl TestCase {
                     ret.logical_plan =
                         Some(explain_plan(&plan_root.clone().into_unordered_subplan()));
                 }
-                if self.expected_outputs.contains(&TestType::LogicalPlanJson) {
-                    ret.logical_plan_json =
-                        Some(plan_root.clone().into_unordered_subplan().explain_to_json());
-                }
                 plan_root
             }
             Err(err) => {
@@ -702,8 +671,7 @@ impl TestCase {
 
         'batch: {
             if self.expected_outputs.contains(&TestType::BatchPlan)
-                || self.expected_outputs.contains(&TestType::BatchProtoPlan)
-                || self.expected_outputs.contains(&TestType::BatchPlanJson)
+                || self.expected_outputs.contains(&TestType::BatchPlanProto)
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
                 let mut plan_root = plan_root.clone();
@@ -725,13 +693,10 @@ impl TestCase {
                 if self.expected_outputs.contains(&TestType::BatchPlan) {
                     ret.batch_plan = Some(explain_plan(&batch_plan));
                 }
-                if self.expected_outputs.contains(&TestType::BatchPlanJson) {
-                    ret.batch_plan_json = Some(batch_plan.explain_to_json());
-                }
 
-                // Only generate batch_proto_plan if it is specified in test case
-                if self.expected_outputs.contains(&TestType::BatchProtoPlan) {
-                    ret.batch_proto_plan = Some(serde_yaml::to_string(
+                // Only generate batch_plan_proto if it is specified in test case
+                if self.expected_outputs.contains(&TestType::BatchPlanProto) {
+                    ret.batch_plan_proto = Some(serde_yaml::to_string(
                         &batch_plan.to_batch_prost_identity(false)?,
                     )?);
                 }
@@ -801,8 +766,6 @@ impl TestCase {
                 emit_mode,
                 plan,
                 ret_plan_str,
-                plan_json,
-                ret_plan_json_str,
                 dist_plan,
                 ret_dist_plan_str,
                 error,
@@ -812,8 +775,6 @@ impl TestCase {
                     EmitMode::Immediately,
                     self.expected_outputs.contains(&TestType::StreamPlan),
                     &mut ret.stream_plan,
-                    self.expected_outputs.contains(&TestType::StreamPlanJson),
-                    &mut ret.stream_plan_json,
                     self.expected_outputs.contains(&TestType::StreamDistPlan),
                     &mut ret.stream_dist_plan,
                     self.expected_outputs.contains(&TestType::StreamError),
@@ -824,16 +785,13 @@ impl TestCase {
                     self.expected_outputs.contains(&TestType::EowcStreamPlan),
                     &mut ret.eowc_stream_plan,
                     self.expected_outputs
-                        .contains(&TestType::EowcStreamPlanJson),
-                    &mut ret.eowc_stream_plan_json,
-                    self.expected_outputs
                         .contains(&TestType::EowcStreamDistPlan),
                     &mut ret.eowc_stream_dist_plan,
                     self.expected_outputs.contains(&TestType::EowcStreamError),
                     &mut ret.eowc_stream_error,
                 ),
             ] {
-                if !plan && !plan_json && !dist_plan && !error {
+                if !plan && !dist_plan && !error {
                     continue;
                 }
 
@@ -861,9 +819,6 @@ impl TestCase {
                 // Only generate stream_plan if it is specified in test case
                 if plan {
                     *ret_plan_str = Some(explain_plan(&stream_plan));
-                }
-                if plan_json {
-                    *ret_plan_json_str = Some(stream_plan.explain_to_json());
                 }
 
                 // Only generate stream_dist_plan if it is specified in test case
@@ -946,19 +901,15 @@ fn check_result(test_case: &TestCase, actual: &TestCaseResult) -> Result<()> {
     check!(eowc_stream_error);
 
     check!(logical_plan);
-    check!(logical_plan_json);
     check!(optimized_logical_plan_for_batch);
     check!(optimized_logical_plan_for_stream);
     check!(batch_plan);
-    check!(batch_plan_json);
     check!(batch_local_plan);
-    check!(batch_proto_plan);
     check!(stream_plan);
-    check!(stream_plan_json);
     check!(stream_dist_plan);
     check!(eowc_stream_plan);
-    check!(eowc_stream_plan_json);
     check!(eowc_stream_dist_plan);
+    check!(batch_plan_proto);
     check!(sink_plan);
 
     check!(explain_output);
