@@ -68,6 +68,7 @@ use crate::controller::utils::{
     rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
+use crate::error::bail_invalid_parameter;
 use crate::manager::{NotificationVersion, StreamingJob};
 use crate::model::{StreamContext, TableParallelism};
 use crate::stream::SplitAssignment;
@@ -700,12 +701,29 @@ impl CatalogController {
             ));
         }
 
+        // 3. check parallelism.
+        let original_max_parallelism: i32 = StreamingJobModel::find_by_id(id as ObjectId)
+            .select_only()
+            .column(streaming_job::Column::MaxParallelism)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), id))?;
+
+        if original_max_parallelism != max_parallelism as i32 {
+            bail_invalid_parameter!(
+                "cannot use a different max parallelism when altering or sinking into an existing table, \
+                please `SET STREAMING_MAX_PARALLELISM TO {}` first",
+                original_max_parallelism
+            );
+        }
+
         let parallelism = match specified_parallelism {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
 
-        // 3. create streaming object for new replace table.
+        // 4. create streaming object for new replace table.
         let obj_id = Self::create_streaming_job_obj(
             &txn,
             ObjectType::Table,
@@ -719,7 +737,7 @@ impl CatalogController {
         )
         .await?;
 
-        // 4. record dependency for new replace table.
+        // 5. record dependency for new replace table.
         ObjectDependency::insert(object_dependency::ActiveModel {
             oid: Set(id as _),
             used_by: Set(obj_id as _),
