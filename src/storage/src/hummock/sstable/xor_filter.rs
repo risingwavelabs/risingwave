@@ -442,13 +442,18 @@ impl Clone for XorFilterReader {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use foyer::CacheContext;
     use rand::RngCore;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
-    use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
+    use crate::compaction_catalog_manager::{
+        CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
+    };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::{SstableBuilder, SstableBuilderOptions};
     use crate::hummock::test_utils::{test_user_key_of, test_value_of, TEST_KEYS_COUNT};
@@ -475,12 +480,19 @@ mod tests {
         let writer = sstable_store
             .clone()
             .create_sst_writer(object_id, writer_opts);
+
+        let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+            table_id_to_vnode,
+        ));
+
         let mut builder = SstableBuilder::new(
             object_id,
             writer,
             BlockedXor16FilterBuilder::create(0.01, 2048),
             opts,
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+            compaction_catalog_agent_ref,
             None,
         );
         let mut rng = rand::thread_rng();

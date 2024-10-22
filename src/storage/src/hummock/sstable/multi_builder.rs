@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
@@ -21,6 +21,7 @@ use bytes::Bytes;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use num_integer::Integer;
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -366,7 +367,11 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
             .sstable_store
             .clone()
             .create_sst_writer(id, writer_options);
-        let builder = SstableBuilder::for_test(id, writer, self.options.clone());
+        let table_id_to_vnode = HashMap::from_iter(vec![(
+            TableId::default().table_id(),
+            VirtualNode::COUNT_FOR_TEST,
+        )]);
+        let builder = SstableBuilder::for_test(id, writer, self.options.clone(), table_id_to_vnode);
 
         Ok(builder)
     }

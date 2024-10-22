@@ -16,13 +16,12 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeCountCompat};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::info_in_release;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{get_table_id, TABLE_PREFIX_LEN};
 use risingwave_pb::catalog::Table;
 use risingwave_rpc_client::error::{Result as RpcResult, RpcError};
@@ -51,7 +50,7 @@ impl FilterKeyExtractorImpl {
         if read_prefix_len == 0 || read_prefix_len > table_catalog.get_pk().len() {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
-            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)
+            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)
         } else {
             FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(table_catalog))
         }
@@ -187,8 +186,6 @@ impl SchemaFilterKeyExtractor {
 #[derive(Default)]
 pub struct MultiFilterKeyExtractor {
     id_to_filter_key_extractor: HashMap<u32, Arc<FilterKeyExtractorImpl>>,
-    // cached state
-    // last_filter_key_extractor_state: Mutex<Option<(u32, Arc<FilterKeyExtractorImpl>)>>,
 }
 
 impl MultiFilterKeyExtractor {
@@ -259,48 +256,67 @@ impl StateTableAccessor for FakeRemoteTableAccessor {
         )))
     }
 }
-struct FilterKeyExtractorManagerInner {
-    table_id_to_filter_key_extractor: RwLock<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
+
+pub struct CompactionCatalogManager {
+    table_id_to_catalog: RwLock<HashMap<StateTableId, Arc<Table>>>,
     table_accessor: Box<dyn StateTableAccessor>,
 }
 
-impl FilterKeyExtractorManagerInner {
-    fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
-        self.table_id_to_filter_key_extractor
-            .write()
-            .insert(table_id, filter_key_extractor);
+impl Default for CompactionCatalogManager {
+    fn default() -> Self {
+        Self::new(Box::<FakeRemoteTableAccessor>::default())
+    }
+}
+
+impl CompactionCatalogManager {
+    pub fn new(table_accessor: Box<dyn StateTableAccessor>) -> Self {
+        Self {
+            table_id_to_catalog: Default::default(),
+            table_accessor,
+        }
+    }
+}
+
+impl CompactionCatalogManager {
+    pub fn update(&self, table_id: u32, catalog: Arc<Table>) {
+        self.table_id_to_catalog.write().insert(table_id, catalog);
     }
 
-    fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
-        let mut guard = self.table_id_to_filter_key_extractor.write();
+    pub fn sync(&self, catalog_map: HashMap<u32, Arc<Table>>) {
+        let mut guard = self.table_id_to_catalog.write();
         guard.clear();
-        guard.extend(filter_key_extractor_map);
+        guard.extend(catalog_map);
     }
 
-    fn remove(&self, table_id: u32) {
-        self.table_id_to_filter_key_extractor
-            .write()
-            .remove(&table_id);
+    pub fn remove(&self, table_id: u32) {
+        self.table_id_to_catalog.write().remove(&table_id);
     }
 
-    async fn acquire(
+    pub async fn acquire(
         &self,
-        mut table_id_set: HashSet<u32>,
-    ) -> HummockResult<FilterKeyExtractorImpl> {
-        if table_id_set.is_empty() {
+        mut table_ids: Vec<StateTableId>,
+    ) -> HummockResult<CompactionCatalogAgentRef> {
+        if table_ids.is_empty() {
             // table_id_set is empty
             // the table in sst has been deleted
 
             // use full key as default
-            return Ok(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
+            // return Ok(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
+            return Err(HummockError::other("table_id_set is empty"));
         }
 
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+        let mut table_id_to_vnode = HashMap::new();
         {
-            let guard = self.table_id_to_filter_key_extractor.read();
-            table_id_set.retain(|table_id| match guard.get(table_id) {
-                Some(filter_key_extractor) => {
-                    multi_filter_key_extractor.register(*table_id, filter_key_extractor.clone());
+            let guard = self.table_id_to_catalog.read();
+            table_ids.retain(|table_id| match guard.get(table_id) {
+                Some(table_catalog) => {
+                    multi_filter_key_extractor.register(
+                        *table_id,
+                        Arc::new(FilterKeyExtractorImpl::from_table(table_catalog.as_ref())),
+                    );
+                    table_id_to_vnode.insert(*table_id, table_catalog.vnode_count());
+
                     false
                 }
 
@@ -308,8 +324,7 @@ impl FilterKeyExtractorManagerInner {
             });
         }
 
-        if !table_id_set.is_empty() {
-            let table_ids = table_id_set.iter().cloned().collect_vec();
+        if !table_ids.is_empty() {
             let mut state_tables =
                 self.table_accessor
                     .get_tables(&table_ids)
@@ -320,120 +335,82 @@ impl FilterKeyExtractorManagerInner {
                             e.as_report()
                         ))
                     })?;
-            let mut guard = self.table_id_to_filter_key_extractor.write();
+            let mut guard = self.table_id_to_catalog.write();
             for table_id in table_ids {
                 if let Some(table) = state_tables.remove(&table_id) {
+                    let table_id = table.id;
                     let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(&table));
-                    guard.insert(table_id, key_extractor.clone());
+                    let vnode = table.vnode_count();
+                    guard.insert(table_id, Arc::new(table));
                     multi_filter_key_extractor.register(table_id, key_extractor);
+                    table_id_to_vnode.insert(table_id, vnode);
                 }
             }
         }
 
-        Ok(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor))
-    }
-}
-
-/// `RpcFilterKeyExtractorManager` is a wrapper for inner, and provide a protected read and write
-/// interface, its thread safe
-pub struct RpcFilterKeyExtractorManager {
-    inner: FilterKeyExtractorManagerInner,
-}
-
-impl Default for RpcFilterKeyExtractorManager {
-    fn default() -> Self {
-        Self::new(Box::<FakeRemoteTableAccessor>::default())
-    }
-}
-
-impl RpcFilterKeyExtractorManager {
-    pub fn new(table_accessor: Box<dyn StateTableAccessor>) -> Self {
-        Self {
-            inner: FilterKeyExtractorManagerInner {
-                table_id_to_filter_key_extractor: Default::default(),
-                table_accessor,
-            },
-        }
+        Ok(Arc::new(CompactionCatalogAgent::new(
+            Arc::new(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor)),
+            table_id_to_vnode,
+        )))
     }
 
-    /// Insert (`table_id`, `filter_key_extractor`) as mapping to `HashMap` for `acquire`
-    pub fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
-        info_in_release!("update key extractor of {}", table_id);
-        self.inner.update(table_id, filter_key_extractor);
-    }
-
-    /// Remove a mapping by `table_id`
-    pub fn remove(&self, table_id: u32) {
-        info_in_release!("remove key extractor of {}", table_id);
-        self.inner.remove(table_id);
-    }
-
-    /// Sync all filter key extractors by snapshot
-    pub fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
-        self.inner.sync(filter_key_extractor_map)
-    }
-
-    /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
-    /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
-    /// `table_id` does not util version update (notify), and retry to get
-    async fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl> {
-        self.inner.acquire(table_id_set).await
-    }
-}
-
-#[derive(Clone)]
-pub enum FilterKeyExtractorManager {
-    RpcFilterKeyExtractorManager(Arc<RpcFilterKeyExtractorManager>),
-    StaticFilterKeyExtractorManager(Arc<StaticFilterKeyExtractorManager>),
-}
-
-impl FilterKeyExtractorManager {
-    pub async fn acquire(
-        &self,
-        table_id_set: HashSet<u32>,
-    ) -> HummockResult<FilterKeyExtractorImpl> {
-        match self {
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                rpc_filter_key_exactor_manager,
-            ) => rpc_filter_key_exactor_manager.acquire(table_id_set).await,
-            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(
-                static_filter_key_extractor_manager,
-            ) => static_filter_key_extractor_manager.acquire(table_id_set),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct StaticFilterKeyExtractorManager {
-    id_to_table: HashMap<u32, Table>,
-}
-
-impl StaticFilterKeyExtractorManager {
-    pub fn new(id_to_table: HashMap<u32, Table>) -> Self {
-        Self { id_to_table }
-    }
-
-    fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl> {
+    pub fn build_compaction_catalog_agent(
+        table_catalogs: HashMap<StateTableId, Arc<Table>>,
+    ) -> CompactionCatalogAgentRef {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
-        for table_id in table_id_set {
-            if let Some(table) = self.id_to_table.get(&table_id) {
-                let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(table));
-                multi_filter_key_extractor.register(table_id, key_extractor);
-            } else {
-                return Err(HummockError::other(format!(
-                    "table {} is absent in id_to_table, need to request rpc list_tables to get the schema", table_id,
-                )));
-            }
+        let mut table_id_to_vnode = HashMap::new();
+        for (table_id, table_catalog) in table_catalogs {
+            multi_filter_key_extractor.register(
+                table_id,
+                Arc::new(FilterKeyExtractorImpl::from_table(table_catalog.as_ref())),
+            );
+            table_id_to_vnode.insert(table_id, table_catalog.vnode_count());
         }
-        Ok(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor))
+
+        Arc::new(CompactionCatalogAgent::new(
+            Arc::new(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor)),
+            table_id_to_vnode,
+        ))
     }
 }
 
-pub type FilterKeyExtractorManagerRef = Arc<RpcFilterKeyExtractorManager>;
+/// build from `CompactionCatalogManager`
+pub struct CompactionCatalogAgent {
+    filter_key_extractor_manager: Arc<FilterKeyExtractorImpl>,
+    table_id_to_vnode: HashMap<StateTableId, usize>,
+}
+
+impl CompactionCatalogAgent {
+    pub fn new(
+        filter_key_extractor_manager: Arc<FilterKeyExtractorImpl>,
+        table_id_to_vnode: HashMap<StateTableId, usize>,
+    ) -> Self {
+        Self {
+            filter_key_extractor_manager,
+            table_id_to_vnode,
+        }
+    }
+}
+
+impl CompactionCatalogAgent {
+    pub fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
+        self.filter_key_extractor_manager.extract(full_key)
+    }
+
+    pub fn vnode_count(&self, table_id: StateTableId) -> usize {
+        *self.table_id_to_vnode.get(&table_id).unwrap()
+    }
+
+    pub fn table_id_to_vnode_ref(&self) -> &HashMap<StateTableId, usize> {
+        &self.table_id_to_vnode
+    }
+}
+
+pub type CompactionCatalogManagerRef = Arc<CompactionCatalogManager>;
+pub type CompactionCatalogAgentRef = Arc<CompactionCatalogAgent>;
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::mem;
     use std::sync::Arc;
 
@@ -453,9 +430,8 @@ mod tests {
     use risingwave_pb::plan_common::PbColumnCatalog;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
-    use crate::filter_key_extractor::{
+    use crate::compaction_catalog_manager::{
         FilterKeyExtractorImpl, FullKeyFilterKeyExtractor, MultiFilterKeyExtractor,
-        RpcFilterKeyExtractorManager,
     };
     const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
         VirtualNode::from_index(233).to_be_bytes()
@@ -662,32 +638,6 @@ mod tests {
             let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();
 
             assert_eq!(pk_prefix_len, output_key.len());
-        }
-    }
-
-    #[tokio::test]
-    async fn test_filter_key_extractor_manager() {
-        let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::default());
-
-        filter_key_extractor_manager.update(
-            1,
-            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
-        );
-
-        let remaining_table_id_set = HashSet::from([1]);
-        let multi_filter_key_extractor = filter_key_extractor_manager
-            .acquire(remaining_table_id_set)
-            .await
-            .unwrap();
-
-        match multi_filter_key_extractor {
-            FilterKeyExtractorImpl::Multi(multi_filter_key_extractor) => {
-                assert_eq!(1, multi_filter_key_extractor.size());
-            }
-
-            _ => {
-                unreachable!()
-            }
         }
     }
 }

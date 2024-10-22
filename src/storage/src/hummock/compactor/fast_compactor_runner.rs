@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, LocalSstableInfo};
 
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
@@ -359,7 +359,7 @@ impl CompactorRunner {
     pub fn new(
         context: CompactorContext,
         task: CompactTask,
-        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         object_id_getter: Box<dyn GetObjectId>,
         task_progress: Arc<TaskProgress>,
     ) -> Self {
@@ -391,7 +391,7 @@ impl CompactorRunner {
             options,
             policy: task_config.cache_policy,
             remote_rpc_cost: get_id_time,
-            filter_key_extractor,
+            compaction_catalog_agent_ref,
             sstable_writer_factory: factory,
             _phantom: PhantomData,
         };

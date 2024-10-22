@@ -52,7 +52,7 @@ pub mod opts;
 pub mod store_impl;
 pub mod table;
 
-pub mod filter_key_extractor;
+pub mod compaction_catalog_manager;
 pub mod mem_table;
 #[cfg(test)]
 #[cfg(feature = "failpoints")]

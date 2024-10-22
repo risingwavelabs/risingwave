@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::env;
 use std::ops::Range;
 use std::sync::atomic::AtomicU64;
@@ -24,6 +25,7 @@ use foyer::{Engine, HybridCacheBuilder};
 use rand::random;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_object_store::object::{
@@ -83,7 +85,11 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
             .create_sst_writer(id, writer_options)
             .await
             .unwrap();
-        let builder = SstableBuilder::for_test(id, writer, self.options.clone());
+        let table_id_to_vnode = HashMap::from_iter(vec![(
+            TableId::default().into(),
+            VirtualNode::COUNT_FOR_TEST,
+        )]);
+        let builder = SstableBuilder::for_test(id, writer, self.options.clone(), table_id_to_vnode);
 
         Ok(builder)
     }

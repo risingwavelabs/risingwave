@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -133,8 +134,13 @@ async fn build_table(
             policy: CachePolicy::Fill(CacheContext::Default),
         },
     );
-    let mut builder =
-        SstableBuilder::<_, Xor16FilterBuilder>::for_test(sstable_object_id, writer, opt);
+    let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+    let mut builder = SstableBuilder::<_, Xor16FilterBuilder>::for_test(
+        sstable_object_id,
+        writer,
+        opt,
+        table_id_to_vnode,
+    );
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch, TableId::new(0));
     let table_key_len = full_key.user_key.table_key.len();
@@ -177,8 +183,14 @@ async fn build_table_2(
             policy: CachePolicy::Fill(CacheContext::Default),
         },
     );
-    let mut builder =
-        SstableBuilder::<_, Xor16FilterBuilder>::for_test(sstable_object_id, writer, opt);
+
+    let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
+    let mut builder = SstableBuilder::<_, Xor16FilterBuilder>::for_test(
+        sstable_object_id,
+        writer,
+        opt,
+        table_id_to_vnode,
+    );
     let mut full_key = test_key_of(0, epoch, TableId::new(table_id));
     let table_key_len = full_key.user_key.table_key.len();
 
