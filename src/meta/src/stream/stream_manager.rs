@@ -350,7 +350,7 @@ impl GlobalStreamManager {
         if let Some((streaming_job, context, table_fragments)) = replace_table_job_info {
             self.metadata_manager
                 .catalog_controller
-                .prepare_streaming_job(table_fragments.to_protobuf(), &streaming_job, true)
+                .prepare_streaming_job(&table_fragments, &streaming_job, true)
                 .await?;
 
             let dummy_table_id = table_fragments.table_id();

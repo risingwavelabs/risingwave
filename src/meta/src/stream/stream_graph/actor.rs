@@ -20,7 +20,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{ActorId, ActorMapping, WorkerSlotId};
+use risingwave_common::hash::{ActorId, ActorMapping, IsSingleton, VnodeCount, WorkerSlotId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
 use risingwave_meta_model::WorkerId;
@@ -683,9 +683,22 @@ impl ActorGraphBuilder {
         // Fill the vnode count for each internal table, based on schedule result.
         let mut fragment_graph = fragment_graph;
         for (id, fragment) in fragment_graph.building_fragments_mut() {
-            let vnode_count = distributions[id].vnode_count();
+            let fragment_vnode_count = distributions[id].vnode_count();
             visit_tables(fragment, |table, _| {
-                table.maybe_vnode_count = Some(vnode_count as _);
+                // There are special cases where a hash-distributed fragment contains singleton
+                // internal tables, e.g., the state table of `Source` executors.
+                let vnode_count = if table.is_singleton() {
+                    if fragment_vnode_count > 1 {
+                        tracing::info!(
+                            table.name,
+                            "found singleton table in hash-distributed fragment"
+                        );
+                    }
+                    1
+                } else {
+                    fragment_vnode_count
+                };
+                table.maybe_vnode_count = VnodeCount::set(vnode_count).to_protobuf();
             })
         }
 
