@@ -33,15 +33,13 @@ use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, error, info, warn, Instrument};
 
-use super::{
-    CheckpointControl, GlobalBarrierManagerContextTrait, GlobalBarrierWorker, TracedEpoch,
-};
+use super::{CheckpointControl, GlobalBarrierWorker, GlobalBarrierWorkerContext, TracedEpoch};
 use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightSubscriptionInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierWorkerState;
-use crate::barrier::{BarrierKind, GlobalBarrierWorkerContext};
+use crate::barrier::{BarrierKind, GlobalBarrierWorkerContextImpl};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, TableFragments, TableParallelism};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -63,7 +61,7 @@ impl<C> GlobalBarrierWorker<C> {
     }
 }
 
-impl GlobalBarrierWorkerContext {
+impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
     async fn clean_dirty_streaming_jobs(&self) -> MetaResult<()> {
         self.metadata_manager
@@ -128,7 +126,7 @@ impl ScheduledBarriers {
     }
 }
 
-impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
+impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
     ///
     /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
@@ -147,13 +145,12 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
     }
 }
 
-impl GlobalBarrierWorkerContext {
+impl GlobalBarrierWorkerContextImpl {
     pub(super) async fn reload_runtime_info_impl(
         &self,
         pre_apply_drop_cancel: impl Fn() -> bool,
     ) -> MetaResult<(
         ActiveStreamingWorkerNodes,
-        ControlStreamManager,
         InflightGraphInfo,
         InflightSubscriptionInfo,
         Option<TracedEpoch>,
@@ -258,23 +255,12 @@ impl GlobalBarrierWorkerContext {
                         })
                         .await;
 
-                    let mut control_stream_manager = ControlStreamManager::new(self.env.clone());
-
                     let subscription_info = InflightSubscriptionInfo {
                         mv_depended_subscriptions: self
                             .metadata_manager
                             .get_mv_depended_subscriptions()
                             .await?,
                     };
-
-                    let reset_start_time = Instant::now();
-                    control_stream_manager
-                        .reset(&subscription_info, active_streaming_nodes.current(), self)
-                        .await
-                        .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "reset compute nodes failed");
-                        })?;
-                    info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
 
                     self.sink_manager.reset().await;
 
@@ -290,7 +276,6 @@ impl GlobalBarrierWorkerContext {
                     let source_split_assignments = self.source_manager.list_assignments().await;
                     Ok((
                         active_streaming_nodes,
-                        control_stream_manager,
                         info,
                         subscription_info,
                         prev_epoch,
@@ -305,7 +290,7 @@ impl GlobalBarrierWorkerContext {
     }
 }
 
-impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
+impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     async fn recovery_inner(
         &mut self,
         paused_reason: Option<PausedReason>,
@@ -324,7 +309,6 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
             };
             let (
                 active_streaming_nodes,
-                mut control_stream_manager,
                 info,
                 subscription_info,
                 prev_epoch,
@@ -336,6 +320,20 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
                 .context
                 .reload_runtime_info(|| self.scheduled_barriers.pre_apply_drop_cancel())
                 .await?;
+
+            let mut control_stream_manager = ControlStreamManager::new(self.env.clone());
+            let reset_start_time = Instant::now();
+            control_stream_manager
+                .reset(
+                    &subscription_info,
+                    active_streaming_nodes.current(),
+                    &self.context,
+                )
+                .await
+                .inspect_err(|err| {
+                    warn!(error = %err.as_report(), "reset compute nodes failed");
+                })?;
+            info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
 
             let recovery_result: MetaResult<_> = try {
                 {
@@ -430,7 +428,7 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
     }
 }
 
-impl GlobalBarrierWorkerContext {
+impl GlobalBarrierWorkerContextImpl {
     // Migration timeout.
     const RECOVERY_FORCE_MIGRATION_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -796,7 +794,7 @@ mod tests {
         // total 10, assigned custom, actual 5, default full -> fixed(5)
         assert_eq!(
             TableParallelism::Fixed(5),
-            GlobalBarrierWorkerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
                 Some(5),
@@ -807,7 +805,7 @@ mod tests {
         // total 10, assigned custom, actual 10, default full -> adaptive
         assert_eq!(
             TableParallelism::Adaptive,
-            GlobalBarrierWorkerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
                 Some(10),
@@ -818,7 +816,7 @@ mod tests {
         // total 10, assigned custom, actual 11, default full -> adaptive
         assert_eq!(
             TableParallelism::Adaptive,
-            GlobalBarrierWorkerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
                 Some(11),
@@ -829,7 +827,7 @@ mod tests {
         // total 10, assigned fixed(5), actual _, default full -> fixed(5)
         assert_eq!(
             TableParallelism::Adaptive,
-            GlobalBarrierWorkerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
                 None,
@@ -840,7 +838,7 @@ mod tests {
         // total 10, assigned adaptive, actual _, default full -> adaptive
         assert_eq!(
             TableParallelism::Adaptive,
-            GlobalBarrierWorkerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
                 10,
                 TableParallelism::Adaptive,
                 None,
@@ -851,7 +849,7 @@ mod tests {
         // total 10, assigned adaptive, actual 5, default 5 -> fixed(5)
         assert_eq!(
             TableParallelism::Fixed(5),
-            GlobalBarrierWorkerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
                 10,
                 TableParallelism::Adaptive,
                 Some(5),
@@ -862,7 +860,7 @@ mod tests {
         // total 10, assigned adaptive, actual 6, default 5 -> adaptive
         assert_eq!(
             TableParallelism::Adaptive,
-            GlobalBarrierWorkerContext::derive_target_parallelism(
+            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
                 10,
                 TableParallelism::Adaptive,
                 Some(6),

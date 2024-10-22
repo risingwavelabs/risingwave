@@ -44,7 +44,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::{
-    Command, GlobalBarrierManagerContextTrait, GlobalBarrierWorker, GlobalBarrierWorkerContext,
+    Command, GlobalBarrierWorker, GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl,
     InflightSubscriptionInfo,
 };
 use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
@@ -53,7 +53,7 @@ use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub(super) struct ControlStreamNode {
+struct ControlStreamNode {
     worker: WorkerNode,
     handle: StreamingControlHandle,
 }
@@ -75,7 +75,7 @@ impl ControlStreamManager {
         &mut self,
         node: WorkerNode,
         subscription: &InflightSubscriptionInfo,
-        context: &impl GlobalBarrierManagerContextTrait,
+        context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
         if self.nodes.contains_key(&node_id) {
@@ -89,11 +89,20 @@ impl ControlStreamManager {
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
             match context
-                .new_control_stream_node(node.clone(), &subscription.mv_depended_subscriptions)
+                .new_control_stream(&node, &subscription.mv_depended_subscriptions)
                 .await
             {
-                Ok(stream_node) => {
-                    assert!(self.nodes.insert(node_id, stream_node).is_none());
+                Ok(handle) => {
+                    assert!(self
+                        .nodes
+                        .insert(
+                            node_id,
+                            ControlStreamNode {
+                                worker: node.clone(),
+                                handle,
+                            }
+                        )
+                        .is_none());
                     info!(?node_host, "add control stream worker");
                     return;
                 }
@@ -113,13 +122,19 @@ impl ControlStreamManager {
         &mut self,
         subscriptions: &InflightSubscriptionInfo,
         nodes: &HashMap<WorkerId, WorkerNode>,
-        context: &impl GlobalBarrierManagerContextTrait,
+        context: &impl GlobalBarrierWorkerContext,
     ) -> MetaResult<()> {
-        let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async {
-            let node = context
-                .new_control_stream_node(node.clone(), &subscriptions.mv_depended_subscriptions)
+        let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async move {
+            let handle = context
+                .new_control_stream(node, &subscriptions.mv_depended_subscriptions)
                 .await?;
-            Result::<_, MetaError>::Ok((*worker_id, node))
+            Result::<_, MetaError>::Ok((
+                *worker_id,
+                ControlStreamNode {
+                    worker: node.clone(),
+                    handle,
+                },
+            ))
         }))
         .await?;
         self.nodes.clear();
@@ -423,12 +438,12 @@ impl ControlStreamManager {
     }
 }
 
-impl GlobalBarrierWorkerContext {
-    pub(super) async fn new_control_stream_node_inner(
+impl GlobalBarrierWorkerContextImpl {
+    pub(super) async fn new_control_stream_impl(
         &self,
-        node: WorkerNode,
+        node: &WorkerNode,
         mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
-    ) -> MetaResult<ControlStreamNode> {
+    ) -> MetaResult<StreamingControlHandle> {
         let initial_version_id = self
             .hummock_manager
             .on_current_version(|version| version.id)
@@ -436,14 +451,11 @@ impl GlobalBarrierWorkerContext {
         let handle = self
             .env
             .stream_client_pool()
-            .get(&node)
+            .get(node)
             .await?
             .start_streaming_control(initial_version_id, mv_depended_subscriptions)
             .await?;
-        Ok(ControlStreamNode {
-            worker: node.clone(),
-            handle,
-        })
+        Ok(handle)
     }
 }
 

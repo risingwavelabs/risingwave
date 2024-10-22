@@ -45,6 +45,7 @@ use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
 use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
+use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -57,7 +58,7 @@ use self::notifier::Notifier;
 use crate::barrier::creating_job::{CompleteJobType, CreatingStreamingJobControl};
 use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
-use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager, ControlStreamNode};
+use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierWorkerState;
 use crate::error::MetaErrorInner;
@@ -156,7 +157,7 @@ pub(crate) enum BarrierManagerRequest {
 }
 
 #[derive(Clone)]
-struct GlobalBarrierWorkerContext {
+struct GlobalBarrierWorkerContextImpl {
     metadata_manager: MetadataManager,
 
     hummock_manager: HummockManagerRef,
@@ -203,7 +204,7 @@ impl GlobalBarrierManager {
     }
 }
 
-trait GlobalBarrierManagerContextTrait: Clone + Send + Sync + 'static {
+trait GlobalBarrierWorkerContext: Clone + Send + Sync + 'static {
     fn commit_epoch(
         &self,
         commit_info: CommitEpochInfo,
@@ -221,18 +222,17 @@ trait GlobalBarrierManagerContextTrait: Clone + Send + Sync + 'static {
         job: TrackingJob,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
-    async fn new_control_stream_node(
+    async fn new_control_stream(
         &self,
-        node: WorkerNode,
+        node: &WorkerNode,
         mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
-    ) -> MetaResult<ControlStreamNode>;
+    ) -> MetaResult<StreamingControlHandle>;
 
     async fn reload_runtime_info(
         &self,
         pre_apply_drop_cancel: impl Fn() -> bool,
     ) -> MetaResult<(
         ActiveStreamingWorkerNodes,
-        ControlStreamManager,
         InflightGraphInfo,
         InflightSubscriptionInfo,
         Option<TracedEpoch>,
@@ -243,7 +243,7 @@ trait GlobalBarrierManagerContextTrait: Clone + Send + Sync + 'static {
     )>;
 }
 
-impl GlobalBarrierManagerContextTrait for GlobalBarrierWorkerContext {
+impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> MetaResult<HummockVersionStats> {
         self.hummock_manager.commit_epoch(commit_info).await?;
         Ok(self.hummock_manager.get_version_stats().await)
@@ -261,12 +261,12 @@ impl GlobalBarrierManagerContextTrait for GlobalBarrierWorkerContext {
         job.finish(&self.metadata_manager).await
     }
 
-    async fn new_control_stream_node(
+    async fn new_control_stream(
         &self,
-        node: WorkerNode,
+        node: &WorkerNode,
         mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
-    ) -> MetaResult<ControlStreamNode> {
-        self.new_control_stream_node_inner(node, mv_depended_subscriptions)
+    ) -> MetaResult<StreamingControlHandle> {
+        self.new_control_stream_impl(node, mv_depended_subscriptions)
             .await
     }
 
@@ -275,7 +275,6 @@ impl GlobalBarrierManagerContextTrait for GlobalBarrierWorkerContext {
         pre_apply_drop_cancel: impl Fn() -> bool,
     ) -> MetaResult<(
         ActiveStreamingWorkerNodes,
-        ControlStreamManager,
         InflightGraphInfo,
         InflightSubscriptionInfo,
         Option<TracedEpoch>,
@@ -510,7 +509,7 @@ impl CheckpointControl {
     }
 }
 
-impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
+impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// We need to make sure there are no changes when doing recovery
     pub async fn clear_on_err(&mut self, err: &MetaError) {
         // join spawned completing command to finish no matter it succeeds or not.
@@ -643,7 +642,7 @@ enum CompletingTask {
     Err(MetaError),
 }
 
-impl GlobalBarrierWorker<GlobalBarrierWorkerContext> {
+impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     /// Create a new [`crate::barrier::GlobalBarrierWorker`].
     pub async fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
@@ -671,7 +670,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContext> {
 
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
 
-        let context = GlobalBarrierWorkerContext {
+        let context = GlobalBarrierWorkerContextImpl {
             metadata_manager,
             hummock_manager,
             source_manager,
@@ -791,7 +790,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContext> {
     }
 }
 
-impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
+impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     async fn run_inner(mut self, mut shutdown_rx: Receiver<()>) {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -834,7 +833,7 @@ impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
 
                 changed_worker = self.active_streaming_nodes.changed() => {
                     if cfg!(debug_assertions)
-                        && let Some(context) = (&self.context as &dyn std::any::Any).downcast_ref::<GlobalBarrierWorkerContext>() {
+                        && let Some(context) = (&self.context as &dyn std::any::Any).downcast_ref::<GlobalBarrierWorkerContextImpl>() {
                         info!("downcast to GlobalBarrierWorkerContext success");
                         use risingwave_pb::common::WorkerNode;
                         match context
@@ -1108,7 +1107,7 @@ impl CheckpointControl {
     }
 }
 
-impl<C: GlobalBarrierManagerContextTrait> GlobalBarrierWorker<C> {
+impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Set barrier manager status.
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
@@ -1180,7 +1179,7 @@ pub struct CompleteBarrierTask {
     creating_job_epochs: Vec<(TableId, u64)>,
 }
 
-impl GlobalBarrierWorkerContext {
+impl GlobalBarrierWorkerContextImpl {
     fn collect_creating_job_commit_epoch_info(
         commit_info: &mut CommitEpochInfo,
         epoch: u64,
@@ -1216,7 +1215,7 @@ impl GlobalBarrierWorkerContext {
 impl CompleteBarrierTask {
     async fn complete_barrier(
         self,
-        context: &impl GlobalBarrierManagerContextTrait,
+        context: &impl GlobalBarrierWorkerContext,
         env: MetaSrvEnv,
     ) -> MetaResult<HummockVersionStats> {
         let result: MetaResult<HummockVersionStats> = try {
@@ -1473,7 +1472,7 @@ impl CheckpointControl {
         if !creating_jobs_task.is_empty() {
             let task = task.get_or_insert_default();
             for (table_id, epoch, resps, is_first_time) in creating_jobs_task {
-                GlobalBarrierWorkerContext::collect_creating_job_commit_epoch_info(
+                GlobalBarrierWorkerContextImpl::collect_creating_job_commit_epoch_info(
                     &mut task.commit_info,
                     epoch,
                     resps,
@@ -1497,7 +1496,7 @@ impl CompletingTask {
         scheduled_barriers: &mut ScheduledBarriers,
         checkpoint_control: &mut CheckpointControl,
         control_stream_manager: &mut ControlStreamManager,
-        context: &impl GlobalBarrierManagerContextTrait,
+        context: &impl GlobalBarrierWorkerContext,
         env: &MetaSrvEnv,
     ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
         // If there is no completing barrier, try to start completing the earliest barrier if
@@ -1610,7 +1609,7 @@ impl GlobalBarrierManager {
     }
 }
 
-impl GlobalBarrierWorkerContext {
+impl GlobalBarrierWorkerContextImpl {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
