@@ -129,6 +129,8 @@ impl TryToBatchPb for BatchLogSeqScan {
                     },
                 )),
             }),
+            // It's currently true.
+            ordered: true,
         }))
     }
 }
