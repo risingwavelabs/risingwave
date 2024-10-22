@@ -359,7 +359,7 @@ impl TableFragments {
     }
 
     /// Returns actor ids that need to be tracked when creating MV.
-    pub fn tracking_progress_actor_ids(&self) -> Vec<ActorId> {
+    pub fn tracking_progress_actor_ids(&self) -> Vec<(ActorId, BackfillUpstreamType)> {
         let mut actor_ids = vec![];
         for fragment in self.fragments.values() {
             if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0 {
@@ -373,7 +373,12 @@ impl TableFragments {
                     | FragmentTypeFlag::SourceScan as u32))
                 != 0
             {
-                actor_ids.extend(fragment.actors.iter().map(|actor| actor.actor_id));
+                actor_ids.extend(fragment.actors.iter().map(|actor| {
+                    (
+                        actor.actor_id,
+                        BackfillUpstreamType::from_fragment_type_mask(fragment.fragment_type_mask),
+                    )
+                }));
             }
         }
         actor_ids
@@ -590,5 +595,38 @@ impl TableFragments {
             });
         });
         self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackfillUpstreamType {
+    MView,
+    Values,
+    Source,
+}
+
+impl BackfillUpstreamType {
+    pub fn from_fragment_type_mask(mask: u32) -> Self {
+        let is_mview = (mask & FragmentTypeFlag::StreamScan as u32) != 0;
+        let is_values = (mask & FragmentTypeFlag::Values as u32) != 0;
+        let is_source = (mask & FragmentTypeFlag::SourceScan as u32) != 0;
+
+        // Note: in theory we can have multiple backfill executors in one fragment, but currently it's not possible.
+        // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
+        debug_assert!(
+            is_mview as u8 + is_values as u8 + is_source as u8 == 1,
+            "a backfill fragment should either be mview, value or source, found {:?}",
+            mask
+        );
+
+        if is_mview {
+            BackfillUpstreamType::MView
+        } else if is_values {
+            BackfillUpstreamType::Values
+        } else if is_source {
+            BackfillUpstreamType::Source
+        } else {
+            unreachable!("invalid fragment type mask: {}", mask);
+        }
     }
 }
