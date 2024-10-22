@@ -226,7 +226,7 @@ impl SinkFormatDesc {
 
     // This function is for compatibility purposes. It sets the `SinkFormatDesc`
     // when there is no configuration provided for the snowflake sink only.
-    pub fn plain_json_for_snowfalke_only() -> Self {
+    pub fn plain_json_for_snowflake_only() -> Self {
         Self {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Json,

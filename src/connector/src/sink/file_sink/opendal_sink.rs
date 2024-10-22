@@ -174,7 +174,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
             Some(desc) => desc,
             None => {
                 if let EngineType::Snowflake = engine_type {
-                    SinkFormatDesc::plain_json_for_snowfalke_only()
+                    SinkFormatDesc::plain_json_for_snowflake_only()
                 } else {
                     return Err(SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")));
                 }
