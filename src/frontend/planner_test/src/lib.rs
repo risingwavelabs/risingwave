@@ -63,7 +63,6 @@ pub enum TestType {
     /// Logical plan with optimization `.gen_optimized_logical_plan_for_stream()`
     OptimizedLogicalPlanForStream,
 
-
     /// Batch plan before planning local/distributed execution `.gen_batch_query_plan()`
     BatchPlan,
     /// Batch plan in Json format
@@ -824,7 +823,8 @@ impl TestCase {
                     EmitMode::OnWindowClose,
                     self.expected_outputs.contains(&TestType::EowcStreamPlan),
                     &mut ret.eowc_stream_plan,
-                    self.expected_outputs.contains(&TestType::EowcStreamPlanJson),
+                    self.expected_outputs
+                        .contains(&TestType::EowcStreamPlanJson),
                     &mut ret.eowc_stream_plan_json,
                     self.expected_outputs
                         .contains(&TestType::EowcStreamDistPlan),
