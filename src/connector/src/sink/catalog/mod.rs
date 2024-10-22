@@ -223,6 +223,18 @@ impl SinkFormatDesc {
             secret_refs: self.secret_refs.clone(),
         }
     }
+
+    // This function is for compatibility purposes. It sets the `SinkFormatDesc`
+    // when there is no configuration provided for the snowflake sink only.
+    pub fn plain_json_for_snowfalke_only() -> Self {
+        Self {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Json,
+            options: Default::default(),
+            secret_refs: Default::default(),
+            key_encode: None,
+        }
+    }
 }
 
 impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {

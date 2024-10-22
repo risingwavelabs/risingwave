@@ -32,8 +32,8 @@ pub struct S3Common {
     #[serde(rename = "s3.bucket_name", alias = "snowflake.s3_bucket")]
     pub bucket_name: String,
     /// The directory where the sink file is located.
-    #[serde(rename = "s3.path", alias = "snowflake.s3_path")]
-    pub path: String,
+    #[serde(rename = "s3.path", alias = "snowflake.s3_path", default)]
+    pub path: Option<String>,
     #[serde(
         rename = "s3.credentials.access",
         alias = "snowflake.aws_access_key_id",
@@ -144,7 +144,7 @@ impl OpendalSinkBackend for S3Sink {
     }
 
     fn get_path(properties: Self::Properties) -> String {
-        properties.common.path
+        properties.common.path.unwrap_or_default()
     }
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
@@ -189,11 +189,11 @@ impl OpendalSinkBackend for SnowflakeSink {
     }
 
     fn get_path(properties: Self::Properties) -> String {
-        properties.common.path
+        properties.common.path.unwrap_or_default()
     }
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
-        super::opendal_sink::EngineType::S3
+        super::opendal_sink::EngineType::Snowflake
     }
 
     fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy {
