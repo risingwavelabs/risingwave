@@ -554,3 +554,34 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: improve join transpose rule to handle join with output indices
+  sql: |
+    with rawdata as (
+      select 'first' as w, '{"x":{"value":123},"y":{"value":[1,2,3]},"z":{"value":[{"a":4,"b":5},{"a":6,"b":7}]}}'::jsonb as rawjson
+      union all
+      select 'second', '{"x":{"value":456},"y":{"value":[7,8,9]},"z":{"value":[{"a":0,"b":1},{"a":2,"b":3}]}}'::jsonb
+    )
+    select
+      array(
+        select
+          array(
+            select 1
+            from jsonb_array_elements(
+              case
+                when jsonb_typeof(o.value->'value') = 'array' then o.value->'value'
+                else '[]'::jsonb
+              end
+            ) with ordinality as x(v, i), jsonb_each (
+              case
+                when jsonb_typeof(v) = 'object' then v
+                else '{}'::jsonb
+              end
+            ) as j
+        )
+        from jsonb_each(rawjson) AS o
+        where jsonb_typeof(o.value) = 'object' and o.value ? 'value'
+      ) as kv
+    from rawdata
+  expected_outputs:
+    - batch_plan
+    - stream_plan
