@@ -29,7 +29,7 @@ docker buildx create \
   --name container \
   --driver=docker-container
 
-if [[ -n "${ALWAYS_PULL+x}" ]]; then
+if [[ "${ALWAYS_PULL:-false}" = "true" ]]; then
   PULL_PARAM="--pull"
 fi
 
