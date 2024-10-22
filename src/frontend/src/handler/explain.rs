@@ -252,10 +252,20 @@ pub async fn handle_explain(
     if analyze {
         bail_not_implemented!(issue = 4856, "explain analyze");
     }
-    if (options.trace || options.explain_type == ExplainType::DistSql)
-        && options.explain_format == ExplainFormat::Json
+    if options.trace && options.explain_format == ExplainFormat::Json {
+        return Err(ErrorCode::NotSupported(
+            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+        )
+        .into());
+    }
+    if options.explain_type == ExplainType::DistSql && options.explain_format == ExplainFormat::Json
     {
-        bail_not_implemented!("explain (trace, distsql, format json) is not supported");
+        return Err(ErrorCode::NotSupported(
+            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+        )
+        .into());
     }
 
     let mut blocks = Vec::new();
