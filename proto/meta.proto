@@ -351,6 +351,7 @@ message AddWorkerNodeRequest {
     bool is_unschedulable = 4;
     // This is used for frontend node to register its rpc address
     string internal_rpc_host_addr = 5;
+    optional string label = 6;
   }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
