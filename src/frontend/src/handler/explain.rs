@@ -252,6 +252,11 @@ pub async fn handle_explain(
     if analyze {
         bail_not_implemented!(issue = 4856, "explain analyze");
     }
+    if (options.trace || options.explain_type == ExplainType::DistSql)
+        && options.explain_format == ExplainFormat::Json
+    {
+        bail_not_implemented!("explain (trace, distsql, format json) is not supported");
+    }
 
     let mut blocks = Vec::new();
     let result = do_handle_explain(handler_args, options.clone(), stmt, &mut blocks).await;
