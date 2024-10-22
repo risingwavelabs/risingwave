@@ -1858,6 +1858,7 @@ fn parse_explain_analyze_with_simple_select() {
             trace: true,
             verbose: true,
             explain_type: ExplainType::DistSql,
+            explain_format: ExplainFormat::Text,
         },
     );
     run_explain_analyze(
@@ -1867,6 +1868,7 @@ fn parse_explain_analyze_with_simple_select() {
             trace: false,
             verbose: true,
             explain_type: ExplainType::DistSql,
+            explain_format: ExplainFormat::Text,
         },
     );
     run_explain_analyze(
@@ -1876,6 +1878,17 @@ fn parse_explain_analyze_with_simple_select() {
             trace: false,
             verbose: true,
             explain_type: ExplainType::DistSql,
+            explain_format: ExplainFormat::Text,
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (LOGICAL, FORMAT JSON) SELECT sqrt(id) FROM foo",
+        false,
+        ExplainOptions {
+            trace: false,
+            verbose: false,
+            explain_type: ExplainType::Logical,
+            explain_format: ExplainFormat::Json,
         },
     );
 }
