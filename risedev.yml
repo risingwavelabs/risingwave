@@ -870,6 +870,12 @@ profile:
         user: root
         password: 123456
         user-managed: true
+      - use: postgres
+        port: 5432
+        address: db
+        user: postgres
+        password: postgres
+        user-managed: true
 
   ci-redis:
     config-path: src/config/ci.toml
