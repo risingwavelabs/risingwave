@@ -1858,6 +1858,7 @@ fn parse_explain_analyze_with_simple_select() {
             trace: true,
             verbose: true,
             explain_type: ExplainType::DistSql,
+            explain_format: ExplainFormat::Text,
         },
     );
     run_explain_analyze(
@@ -1867,6 +1868,7 @@ fn parse_explain_analyze_with_simple_select() {
             trace: false,
             verbose: true,
             explain_type: ExplainType::DistSql,
+            explain_format: ExplainFormat::Text,
         },
     );
     run_explain_analyze(
@@ -1876,6 +1878,17 @@ fn parse_explain_analyze_with_simple_select() {
             trace: false,
             verbose: true,
             explain_type: ExplainType::DistSql,
+            explain_format: ExplainFormat::Text,
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (LOGICAL, FORMAT JSON) SELECT sqrt(id) FROM foo",
+        false,
+        ExplainOptions {
+            trace: false,
+            verbose: false,
+            explain_type: ExplainType::Logical,
+            explain_format: ExplainFormat::Json,
         },
     );
 }
@@ -1893,9 +1906,15 @@ fn parse_explain_with_invalid_options() {
 
     let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
 
-    let err_msg =
-        "expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )";
-    assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+    let expected =
+        "expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT, found: )";
+    let actual = res.unwrap_err().to_string();
+    assert!(
+        actual.contains(expected),
+        "expected: {:?}\nactual: {:?}",
+        expected,
+        actual
+    );
 }
 
 #[test]
