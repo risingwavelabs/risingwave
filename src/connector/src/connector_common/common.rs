@@ -163,12 +163,6 @@ impl AwsAuthProps {
     }
 }
 
-pub fn check_kafka_connection_identical(lhs: &KafkaProperties, rhs: &KafkaProperties) -> bool {
-    lhs.aws_auth_props == rhs.aws_auth_props
-        && lhs.privatelink_common == rhs.privatelink_common
-        && lhs.connection == rhs.connection
-}
-
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash)]
 pub struct KafkaConnection {
