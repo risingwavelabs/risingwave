@@ -58,6 +58,7 @@ public class DbzConnectorConfig {
 
     /* Sql Server configs */
     public static final String SQL_SERVER_SCHEMA_NAME = "schema.name";
+    public static final String SQL_SERVER_ENCRYPT = "database.encrypt";
 
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";

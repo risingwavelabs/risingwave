@@ -18,7 +18,10 @@ use std::ops::AddAssign;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId};
+use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::source::SplitImpl;
+use risingwave_meta_model::{SourceId, WorkerId};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -34,12 +37,8 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::{ActorId, FragmentId};
-use crate::manager::{SourceId, WorkerId};
-use crate::model::{MetadataModel, MetadataModelResult};
+use crate::model::MetadataModelResult;
 use crate::stream::{build_actor_connector_splits, build_actor_split_impls, SplitAssignment};
-
-/// Column family name for table fragments.
-const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
 /// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -160,16 +159,9 @@ impl StreamContext {
     }
 }
 
-impl MetadataModel for TableFragments {
-    type KeyType = u32;
-    type PbType = PbTableFragments;
-
-    fn cf_name() -> String {
-        TABLE_FRAGMENTS_CF_NAME.to_string()
-    }
-
-    fn to_protobuf(&self) -> Self::PbType {
-        Self::PbType {
+impl TableFragments {
+    pub fn to_protobuf(&self) -> PbTableFragments {
+        PbTableFragments {
             table_id: self.table_id.table_id(),
             state: self.state as _,
             fragments: self.fragments.clone().into_iter().collect(),
@@ -183,7 +175,7 @@ impl MetadataModel for TableFragments {
         }
     }
 
-    fn from_protobuf(prost: Self::PbType) -> Self {
+    pub fn from_protobuf(prost: PbTableFragments) -> Self {
         let ctx = StreamContext::from_protobuf(prost.get_ctx().unwrap());
 
         let default_parallelism = PbTableParallelism {
@@ -204,10 +196,6 @@ impl MetadataModel for TableFragments {
                 .max_parallelism
                 .map_or(VirtualNode::COUNT_FOR_COMPAT, |v| v as _),
         }
-    }
-
-    fn key(&self) -> MetadataModelResult<Self::KeyType> {
-        Ok(self.table_id.table_id())
     }
 }
 
@@ -373,7 +361,7 @@ impl TableFragments {
     }
 
     /// Returns actor ids that need to be tracked when creating MV.
-    pub fn tracking_progress_actor_ids(&self) -> Vec<ActorId> {
+    pub fn tracking_progress_actor_ids(&self) -> Vec<(ActorId, BackfillUpstreamType)> {
         let mut actor_ids = vec![];
         for fragment in self.fragments.values() {
             if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0 {
@@ -387,7 +375,12 @@ impl TableFragments {
                     | FragmentTypeFlag::SourceScan as u32))
                 != 0
             {
-                actor_ids.extend(fragment.actors.iter().map(|actor| actor.actor_id));
+                actor_ids.extend(fragment.actors.iter().map(|actor| {
+                    (
+                        actor.actor_id,
+                        BackfillUpstreamType::from_fragment_type_mask(fragment.fragment_type_mask),
+                    )
+                }));
             }
         }
         actor_ids
@@ -445,7 +438,7 @@ impl TableFragments {
             for actor in &fragment.actors {
                 if let Some(source_id) = actor.nodes.as_ref().unwrap().find_stream_source() {
                     source_fragments
-                        .entry(source_id)
+                        .entry(source_id as SourceId)
                         .or_insert(BTreeSet::new())
                         .insert(fragment.fragment_id as FragmentId);
 
@@ -468,7 +461,7 @@ impl TableFragments {
                         return Err(anyhow::anyhow!("SourceBackfill should have only one upstream fragment, found {:?} for fragment {}", fragment.upstream_fragment_ids, fragment.fragment_id).into());
                     }
                     source_fragments
-                        .entry(source_id)
+                        .entry(source_id as SourceId)
                         .or_insert(BTreeSet::new())
                         .insert((fragment.fragment_id, fragment.upstream_fragment_ids[0]));
 
@@ -559,7 +552,7 @@ impl TableFragments {
                     .actor_status
                     .get(&actor.actor_id)
                     .expect("should exist")
-                    .worker_id();
+                    .worker_id() as WorkerId;
                 actor_map.entry(worker_id).or_default().push(actor.clone());
             });
         actor_map
@@ -576,6 +569,26 @@ impl TableFragments {
         } else {
             None
         }
+    }
+
+    /// Retrieve the **complete** internal tables map of the whole graph.
+    ///
+    /// Compared to [`crate::stream::StreamFragmentGraph::incomplete_internal_tables`],
+    /// the table catalogs returned here are complete, with all fields filled.
+    pub fn internal_tables(&self) -> BTreeMap<u32, Table> {
+        let mut tables = BTreeMap::new();
+        for fragment in self.fragments.values() {
+            stream_graph_visitor::visit_stream_node_internal_tables(
+                &mut fragment.actors[0].nodes.clone().unwrap(),
+                |table, _| {
+                    let table_id = table.id;
+                    tables
+                        .try_insert(table_id, table.clone())
+                        .unwrap_or_else(|_| panic!("duplicated table id `{}`", table_id));
+                },
+            );
+        }
+        tables
     }
 
     /// Returns the internal table ids without the mview table.
@@ -604,5 +617,38 @@ impl TableFragments {
             });
         });
         self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackfillUpstreamType {
+    MView,
+    Values,
+    Source,
+}
+
+impl BackfillUpstreamType {
+    pub fn from_fragment_type_mask(mask: u32) -> Self {
+        let is_mview = (mask & FragmentTypeFlag::StreamScan as u32) != 0;
+        let is_values = (mask & FragmentTypeFlag::Values as u32) != 0;
+        let is_source = (mask & FragmentTypeFlag::SourceScan as u32) != 0;
+
+        // Note: in theory we can have multiple backfill executors in one fragment, but currently it's not possible.
+        // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
+        debug_assert!(
+            is_mview as u8 + is_values as u8 + is_source as u8 == 1,
+            "a backfill fragment should either be mview, value or source, found {:?}",
+            mask
+        );
+
+        if is_mview {
+            BackfillUpstreamType::MView
+        } else if is_values {
+            BackfillUpstreamType::Values
+        } else if is_source {
+            BackfillUpstreamType::Source
+        } else {
+            unreachable!("invalid fragment type mask: {}", mask);
+        }
     }
 }

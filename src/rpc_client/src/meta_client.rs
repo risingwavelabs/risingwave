@@ -1423,6 +1423,26 @@ impl MetaClient {
         .join();
     }
 
+    pub async fn add_sink_fail_evet(
+        &self,
+        sink_id: u32,
+        sink_name: String,
+        connector: String,
+        error: String,
+    ) -> Result<()> {
+        let event = event_log::EventSinkFail {
+            sink_id,
+            sink_name,
+            connector,
+            error,
+        };
+        let req = AddEventLogRequest {
+            event: Some(add_event_log_request::Event::SinkFail(event)),
+        };
+        self.inner.add_event_log(req).await?;
+        Ok(())
+    }
+
     pub async fn cancel_compact_task(&self, task_id: u64, task_status: TaskStatus) -> Result<bool> {
         let req = CancelCompactTaskRequest {
             task_id,
@@ -1517,6 +1537,7 @@ impl HummockMetaClient for MetaClient {
         filtered_object_ids: Vec<HummockSstableObjectId>,
         total_object_count: u64,
         total_object_size: u64,
+        start_after: Option<String>,
         next_start_after: Option<String>,
     ) -> Result<()> {
         let req = ReportFullScanTaskRequest {
@@ -1524,6 +1545,7 @@ impl HummockMetaClient for MetaClient {
             total_object_count,
             total_object_size,
             next_start_after,
+            start_after,
         };
         self.inner.report_full_scan_task(req).await?;
         Ok(())

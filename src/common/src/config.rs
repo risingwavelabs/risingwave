@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeConfig, S3FifoConfig};
+use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -173,7 +173,6 @@ serde_with::with_prefix!(batch_prefix "batch_");
 pub enum MetaBackend {
     #[default]
     Mem,
-    Etcd,
     Sql, // keep for backward compatibility
     Sqlite,
     Postgres,
@@ -195,6 +194,14 @@ pub struct MetaConfig {
     /// Max number of object per full GC job can fetch.
     #[serde(default = "default::meta::full_gc_object_limit")]
     pub full_gc_object_limit: u64,
+
+    /// Duration in seconds to retain garbage collection history data.
+    #[serde(default = "default::meta::gc_history_retention_time_sec")]
+    pub gc_history_retention_time_sec: u64,
+
+    /// Max number of inflight time travel query.
+    #[serde(default = "default::meta::max_inflight_time_travel_query")]
+    pub max_inflight_time_travel_query: u64,
 
     /// Schedule compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
@@ -707,8 +714,8 @@ pub struct StorageConfig {
     #[serde(default)]
     pub prefetch_buffer_capacity_mb: Option<usize>,
 
-    #[serde(default)]
-    pub max_cached_recent_versions_number: Option<usize>,
+    #[serde(default = "default::storage::max_cached_recent_versions_number")]
+    pub max_cached_recent_versions_number: usize,
 
     /// max prefetch block number
     #[serde(default = "default::storage::max_prefetch_block_number")]
@@ -800,12 +807,18 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
     pub compactor_concurrent_uploading_sst_count: Option<usize>,
 
+    #[serde(default = "default::storage::compactor_max_overlap_sst_count")]
+    pub compactor_max_overlap_sst_count: usize,
+
     /// Object storage configuration
     /// 1. General configuration
     /// 2. Some special configuration of Backend
     /// 3. Retry and timeout configuration
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
+
+    #[serde(default = "default::storage::time_travel_version_cache_capacity")]
+    pub time_travel_version_cache_capacity: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -893,7 +906,7 @@ pub struct FileCacheConfig {
     pub recover_mode: RecoverMode,
 
     #[serde(default = "default::file_cache::runtime_config")]
-    pub runtime_config: RuntimeConfig,
+    pub runtime_config: RuntimeOptions,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1030,8 +1043,7 @@ pub struct StreamingDeveloperConfig {
     /// Enable arrangement backfill
     /// If false, the arrangement backfill will be disabled,
     /// even if session variable set.
-    /// If true, it will be enabled by default, but session variable
-    /// can override it.
+    /// If true, it's decided by session variable `streaming_use_arrangement_backfill` (default true)
     pub enable_arrangement_backfill: bool,
 
     #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
@@ -1051,6 +1063,13 @@ pub struct StreamingDeveloperConfig {
     /// A flag to allow disabling the auto schema change handling
     #[serde(default = "default::developer::stream_enable_auto_schema_change")]
     pub enable_auto_schema_change: bool,
+
+    #[serde(default = "default::developer::enable_shared_source")]
+    /// Enable shared source
+    /// If false, the shared source will be disabled,
+    /// even if session variable set.
+    /// If true, it's decided by session variable `streaming_use_shared_source` (default true)
+    pub enable_shared_source: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1343,15 +1362,23 @@ pub mod default {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            86400
+            3600 * 3
+        }
+
+        pub fn gc_history_retention_time_sec() -> u64 {
+            3600 * 6
         }
 
         pub fn full_gc_interval_sec() -> u64 {
-            86400
+            600
         }
 
         pub fn full_gc_object_limit() -> u64 {
             100_000
+        }
+
+        pub fn max_inflight_time_travel_query() -> u64 {
+            1000
         }
 
         pub fn periodic_compaction_interval_sec() -> u64 {
@@ -1540,6 +1567,10 @@ pub mod default {
             cfg!(debug_assertions)
         }
 
+        pub fn max_cached_recent_versions_number() -> usize {
+            60
+        }
+
         pub fn block_cache_capacity_mb() -> usize {
             512
         }
@@ -1673,6 +1704,10 @@ pub mod default {
             None
         }
 
+        pub fn compactor_max_overlap_sst_count() -> usize {
+            64
+        }
+
         pub fn table_info_statistic_history_times() -> usize {
             240
         }
@@ -1683,6 +1718,10 @@ pub mod default {
 
         pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize {
             64
+        }
+
+        pub fn time_travel_version_cache_capacity() -> u64 {
+            32
         }
     }
 
@@ -1709,7 +1748,7 @@ pub mod default {
     }
 
     pub mod file_cache {
-        use foyer::{Compression, RecoverMode, RuntimeConfig, TokioRuntimeConfig};
+        use foyer::{Compression, RecoverMode, RuntimeOptions, TokioRuntimeOptions};
 
         pub fn dir() -> String {
             "".to_string()
@@ -1755,8 +1794,8 @@ pub mod default {
             RecoverMode::None
         }
 
-        pub fn runtime_config() -> RuntimeConfig {
-            RuntimeConfig::Unified(TokioRuntimeConfig::default())
+        pub fn runtime_config() -> RuntimeOptions {
+            RuntimeOptions::Unified(TokioRuntimeOptions::default())
         }
     }
 
@@ -1931,6 +1970,10 @@ pub mod default {
             true
         }
 
+        pub fn enable_shared_source() -> bool {
+            true
+        }
+
         pub fn stream_high_join_amplification_threshold() -> usize {
             2048
         }
@@ -2084,6 +2127,10 @@ pub mod default {
 
         pub fn sst_allowed_trivial_move_min_size() -> u64 {
             DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
+        }
+
+        pub fn disable_auto_group_scheduling() -> bool {
+            false
         }
     }
 

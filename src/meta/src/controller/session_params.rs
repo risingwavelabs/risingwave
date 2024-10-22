@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::session_config::{SessionConfig, SessionConfigError};
-use risingwave_meta_model_v2::prelude::SessionParameter;
-use risingwave_meta_model_v2::session_parameter;
+use risingwave_meta_model::prelude::SessionParameter;
+use risingwave_meta_model::session_parameter;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SetSessionParamRequest;
 use sea_orm::ActiveValue::Set;
@@ -146,12 +146,11 @@ mod tests {
     use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
-    #[cfg(not(madsim))]
     async fn test_session_params() {
         use sea_orm::QueryFilter;
 
-        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
-        let meta_store = env.meta_store_ref().as_sql();
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref();
         let init_params = SessionConfig::default();
 
         // init system parameter controller as first launch.

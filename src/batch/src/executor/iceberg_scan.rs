@@ -28,6 +28,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_connector::WithOptionsSecResolved;
@@ -36,6 +37,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::BatchError;
 use crate::executor::{DataChunk, Executor};
+use crate::monitor::BatchMetrics;
 use crate::task::BatchTaskContext;
 
 static POSITION_DELETE_FILE_FILE_PATH_INDEX: usize = 0;
@@ -51,6 +53,7 @@ pub struct IcebergScanExecutor {
     batch_size: usize,
     schema: Schema,
     identity: String,
+    metrics: Option<BatchMetrics>,
 }
 
 impl Executor for IcebergScanExecutor {
@@ -78,6 +81,7 @@ impl IcebergScanExecutor {
         batch_size: usize,
         schema: Schema,
         identity: String,
+        metrics: Option<BatchMetrics>,
     ) -> Self {
         Self {
             iceberg_config,
@@ -89,6 +93,7 @@ impl IcebergScanExecutor {
             batch_size,
             schema,
             identity,
+            metrics,
         }
     }
 
@@ -100,6 +105,7 @@ impl IcebergScanExecutor {
             .await?;
         let data_types = self.schema.data_types();
         let executor_schema_names = self.schema.names();
+        let table_name = table.identifier().name().to_string();
 
         let data_file_scan_tasks = mem::take(&mut self.data_file_scan_tasks);
 
@@ -119,6 +125,20 @@ impl IcebergScanExecutor {
         .await?;
 
         // Delete rows in the data file that need to be deleted by map
+        let mut read_bytes = 0;
+        let _metrics_report_guard = scopeguard::guard(
+            (read_bytes, table_name, self.metrics.clone()),
+            |(read_bytes, table_name, metrics)| {
+                if let Some(metrics) = metrics {
+                    metrics
+                        .iceberg_scan_metrics()
+                        .iceberg_read_bytes
+                        .with_guarded_label_values(&[&table_name])
+                        .inc_by(read_bytes as _);
+                }
+            },
+        );
+
         for data_file_scan_task in data_file_scan_tasks {
             let data_file_path = data_file_scan_task.data_file_path.clone();
             let data_sequence_number = data_file_scan_task.sequence_number;
@@ -131,13 +151,10 @@ impl IcebergScanExecutor {
                 .build();
             let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
-            let mut record_batch_stream = reader
-                .read(Box::pin(file_scan_stream))
-                .map_err(BatchError::Iceberg)?
-                .enumerate();
+            let mut record_batch_stream = reader.read(Box::pin(file_scan_stream))?.enumerate();
 
             while let Some((index, record_batch)) = record_batch_stream.next().await {
-                let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+                let record_batch = record_batch?;
 
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
                 // position delete
@@ -145,6 +162,7 @@ impl IcebergScanExecutor {
                 // equality delete
                 let chunk = equality_delete_filter.filter(chunk, data_sequence_number)?;
                 assert_eq!(chunk.data_types(), data_types);
+                read_bytes += chunk.estimated_heap_size() as u64;
                 yield chunk;
             }
             position_delete_filter.remove_file_path(&data_file_path);
@@ -174,8 +192,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             source_node.with_properties.clone(),
             source_node.secret_refs.clone(),
         );
-        let config = ConnectorProperties::extract(options_with_secret.clone(), false)
-            .map_err(BatchError::connector)?;
+        let config = ConnectorProperties::extract(options_with_secret.clone(), false)?;
 
         let split_list = source_node
             .split
@@ -195,6 +212,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             })
             .collect();
         let schema = Schema::new(fields);
+        let metrics = source.context.batch_metrics().clone();
 
         if let ConnectorProperties::Iceberg(iceberg_properties) = config
             && let SplitImpl::Iceberg(split) = &split_list[0]
@@ -219,6 +237,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 source.context.get_config().developer.chunk_size,
                 schema,
                 source.plan_node().get_identity().clone(),
+                metrics,
             )))
         } else {
             unreachable!()
@@ -256,12 +275,10 @@ impl PositionDeleteFilter {
 
         let reader = table.reader_builder().with_batch_size(batch_size).build();
 
-        let mut record_batch_stream = reader
-            .read(Box::pin(position_delete_file_scan_stream))
-            .map_err(BatchError::Iceberg)?;
+        let mut record_batch_stream = reader.read(Box::pin(position_delete_file_scan_stream))?;
 
         while let Some(record_batch) = record_batch_stream.next().await {
-            let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+            let record_batch = record_batch?;
             let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
             for row in chunk.rows() {
                 // The schema is fixed. `0` must be `file_path`, `1` must be `pos`.
@@ -359,12 +376,10 @@ impl EqualityDeleteFilter {
             let reader = table.reader_builder().with_batch_size(batch_size).build();
             let delete_file_scan_stream = tokio_stream::once(Ok(equality_delete_file_scan_task));
 
-            let mut delete_record_batch_stream = reader
-                .read(Box::pin(delete_file_scan_stream))
-                .map_err(BatchError::Iceberg)?;
+            let mut delete_record_batch_stream = reader.read(Box::pin(delete_file_scan_stream))?;
 
             while let Some(record_batch) = delete_record_batch_stream.next().await {
-                let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+                let record_batch = record_batch?;
 
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
                 for row in chunk.rows() {

@@ -36,7 +36,7 @@ use risingwave_common::must_match;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
 use task_manager::{TaskManager, UploadingTaskStatus};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
@@ -1089,6 +1089,21 @@ impl UploaderData {
             send_sync_result(syncing_data.sync_result_sender, Err(err()));
         }
     }
+
+    fn min_uncommitted_sst_id(&self) -> Option<HummockSstableObjectId> {
+        self.spilled_data
+            .values()
+            .map(|(s, _)| s)
+            .chain(self.syncing_data.values().flat_map(|s| s.uploaded.iter()))
+            .filter_map(|s| {
+                s.sstable_infos()
+                    .iter()
+                    .chain(s.old_value_sstable_infos())
+                    .map(|s| s.sst_info.sst_id)
+                    .min()
+            })
+            .min()
+    }
 }
 
 struct ErrState {
@@ -1328,6 +1343,14 @@ impl HummockUploader {
             )
         }
         data.check_upload_task_consistency();
+    }
+
+    pub(crate) fn min_uncommitted_sst_id(&self) -> Option<HummockSstableObjectId> {
+        if let UploaderState::Working(ref u) = self.state {
+            u.min_uncommitted_sst_id()
+        } else {
+            None
+        }
     }
 }
 

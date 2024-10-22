@@ -109,6 +109,8 @@ pub struct StreamingMetrics {
     agg_distinct_cache_miss_count: LabelGuardedIntCounterVec<3>,
     agg_distinct_total_cache_count: LabelGuardedIntCounterVec<3>,
     agg_distinct_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    agg_state_cache_lookup_count: LabelGuardedIntCounterVec<3>,
+    agg_state_cache_miss_count: LabelGuardedIntCounterVec<3>,
 
     // Streaming TopN
     group_top_n_cache_miss_count: LabelGuardedIntCounterVec<3>,
@@ -148,6 +150,9 @@ pub struct StreamingMetrics {
     over_window_range_cache_lookup_count: LabelGuardedIntCounterVec<3>,
     over_window_range_cache_left_miss_count: LabelGuardedIntCounterVec<3>,
     over_window_range_cache_right_miss_count: LabelGuardedIntCounterVec<3>,
+    over_window_accessed_entry_count: LabelGuardedIntCounterVec<3>,
+    over_window_compute_count: LabelGuardedIntCounterVec<3>,
+    over_window_same_output_count: LabelGuardedIntCounterVec<3>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -547,6 +552,22 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let agg_state_cache_lookup_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_agg_state_cache_lookup_count",
+            "Aggregation executor state cache lookup count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_state_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_agg_state_cache_miss_count",
+            "Aggregation executor state cache miss count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let group_top_n_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_group_top_n_cache_miss_count",
             "Group top n executor cache miss count",
@@ -769,6 +790,30 @@ impl StreamingMetrics {
                 registry
             )
             .unwrap();
+
+        let over_window_accessed_entry_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_over_window_accessed_entry_count",
+            "Over window accessed entry count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_compute_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_over_window_compute_count",
+            "Over window compute count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_same_output_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_over_window_same_output_count",
+            "Over window same output count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
 
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
@@ -1034,6 +1079,8 @@ impl StreamingMetrics {
             agg_distinct_cache_miss_count,
             agg_distinct_total_cache_count,
             agg_distinct_cached_entry_count,
+            agg_state_cache_lookup_count,
+            agg_state_cache_miss_count,
             group_top_n_cache_miss_count,
             group_top_n_total_query_cache_count,
             group_top_n_cached_entry_count,
@@ -1058,6 +1105,9 @@ impl StreamingMetrics {
             over_window_range_cache_lookup_count,
             over_window_range_cache_left_miss_count,
             over_window_range_cache_right_miss_count,
+            over_window_accessed_entry_count,
+            over_window_compute_count,
+            over_window_same_output_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             barrier_manager_progress,
@@ -1293,6 +1343,12 @@ impl StreamingMetrics {
             agg_dirty_groups_heap_size: self
                 .agg_dirty_groups_heap_size
                 .with_guarded_label_values(label_list),
+            agg_state_cache_lookup_count: self
+                .agg_state_cache_lookup_count
+                .with_guarded_label_values(label_list),
+            agg_state_cache_miss_count: self
+                .agg_state_cache_miss_count
+                .with_guarded_label_values(label_list),
         }
     }
 
@@ -1405,6 +1461,15 @@ impl StreamingMetrics {
             over_window_range_cache_right_miss_count: self
                 .over_window_range_cache_right_miss_count
                 .with_guarded_label_values(label_list),
+            over_window_accessed_entry_count: self
+                .over_window_accessed_entry_count
+                .with_guarded_label_values(label_list),
+            over_window_compute_count: self
+                .over_window_compute_count
+                .with_guarded_label_values(label_list),
+            over_window_same_output_count: self
+                .over_window_same_output_count
+                .with_guarded_label_values(label_list),
         }
     }
 
@@ -1484,6 +1549,8 @@ pub struct HashAggMetrics {
     pub agg_chunk_total_lookup_count: LabelGuardedIntCounter<3>,
     pub agg_dirty_groups_count: LabelGuardedIntGauge<3>,
     pub agg_dirty_groups_heap_size: LabelGuardedIntGauge<3>,
+    pub agg_state_cache_lookup_count: LabelGuardedIntCounter<3>,
+    pub agg_state_cache_miss_count: LabelGuardedIntCounter<3>,
 }
 
 pub struct AggDistinctDedupMetrics {
@@ -1516,4 +1583,7 @@ pub struct OverWindowMetrics {
     pub over_window_range_cache_lookup_count: LabelGuardedIntCounter<3>,
     pub over_window_range_cache_left_miss_count: LabelGuardedIntCounter<3>,
     pub over_window_range_cache_right_miss_count: LabelGuardedIntCounter<3>,
+    pub over_window_accessed_entry_count: LabelGuardedIntCounter<3>,
+    pub over_window_compute_count: LabelGuardedIntCounter<3>,
+    pub over_window_same_output_count: LabelGuardedIntCounter<3>,
 }

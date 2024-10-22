@@ -19,17 +19,17 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash;
 use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
-use risingwave_meta_model_migration::WithQuery;
-use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::fragment::DistributionType;
-use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::*;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::actor::ActorStatus;
+use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
     view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
     PrivilegeId, SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
 };
+use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
 };
@@ -1082,7 +1082,13 @@ where
     ))
 }
 
-pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> NotificationInfo {
+/// Build a relation group for notifying the deletion of the given objects.
+///
+/// Note that only id fields are filled in the relation info, as the arguments are partial objects.
+/// As a result, the returned notification info should only be used for deletion.
+pub(crate) fn build_relation_group_for_delete(
+    relation_objects: Vec<PartialObject>,
+) -> NotificationInfo {
     let mut relations = vec![];
     for obj in relation_objects {
         match obj.obj_type {
@@ -1168,5 +1174,24 @@ pub fn extract_external_table_name_from_definition(table_definition: &str) -> Op
             .map(|cdc_table_info| cdc_table_info.external_table_name)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_cdc_table_name() {
+        let ddl1 = "CREATE TABLE t1 () FROM pg_source TABLE 'public.t1'";
+        let ddl2 = "CREATE TABLE t2 (v1 int) FROM pg_source TABLE 'mydb.t2'";
+        assert_eq!(
+            extract_external_table_name_from_definition(ddl1),
+            Some("public.t1".into())
+        );
+        assert_eq!(
+            extract_external_table_name_from_definition(ddl2),
+            Some("mydb.t2".into())
+        );
     }
 }

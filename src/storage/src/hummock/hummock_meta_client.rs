@@ -92,6 +92,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         filtered_object_ids: Vec<HummockSstableObjectId>,
         total_object_count: u64,
         total_object_size: u64,
+        start_after: Option<String>,
         next_start_after: Option<String>,
     ) -> Result<()> {
         self.meta_client
@@ -99,6 +100,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
                 filtered_object_ids,
                 total_object_count,
                 total_object_size,
+                start_after,
                 next_start_after,
             )
             .await

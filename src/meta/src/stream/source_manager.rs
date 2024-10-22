@@ -29,6 +29,7 @@ use risingwave_connector::source::{
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
+use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
@@ -40,7 +41,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{MetadataManager, SourceId};
+use crate::manager::MetadataManager;
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
@@ -55,10 +56,11 @@ pub struct SourceManager {
     pub paused: Mutex<()>,
     barrier_scheduler: BarrierScheduler,
     core: Mutex<SourceManagerCore>,
-    metrics: Arc<MetaMetrics>,
+    pub metrics: Arc<MetaMetrics>,
 }
 
 const MAX_FAIL_CNT: u32 = 10;
+const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct SharedSplitMap {
     splits: Option<BTreeMap<SplitId, SplitImpl>>,
@@ -95,6 +97,56 @@ fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorPro
     Ok(properties)
 }
 
+/// Used to create a new `ConnectorSourceWorkerHandle` for a new source.
+///
+/// It will call `ConnectorSourceWorker::tick()` to fetch split metadata once before returning.
+pub async fn create_source_worker_handle(
+    source: &Source,
+    metrics: Arc<MetaMetrics>,
+) -> MetaResult<ConnectorSourceWorkerHandle> {
+    tracing::info!("spawning new watcher for source {}", source.id);
+
+    let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+    let current_splits_ref = splits.clone();
+
+    let connector_properties = extract_prop_from_new_source(source)?;
+    let enable_scale_in = connector_properties.enable_split_scale_in();
+    let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+    let handle = dispatch_source_prop!(connector_properties, prop, {
+        let mut worker = ConnectorSourceWorker::create(
+            source,
+            *prop,
+            DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
+            current_splits_ref.clone(),
+            metrics,
+        )
+        .await?;
+
+        // if fail to fetch meta info, will refuse to create source
+
+        // todo: make the timeout configurable, longer than `properties.sync.call.timeout`
+        // in kafka
+        tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
+            .await
+            .ok()
+            .with_context(|| {
+                format!(
+                    "failed to fetch meta info for source {}, timeout {:?}",
+                    source.id, DEFAULT_SOURCE_TICK_TIMEOUT
+                )
+            })??;
+
+        tokio::spawn(async move { worker.run(sync_call_rx).await })
+    });
+
+    Ok(ConnectorSourceWorkerHandle {
+        handle,
+        sync_call_tx,
+        splits,
+        enable_scale_in,
+    })
+}
+
 const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
 
 impl<P: SourceProperties> ConnectorSourceWorker<P> {
@@ -105,7 +157,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
             Arc::new(SourceEnumeratorContext {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
-                    source_id: self.source_id,
+                    source_id: self.source_id as u32,
                 },
             }),
         )
@@ -143,7 +195,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
             .with_guarded_label_values(&[source.id.to_string().as_str(), &source.name]);
 
         Ok(Self {
-            source_id: source.id,
+            source_id: source.id as SourceId,
             source_name: source.name.clone(),
             current_splits: splits,
             enumerator,
@@ -207,7 +259,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
 }
 
 /// Handle for a running [`ConnectorSourceWorker`].
-struct ConnectorSourceWorkerHandle {
+pub struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
@@ -625,7 +677,6 @@ fn align_backfill_splits(
 
 impl SourceManager {
     const DEFAULT_SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
-    const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
     pub async fn new(
         barrier_scheduler: BarrierScheduler,
@@ -640,71 +691,50 @@ impl SourceManager {
             }
         }
 
-        let mut actor_splits = HashMap::new();
-        let mut source_fragments = HashMap::new();
-        let mut backfill_fragments = HashMap::new();
-
-        match &metadata_manager {
-            MetadataManager::V1(mgr) => {
-                for table_fragments in mgr
-                    .fragment_manager
-                    .get_fragment_read_guard()
-                    .await
-                    .table_fragments()
-                    .values()
-                {
-                    source_fragments.extend(table_fragments.stream_source_fragments());
-                    backfill_fragments.extend(table_fragments.source_backfill_fragments()?);
-                    actor_splits.extend(table_fragments.actor_splits.clone());
-                }
-            }
-            MetadataManager::V2(mgr) => {
-                source_fragments = mgr
-                    .catalog_controller
-                    .load_source_fragment_ids()
-                    .await?
-                    .into_iter()
-                    .map(|(source_id, fragment_ids)| {
-                        (
-                            source_id as SourceId,
-                            fragment_ids.into_iter().map(|id| id as _).collect(),
-                        )
-                    })
-                    .collect();
-                backfill_fragments = mgr
-                    .catalog_controller
-                    .load_backfill_fragment_ids()
-                    .await?
-                    .into_iter()
-                    .map(|(source_id, fragment_ids)| {
-                        (
-                            source_id as SourceId,
-                            fragment_ids
-                                .into_iter()
-                                .map(|(id, up_id)| (id as _, up_id as _))
-                                .collect(),
-                        )
-                    })
-                    .collect();
-                actor_splits = mgr
-                    .catalog_controller
-                    .load_actor_splits()
-                    .await?
-                    .into_iter()
-                    .map(|(actor_id, splits)| {
-                        (
-                            actor_id as ActorId,
-                            splits
-                                .to_protobuf()
-                                .splits
-                                .iter()
-                                .map(|split| SplitImpl::try_from(split).unwrap())
-                                .collect(),
-                        )
-                    })
-                    .collect();
-            }
-        }
+        let source_fragments = metadata_manager
+            .catalog_controller
+            .load_source_fragment_ids()
+            .await?
+            .into_iter()
+            .map(|(source_id, fragment_ids)| {
+                (
+                    source_id as SourceId,
+                    fragment_ids.into_iter().map(|id| id as _).collect(),
+                )
+            })
+            .collect();
+        let backfill_fragments = metadata_manager
+            .catalog_controller
+            .load_backfill_fragment_ids()
+            .await?
+            .into_iter()
+            .map(|(source_id, fragment_ids)| {
+                (
+                    source_id as SourceId,
+                    fragment_ids
+                        .into_iter()
+                        .map(|(id, up_id)| (id as _, up_id as _))
+                        .collect(),
+                )
+            })
+            .collect();
+        let actor_splits = metadata_manager
+            .catalog_controller
+            .load_actor_splits()
+            .await?
+            .into_iter()
+            .map(|(actor_id, splits)| {
+                (
+                    actor_id as ActorId,
+                    splits
+                        .to_protobuf()
+                        .splits
+                        .iter()
+                        .map(|split| SplitImpl::try_from(split).unwrap())
+                        .collect(),
+                )
+            })
+            .collect();
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,
@@ -722,7 +752,7 @@ impl SourceManager {
         })
     }
 
-    pub async fn drop_source_fragments_v2(
+    pub async fn drop_source_fragments(
         &self,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         removed_actors: HashSet<ActorId>,
@@ -732,7 +762,7 @@ impl SourceManager {
     }
 
     /// For dropping MV.
-    pub async fn drop_source_fragments(&self, table_fragments: &[TableFragments]) {
+    pub async fn drop_source_fragments_vec(&self, table_fragments: &[TableFragments]) {
         let mut core = self.core.lock().await;
 
         // Extract the fragments that include source operators.
@@ -969,17 +999,32 @@ impl SourceManager {
         Ok(assigned)
     }
 
-    /// register connector worker for source.
+    /// create and register connector worker for source.
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         let mut core = self.core.lock().await;
-        if core.managed_sources.contains_key(&source.get_id()) {
-            tracing::warn!("source {} already registered", source.get_id());
-        } else {
-            Self::create_source_worker(source, &mut core.managed_sources, self.metrics.clone())
+        if let Entry::Vacant(e) = core.managed_sources.entry(source.get_id() as _) {
+            let handle = create_source_worker_handle(source, self.metrics.clone())
                 .await
                 .context("failed to create source worker")?;
+            e.insert(handle);
+        } else {
+            tracing::warn!("source {} already registered", source.get_id());
         }
         Ok(())
+    }
+
+    /// register connector worker for source.
+    pub async fn register_source_with_handle(
+        &self,
+        source_id: SourceId,
+        handle: ConnectorSourceWorkerHandle,
+    ) {
+        let mut core = self.core.lock().await;
+        if let Entry::Vacant(e) = core.managed_sources.entry(source_id) {
+            e.insert(handle);
+        } else {
+            tracing::warn!("source {} already registered", source_id);
+        }
     }
 
     /// Unregister connector worker for source.
@@ -1038,7 +1083,7 @@ impl SourceManager {
         });
 
         managed_sources.insert(
-            source_id,
+            source_id as SourceId,
             ConnectorSourceWorkerHandle {
                 handle,
                 sync_call_tx,
@@ -1046,64 +1091,6 @@ impl SourceManager {
                 enable_scale_in,
             },
         );
-        Ok(())
-    }
-
-    /// Used when registering new sources (`Self::register_source`).
-    ///
-    /// It will call `ConnectorSourceWorker::tick()` to fetch split metadata once before returning.
-    async fn create_source_worker(
-        source: &Source,
-        managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
-        metrics: Arc<MetaMetrics>,
-    ) -> MetaResult<()> {
-        tracing::info!("spawning new watcher for source {}", source.id);
-
-        let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
-        let current_splits_ref = splits.clone();
-        let source_id = source.id;
-
-        let connector_properties = extract_prop_from_new_source(source)?;
-        let enable_scale_in = connector_properties.enable_split_scale_in();
-        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
-        let handle = dispatch_source_prop!(connector_properties, prop, {
-            let mut worker = ConnectorSourceWorker::create(
-                source,
-                *prop,
-                DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
-                current_splits_ref.clone(),
-                metrics,
-            )
-            .await?;
-
-            // if fail to fetch meta info, will refuse to create source
-
-            // todo: make the timeout configurable, longer than `properties.sync.call.timeout`
-            // in kafka
-            tokio::time::timeout(Self::DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
-                .await
-                .ok()
-                .with_context(|| {
-                    format!(
-                        "failed to fetch meta info for source {}, timeout {:?}",
-                        source.id,
-                        Self::DEFAULT_SOURCE_TICK_TIMEOUT
-                    )
-                })??;
-
-            tokio::spawn(async move { worker.run(sync_call_rx).await })
-        });
-
-        managed_sources.insert(
-            source_id,
-            ConnectorSourceWorkerHandle {
-                handle,
-                sync_call_tx,
-                splits,
-                enable_scale_in,
-            },
-        );
-
         Ok(())
     }
 

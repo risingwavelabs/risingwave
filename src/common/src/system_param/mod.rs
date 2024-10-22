@@ -91,7 +91,7 @@ macro_rules! for_all_params {
             { enable_tracing,                           bool,                           Some(false),                    true,   "Whether to enable distributed tracing.", },
             { use_new_object_prefix_strategy,           bool,                           None,                           false,  "Whether to split object prefix.", },
             { license_key,                              risingwave_license::LicenseKey, Some(Default::default()),       true,   "The license key to activate enterprise features.", },
-            { time_travel_retention_ms,                 u64,                            Some(0_u64),                    true,   "The data retention period for time travel, where 0 indicates that it's disabled.", },
+            { time_travel_retention_ms,                 u64,                            Some(600000_u64),              true,   "The data retention period for time travel.", },
         }
     };
 }
@@ -416,6 +416,17 @@ impl ValidateOnSet for OverrideValidateOnSet {
     fn backup_storage_url(v: &String) -> Result<()> {
         if v.trim().is_empty() {
             return Err("backup_storage_url cannot be empty".into());
+        }
+        Ok(())
+    }
+
+    fn time_travel_retention_ms(v: &u64) -> Result<()> {
+        // This is intended to guarantee that non-time-travel batch query can still function even compute node's recent versions doesn't include the desired version.
+        let min_retention_ms = 600_000;
+        if *v < min_retention_ms {
+            return Err(format!(
+                "time_travel_retention_ms cannot be less than {min_retention_ms}"
+            ));
         }
         Ok(())
     }

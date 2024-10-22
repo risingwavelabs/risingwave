@@ -239,7 +239,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         };
 
         if encoded_states.is_some() {
-            let (_, outputs) = this.get_outputs(storages, agg_funcs).await?;
+            let (_, outputs, _stats) = this.get_outputs(storages, agg_funcs).await?;
             this.prev_outputs = Some(outputs);
         }
 
@@ -405,7 +405,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         &mut self,
         storages: &[AggStateStorage<S>],
         funcs: &[BoxedAggregateFunction],
-    ) -> StreamExecutorResult<(usize, OwnedRow)> {
+    ) -> StreamExecutorResult<(usize, OwnedRow, AggStateCacheStats)> {
         let row_count = self.curr_row_count();
         if row_count == 0 {
             // Reset all states (in fact only value states will be reset).
@@ -415,6 +415,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             // correct, see https://github.com/risingwavelabs/risingwave/issues/7412 for bug description.
             self.reset(funcs)?;
         }
+        let mut stats = AggStateCacheStats::default();
         futures::future::try_join_all(
             self.states
                 .iter_mut()
@@ -425,7 +426,16 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 }),
         )
         .await
-        .map(|row| (row_count, OwnedRow::new(row)))
+        .map(|outputs_and_stats| {
+            outputs_and_stats
+                .into_iter()
+                .map(|(output, stat)| {
+                    stats.merge(stat);
+                    output
+                })
+                .collect::<Vec<_>>()
+        })
+        .map(|row| (row_count, OwnedRow::new(row), stats))
     }
 
     /// Build aggregation result change, according to previous and current agg outputs.
@@ -434,9 +444,9 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         &mut self,
         storages: &[AggStateStorage<S>],
         funcs: &[BoxedAggregateFunction],
-    ) -> StreamExecutorResult<Option<Record<OwnedRow>>> {
+    ) -> StreamExecutorResult<(Option<Record<OwnedRow>>, AggStateCacheStats)> {
         let prev_row_count = self.prev_row_count();
-        let (curr_row_count, curr_outputs) = self.get_outputs(storages, funcs).await?;
+        let (curr_row_count, curr_outputs, stats) = self.get_outputs(storages, funcs).await?;
 
         let change_type = Strtg::infer_change_type(
             prev_row_count,
@@ -453,7 +463,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             "build change"
         );
 
-        Ok(change_type.map(|change_type| match change_type {
+        let change = change_type.map(|change_type| match change_type {
             RecordType::Insert => {
                 let new_row = self
                     .group_key()
@@ -486,6 +496,22 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                     .into_owned_row();
                 Record::Update { old_row, new_row }
             }
-        }))
+        });
+
+        Ok((change, stats))
+    }
+}
+
+/// Stats for agg state cache operations.
+#[derive(Debug, Default)]
+pub struct AggStateCacheStats {
+    pub agg_state_cache_lookup_count: u64,
+    pub agg_state_cache_miss_count: u64,
+}
+
+impl AggStateCacheStats {
+    fn merge(&mut self, other: Self) {
+        self.agg_state_cache_lookup_count += other.agg_state_cache_lookup_count;
+        self.agg_state_cache_miss_count += other.agg_state_cache_miss_count;
     }
 }

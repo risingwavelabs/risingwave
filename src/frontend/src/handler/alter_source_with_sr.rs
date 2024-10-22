@@ -228,6 +228,9 @@ pub async fn handle_alter_source_with_sr(
         )
         .into());
     };
+    if source.info.is_shared() {
+        bail_not_implemented!(issue = 16003, "alter shared source");
+    }
 
     check_format_encode(&source, &connector_schema)?;
 
@@ -345,7 +348,14 @@ pub mod tests {
         let session = frontend.session_ref();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
-        frontend.run_sql(sql).await.unwrap();
+        frontend
+            .run_sql_with_session(session.clone(), "SET streaming_use_shared_source TO false;")
+            .await
+            .unwrap();
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
 
         let get_source = || {
             let catalog_reader = session.env().catalog_reader().read_guard();

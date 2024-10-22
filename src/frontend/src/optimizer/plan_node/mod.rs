@@ -922,9 +922,11 @@ mod stream_watermark_filter;
 mod batch_file_scan;
 mod batch_iceberg_scan;
 mod batch_kafka_scan;
+mod batch_postgres_query;
 mod derive;
 mod logical_file_scan;
 mod logical_iceberg_scan;
+mod logical_postgres_query;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
@@ -949,6 +951,7 @@ pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_over_window::BatchOverWindow;
+pub use batch_postgres_query::BatchPostgresQuery;
 pub use batch_project::BatchProject;
 pub use batch_project_set::BatchProjectSet;
 pub use batch_seq_scan::BatchSeqScan;
@@ -984,6 +987,7 @@ pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
 pub use logical_over_window::LogicalOverWindow;
+pub use logical_postgres_query::LogicalPostgresQuery;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_recursive_union::LogicalRecursiveUnion;
@@ -1095,6 +1099,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, CteRef }
             , { Logical, ChangeLog }
             , { Logical, FileScan }
+            , { Logical, PostgresQuery }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1126,6 +1131,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
             , { Batch, FileScan }
+            , { Batch, PostgresQuery }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1207,6 +1213,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, CteRef }
             , { Logical, ChangeLog }
             , { Logical, FileScan }
+            , { Logical, PostgresQuery }
         }
     };
 }
@@ -1247,6 +1254,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
             , { Batch, FileScan }
+            , { Batch, PostgresQuery }
         }
     };
 }

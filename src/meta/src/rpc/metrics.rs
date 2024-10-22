@@ -34,12 +34,11 @@ use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
 };
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::stream_plan::stream_node::NodeBody::Sink;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -84,9 +83,6 @@ pub struct MetaMetrics {
     pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec<2>, // (table_id, barrier_type)
     /// The latency of commit epoch of `table_id`
     pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec<1>, // (table_id, )
-    /// The latency that the upstream waits on the snapshot backfill progress after the upstream
-    /// has collected the barrier.
-    pub snapshot_backfill_upstream_wait_progress_latency: LabelGuardedHistogramVec<1>, /* (table_id, ) */
     /// The lags between the upstream epoch and the downstream epoch.
     pub snapshot_backfill_lag: LabelGuardedIntGaugeVec<1>, // (table_id, )
     /// The number of inflight barriers of `table_id`
@@ -283,13 +279,7 @@ impl MetaMetrics {
         );
         let snapshot_backfill_wait_commit_latency =
             register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let opts = histogram_opts!(
-            "meta_snapshot_backfill_upstream_wait_progress_latency",
-            "snapshot backfill upstream_wait_progress_latency",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
-        );
-        let snapshot_backfill_upstream_wait_progress_latency =
-            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+
         let snapshot_backfill_lag = register_guarded_int_gauge_vec_with_registry!(
             "meta_snapshot_backfill_upstream_lag",
             "snapshot backfill upstream_lag",
@@ -760,7 +750,6 @@ impl MetaMetrics {
             last_committed_barrier_time,
             snapshot_backfill_barrier_latency,
             snapshot_backfill_wait_commit_latency,
-            snapshot_backfill_upstream_wait_progress_latency,
             snapshot_backfill_lag,
             snapshot_backfill_inflight_barrier_num,
             recovery_failure_cnt,
@@ -897,7 +886,7 @@ pub fn start_worker_info_monitor(
     (join_handle, shutdown_tx)
 }
 
-pub async fn refresh_fragment_info_metrics_v2(
+pub async fn refresh_fragment_info_metrics(
     catalog_controller: &CatalogControllerRef,
     cluster_controller: &ClusterControllerRef,
     hummock_manager: &HummockManagerRef,
@@ -1039,106 +1028,13 @@ pub fn start_fragment_info_monitor(
                 }
             }
 
-            let (cluster_manager, catalog_manager, fragment_manager) = match &metadata_manager {
-                MetadataManager::V1(mgr) => (
-                    &mgr.cluster_manager,
-                    &mgr.catalog_manager,
-                    &mgr.fragment_manager,
-                ),
-                MetadataManager::V2(mgr) => {
-                    refresh_fragment_info_metrics_v2(
-                        &mgr.catalog_controller,
-                        &mgr.cluster_controller,
-                        &hummock_manager,
-                        meta_metrics.clone(),
-                    )
-                    .await;
-                    continue;
-                }
-            };
-
-            // Start fresh with a reset to clear all outdated labels. This is safe since we always
-            // report full info on each interval.
-            meta_metrics.actor_info.reset();
-            meta_metrics.table_info.reset();
-            meta_metrics.sink_info.reset();
-            let workers: HashMap<u32, String> = cluster_manager
-                .list_worker_node(Some(WorkerType::ComputeNode), None)
-                .await
-                .into_iter()
-                .map(|worker_node| match worker_node.host {
-                    Some(host) => (worker_node.id, format!("{}:{}", host.host, host.port)),
-                    None => (worker_node.id, "".to_owned()),
-                })
-                .collect();
-            let table_name_and_type_mapping =
-                catalog_manager.get_table_name_and_type_mapping().await;
-            let table_compaction_group_id_mapping = hummock_manager
-                .get_table_compaction_group_id_mapping()
-                .await;
-
-            let core = fragment_manager.get_fragment_read_guard().await;
-            for table_fragments in core.table_fragments().values() {
-                let mv_id_str = table_fragments.table_id().to_string();
-                for (fragment_id, fragment) in &table_fragments.fragments {
-                    let fragment_id_str = fragment_id.to_string();
-                    for actor in &fragment.actors {
-                        let actor_id_str = actor.actor_id.to_string();
-                        // Report a dummy gauge metrics with (fragment id, actor id, node
-                        // address) as its label
-                        if let Some(actor_status) =
-                            table_fragments.actor_status.get(&actor.actor_id)
-                        {
-                            if let Some(address) = workers.get(&actor_status.worker_id()) {
-                                meta_metrics
-                                    .actor_info
-                                    .with_label_values(&[&actor_id_str, &fragment_id_str, address])
-                                    .set(1);
-                            }
-                        }
-
-                        if let Some(stream_node) = &actor.nodes {
-                            if let Some(Sink(sink_node)) = &stream_node.node_body {
-                                let (sink_id, sink_name) = match &sink_node.sink_desc {
-                                    Some(sink_desc) => (sink_desc.id, sink_desc.name.as_str()),
-                                    _ => (0, "unknown"), // unreachable
-                                };
-                                let sink_id_str = sink_id.to_string();
-                                meta_metrics
-                                    .sink_info
-                                    .with_label_values(&[&actor_id_str, &sink_id_str, sink_name])
-                                    .set(1);
-                            }
-                        }
-                    }
-                    // Report a dummy gauge metrics with (materialized_view_id, table id, fragment_id, compaction_group_id,  table
-                    // name) as its label
-
-                    for table_id in &fragment.state_table_ids {
-                        let table_id_str = table_id.to_string();
-                        let (table_name, table_type) = table_name_and_type_mapping
-                            .get(table_id)
-                            .cloned()
-                            .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
-                        let compaction_group_id = table_compaction_group_id_mapping
-                            .get(table_id)
-                            .map(|cg_id| cg_id.to_string())
-                            .unwrap_or_else(|| "unknown".to_string());
-
-                        meta_metrics
-                            .table_info
-                            .with_label_values(&[
-                                &mv_id_str,
-                                &table_id_str,
-                                &fragment_id_str,
-                                &table_name,
-                                &table_type,
-                                &compaction_group_id,
-                            ])
-                            .set(1);
-                    }
-                }
-            }
+            refresh_fragment_info_metrics(
+                &metadata_manager.catalog_controller,
+                &metadata_manager.cluster_controller,
+                &hummock_manager,
+                meta_metrics.clone(),
+            )
+            .await;
         }
     });
 

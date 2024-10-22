@@ -251,19 +251,22 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
         let req = request.into_inner();
         let hummock_manager = self.hummock_manager.clone();
-        hummock_manager
-            .metrics
-            .total_object_count
-            .set(req.total_object_count as _);
-        hummock_manager
-            .metrics
-            .total_object_size
-            .set(req.total_object_size as _);
+        hummock_manager.update_paged_metrics(
+            req.start_after,
+            req.next_start_after.clone(),
+            req.total_object_count,
+            req.total_object_size,
+        );
+        let pinned_by_metadata_backup = self.vacuum_manager.backup_manager.list_pinned_ssts();
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {
             match hummock_manager
-                .complete_full_gc(req.object_ids, req.next_start_after)
+                .complete_full_gc(
+                    req.object_ids,
+                    req.next_start_after,
+                    pinned_by_metadata_backup,
+                )
                 .await
             {
                 Ok(number) => {
@@ -359,8 +362,7 @@ impl HummockManagerService for HummockServiceImpl {
         } = request.into_inner();
 
         self.hummock_manager
-            .init_metadata_for_version_replay(tables, compaction_groups)
-            .await?;
+            .init_metadata_for_version_replay(tables, compaction_groups)?;
         Ok(Response::new(InitMetadataForReplayResponse {}))
     }
 

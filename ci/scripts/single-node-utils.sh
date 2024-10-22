@@ -10,7 +10,6 @@ export RISEDEV=1 # as if we are running in RiseDev
 
 # You can fill up this section by consulting
 # .risingwave/log/risedev.log, after calling `risedev d full`.
-# It is expected that minio, etcd will be started after this is called.
 start_single_node() {
   mkdir -p "$HOME/.risingwave/state_store"
   mkdir -p "$HOME/.risingwave/meta_store"

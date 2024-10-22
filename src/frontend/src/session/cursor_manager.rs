@@ -15,6 +15,7 @@
 use core::mem;
 use core::time::Duration;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -225,6 +226,34 @@ enum State {
         init_query_timer: Instant,
     },
     Invalid,
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            State::InitLogStoreQuery {
+                seek_timestamp,
+                expected_timestamp,
+            } => write!(
+                f,
+                "InitLogStoreQuery {{ seek_timestamp: {}, expected_timestamp: {:?} }}",
+                seek_timestamp, expected_timestamp
+            ),
+            State::Fetch {
+                from_snapshot,
+                rw_timestamp,
+                expected_timestamp,
+                remaining_rows,
+                init_query_timer,
+                ..
+            } => write!(
+                f,
+                "Fetch {{ from_snapshot: {}, rw_timestamp: {}, expected_timestamp: {:?}, cached rows: {}, query init at {}ms before }}",
+                from_snapshot, rw_timestamp, expected_timestamp, remaining_rows.len(), init_query_timer.elapsed().as_millis()
+            ),
+            State::Invalid => write!(f, "Invalid"),
+        }
+    }
 }
 
 pub struct SubscriptionCursor {
@@ -811,6 +840,18 @@ impl SubscriptionCursor {
         }
         chunk_stream.init_row_stream(&fields, &formats, session);
     }
+
+    pub fn idle_duration(&self) -> Duration {
+        self.last_fetch.elapsed()
+    }
+
+    pub fn subscription_name(&self) -> &str {
+        self.subscription.name.as_str()
+    }
+
+    pub fn state_info_string(&self) -> String {
+        format!("{}", self.state)
+    }
 }
 
 pub struct CursorManager {
@@ -960,64 +1001,28 @@ impl CursorManager {
         }
     }
 
-    pub async fn get_all_query_cursors(&self) -> (Vec<Row>, Vec<PgFieldDescriptor>) {
-        let cursor_names = self
-            .cursor_map
+    pub async fn iter_query_cursors(&self, mut f: impl FnMut(&String, &QueryCursor)) {
+        self.cursor_map
             .lock()
             .await
             .iter()
-            .filter_map(|(currsor_name, cursor)| {
-                if let Cursor::Query(_cursor) = cursor {
-                    let cursor_name = vec![Some(Bytes::from(currsor_name.clone().into_bytes()))];
-                    Some(Row::new(cursor_name))
-                } else {
-                    None
+            .for_each(|(cursor_name, cursor)| {
+                if let Cursor::Query(cursor) = cursor {
+                    f(cursor_name, cursor)
                 }
-            })
-            .collect();
-        (
-            cursor_names,
-            vec![PgFieldDescriptor::new(
-                "Name".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            )],
-        )
+            });
     }
 
-    pub async fn get_all_subscription_cursors(&self) -> (Vec<Row>, Vec<PgFieldDescriptor>) {
-        let cursors = self
-            .cursor_map
+    pub async fn iter_subscription_cursors(&self, mut f: impl FnMut(&String, &SubscriptionCursor)) {
+        self.cursor_map
             .lock()
             .await
             .iter()
-            .filter_map(|(cursor_name, cursor)| {
+            .for_each(|(cursor_name, cursor)| {
                 if let Cursor::Subscription(cursor) = cursor {
-                    let cursors = vec![
-                        Some(Bytes::from(cursor_name.clone().into_bytes())),
-                        Some(Bytes::from(cursor.subscription.name.clone().into_bytes())),
-                    ];
-                    Some(Row::new(cursors))
-                } else {
-                    None
+                    f(cursor_name, cursor)
                 }
-            })
-            .collect();
-        (
-            cursors,
-            vec![
-                PgFieldDescriptor::new(
-                    "Name".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "SubscriptionName".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-            ],
-        )
+            });
     }
 
     pub async fn gen_batch_plan_with_subscription_cursor(

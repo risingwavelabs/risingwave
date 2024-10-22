@@ -21,7 +21,7 @@ pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
-pub mod elasticsearch;
+pub mod elasticsearch_opensearch;
 pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
@@ -113,8 +113,10 @@ macro_rules! for_all_sinks {
                 { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
-                { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
-                { Opensearch, $crate::sink::remote::OpenSearchSink },
+                // { ElasticSearchJava, $crate::sink::remote::ElasticSearchJavaSink },
+                // { OpensearchJava, $crate::sink::remote::OpenSearchJavaSink },
+                { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
+                { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
@@ -321,6 +323,7 @@ pub struct SinkMetrics {
     pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
     pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
     pub iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
+    pub iceberg_write_bytes: LabelGuardedIntCounterVec<3>,
 }
 
 impl SinkMetrics {
@@ -430,6 +433,14 @@ impl SinkMetrics {
         )
         .unwrap();
 
+        let iceberg_write_bytes = register_guarded_int_counter_vec_with_registry!(
+            "iceberg_write_bytes",
+            "The write bytes of iceberg writer",
+            &["actor_id", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             sink_commit_duration,
             connector_sink_rows_received,
@@ -444,6 +455,7 @@ impl SinkMetrics {
             iceberg_rolling_unflushed_data_file,
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
+            iceberg_write_bytes,
         }
     }
 }
@@ -520,6 +532,29 @@ impl SinkMetaClient {
                     mock_meta_client.sink_coordinate_client(),
                 )
             }
+        }
+    }
+
+    pub async fn add_sink_fail_evet_log(
+        &self,
+        sink_id: u32,
+        sink_name: String,
+        connector: String,
+        error: String,
+    ) {
+        match self {
+            SinkMetaClient::MetaClient(meta_client) => {
+                match meta_client
+                    .add_sink_fail_evet(sink_id, sink_name, connector, error)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), sink_id = sink_id, "Fialed to add sink fail event to event log.");
+                    }
+                }
+            }
+            SinkMetaClient::MockMetaClient(_) => {}
         }
     }
 }
@@ -794,6 +829,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error("ElasticSearch/OpenSearch error: {0}")]
+    ElasticSearchOpenSearch(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("File error: {0}")]
@@ -905,5 +946,17 @@ impl From<RedisError> for SinkError {
 impl From<tiberius::error::Error> for SinkError {
     fn from(err: tiberius::error::Error) -> Self {
         SinkError::SqlServer(anyhow!(err))
+    }
+}
+
+impl From<::elasticsearch::Error> for SinkError {
+    fn from(err: ::elasticsearch::Error) -> Self {
+        SinkError::ElasticSearchOpenSearch(anyhow!(err))
+    }
+}
+
+impl From<::opensearch::Error> for SinkError {
+    fn from(err: ::opensearch::Error) -> Self {
+        SinkError::ElasticSearchOpenSearch(anyhow!(err))
     }
 }

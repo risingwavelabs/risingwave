@@ -25,12 +25,13 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::version::GroupDelta;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_meta_model_v2::compaction_config;
+use risingwave_meta_model::compaction_config;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     CompactionConfig, CompactionGroupInfo, PbGroupConstruct, PbGroupDestroy, PbStateTableInfoDelta,
 };
+use sea_orm::EntityTrait;
 use tokio::sync::OnceCell;
 
 use crate::hummock::compaction::compaction_config::{
@@ -43,10 +44,9 @@ use crate::hummock::manager::{commit_multi_var, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::next_compaction_group_id;
-use crate::manager::{MetaSrvEnv, MetaStoreImpl};
+use crate::manager::MetaSrvEnv;
 use crate::model::{
-    BTreeMapTransaction, BTreeMapTransactionInner, DerefMutForward, MetadataModel,
-    MetadataModelError,
+    BTreeMapTransaction, BTreeMapTransactionInner, DerefMutForward, MetadataModelError,
 };
 
 type CompactionGroupTransaction<'a> = BTreeMapTransaction<'a, CompactionGroupId, CompactionGroup>;
@@ -71,23 +71,13 @@ impl CompactionGroupManager {
         };
 
         let loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup> =
-            match env.meta_store_ref() {
-                MetaStoreImpl::Kv(meta_store) => CompactionGroup::list(meta_store)
-                    .await?
-                    .into_iter()
-                    .map(|cg| (cg.group_id(), cg))
-                    .collect(),
-                MetaStoreImpl::Sql(sql_meta_store) => {
-                    use sea_orm::EntityTrait;
-                    compaction_config::Entity::find()
-                        .all(&sql_meta_store.conn)
-                        .await
-                        .map_err(MetadataModelError::from)?
-                        .into_iter()
-                        .map(|m| (m.compaction_group_id as CompactionGroupId, m.into()))
-                        .collect()
-                }
-            };
+            compaction_config::Entity::find()
+                .all(&env.meta_store_ref().conn)
+                .await
+                .map_err(MetadataModelError::from)?
+                .into_iter()
+                .map(|m| (m.compaction_group_id as CompactionGroupId, m.into()))
+                .collect();
 
         compaction_group_manager.init(loaded_compaction_groups);
         Ok(compaction_group_manager)
@@ -598,6 +588,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::SplitWeightByVnode(c) => {
                 target.split_weight_by_vnode = *c;
             }
+            MutableConfig::DisableAutoGroupScheduling(c) => {
+                target.disable_auto_group_scheduling = Some(*c);
+            }
         }
     }
 }
@@ -688,11 +681,11 @@ mod tests {
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::meta::table_fragments::Fragment;
 
+    use crate::controller::SqlMetaStore;
     use crate::hummock::commit_multi_var;
     use crate::hummock::error::Result;
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
     use crate::hummock::test_utils::setup_compute_env;
-    use crate::manager::MetaStoreImpl;
     use crate::model::TableFragments;
 
     #[tokio::test]
@@ -702,7 +695,7 @@ mod tests {
         assert_eq!(inner.compaction_groups.len(), 2);
 
         async fn update_compaction_config(
-            meta: &MetaStoreImpl,
+            meta: &SqlMetaStore,
             inner: &mut CompactionGroupManager,
             cg_ids: &[u64],
             config_to_update: &[MutableConfig],
@@ -713,7 +706,7 @@ mod tests {
         }
 
         async fn insert_compaction_group_configs(
-            meta: &MetaStoreImpl,
+            meta: &SqlMetaStore,
             inner: &mut CompactionGroupManager,
             cg_ids: &[u64],
         ) {

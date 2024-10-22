@@ -21,6 +21,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
     ColumnCatalog, ConflictBehavior, CreateType, StreamJobStatus, TableId, OBJECT_ID_PLACEHOLDER,
 };
+use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -33,7 +34,7 @@ use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::error::Result;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::plan_has_backfill_leaf_nodes;
+use crate::optimizer::plan_node::utils::plan_can_use_backgronud_ddl;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -88,7 +89,7 @@ impl StreamMaterialize {
 
         let create_type = if matches!(table_type, TableType::MaterializedView)
             && input.ctx().session_ctx().config().background_ddl()
-            && plan_has_backfill_leaf_nodes(&input)
+            && plan_can_use_backgronud_ddl(&input)
         {
             CreateType::Background
         } else {
@@ -283,7 +284,7 @@ impl StreamMaterialize {
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
             cdc_table_id: None,
-            vnode_count: None, // will be filled in by the meta service later
+            vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
         })
     }
 

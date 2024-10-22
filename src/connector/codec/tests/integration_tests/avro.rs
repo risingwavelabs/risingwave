@@ -119,7 +119,7 @@ fn check(
     expected_risingwave_data.assert_eq(&format!("{}", data_str.iter().format("\n----\n")));
 }
 
-// This corresponds to legacy `scripts/source/test_data/avro_simple_schema_bin.1`. TODO: remove that file.
+// This corresponds to legacy `e2e_test/source_legacy/basic/scripts/test_data/avro_simple_schema_bin.1`. TODO: remove that file.
 #[test]
 fn test_simple() {
     check(

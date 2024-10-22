@@ -19,18 +19,18 @@ use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::{bail, current_cluster_version};
-use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
-use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::{
+use risingwave_meta_model::actor::ActorStatus;
+use risingwave_meta_model::actor_dispatcher::DispatcherType;
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::{
     Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
     StreamingJob as StreamingJobModel, Table,
 };
-use risingwave_meta_model_v2::table::TableType;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
     streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType, DatabaseId,
-    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId,
+    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SinkId, SourceId,
     StreamNode, StreamingParallelism, TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
@@ -63,12 +63,12 @@ use crate::barrier::{ReplaceTablePlan, Reschedule};
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
-    build_relation_group, check_relation_name_duplicate, check_sink_into_table_cycle,
+    build_relation_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
     ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
     rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{NotificationVersion, SinkId, StreamingJob};
+use crate::manager::{NotificationVersion, StreamingJob};
 use crate::model::{StreamContext, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
@@ -99,6 +99,11 @@ impl CatalogController {
         Ok(obj.oid)
     }
 
+    /// Create catalogs for the streaming job, then notify frontend about them if the job is a
+    /// materialized view.
+    ///
+    /// Some of the fields in the given streaming job are placeholders, which will
+    /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
     pub async fn create_job_catalog(
         &self,
         streaming_job: &mut StreamingJob,
@@ -333,16 +338,23 @@ impl CatalogController {
         Ok(())
     }
 
+    /// Create catalogs for internal tables, then notify frontend about them if the job is a
+    /// materialized view.
+    ///
+    /// Some of the fields in the given "incomplete" internal tables are placeholders, which will
+    /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
+    ///
+    /// Returns a mapping from the temporary table id to the actual global table id.
     pub async fn create_internal_table_catalog(
         &self,
         job: &StreamingJob,
-        mut internal_tables: Vec<PbTable>,
+        mut incomplete_internal_tables: Vec<PbTable>,
     ) -> MetaResult<HashMap<u32, u32>> {
         let job_id = job.id() as ObjectId;
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let mut table_id_map = HashMap::new();
-        for table in &mut internal_tables {
+        for table in &mut incomplete_internal_tables {
             let table_id = Self::create_object(
                 &txn,
                 ObjectType::Table,
@@ -354,10 +366,13 @@ impl CatalogController {
             .oid;
             table_id_map.insert(table.id, table_id as u32);
             table.id = table_id as _;
-            let mut table_model: table::ActiveModel = table.clone().into();
-            table_model.table_id = Set(table_id as _);
-            table_model.belongs_to_job_id = Set(Some(job_id));
-            table_model.fragment_id = NotSet;
+
+            let table_model = table::ActiveModel {
+                table_id: Set(table_id as _),
+                belongs_to_job_id: Set(Some(job_id)),
+                fragment_id: NotSet,
+                ..table.clone().into()
+            };
             Table::insert(table_model).exec(&txn).await?;
         }
         txn.commit().await?;
@@ -366,7 +381,7 @@ impl CatalogController {
             self.notify_frontend(
                 Operation::Add,
                 Info::RelationGroup(RelationGroup {
-                    relations: internal_tables
+                    relations: incomplete_internal_tables
                         .iter()
                         .map(|table| Relation {
                             relation_info: Some(RelationInfo::Table(table.clone())),
@@ -565,7 +580,9 @@ impl CatalogController {
         txn.commit().await?;
 
         if !objs.is_empty() {
-            self.notify_frontend(Operation::Delete, build_relation_group(objs))
+            // We also have notified the frontend about these objects,
+            // so we need to notify the frontend to delete them here.
+            self.notify_frontend(Operation::Delete, build_relation_group_for_delete(objs))
                 .await;
         }
         Ok(true)
@@ -995,15 +1012,13 @@ impl CatalogController {
         let mut table = table::ActiveModel::from(table);
         let mut incoming_sinks = table.incoming_sinks.as_ref().inner_ref().clone();
         if let Some(sink_id) = creating_sink_id {
-            debug_assert!(!incoming_sinks.contains(&(sink_id as i32)));
+            debug_assert!(!incoming_sinks.contains(&{ sink_id }));
             incoming_sinks.push(sink_id as _);
         }
 
         if let Some(sink_id) = dropping_sink_id {
-            let drained = incoming_sinks
-                .extract_if(|id| *id == sink_id as i32)
-                .collect_vec();
-            debug_assert_eq!(drained, vec![sink_id as i32]);
+            let drained = incoming_sinks.extract_if(|id| *id == sink_id).collect_vec();
+            debug_assert_eq!(drained, vec![sink_id]);
         }
 
         table.incoming_sinks = Set(incoming_sinks.into());
@@ -1650,10 +1665,9 @@ impl CatalogController {
 
                     // Only hash dispatcher needs mapping
                     if dispatcher.dispatcher_type.as_ref() == &DispatcherType::Hash {
-                        dispatcher.hash_mapping =
-                            Set(upstream_dispatcher_mapping.as_ref().map(|m| {
-                                risingwave_meta_model_v2::ActorMapping::from(&m.to_protobuf())
-                            }));
+                        dispatcher.hash_mapping = Set(upstream_dispatcher_mapping
+                            .as_ref()
+                            .map(|m| risingwave_meta_model::ActorMapping::from(&m.to_protobuf())));
                     }
 
                     let mut new_downstream_actor_ids =

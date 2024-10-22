@@ -203,20 +203,20 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         }
 
         // Retrieve modified states and put the changes into the builders.
-        let chunk = vars
+        let (change, _stats) = vars
             .agg_group
             .build_change(&this.storages, &this.agg_funcs)
-            .await?
-            .and_then(|change| {
-                if !this.must_output_per_barrier {
-                    if let Record::Update { old_row, new_row } = &change {
-                        if old_row == new_row {
-                            return None;
-                        }
-                    };
-                }
-                Some(change.to_stream_chunk(&this.info.schema.data_types()))
-            });
+            .await?;
+        let chunk = change.and_then(|change| {
+            if !this.must_output_per_barrier {
+                if let Record::Update { old_row, new_row } = &change {
+                    if old_row == new_row {
+                        return None;
+                    }
+                };
+            }
+            Some(change.to_stream_chunk(&this.info.schema.data_types()))
+        });
 
         // Commit all state tables.
         futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.commit(epoch)))
@@ -254,8 +254,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         yield Message::Barrier(barrier);
 
+        // This will fetch previous agg states from the intermediate state table.
         let mut vars = ExecutionVars {
-            // This will fetch previous agg states from the intermediate state table.
             agg_group: AggGroup::create(
                 this.version,
                 None,

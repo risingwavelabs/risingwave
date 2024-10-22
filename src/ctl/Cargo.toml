@@ -19,8 +19,7 @@ bytes = "1"
 chrono = "0.4"
 clap = { workspace = true }
 comfy-table = "7"
-etcd-client = { workspace = true }
-foyer ={ workspace = true }
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 inquire = "0.7.0"
@@ -33,8 +32,8 @@ risingwave_connector = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_meta = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_meta_model_migration = { workspace = true }
-risingwave_meta_model_v2 = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }

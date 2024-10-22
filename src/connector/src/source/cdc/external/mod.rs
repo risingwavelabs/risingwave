@@ -243,6 +243,11 @@ pub struct ExternalTableConfig {
     #[serde(rename = "ssl.root.cert")]
     #[serde(alias = "debezium.database.sslrootcert")]
     pub ssl_root_cert: Option<String>,
+
+    /// `encrypt` specifies whether connect to SQL Server using SSL.
+    /// Only "true" means using SSL. All other values are treated as "false".
+    #[serde(rename = "database.encrypt", default = "Default::default")]
+    pub encrypt: String,
 }
 
 impl ExternalTableConfig {
