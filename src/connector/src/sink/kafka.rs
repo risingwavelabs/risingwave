@@ -685,7 +685,7 @@ mod test {
             "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
         let config = KafkaConfig::from_btreemap(properties).unwrap();
-        assert_eq!(config.common.brokers, "localhost:9092");
+        assert_eq!(config.common.connection.brokers, "localhost:9092");
         assert_eq!(config.common.topic, "test");
         assert_eq!(config.max_retry_num, 20);
         assert_eq!(config.retry_interval, Duration::from_millis(500));
