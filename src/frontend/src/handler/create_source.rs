@@ -646,12 +646,6 @@ pub fn handle_addition_columns(
         ))));
     }
 
-    let latest_col_id: ColumnId = columns
-        .iter()
-        .map(|col| col.column_desc.column_id)
-        .max()
-        .unwrap(); // there must be at least one column in the column catalog
-
     while let Some(item) = additional_columns.pop() {
         check_additional_column_compatibility(&item, source_schema)?;
 
@@ -667,7 +661,7 @@ pub fn handle_addition_columns(
             );
         }
         let col = build_additional_column_desc(
-            latest_col_id.next(),
+            ColumnId::placeholder(),
             connector_name.as_str(),
             item.column_type.real_value().as_str(),
             item.column_alias.map(|alias| alias.real_value()),
@@ -720,12 +714,6 @@ pub(crate) fn bind_all_columns(
             return Err(RwError::from(NotSupported(
                 "Wildcard in user-defined schema is only allowed when there exists columns from external schema".to_string(),
                 "Remove the wildcard or use a source with external schema".to_string(),
-            )));
-        }
-        // FIXME(yuhao): cols_from_sql should be None is no `()` is given.
-        if cols_from_sql.is_empty() {
-            return Err(RwError::from(ProtocolError(
-                "Schema definition is required, either from SQL or schema registry.".to_string(),
             )));
         }
         let non_generated_sql_defined_columns = non_generated_sql_columns(col_defs_from_sql);
@@ -1547,6 +1535,13 @@ pub async fn bind_create_source_or_table_with_connector(
         &mut columns,
         false,
     )?;
+
+    if columns.is_empty() {
+        return Err(RwError::from(ProtocolError(
+            "Schema definition is required, either from SQL or schema registry.".to_string(),
+        )));
+    }
+
     // compatible with the behavior that add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
     if is_create_source {
         // must behind `handle_addition_columns`
@@ -1669,7 +1664,12 @@ pub async fn handle_create_source(
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
     let is_shared = create_cdc_source_job
         || (with_properties.is_shareable_non_cdc_connector()
-            && session.config().enable_shared_source());
+            && session
+                .env()
+                .streaming_config()
+                .developer
+                .enable_shared_source
+            && session.config().streaming_use_shared_source());
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema)?

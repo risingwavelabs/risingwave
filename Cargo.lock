@@ -1822,7 +1822,7 @@ dependencies = [
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
- "tower",
+ "tower 0.4.13",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -1880,7 +1880,7 @@ dependencies = [
  "pin-project-lite",
  "serde",
  "serde_html_form",
- "tower",
+ "tower 0.4.13",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -5627,7 +5627,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tonic",
- "tower",
+ "tower 0.4.13",
  "tracing",
  "trust-dns-resolver 0.23.2",
 ]
@@ -5711,7 +5711,7 @@ dependencies = [
  "tokio",
  "tokio-retry",
  "tonic",
- "tower",
+ "tower 0.4.13",
  "tracing",
 ]
 
@@ -6234,7 +6234,7 @@ dependencies = [
  "pin-project-lite",
  "socket2 0.5.6",
  "tokio",
- "tower",
+ "tower 0.4.13",
  "tower-service",
  "tracing",
 ]
@@ -7236,8 +7236,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.30"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=f0ffd24864245aea236833f1ff3638f75bd51700#f0ffd24864245aea236833f1ff3638f75bd51700"
+version = "0.2.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3c97f34bb19cf6a435a4da2187e90acc6bc59faa730e493b28b6d33e1bb9ccb"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7285,7 +7286,8 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=f0ffd24864245aea236833f1ff3638f75bd51700#f0ffd24864245aea236833f1ff3638f75bd51700"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -7340,7 +7342,7 @@ dependencies = [
  "madsim",
  "tokio",
  "tonic",
- "tower",
+ "tower 0.4.13",
  "tracing",
 ]
 
@@ -10802,7 +10804,7 @@ dependencies = [
  "serde",
  "thiserror",
  "thiserror-ext",
- "tower",
+ "tower 0.5.0",
  "tower-http",
  "tracing",
  "workspace-hack",
@@ -10901,7 +10903,7 @@ dependencies = [
  "thiserror-ext",
  "tikv-jemalloc-ctl",
  "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
- "tower",
+ "tower 0.5.0",
  "tracing",
  "uuid",
  "workspace-hack",
@@ -11598,7 +11600,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
- "tower",
+ "tower 0.5.0",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -11837,7 +11839,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
- "tower",
+ "tower 0.5.0",
  "tracing",
  "url",
  "workspace-hack",
@@ -14742,7 +14744,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.0",
  "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
- "tower",
+ "tower 0.4.13",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -14783,6 +14785,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tower"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36b837f86b25d7c0d7988f00a54e74739be6477f2aac6201b8f429a7569991b7"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "pin-project-lite",
+ "sync_wrapper",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
 name = "tower-http"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14811,15 +14827,15 @@ dependencies = [
 
 [[package]]
 name = "tower-layer"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c20c8dbed6283a09604c3e69b4b7eeb54e298b8a600d4d5ecb5ad39de609f1d0"
+checksum = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e"
 
 [[package]]
 name = "tower-service"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6bc1c9ce2b5135ac7f93c72918fc37feb872bdc6a5533a8b85eb4b86bfdae52"
+checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "tracing"

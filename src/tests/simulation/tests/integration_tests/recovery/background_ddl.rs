@@ -318,7 +318,7 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
             .await
             .unwrap();
         tracing::info!(progress, "get progress before cancel stream job");
-        let progress = progress.replace('%', "");
+        let progress = progress.split_once("%").unwrap().0;
         let progress = progress.parse::<f64>().unwrap();
         if progress >= 0.01 {
             break;
