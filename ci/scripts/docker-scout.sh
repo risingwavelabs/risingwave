@@ -18,13 +18,14 @@ echo "pulling ${image}"
 docker pull "${image}"
 
 echo "--- check vulnerabilities"
+mkdir -p scout
 function docker-scout {
-    docker run -it -e DOCKER_SCOUT_HUB_USER=risingwavelabs -e DOCKER_SCOUT_HUB_PASSWORD=$DOCKER_TOKEN -u root -v /var/run/docker.sock:/var/run/docker.sock docker/scout-cli "$@"
+    docker run -it -e DOCKER_SCOUT_HUB_USER=risingwavelabs -e DOCKER_SCOUT_HUB_PASSWORD=$DOCKER_TOKEN -u root -v /var/run/docker.sock:/var/run/docker.sock -v $PWD/scout:/scout docker/scout-cli "$@"
 }
 docker-scout quickview ${image}
 docker-scout recommendations "${image}"
-docker-scout cves --format sarif -o scout.sarif "${image}"
+docker-scout cves --format sarif -o /scout/scout.sarif "${image}"
 
 export SCOUT_REPORT=$(cat scout.sarif)
 echo "--- scout report"
-cat scout.sarif
+cat scout/scout.sarif
