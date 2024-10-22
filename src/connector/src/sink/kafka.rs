@@ -368,7 +368,7 @@ impl Sink for KafkaSink {
         if !check.check_reachability().await {
             return Err(SinkError::Config(anyhow!(
                 "cannot connect to kafka broker ({})",
-                self.config.common.brokers
+                self.config.common.connection.brokers
             )));
         }
         Ok(())
@@ -413,11 +413,11 @@ impl KafkaSinkWriter {
             let mut c = ClientConfig::new();
 
             // KafkaConfig configuration
-            config.common.set_security_properties(&mut c);
+            config.common.connection.set_security_properties(&mut c);
             config.set_client(&mut c);
 
             // ClientConfig configuration
-            c.set("bootstrap.servers", &config.common.brokers);
+            c.set("bootstrap.servers", &config.common.connection.brokers);
 
             // Create the producer context, will be used to create the producer
             let broker_rewrite_map = config.privatelink_common.broker_rewrite_map.clone();
@@ -426,7 +426,7 @@ impl KafkaSinkWriter {
                 None,
                 None,
                 config.aws_auth_props.clone(),
-                config.common.is_aws_msk_iam(),
+                config.common.connection.is_aws_msk_iam(),
             )
             .await?;
             let producer_ctx = RwProducerContext::new(ctx_common);
