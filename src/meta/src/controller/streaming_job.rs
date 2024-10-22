@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::{bail, current_cluster_version};
@@ -41,8 +42,7 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{
-    PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup, PbTableFragments, Relation,
-    RelationGroup,
+    PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup, Relation, RelationGroup,
 };
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -69,7 +69,7 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob};
-use crate::model::{StreamContext, TableParallelism};
+use crate::model::{StreamContext, TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -395,14 +395,18 @@ impl CatalogController {
         Ok(table_id_map)
     }
 
+    // TODO: In this function, we also update the `Table` model in the meta store.
+    // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
+    // making them the source of truth and performing a full replacement for those in the meta store?
     pub async fn prepare_streaming_job(
         &self,
-        table_fragment: PbTableFragments,
+        table_fragments: &TableFragments,
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
         let fragment_actors =
-            Self::extract_fragment_and_actors_from_table_fragments(table_fragment)?;
+            Self::extract_fragment_and_actors_from_table_fragments(table_fragments.to_protobuf())?;
+        let all_tables = table_fragments.all_tables();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -414,7 +418,6 @@ impl CatalogController {
         for fragment in fragments {
             let fragment_id = fragment.fragment_id;
             let state_table_ids = fragment.state_table_ids.inner_ref().clone();
-            let vnode_count = fragment.vnode_count;
 
             let fragment = fragment.into_active_model();
             Fragment::insert(fragment).exec(&txn).await?;
@@ -423,10 +426,19 @@ impl CatalogController {
             // After table fragments are created, update them for all internal tables.
             if !for_replace {
                 for state_table_id in state_table_ids {
+                    // Table's vnode count is not always the fragment's vnode count, so we have to
+                    // look up the table from `TableFragments`.
+                    // See `ActorGraphBuilder::new`.
+                    let table = all_tables
+                        .get(&(state_table_id as u32))
+                        .unwrap_or_else(|| panic!("table {} not found", state_table_id));
+                    assert_eq!(table.fragment_id, fragment_id as u32);
+                    let vnode_count = table.vnode_count();
+
                     table::ActiveModel {
                         table_id: Set(state_table_id as _),
                         fragment_id: Set(Some(fragment_id)),
-                        vnode_count: Set(vnode_count),
+                        vnode_count: Set(vnode_count as _),
                         ..Default::default()
                     }
                     .update(&txn)
@@ -1045,25 +1057,24 @@ impl CatalogController {
         table.incoming_sinks = Set(incoming_sinks.into());
         let table = table.update(txn).await?;
 
-        // Fields including `fragment_id` and `vnode_count` were placeholder values before.
+        // Fields including `fragment_id` were placeholder values before.
         // After table fragments are created, update them for all internal tables.
-        let fragment_info: Vec<(FragmentId, I32Array, i32)> = Fragment::find()
+        let fragment_info: Vec<(FragmentId, I32Array)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
                 fragment::Column::StateTableIds,
-                fragment::Column::VnodeCount,
             ])
             .filter(fragment::Column::JobId.eq(dummy_id))
             .into_tuple()
             .all(txn)
             .await?;
-        for (fragment_id, state_table_ids, vnode_count) in fragment_info {
+        for (fragment_id, state_table_ids) in fragment_info {
             for state_table_id in state_table_ids.into_inner() {
                 table::ActiveModel {
                     table_id: Set(state_table_id as _),
                     fragment_id: Set(Some(fragment_id)),
-                    vnode_count: Set(vnode_count),
+                    // No need to update `vnode_count` because it must remain the same.
                     ..Default::default()
                 }
                 .update(txn)

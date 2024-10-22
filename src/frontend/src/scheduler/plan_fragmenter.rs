@@ -1232,7 +1232,11 @@ fn derive_partitions(
         // The vnode count mismatch occurs only in special cases where a hash-distributed fragment
         // contains singleton internal tables. e.g., the state table of `Source` executors.
         // In this case, we reduce the vnode mapping to a single vnode as only `SINGLETON_VNODE` is used.
-        assert_eq!(table_desc.vnode_count, 1);
+        assert!(
+            table_desc.vnode_count == 1,
+            "fragment vnode count {} does not match table vnode count {}",
+            vnode_mapping.len(), table_desc.vnode_count,
+        );
         &WorkerSlotMapping::new_single(vnode_mapping.iter().next().unwrap())
     } else {
         vnode_mapping
