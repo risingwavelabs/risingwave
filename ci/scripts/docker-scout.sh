@@ -26,6 +26,6 @@ docker-scout quickview ${image}
 docker-scout recommendations "${image}"
 docker-scout cves --format sarif -o /scout/scout.sarif "${image}"
 
-export SCOUT_REPORT=$(cat scout.sarif)
 echo "--- scout report"
-cat scout/scout.sarif
+export SCOUT_REPORT=$(cat scout/scout.sarif)
+echo ${SCOUT_REPORT}
