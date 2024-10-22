@@ -214,6 +214,9 @@ pub struct KafkaConfig {
     #[serde(flatten)]
     pub common: KafkaCommon,
 
+    #[serde(flatten)]
+    pub connection: crate::connector_common::KafkaConnection,
+
     #[serde(
         rename = "properties.retry.max",
         default = "_default_max_retries",
@@ -269,6 +272,7 @@ impl From<KafkaConfig> for KafkaProperties {
             time_offset: None,
             upsert: None,
             common: val.common,
+            connection: val.connection,
             rdkafka_properties_common: val.rdkafka_properties_common,
             rdkafka_properties_consumer: Default::default(),
             privatelink_common: val.privatelink_common,
@@ -368,7 +372,7 @@ impl Sink for KafkaSink {
         if !check.check_reachability().await {
             return Err(SinkError::Config(anyhow!(
                 "cannot connect to kafka broker ({})",
-                self.config.common.connection.brokers
+                self.config.connection.brokers
             )));
         }
         Ok(())
@@ -413,11 +417,11 @@ impl KafkaSinkWriter {
             let mut c = ClientConfig::new();
 
             // KafkaConfig configuration
-            config.common.connection.set_security_properties(&mut c);
+            config.connection.set_security_properties(&mut c);
             config.set_client(&mut c);
 
             // ClientConfig configuration
-            c.set("bootstrap.servers", &config.common.connection.brokers);
+            c.set("bootstrap.servers", &config.connection.brokers);
 
             // Create the producer context, will be used to create the producer
             let broker_rewrite_map = config.privatelink_common.broker_rewrite_map.clone();
@@ -426,7 +430,7 @@ impl KafkaSinkWriter {
                 None,
                 None,
                 config.aws_auth_props.clone(),
-                config.common.connection.is_aws_msk_iam(),
+                config.connection.is_aws_msk_iam(),
             )
             .await?;
             let producer_ctx = RwProducerContext::new(ctx_common);
@@ -685,7 +689,7 @@ mod test {
             "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
         let config = KafkaConfig::from_btreemap(properties).unwrap();
-        assert_eq!(config.common.connection.brokers, "localhost:9092");
+        assert_eq!(config.connection.brokers, "localhost:9092");
         assert_eq!(config.common.topic, "test");
         assert_eq!(config.max_retry_num, 20);
         assert_eq!(config.retry_interval, Duration::from_millis(500));

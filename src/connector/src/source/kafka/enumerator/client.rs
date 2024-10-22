@@ -80,12 +80,12 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let mut config = rdkafka::ClientConfig::new();
         let common_props = &properties.common;
 
-        let broker_address = common_props.connection.brokers.clone();
+        let broker_address = properties.connection.brokers.clone();
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
-        common_props.connection.set_security_properties(&mut config);
+        properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
         let mut scan_start_offset = match properties
             .scan_startup_mode
@@ -122,7 +122,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 None,
                 None,
                 properties.aws_auth_props.clone(),
-                common_props.connection.is_aws_msk_iam(),
+                properties.connection.is_aws_msk_iam(),
             )
             .await?;
             let client_ctx = RwConsumerContext::new(ctx_common);
@@ -134,7 +134,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
             // of an initial token to occur.
             // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
-            if common_props.connection.is_aws_msk_iam() {
+            if properties.connection.is_aws_msk_iam() {
                 #[cfg(not(madsim))]
                 client.poll(Duration::from_secs(10)); // note: this is a blocking call
                 #[cfg(madsim)]

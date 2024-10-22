@@ -64,7 +64,7 @@ impl SplitReader for KafkaSplitReader {
     ) -> Result<Self> {
         let mut config = ClientConfig::new();
 
-        let bootstrap_servers = &properties.common.connection.brokers;
+        let bootstrap_servers = &properties.connection.brokers;
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
 
         // disable partition eof
@@ -73,10 +73,7 @@ impl SplitReader for KafkaSplitReader {
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
 
-        properties
-            .common
-            .connection
-            .set_security_properties(&mut config);
+        properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
 
         let group_id_prefix = properties
@@ -98,7 +95,7 @@ impl SplitReader for KafkaSplitReader {
             // explicitly
             Some(source_ctx.metrics.rdkafka_native_metric.clone()),
             properties.aws_auth_props,
-            properties.common.connection.is_aws_msk_iam(),
+            properties.connection.is_aws_msk_iam(),
         )
         .await?;
 

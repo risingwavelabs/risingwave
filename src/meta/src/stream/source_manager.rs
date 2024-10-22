@@ -1201,7 +1201,7 @@ fn get_kafka_bootstrap_addr(connector_properties: &ConnectorProperties) -> Optio
     {
         // for kafka source: extract the bootstrap servers from the source properties as shared source entry (on meta)
         if let ConnectorProperties::Kafka(kafka_props) = connector_properties {
-            return Some(kafka_props.common.connection.brokers.clone());
+            return Some(kafka_props.connection.brokers.clone());
         }
         None
     }

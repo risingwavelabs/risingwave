@@ -165,7 +165,7 @@ impl AwsAuthProps {
 pub fn check_kafka_connection_identical(lhs: &KafkaProperties, rhs: &KafkaProperties) -> bool {
     lhs.aws_auth_props == rhs.aws_auth_props
         && lhs.privatelink_common == rhs.privatelink_common
-        && lhs.common.connection == rhs.common.connection
+        && lhs.connection == rhs.connection
 }
 
 #[serde_as]
@@ -260,9 +260,6 @@ pub struct KafkaCommon {
         default = "default_kafka_sync_call_timeout"
     )]
     pub sync_call_timeout: Duration,
-
-    #[serde(flatten)]
-    pub connection: KafkaConnection,
 }
 
 #[serde_as]
