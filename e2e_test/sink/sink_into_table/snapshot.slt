@@ -20,7 +20,7 @@ statement ok
 insert into s values (2, 22);
 
 
-query IIII rowsort
+query II rowsort
 select * from t;
 ----
 1	11
