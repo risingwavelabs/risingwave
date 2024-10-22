@@ -122,6 +122,7 @@ message LogRowSeqScanNode {
   common.Buffer vnode_bitmap = 3;
   common.BatchQueryEpoch old_epoch = 4;
   common.BatchQueryEpoch new_epoch = 5;
+  bool ordered = 6;
 }
 
 message InsertNode {

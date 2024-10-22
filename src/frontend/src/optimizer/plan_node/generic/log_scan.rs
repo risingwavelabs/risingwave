@@ -16,6 +16,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use educe::Educe;
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, Schema, TableDesc};
 use risingwave_common::types::DataType;
@@ -32,7 +34,9 @@ const OP_TYPE: DataType = DataType::Varchar;
 #[educe(PartialEq, Eq, Hash)]
 pub struct LogScan {
     pub table_name: String,
-    /// Include `output_col_idx` and `op_column`
+    /// Include `output_col_idx_with_out_hidden` and `op_column`
+    pub output_col_idx_with_out_hidden: Vec<usize>,
+    /// Include `output_col_idx_with_out_hidden` and `op_column` and hidden pk
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the table
     pub table_desc: Rc<TableDesc>,
@@ -81,6 +85,16 @@ impl LogScan {
         out_column_names
     }
 
+    pub(crate) fn column_names_without_hidden(&self) -> Vec<String> {
+        let mut out_column_names: Vec<_> = self
+            .output_col_idx_with_out_hidden
+            .iter()
+            .map(|&i| self.table_desc.columns[i].name.clone())
+            .collect();
+        out_column_names.push(OP_NAME.to_string());
+        out_column_names
+    }
+
     pub fn distribution_key(&self) -> Option<Vec<usize>> {
         let tb_idx_to_op_idx = self
             .output_col_idx
@@ -98,6 +112,7 @@ impl LogScan {
     /// Create a logical scan node for log table scan
     pub(crate) fn new(
         table_name: String,
+        output_col_idx_with_out_hidden: Vec<usize>,
         output_col_idx: Vec<usize>,
         table_desc: Rc<TableDesc>,
         ctx: OptimizerContextRef,
@@ -107,6 +122,7 @@ impl LogScan {
     ) -> Self {
         Self {
             table_name,
+            output_col_idx_with_out_hidden,
             output_col_idx,
             table_desc,
             chunk_size: None,
@@ -145,17 +161,22 @@ impl LogScan {
         Schema { fields }
     }
 
-    pub(crate) fn schema_without_table_name(&self) -> Schema {
-        let mut fields: Vec<_> = self
+    pub(crate) fn out_fields(&self) -> FixedBitSet {
+        let mut out_fields_vec = self
             .output_col_idx
             .iter()
-            .map(|tb_idx| {
-                let col = &self.table_desc.columns[*tb_idx];
-                Field::from(col)
+            .enumerate()
+            .filter_map(|(index, idx)| {
+                if self.output_col_idx_with_out_hidden.contains(idx) {
+                    Some(index)
+                } else {
+                    None
+                }
             })
-            .collect();
-        fields.push(Field::with_name(OP_TYPE, OP_NAME));
-        Schema { fields }
+            .collect_vec();
+        // add op column
+        out_fields_vec.push(self.output_col_idx.len());
+        FixedBitSet::from_iter(out_fields_vec)
     }
 
     pub(crate) fn ctx(&self) -> OptimizerContextRef {

@@ -190,7 +190,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         assert_eq!(upstream_barrier.epoch, barrier.epoch);
                         assert_eq!(barrier_epoch.curr, barrier.epoch.prev);
                         barrier_epoch = barrier.epoch;
-
                         debug!(?barrier_epoch, kind = ?barrier.kind, "before consume change log");
                         // use `upstream_buffer.run_future` to poll upstream concurrently so that we won't have back-pressure
                         // on the upstream. Otherwise, in `batch_iter_log_with_pk_bounds`, we may wait upstream epoch to be committed,
@@ -199,6 +198,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             .run_future(self.upstream_table.batch_iter_log_with_pk_bounds(
                                 barrier_epoch.prev,
                                 HummockReadEpoch::Committed(barrier_epoch.prev),
+                                false,
                             ))
                             .await?;
                         let data_types = self.upstream_table.schema().data_types();

@@ -16,7 +16,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::Fields;
-use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
+use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, FetchCursorStatement, Statement};
 use thiserror_ext::AsReport;
 
 use super::create_index::{gen_create_index_plan, resolve_index_schema};
@@ -90,6 +90,18 @@ async fn do_handle_explain(
                 let plan = gen_sink_plan(handler_args, stmt, Some(explain_options))
                     .await
                     .map(|plan| plan.sink_plan)?;
+                let context = plan.ctx();
+                (Ok(plan), context)
+            }
+
+            Statement::FetchCursor {
+                stmt: FetchCursorStatement { cursor_name, .. },
+            } => {
+                let cursor_manager = session.clone().get_cursor_manager();
+                let plan = cursor_manager
+                    .gen_batch_plan_with_subscription_cursor(cursor_name, handler_args)
+                    .await
+                    .map(|x| x.plan)?;
                 let context = plan.ctx();
                 (Ok(plan), context)
             }

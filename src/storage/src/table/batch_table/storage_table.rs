@@ -52,7 +52,7 @@ use crate::store::{
     TryWaitEpochOptions,
 };
 use crate::table::merge_sort::merge_sort;
-use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
+use crate::table::{ChangeLogRow, KeyedChangeLogRow, KeyedRow, TableDistribution, TableIter};
 use crate::StateStore;
 
 /// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with
@@ -755,6 +755,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         &self,
         start_epoch: u64,
         end_epoch: HummockReadEpoch,
+        ordered: bool,
     ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
         let pk_prefix = OwnedRow::default();
         let start_key = self.serialize_pk_bound(&pk_prefix, Unbounded, true);
@@ -797,9 +798,14 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             0 => unreachable!(),
             1 => iterators.into_iter().next().unwrap(),
             // Concat all iterators if not to preserve order.
-            _ => futures::stream::iter(iterators.into_iter().map(Box::pin).collect_vec())
-                .flatten_unordered(1024),
-        };
+            _ if !ordered => {
+                futures::stream::iter(iterators.into_iter().map(Box::pin).collect_vec())
+                    .flatten_unordered(1024)
+            }
+            // Merge all iterators if to preserve order.
+            _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
+        }
+        .map(|row| row.map(|key_row| key_row.into_owned_row()));
 
         Ok(iter)
     }
@@ -1007,16 +1013,21 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
     }
 
     /// Yield a row with its primary key.
-    fn into_stream(self) -> impl Stream<Item = StorageResult<ChangeLogRow>> {
-        self.iter.into_stream(move |(_key, value)| {
-            value.try_map(|value| {
-                let full_row = self.row_deserializer.deserialize(value)?;
-                let row = self
-                    .mapping
-                    .project(OwnedRow::new(full_row))
-                    .into_owned_row();
-                Ok(row)
-            })
+    fn into_stream(self) -> impl Stream<Item = StorageResult<KeyedChangeLogRow<Bytes>>> {
+        self.iter.into_stream(move |(table_key, value)| {
+            value
+                .try_map(|value| {
+                    let full_row = self.row_deserializer.deserialize(value)?;
+                    let row = self
+                        .mapping
+                        .project(OwnedRow::new(full_row))
+                        .into_owned_row();
+                    Ok(row)
+                })
+                .map(|row| KeyedChangeLogRow {
+                    vnode_prefixed_key: table_key.copy_into(),
+                    row,
+                })
         })
     }
 }
