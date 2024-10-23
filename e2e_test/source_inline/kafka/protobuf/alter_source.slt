@@ -1,5 +1,8 @@
 control substitution on
 
+statement ok
+SET streaming_use_shared_source TO false;
+
 system ok
 rpk topic delete pb_alter_source_test || true; \
 (rpk sr subject delete 'pb_alter_source_test-value' && rpk sr subject delete 'pb_alter_source_test-value' --permanent) || true;
@@ -89,3 +92,6 @@ DROP MATERIALIZED VIEW mv_user;
 
 statement ok
 DROP SOURCE src_user;
+
+statement ok
+SET streaming_use_shared_source TO true;

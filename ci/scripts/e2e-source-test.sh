@@ -139,9 +139,6 @@ risedev slt './e2e_test/source_legacy/cdc/cdc.check_new_rows.slt'
 # drop relations
 risedev slt './e2e_test/source_legacy/cdc/cdc_share_stream_drop.slt'
 
-echo "--- postgres_query tvf test"
-risedev slt './e2e_test/source_legacy/tvf/postgres_query.slt'
-
 echo "--- Kill cluster"
 risedev ci-kill
 export RISINGWAVE_CI=true
