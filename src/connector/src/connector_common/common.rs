@@ -61,8 +61,6 @@ use aws_types::region::Region;
 use aws_types::SdkConfig;
 use risingwave_common::util::env_var::env_var_is_true;
 
-use crate::source::kafka::KafkaProperties;
-
 /// A flatten config map for aws auth.
 #[derive(Deserialize, Debug, Clone, WithOptions, PartialEq)]
 pub struct AwsAuthProps {
