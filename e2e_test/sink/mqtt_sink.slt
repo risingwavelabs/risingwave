@@ -21,7 +21,7 @@ FROM
 WITH
   (
     connector='mqtt',
-    url='tcp://127.0.0.1',
+    url='tcp://mqtt-server',
     type = 'append-only',
     topic.field = 'topic',
     retain = 'true',
@@ -37,7 +37,7 @@ FROM
 WITH
   (
     connector='mqtt',
-    url='tcp://127.0.0.1',
+    url='tcp://mqtt-server',
     type = 'append-only',
     topic = '/nested/fallback',
     topic.field = 'info.topic',
@@ -85,7 +85,7 @@ CREATE TABLE mqtt_source
 INCLUDE partition AS mqtt_topic
 WITH (
     connector ='mqtt',
-    url ='tcp://127.0.0.1',
+    url ='tcp://mqtt-server',
     topic = '/device/+',
     qos = 'at_least_once',
 ) FORMAT PLAIN ENCODE JSON;
@@ -98,7 +98,7 @@ CREATE TABLE mqtt_nested_source
 )
 WITH (
     connector='mqtt',
-    url='tcp://127.0.0.1',
+    url='tcp://mqtt-server',
     topic= '/nested/fallback',
     qos = 'at_least_once',
 ) FORMAT PLAIN ENCODE JSON;
