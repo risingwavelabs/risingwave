@@ -199,9 +199,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: LazyLock<OptimizationStage> =
     LazyLock::new(|| {
         OptimizationStage::new(
             "General Unnesting(Translate Apply)",
-            vec![
-                TranslateApplyRule::create(true)
-            ],
+            vec![TranslateApplyRule::create(true)],
             ApplyOrder::TopDown,
         )
     });
@@ -210,9 +208,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: LazyLock<OptimizationStage> 
     LazyLock::new(|| {
         OptimizationStage::new(
             "General Unnesting(Translate Apply)",
-            vec![
-                TranslateApplyRule::create(false)
-            ],
+            vec![TranslateApplyRule::create(false)],
             ApplyOrder::TopDown,
         )
     });
