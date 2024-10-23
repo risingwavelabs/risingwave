@@ -480,6 +480,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 },
             );
 
+            if delta.is_empty() {
+                continue;
+            }
+
             // Build changes for current partition.
             let (part_changes, accessed_range) =
                 partition.build_changes(&this.state_table, delta).await?;
