@@ -850,7 +850,7 @@ impl ScaleController {
     /// - `reschedule_fragment`: the generated reschedule plan
     /// - `applied_reschedules`: the changes that need to be updated to the meta store (`pre_apply_reschedules`, only for V1).
     ///
-    /// In [normal process of scaling](`GlobalStreamManager::reschedule_actors_impl`), we use the returned values to
+    /// In [normal process of scaling](`GlobalStreamManager::reschedule_actors`), we use the returned values to
     /// build a [`Command::RescheduleFragment`], which will then flows through the barrier mechanism to perform scaling.
     /// Meta store is updated after the barrier is collected.
     ///

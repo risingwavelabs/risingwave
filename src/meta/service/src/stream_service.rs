@@ -80,27 +80,35 @@ impl StreamManagerService for StreamServiceImpl {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        for database_id in self.metadata_manager.list_active_database_ids().await? {
-            self.barrier_scheduler
-                .run_command(
-                    DatabaseId::new(database_id as _),
-                    Command::pause(PausedReason::Manual),
-                )
-                .await?;
-        }
+        // TODO: call on database id one by one after supporting database isolation
+        let database_id = DatabaseId::new(
+            self.metadata_manager
+                .list_active_database_ids()
+                .await?
+                .into_iter()
+                .next()
+                .unwrap_or_default() as _,
+        );
+        self.barrier_scheduler
+            .run_command(database_id, Command::pause(PausedReason::Manual))
+            .await?;
         Ok(Response::new(PauseResponse {}))
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        for database_id in self.metadata_manager.list_active_database_ids().await? {
-            self.barrier_scheduler
-                .run_command(
-                    DatabaseId::new(database_id as _),
-                    Command::resume(PausedReason::Manual),
-                )
-                .await?;
-        }
+        // TODO: call on database id one by one after supporting database isolation
+        let database_id = DatabaseId::new(
+            self.metadata_manager
+                .list_active_database_ids()
+                .await?
+                .into_iter()
+                .next()
+                .unwrap_or_default() as _,
+        );
+        self.barrier_scheduler
+            .run_command(database_id, Command::resume(PausedReason::Manual))
+            .await?;
         Ok(Response::new(ResumeResponse {}))
     }
 
