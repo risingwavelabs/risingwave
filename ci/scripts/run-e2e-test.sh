@@ -35,8 +35,8 @@ cluster_start() {
     mkdir -p "$PREFIX_LOG"
     risedev clean-data
     risedev pre-start-dev
-    start_standalone "$PREFIX_LOG"/standalone.log &
-    risedev dev standalone-minio-sqlite
+    risedev dev standalone-minio-sqlite &
+    start_standalone "$PREFIX_LOG"/standalone.log
   elif [[ $mode == "single-node" ]]; then
     mkdir -p "$PREFIX_LOG"
     risedev clean-data
