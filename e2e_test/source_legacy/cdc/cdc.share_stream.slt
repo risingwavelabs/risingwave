@@ -11,7 +11,7 @@ system ok
 mysql --protocol=tcp -u root mytest < e2e_test/source_legacy/cdc/mysql_create.sql
 
 system ok
-mysql --protocol=tcp -u root kdb -e " CREATE TABLE kt1 (id int primary key, v1 varchar);
+mysql --protocol=tcp -u root kdb -e " CREATE TABLE kt1 (id int primary key, v1 varchar(32));
                                       INSERT INTO kt1 VALUES (1,'aaa'),(2,'bbb');
 "
 
