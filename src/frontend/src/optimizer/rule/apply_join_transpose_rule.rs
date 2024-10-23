@@ -18,7 +18,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::types::DataType::Boolean;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{
     CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall,
     InputRef,
@@ -85,8 +85,9 @@ use crate::utils::{ColIndexMapping, Condition};
 /// ```
 pub struct ApplyJoinTransposeRule {}
 impl Rule for ApplyJoinTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
+
         let (
             apply_left,
             apply_right,
@@ -98,7 +99,7 @@ impl Rule for ApplyJoinTransposeRule {
         ) = apply.clone().decompose();
 
         if max_one_row {
-            return None;
+            return OResult::NotApplicable;
         }
 
         assert_eq!(apply_join_type, JoinType::Inner);
@@ -119,7 +120,7 @@ impl Rule for ApplyJoinTransposeRule {
             && !join_left_has_correlated_id
             && !join_right_has_correlated_id
         {
-            return None;
+            return OResult::NotApplicable;
         }
 
         assert!(
@@ -196,7 +197,7 @@ impl Rule for ApplyJoinTransposeRule {
             unreachable!();
         };
         assert_eq!(out.schema(), plan.schema());
-        Some(out)
+        OResult::Ok(out)
     }
 }
 

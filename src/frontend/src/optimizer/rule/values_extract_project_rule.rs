@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{ExprImpl, ExprVisitor};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalProject, LogicalValues};
@@ -24,13 +24,12 @@ use crate::optimizer::PlanRef;
 
 pub struct ValuesExtractProjectRule {}
 impl Rule for ValuesExtractProjectRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let old_values: &LogicalValues = plan.as_logical_values()?;
-
         let mut expr_correlated_id_finder = ExprCorrelatedIdFinder::default();
 
         if old_values.rows().len() != 1 {
-            return None;
+            return OResult::NotApplicable;
         }
 
         old_values.rows()[0]
@@ -38,7 +37,7 @@ impl Rule for ValuesExtractProjectRule {
             .for_each(|expr| expr_correlated_id_finder.visit_expr(expr));
 
         if !expr_correlated_id_finder.has_correlated_input_ref() {
-            return None;
+            return OResult::NotApplicable;
         }
 
         let new_values = LogicalValues::create(
@@ -47,7 +46,7 @@ impl Rule for ValuesExtractProjectRule {
             old_values.ctx(),
         );
 
-        Some(LogicalProject::create(
+        OResult::Ok(LogicalProject::create(
             new_values,
             old_values.rows()[0].clone(),
         ))

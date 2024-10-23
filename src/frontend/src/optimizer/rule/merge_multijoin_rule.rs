@@ -13,19 +13,19 @@
 // limitations under the License.
 
 use super::super::plan_node::*;
-use super::Rule;
+use super::{OResult, Rule};
 use crate::optimizer::rule::BoxedRule;
 
 /// Merges adjacent inner joins, filters and projections into a single `LogicalMultiJoin`.
 pub struct MergeMultiJoinRule {}
 
 impl Rule for MergeMultiJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let multijoin_builder = LogicalMultiJoinBuilder::new(plan);
         if multijoin_builder.inputs().len() <= 2 {
-            return None;
+            return OResult::NotApplicable;
         }
-        Some(multijoin_builder.build().into())
+        OResult::Ok(multijoin_builder.build().into())
     }
 }
 

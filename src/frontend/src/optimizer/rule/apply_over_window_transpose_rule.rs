@@ -14,7 +14,7 @@
 
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::InputRef;
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalOverWindow};
 use crate::optimizer::PlanRef;
@@ -43,7 +43,7 @@ use crate::utils::Condition;
 /// ```
 pub struct ApplyOverWindowTransposeRule {}
 impl Rule for ApplyOverWindowTransposeRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
@@ -52,7 +52,7 @@ impl Rule for ApplyOverWindowTransposeRule {
         let (window_input, mut window_functions) = over_window.clone().decompose();
 
         if max_one_row {
-            return None;
+            return OResult::NotApplicable;
         }
 
         let apply_left_len = left.schema().len();
@@ -92,7 +92,7 @@ impl Rule for ApplyOverWindowTransposeRule {
         };
 
         let filter = LogicalFilter::create(new_over_window.into(), on);
-        Some(filter)
+        OResult::Ok(filter)
     }
 }
 

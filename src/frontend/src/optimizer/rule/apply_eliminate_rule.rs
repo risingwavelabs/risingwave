@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::{BoxedRule, OResult, Rule};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject};
 use crate::optimizer::plan_visitor::PlanCorrelatedIdFinder;
@@ -56,18 +56,18 @@ use crate::utils::Condition;
 /// ```
 pub struct ApplyEliminateRule {}
 impl Rule for ApplyEliminateRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
 
         if max_one_row {
-            return None;
+            return OResult::NotApplicable;
         }
 
         // Still can find `correlated_id`, so bail out.
         if PlanCorrelatedIdFinder::find_correlated_id(right.clone(), &correlated_id) {
-            return None;
+            return OResult::NotApplicable;
         }
 
         let apply_left_len = left.schema().len();
@@ -128,10 +128,10 @@ impl Rule for ApplyEliminateRule {
                 },
             );
 
-            Some(filter)
+            OResult::Ok(filter)
         } else {
             let join = LogicalJoin::new(left, right, join_type, on);
-            Some(join.into())
+            OResult::Ok(join.into())
         }
     }
 }

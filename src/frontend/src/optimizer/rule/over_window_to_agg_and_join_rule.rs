@@ -25,6 +25,7 @@ use crate::optimizer::plan_node::{
 use crate::utils::{Condition, GroupBy};
 use crate::PlanRef;
 pub struct OverWindowToAggAndJoinRule;
+use super::OResult;
 
 impl OverWindowToAggAndJoinRule {
     pub fn create() -> Box<dyn Rule> {
@@ -33,7 +34,7 @@ impl OverWindowToAggAndJoinRule {
 }
 
 impl Rule for OverWindowToAggAndJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+    fn apply(&self, plan: PlanRef) -> OResult<PlanRef> {
         let over_window = plan.as_logical_over_window()?;
         let window_functions = over_window.window_functions();
         if window_functions.iter().any(|window| {
@@ -41,7 +42,7 @@ impl Rule for OverWindowToAggAndJoinRule {
                 && window.frame.bounds.start_is_unbounded()
                 && window.frame.bounds.end_is_unbounded())
         }) {
-            return None;
+            return OResult::NotApplicable;
         }
         // This rule should be applied after OverWindowSplitByWindowRule.
         let group_exprs: Vec<ExprImpl> = window_functions[0]
@@ -63,7 +64,7 @@ impl Rule for OverWindowToAggAndJoinRule {
                 .ok()?;
                 select_exprs.push(agg_call.into());
             } else {
-                return None;
+                return OResult::NotApplicable;
             }
         }
 
@@ -80,6 +81,7 @@ impl Rule for OverWindowToAggAndJoinRule {
             common_input.clone(),
         )
         .ok()?;
+
         let on_clause = window_functions[0].partition_by.iter().enumerate().fold(
             Condition::true_cond(),
             |on_clause, (idx, x)| {
@@ -96,7 +98,7 @@ impl Rule for OverWindowToAggAndJoinRule {
                 ))
             },
         );
-        Some(
+        OResult::Ok(
             LogicalProject::with_out_col_idx(
                 LogicalJoin::new(common_input, agg, JoinType::Inner, on_clause).into(),
                 out_fields.into_iter(),
