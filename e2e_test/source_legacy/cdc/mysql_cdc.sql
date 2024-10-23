@@ -62,7 +62,3 @@ FLUSH PRIVILEGES;
 CREATE TABLE tt3 (v1 int primary key, v2 timestamp);
 INSERT INTO tt3 VALUES (1, '2020-07-30 10:08:22');
 INSERT INTO tt3 VALUES (2, '2020-07-31 10:09:22');
-
-USE `kdb`;
-CREATE TABLE kt1 (id int primary key, v1 varchar);
-INSERT INTO kt1 VALUES (1,'aaa'),(2,'bbb');
