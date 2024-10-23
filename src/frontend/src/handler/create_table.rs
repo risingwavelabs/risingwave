@@ -892,7 +892,7 @@ fn derive_with_options_for_cdc_table(
                 // MySQL doesn't allow '.' in database name and table name, so we can split the
                 // external table name by '.' to get the table name
                 let (db_name, table_name) = external_table_name.split_once('.').ok_or_else(|| {
-                    anyhow!("The upstream table name must contain schema name prefix, e.g. 'database.table'")
+                    anyhow!("The upstream table name must contain database name prefix, e.g. 'database.table'")
                 })?;
                 with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
