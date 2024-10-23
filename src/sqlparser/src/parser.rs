@@ -4015,6 +4015,7 @@ impl Parser<'_> {
             Keyword::LOGICAL,
             Keyword::PHYSICAL,
             Keyword::DISTSQL,
+            Keyword::FORMAT,
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> PResult<()> {
@@ -4038,6 +4039,15 @@ impl Parser<'_> {
                 Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                 Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
                 Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
+                Keyword::FORMAT => {
+                    options.explain_format = {
+                        match parser.expect_one_of_keywords(&[Keyword::TEXT, Keyword::JSON])? {
+                            Keyword::TEXT => ExplainFormat::Text,
+                            Keyword::JSON => ExplainFormat::Json,
+                            _ => unreachable!("{}", keyword),
+                        }
+                    }
+                }
                 _ => unreachable!("{}", keyword),
             };
             Ok(())
