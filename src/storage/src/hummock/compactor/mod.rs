@@ -240,7 +240,7 @@ impl Compactor {
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
             remote_rpc_cost: self.get_id_time.clone(),
-            compaction_catalog_agent_ref,
+            compaction_catalog_agent_ref: compaction_catalog_agent_ref.clone(),
             sstable_writer_factory: writer_factory,
             _phantom: PhantomData,
         };
@@ -253,6 +253,7 @@ impl Compactor {
             self.context
                 .storage_opts
                 .compactor_concurrent_uploading_sst_count,
+            compaction_catalog_agent_ref,
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,

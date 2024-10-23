@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, S3ObjectStore,
 };
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::iterator::{ConcatIterator, ConcatIteratorInner, HummockIterator};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
@@ -198,6 +199,8 @@ fn bench_builder(
 
     let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
 
+    let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+
     let mut group = c.benchmark_group("bench_multi_builder");
     group
         .sample_size(SAMPLE_COUNT)
@@ -211,6 +214,7 @@ fn bench_builder(
                         StreamingSstableWriterFactory::new(sstable_store.clone()),
                         get_builder_options(capacity_mb),
                     ),
+                    compaction_catalog_agent_ref.clone(),
                 ))
             })
         });
@@ -223,6 +227,7 @@ fn bench_builder(
                         BatchSstableWriterFactory::new(sstable_store.clone()),
                         get_builder_options(capacity_mb),
                     ),
+                    compaction_catalog_agent_ref.clone(),
                 ))
             })
         });
@@ -255,6 +260,8 @@ fn bench_table_scan(c: &mut Criterion) {
     let object_store = Arc::new(ObjectStoreImpl::InMem(store));
     let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
 
+    let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+
     let ssts = runtime.block_on(async {
         build_tables(CapacitySplitTableBuilder::for_test(
             LocalTableBuilderFactory::new(
@@ -262,6 +269,7 @@ fn bench_table_scan(c: &mut Criterion) {
                 BatchSstableWriterFactory::new(sstable_store.clone()),
                 get_builder_options(capacity_mb),
             ),
+            compaction_catalog_agent_ref.clone(),
         ))
         .await
     });

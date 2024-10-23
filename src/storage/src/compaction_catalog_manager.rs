@@ -374,7 +374,8 @@ impl CompactionCatalogManager {
     }
 }
 
-/// build from `CompactionCatalogManager`
+/// `CompactionCatalogAgent` is a wrapper of `filter_key_extractor_manager` and `table_id_to_vnode`
+/// which is used to extract key and get vnode count
 pub struct CompactionCatalogAgent {
     filter_key_extractor_manager: Arc<FilterKeyExtractorImpl>,
     table_id_to_vnode: HashMap<StateTableId, usize>,
@@ -390,6 +391,30 @@ impl CompactionCatalogAgent {
             table_id_to_vnode,
         }
     }
+
+    pub fn dummy() -> Self {
+        Self {
+            filter_key_extractor_manager: Arc::new(FilterKeyExtractorImpl::Dummy(
+                DummyFilterKeyExtractor,
+            )),
+            table_id_to_vnode: Default::default(),
+        }
+    }
+
+    pub fn for_test(table_ids: Vec<StateTableId>) -> Arc<Self> {
+        let full_key_filter_key_extractor =
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
+
+        let table_id_to_vnode = table_ids
+            .into_iter()
+            .map(|table_id| (table_id, VirtualNode::COUNT_FOR_TEST))
+            .collect();
+
+        Arc::new(CompactionCatalogAgent::new(
+            full_key_filter_key_extractor,
+            table_id_to_vnode,
+        ))
+    }
 }
 
 impl CompactionCatalogAgent {
@@ -398,7 +423,10 @@ impl CompactionCatalogAgent {
     }
 
     pub fn vnode_count(&self, table_id: StateTableId) -> usize {
-        *self.table_id_to_vnode.get(&table_id).unwrap()
+        *self
+            .table_id_to_vnode
+            .get(&table_id)
+            .expect(&format!("table_id not found {}", table_id))
     }
 
     pub fn table_id_to_vnode_ref(&self) -> &HashMap<StateTableId, usize> {

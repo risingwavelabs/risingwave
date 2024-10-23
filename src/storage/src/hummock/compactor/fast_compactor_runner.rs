@@ -391,7 +391,7 @@ impl CompactorRunner {
             options,
             policy: task_config.cache_policy,
             remote_rpc_cost: get_id_time,
-            compaction_catalog_agent_ref,
+            compaction_catalog_agent_ref: compaction_catalog_agent_ref.clone(),
             sstable_writer_factory: factory,
             _phantom: PhantomData,
         };
@@ -403,6 +403,7 @@ impl CompactorRunner {
             context
                 .storage_opts
                 .compactor_concurrent_uploading_sst_count,
+            compaction_catalog_agent_ref,
         );
         assert_eq!(
             task.input_ssts.len(),

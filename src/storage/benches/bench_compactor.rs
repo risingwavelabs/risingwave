@@ -33,6 +33,7 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::PbTableSchema;
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
     ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
@@ -285,8 +286,11 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
         bloom_false_positive: 0.001,
         ..Default::default()
     };
-    let mut builder =
-        CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(32, sstable_store, opt));
+    let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+    let mut builder = CapacitySplitTableBuilder::for_test(
+        LocalTableBuilderFactory::new(32, sstable_store, opt),
+        compaction_catalog_agent_ref,
+    );
 
     let task_config = task_config.unwrap_or_else(|| TaskConfig {
         key_range: KeyRange::inf(),

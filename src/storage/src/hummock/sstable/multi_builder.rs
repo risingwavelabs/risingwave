@@ -27,6 +27,7 @@ use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
+use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -79,6 +80,8 @@ where
     concurrent_upload_join_handle: FuturesUnordered<UploadJoinHandle>,
 
     concurrent_uploading_sst_count: Option<usize>,
+
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -93,6 +96,7 @@ where
         task_progress: Option<Arc<TaskProgress>>,
         table_vnode_partition: BTreeMap<u32, u32>,
         concurrent_uploading_sst_count: Option<usize>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> Self {
         // TODO(var-vnode): should use value from caller
         let vnode_count = VirtualNode::COUNT_FOR_COMPAT;
@@ -110,10 +114,14 @@ where
             largest_vnode_in_current_partition: vnode_count - 1,
             concurrent_upload_join_handle: FuturesUnordered::new(),
             concurrent_uploading_sst_count,
+            compaction_catalog_agent_ref,
         }
     }
 
-    pub fn for_test(builder_factory: F) -> Self {
+    pub fn for_test(
+        builder_factory: F,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    ) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
@@ -127,6 +135,7 @@ where
             largest_vnode_in_current_partition: VirtualNode::MAX_FOR_TEST.to_index(),
             concurrent_upload_join_handle: FuturesUnordered::new(),
             concurrent_uploading_sst_count: None,
+            compaction_catalog_agent_ref,
         }
     }
 
@@ -222,6 +231,11 @@ where
         if user_key.table_id.table_id != self.last_table_id {
             let new_vnode_partition_count =
                 self.table_vnode_partition.get(&user_key.table_id.table_id);
+
+            self.vnode_count = self
+                .compaction_catalog_agent_ref
+                .vnode_count(user_key.table_id.table_id);
+            self.largest_vnode_in_current_partition = self.vnode_count - 1;
 
             if new_vnode_partition_count.is_some()
                 || self.table_vnode_partition.contains_key(&self.last_table_id)
@@ -383,6 +397,7 @@ mod tests {
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
 
     use super::*;
+    use crate::compaction_catalog_manager::CompactionCatalogAgent;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
     use crate::hummock::DEFAULT_RESTART_INTERVAL;
@@ -399,7 +414,9 @@ mod tests {
             ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts);
-        let builder = CapacitySplitTableBuilder::for_test(builder_factory);
+        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::dummy());
+        let builder =
+            CapacitySplitTableBuilder::for_test(builder_factory, compaction_catalog_agent_ref);
         let results = builder.finish().await.unwrap();
         assert!(results.is_empty());
     }
@@ -415,8 +432,11 @@ mod tests {
             bloom_false_positive: 0.1,
             ..Default::default()
         };
+        let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts);
-        let mut builder = CapacitySplitTableBuilder::for_test(builder_factory);
+        let mut builder =
+            CapacitySplitTableBuilder::for_test(builder_factory, compaction_catalog_agent_ref);
 
         for i in 0..table_capacity {
             builder
@@ -439,11 +459,11 @@ mod tests {
     #[tokio::test]
     async fn test_table_seal() {
         let opts = default_builder_opt_for_test();
-        let mut builder = CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(
-            1001,
-            mock_sstable_store().await,
-            opts,
-        ));
+        let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+        let mut builder = CapacitySplitTableBuilder::for_test(
+            LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts),
+            compaction_catalog_agent_ref,
+        );
         let mut epoch = test_epoch(100);
 
         macro_rules! add {
@@ -483,11 +503,11 @@ mod tests {
     #[tokio::test]
     async fn test_initial_not_allowed_split() {
         let opts = default_builder_opt_for_test();
-        let mut builder = CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(
-            1001,
-            mock_sstable_store().await,
-            opts,
-        ));
+        let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+        let mut builder = CapacitySplitTableBuilder::for_test(
+            LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts),
+            compaction_catalog_agent_ref,
+        );
         builder
             .add_full_key_for_test(test_key_of(0).to_ref(), HummockValue::put(b"v"), false)
             .await
@@ -509,12 +529,14 @@ mod tests {
         let table_partition_vnode =
             BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
 
+        let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0, 1, 2, 3, 4, 5]);
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts),
             Arc::new(CompactorMetrics::unused()),
             None,
             table_partition_vnode,
             None,
+            compaction_catalog_agent_ref,
         );
 
         let mut table_key = VirtualNode::from_index(0).to_be_bytes().to_vec();

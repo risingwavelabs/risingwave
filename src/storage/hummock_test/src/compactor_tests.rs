@@ -29,7 +29,7 @@ pub(crate) mod tests {
     use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt};
     use risingwave_common_service::NotificationClient;
     use risingwave_hummock_sdk::compact_task::CompactTask;
-    use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{
         next_key, prefix_slice_with_vnode, prefixed_range_with_vnode, FullKey, TableKey,
         TABLE_PREFIX_LEN,
@@ -55,7 +55,7 @@ pub(crate) mod tests {
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::compaction_catalog_manager::{
         CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
-        FixedLengthFilterKeyExtractor, FullKeyFilterKeyExtractor, MultiFilterKeyExtractor,
+        FixedLengthFilterKeyExtractor, MultiFilterKeyExtractor,
     };
     use risingwave_storage::hummock::compactor::compactor_runner::{compact, CompactorRunner};
     use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
@@ -1289,20 +1289,6 @@ pub(crate) mod tests {
         }
     }
 
-    fn build_full_filter_key_extractor_with_table_ids(
-        table_ids: Vec<StateTableId>,
-    ) -> Arc<FilterKeyExtractorImpl> {
-        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
-        for table_id in table_ids {
-            multi_filter_key_extractor.register(
-                table_id,
-                Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
-            );
-        }
-
-        Arc::new(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor))
-    }
-
     async fn run_fast_and_normal_runner(
         compact_ctx: CompactorContext,
         task: CompactTask,
@@ -1363,16 +1349,8 @@ pub(crate) mod tests {
         .await;
         hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
         let compact_ctx = get_compactor_context(&storage);
-
-        let multi_filter_key_extractor =
-            build_full_filter_key_extractor_with_table_ids(vec![existing_table_id]);
-        let table_id_to_vnode =
-            HashMap::from_iter(vec![(existing_table_id, VirtualNode::COUNT_FOR_TEST)]);
-
-        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
-            multi_filter_key_extractor,
-            table_id_to_vnode,
-        ));
+        let compaction_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![existing_table_id]);
 
         let sstable_store = compact_ctx.sstable_store.clone();
         let capacity = 256 * 1024;
@@ -1553,17 +1531,9 @@ pub(crate) mod tests {
         )
         .await;
         hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
-        // let (compact_ctx, _) = prepare_compactor_and_filter(&storage, existing_table_id);
         let compact_ctx = get_compactor_context(&storage);
-        let multi_filter_key_extractor =
-            build_full_filter_key_extractor_with_table_ids(vec![existing_table_id]);
-        let table_id_to_vnode =
-            HashMap::from_iter(vec![(existing_table_id, VirtualNode::COUNT_FOR_TEST)]);
-
-        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
-            multi_filter_key_extractor,
-            table_id_to_vnode,
-        ));
+        let compaction_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![existing_table_id]);
 
         let sstable_store = compact_ctx.sstable_store.clone();
         let capacity = 256 * 1024;
@@ -1690,15 +1660,8 @@ pub(crate) mod tests {
         .await;
         hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
         let compact_ctx = get_compactor_context(&storage);
-        let multi_filter_key_extractor =
-            build_full_filter_key_extractor_with_table_ids(vec![existing_table_id]);
-        let table_id_to_vnode =
-            HashMap::from_iter(vec![(existing_table_id, VirtualNode::COUNT_FOR_TEST)]);
-
-        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
-            multi_filter_key_extractor,
-            table_id_to_vnode,
-        ));
+        let compaction_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![existing_table_id]);
 
         let sstable_store = compact_ctx.sstable_store.clone();
         let capacity = 256 * 1024;
@@ -1911,19 +1874,8 @@ pub(crate) mod tests {
         key.put_slice(b"key_prefix");
         let key_prefix = key.freeze();
 
-        let multi_filter_key_extractor = build_full_filter_key_extractor_with_table_ids(vec![
-            table_id_1.table_id(),
-            table_id_2.table_id(),
-        ]);
-        let table_id_to_vnode = HashMap::from_iter(vec![
-            (table_id_1.table_id(), VirtualNode::COUNT_FOR_TEST),
-            (table_id_2.table_id(), VirtualNode::COUNT_FOR_TEST),
-        ]);
-
-        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
-            multi_filter_key_extractor,
-            table_id_to_vnode,
-        ));
+        let compaction_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![table_id_1.table_id(), table_id_2.table_id()]);
 
         let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
