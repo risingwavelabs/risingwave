@@ -672,7 +672,94 @@ impl CatalogController {
         Ok(tables)
     }
 
-    pub async fn list_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+    pub async fn list_all_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        let inner = self.inner.read().await;
+
+        let dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
+            .select_only()
+            .columns([
+                object_dependency::Column::Oid,
+                object_dependency::Column::UsedBy,
+            ])
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut obj_dependencies = dependencies
+            .into_iter()
+            .map(|(oid, used_by)| PbObjectDependencies {
+                object_id: used_by as _,
+                referenced_object_id: oid as _,
+            })
+            .collect_vec();
+
+        let view_dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
+            .select_only()
+            .columns([
+                object_dependency::Column::Oid,
+                object_dependency::Column::UsedBy,
+            ])
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join(JoinType::InnerJoin, object::Relation::View.def())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        obj_dependencies.extend(view_dependencies.into_iter().map(|(view_id, table_id)| {
+            PbObjectDependencies {
+                object_id: table_id as _,
+                referenced_object_id: view_id as _,
+            }
+        }));
+
+        let sink_dependencies: Vec<(SinkId, TableId)> = Sink::find()
+            .select_only()
+            .columns([sink::Column::SinkId, sink::Column::TargetTable])
+            .join(JoinType::InnerJoin, sink::Relation::Object.def())
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(sink::Column::TargetTable.is_not_null())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
+            PbObjectDependencies {
+                object_id: table_id as _,
+                referenced_object_id: sink_id as _,
+            }
+        }));
+
+        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = Subscription::find()
+            .select_only()
+            .columns([
+                subscription::Column::SubscriptionId,
+                subscription::Column::DependentTableId,
+            ])
+            .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+            .filter(subscription::Column::DependentTableId.is_not_null())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        obj_dependencies.extend(subscription_dependencies.into_iter().map(
+            |(subscription_id, table_id)| PbObjectDependencies {
+                object_id: subscription_id as _,
+                referenced_object_id: table_id as _,
+            },
+        ));
+
+        Ok(obj_dependencies)
+    }
+
+    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
         let inner = self.inner.read().await;
 
         let dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
