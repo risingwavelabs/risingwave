@@ -69,9 +69,9 @@ impl StreamManagerService for StreamServiceImpl {
     #[cfg_attr(coverage, coverage(off))]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
-        let req = request.into_inner();
+        let _req = request.into_inner();
 
-        let version_id = self.barrier_scheduler.flush(req.checkpoint).await?;
+        let version_id = self.barrier_scheduler.flush().await?;
         Ok(Response::new(FlushResponse {
             status: None,
             hummock_version_id: version_id.to_u64(),

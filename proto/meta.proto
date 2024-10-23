@@ -155,9 +155,7 @@ message MigrationPlan {
   map<uint64, uint64> worker_slot_migration_plan = 2;
 }
 
-message FlushRequest {
-  bool checkpoint = 1;
-}
+message FlushRequest {}
 
 message FlushResponse {
   common.Status status = 1;

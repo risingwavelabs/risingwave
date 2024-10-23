@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context};
 use assert_matches::assert_matches;
 use parking_lot::Mutex;
+use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::meta::PausedReason;
@@ -56,8 +57,15 @@ enum QueueStatus {
     Blocked(String),
 }
 
+struct ScheduledQueueItem {
+    command: Command,
+    notifiers: Vec<Notifier>,
+    send_latency_timer: HistogramTimer,
+    span: tracing::Span,
+}
+
 pub(super) struct ScheduledQueue {
-    queue: VecDeque<Scheduled>,
+    queue: VecDeque<ScheduledQueueItem>,
     status: QueueStatus,
 }
 
@@ -81,7 +89,7 @@ impl ScheduledQueue {
         self.queue.len()
     }
 
-    fn push_back(&mut self, scheduled: Scheduled) -> MetaResult<()> {
+    fn push_back(&mut self, scheduled: ScheduledQueueItem) -> MetaResult<()> {
         // We don't allow any command to be scheduled when the queue is blocked, except for dropping streaming jobs.
         // Because we allow dropping streaming jobs when the cluster is under recovery, so we have to buffer the drop
         // command and execute it when the cluster is ready to clean up it.
@@ -100,27 +108,33 @@ impl ScheduledQueue {
     }
 }
 
+fn tracing_span() -> tracing::Span {
+    if tracing::Span::current().is_none() {
+        tracing::Span::none()
+    } else {
+        tracing::info_span!(
+            "barrier",
+            checkpoint = tracing::field::Empty,
+            epoch = tracing::field::Empty
+        )
+    }
+}
+
 impl Inner {
     /// Create a new scheduled barrier with the given `checkpoint`, `command` and `notifiers`.
     fn new_scheduled(
         &self,
-        checkpoint: bool,
         command: Command,
         notifiers: impl IntoIterator<Item = Notifier>,
-    ) -> Scheduled {
+    ) -> ScheduledQueueItem {
         // Create a span only if we're being traced, instead of for every periodic barrier.
-        let span = if tracing::Span::current().is_none() {
-            tracing::Span::none()
-        } else {
-            tracing::info_span!("barrier", checkpoint, epoch = tracing::field::Empty)
-        };
+        let span = tracing_span();
 
-        Scheduled {
+        ScheduledQueueItem {
             command,
             notifiers: notifiers.into_iter().collect(),
             send_latency_timer: self.metrics.barrier_send_latency.start_timer(),
             span,
-            checkpoint,
         }
     }
 }
@@ -169,7 +183,7 @@ impl BarrierScheduler {
     }
 
     /// Push a scheduled barrier into the queue.
-    fn push(&self, scheduleds: impl IntoIterator<Item = Scheduled>) -> MetaResult<()> {
+    fn push(&self, scheduleds: impl IntoIterator<Item = ScheduledQueueItem>) -> MetaResult<()> {
         let mut queue = self.inner.queue.lock();
         for scheduled in scheduleds {
             queue.push_back(scheduled)?;
@@ -200,51 +214,6 @@ impl BarrierScheduler {
         }
     }
 
-    /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
-    /// default barrier will be created. If `new_checkpoint` is true, the barrier will become a
-    /// checkpoint.
-    fn attach_notifiers(
-        &self,
-        new_notifiers: Vec<Notifier>,
-        new_checkpoint: bool,
-    ) -> MetaResult<()> {
-        let mut queue = self.inner.queue.lock();
-        match queue.queue.front_mut() {
-            Some(Scheduled {
-                notifiers,
-                checkpoint,
-                ..
-            }) => {
-                notifiers.extend(new_notifiers);
-                *checkpoint = *checkpoint || new_checkpoint;
-            }
-            None => {
-                // If no command scheduled, create a periodic barrier by default.
-                queue.push_back(self.inner.new_scheduled(
-                    new_checkpoint,
-                    Command::barrier(),
-                    new_notifiers,
-                ))?;
-                self.inner.changed_tx.send(()).ok();
-            }
-        }
-        Ok(())
-    }
-
-    /// Wait for the next barrier to collect. Note that the barrier flowing in our stream graph is
-    /// ignored, if exists.
-    pub async fn wait_for_next_barrier_to_collect(&self, checkpoint: bool) -> MetaResult<()> {
-        let (tx, rx) = oneshot::channel();
-        let notifier = Notifier {
-            collected: Some(tx),
-            ..Default::default()
-        };
-        self.attach_notifiers(vec![notifier], checkpoint)?;
-        rx.await
-            .ok()
-            .context("failed to wait for barrier collect")?
-    }
-
     /// Run multiple commands and return when they're all completely finished. It's ensured that
     /// multiple commands are executed continuously.
     ///
@@ -261,7 +230,6 @@ impl BarrierScheduler {
 
             contexts.push((started_rx, collect_rx));
             scheduleds.push(self.inner.new_scheduled(
-                command.need_checkpoint(),
                 command,
                 once(Notifier {
                     started: Some(started_tx),
@@ -315,11 +283,11 @@ impl BarrierScheduler {
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self, checkpoint: bool) -> MetaResult<HummockVersionId> {
+    pub async fn flush(&self) -> MetaResult<HummockVersionId> {
         let start = Instant::now();
 
         tracing::debug!("start barrier flush");
-        self.wait_for_next_barrier_to_collect(checkpoint).await?;
+        self.run_multiple_commands(vec![Command::Flush]).await?;
 
         let elapsed = Instant::now().duration_since(start);
         tracing::debug!("barrier flushed in {:?}", elapsed);
@@ -360,16 +328,24 @@ impl ScheduledBarriers {
         let checkpoint = self.try_get_checkpoint();
         let scheduled = select! {
             biased;
-            mut scheduled = self.inner.next_scheduled() => {
+            item = self.inner.next_scheduled() => {
                 if let Some(min_interval) = &mut self.min_interval {
                     min_interval.reset();
                 }
-                scheduled.checkpoint = scheduled.checkpoint || checkpoint;
-                scheduled
+                let checkpoint = item.command.need_checkpoint() || checkpoint;
+                item.send_latency_timer.observe_duration();
+                Scheduled {
+                    command: Some((item.command, item.notifiers)),
+                    span: item.span,
+                    checkpoint,
+                }
             },
             _ = self.min_interval.as_mut().expect("should have set min interval").tick() => {
-                self.inner
-                    .new_scheduled(checkpoint, Command::barrier(), std::iter::empty())
+                Scheduled {
+                    command: None,
+                    span: tracing_span(),
+                    checkpoint,
+                }
             }
         };
         self.update_num_uncheckpointed_barrier(scheduled.checkpoint);
@@ -378,7 +354,7 @@ impl ScheduledBarriers {
 }
 
 impl Inner {
-    async fn next_scheduled(&self) -> Scheduled {
+    async fn next_scheduled(&self) -> ScheduledQueueItem {
         loop {
             let mut rx = self.changed_tx.subscribe();
             {
@@ -398,7 +374,7 @@ impl ScheduledBarriers {
     pub(super) fn abort_and_mark_blocked(&self, reason: impl Into<String> + Copy) {
         let mut queue = self.inner.queue.lock();
         queue.mark_blocked(reason.into());
-        while let Some(Scheduled { notifiers, .. }) = queue.queue.pop_front() {
+        while let Some(ScheduledQueueItem { notifiers, .. }) = queue.queue.pop_front() {
             notifiers
                 .into_iter()
                 .for_each(|notify| notify.notify_collection_failed(anyhow!(reason.into()).into()))
@@ -418,7 +394,7 @@ impl ScheduledBarriers {
         assert_matches!(queue.status, QueueStatus::Blocked(_));
         let (mut dropped_actors, mut cancel_table_ids) = (vec![], HashSet::new());
 
-        while let Some(Scheduled {
+        while let Some(ScheduledQueueItem {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {

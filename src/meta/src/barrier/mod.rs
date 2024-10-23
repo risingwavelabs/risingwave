@@ -125,9 +125,7 @@ enum BarrierManagerStatus {
 
 /// Scheduled command with its notifiers.
 struct Scheduled {
-    command: Command,
-    notifiers: Vec<Notifier>,
-    send_latency_timer: HistogramTimer,
+    command: Option<(Command, Vec<Notifier>)>,
     span: tracing::Span,
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
@@ -379,7 +377,12 @@ impl CheckpointControl {
                 CompletingTask::None | CompletingTask::Err(_) => None,
                 CompletingTask::Completing { command_ctx, .. } => command_ctx.as_ref(),
             })
-            .map(|command_ctx| command_ctx.command.should_pause_inject_barrier())
+            .and_then(|command_ctx| {
+                command_ctx
+                    .command
+                    .as_ref()
+                    .map(Command::should_pause_inject_barrier)
+            })
             .unwrap_or(false);
         debug_assert_eq!(
             self.command_ctx_queue
@@ -392,7 +395,11 @@ impl CheckpointControl {
                     }
                     .into_iter()
                 )
-                .any(|command_ctx| command_ctx.command.should_pause_inject_barrier()),
+                .any(|command_ctx| command_ctx
+                    .command
+                    .as_ref()
+                    .map(Command::should_pause_inject_barrier)
+                    .unwrap_or(false)),
             should_pause
         );
 
@@ -811,14 +818,18 @@ impl GlobalBarrierManager {
     /// Handle the new barrier from the scheduled queue and inject it.
     fn handle_new_barrier(&mut self, scheduled: Scheduled) -> MetaResult<()> {
         let Scheduled {
-            mut command,
-            mut notifiers,
-            send_latency_timer,
+            command,
             checkpoint,
             span,
         } = scheduled;
 
-        if let Some(table_to_cancel) = command.table_to_cancel()
+        let (mut command, mut notifiers) = if let Some((command, notifiers)) = command {
+            (Some(command), notifiers)
+        } else {
+            (None, vec![])
+        };
+
+        if let Some(table_to_cancel) = command.as_ref().and_then(Command::table_to_cancel)
             && self
                 .checkpoint_control
                 .creating_streaming_job_controls
@@ -835,7 +846,7 @@ impl GlobalBarrierManager {
             return Ok(());
         }
 
-        if let Command::RescheduleFragment { .. } = &command {
+        if let Some(Command::RescheduleFragment { .. }) = &command {
             if !self
                 .checkpoint_control
                 .creating_streaming_job_controls
@@ -854,7 +865,7 @@ impl GlobalBarrierManager {
             }
         }
 
-        let Some((prev_epoch, curr_epoch)) = self.state.next_epoch_pair(&command) else {
+        let Some((prev_epoch, curr_epoch)) = self.state.next_epoch_pair(command.as_ref()) else {
             // skip the command when there is nothing to do with the barrier
             for mut notifier in notifiers {
                 notifier.notify_started();
@@ -864,10 +875,10 @@ impl GlobalBarrierManager {
         };
 
         // Insert newly added creating job
-        if let Command::CreateStreamingJob {
+        if let Some(Command::CreateStreamingJob {
             job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
             info,
-        } = &command
+        }) = &command
         {
             if self.state.paused_reason().is_some() {
                 warn!("cannot create streaming job with snapshot backfill when paused");
@@ -880,6 +891,8 @@ impl GlobalBarrierManager {
                 return Ok(());
             }
             let mutation = command
+                .as_ref()
+                .expect("checked Some")
                 .to_mutation(None)
                 .expect("should have some mutation in `CreateStreamingJob` command");
             self.checkpoint_control
@@ -909,10 +922,10 @@ impl GlobalBarrierManager {
         tracing::trace!(prev_epoch = prev_epoch.value().0, "inject barrier");
 
         // Collect the jobs to finish
-        if let (BarrierKind::Checkpoint(_), Command::Plain(None)) = (&kind, &command)
+        if let (BarrierKind::Checkpoint(_), None) = (&kind, &command)
             && let Some(jobs_to_merge) = self.checkpoint_control.jobs_to_merge()
         {
-            command = Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge);
+            command = Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge));
         }
 
         let command = command;
@@ -922,7 +935,7 @@ impl GlobalBarrierManager {
             pre_applied_subscription_info,
             table_ids_to_commit,
             jobs_to_wait,
-        ) = self.state.apply_command(&command);
+        ) = self.state.apply_command(command.as_ref());
 
         // Tracing related stuff
         prev_epoch.span().in_scope(|| {
@@ -942,8 +955,6 @@ impl GlobalBarrierManager {
             self.context.clone(),
             span,
         ));
-
-        send_latency_timer.observe_duration();
 
         for creating_job in &mut self
             .checkpoint_control
@@ -1181,7 +1192,11 @@ impl GlobalBarrierManagerContext {
             prev_epoch: command_ctx.prev_epoch.value().0,
             cur_epoch: command_ctx.curr_epoch.value().0,
             duration_sec,
-            command: command_ctx.command.to_string(),
+            command: command_ctx
+                .command
+                .as_ref()
+                .map(|command| command.to_string())
+                .unwrap_or_else(|| "barrier".to_string()),
             barrier_kind: command_ctx.kind.as_str_name().to_string(),
         };
         self.env
@@ -1557,7 +1572,7 @@ fn collect_commit_epoch_info(
     let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
         collect_resp_info(resps);
 
-    let new_table_fragment_infos = if let Command::CreateStreamingJob { info, job_type } =
+    let new_table_fragment_infos = if let Some(Command::CreateStreamingJob { info, job_type }) =
         &command_ctx.command
         && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
     {

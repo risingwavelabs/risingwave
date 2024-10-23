@@ -69,9 +69,12 @@ impl BarrierManagerState {
     }
 
     /// Returns the epoch pair for the next barrier, and updates the state.
-    pub fn next_epoch_pair(&mut self, command: &Command) -> Option<(TracedEpoch, TracedEpoch)> {
+    pub fn next_epoch_pair(
+        &mut self,
+        command: Option<&Command>,
+    ) -> Option<(TracedEpoch, TracedEpoch)> {
         if self.inflight_graph_info.is_empty()
-            && !matches!(&command, Command::CreateStreamingJob { .. })
+            && !matches!(&command, Some(Command::CreateStreamingJob { .. }))
         {
             return None;
         };
@@ -90,7 +93,7 @@ impl BarrierManagerState {
     /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`)
     pub fn apply_command(
         &mut self,
-        command: &Command,
+        command: Option<&Command>,
     ) -> (
         InflightGraphInfo,
         InflightSubscriptionInfo,
@@ -98,19 +101,21 @@ impl BarrierManagerState {
         HashSet<TableId>,
     ) {
         // update the fragment_infos outside pre_apply
-        let fragment_changes = if let Command::CreateStreamingJob {
+        let fragment_changes = if let Some(Command::CreateStreamingJob {
             job_type: CreateStreamingJobType::SnapshotBackfill(_),
             ..
-        } = command
+        }) = command
         {
             None
-        } else if let Some(fragment_changes) = command.fragment_changes() {
+        } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
             self.inflight_graph_info.pre_apply(&fragment_changes);
             Some(fragment_changes)
         } else {
             None
         };
-        self.inflight_subscription_info.pre_apply(command);
+        if let Some(command) = &command {
+            self.inflight_subscription_info.pre_apply(command);
+        }
 
         let info = self.inflight_graph_info.clone();
         let subscription_info = self.inflight_subscription_info.clone();
@@ -121,7 +126,7 @@ impl BarrierManagerState {
 
         let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();
         let mut jobs_to_wait = HashSet::new();
-        if let Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) = command {
+        if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
             for (table_id, (_, graph_info)) in jobs_to_merge {
                 jobs_to_wait.insert(*table_id);
                 table_ids_to_commit.extend(graph_info.existing_table_ids());
@@ -129,7 +134,9 @@ impl BarrierManagerState {
             }
         }
 
-        self.inflight_subscription_info.post_apply(command);
+        if let Some(command) = command {
+            self.inflight_subscription_info.post_apply(command);
+        }
 
         (info, subscription_info, table_ids_to_commit, jobs_to_wait)
     }

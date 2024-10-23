@@ -48,7 +48,7 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 pub trait FrontendMetaClient: Send + Sync {
     async fn try_unregister(&self);
 
-    async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId>;
+    async fn flush(&self) -> Result<HummockVersionId>;
 
     async fn wait(&self) -> Result<()>;
 
@@ -133,8 +133,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.try_unregister().await;
     }
 
-    async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId> {
-        self.0.flush(checkpoint).await
+    async fn flush(&self) -> Result<HummockVersionId> {
+        self.0.flush().await
     }
 
     async fn wait(&self) -> Result<()> {
