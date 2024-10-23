@@ -8,9 +8,6 @@ system ok
 mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS kdb; CREATE DATABASE kdb;"
 
 system ok
-mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS kdb; CREATE DATABASE kdb;"
-
-system ok
 mysql --protocol=tcp -u root mytest < e2e_test/source_legacy/cdc/mysql_create.sql
 
 system ok
