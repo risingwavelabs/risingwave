@@ -106,10 +106,20 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         }
 
         let kafka_client: Arc<BaseConsumer<RwConsumerContext>>;
-        if let Some(item) = SHARED_KAFKA_CLIENT.lock().await.get_mut(&connection_hash) {
+        let mut shared_client_guard = SHARED_KAFKA_CLIENT.lock().await;
+        if let Some(item) = shared_client_guard.get_mut(&connection_hash) {
+            tracing::info!(
+                "reusing kafka client for connection hash {}, to broker {}",
+                connection_hash,
+                broker_address
+            );
             kafka_client = item.client.clone();
             item.ref_count += 1;
+            drop(shared_client_guard);
         } else {
+            // drop the guard and acquire a new one to avoid a 10s blocking call
+            drop(shared_client_guard);
+
             // don't need kafka metrics from enumerator
             let ctx_common = KafkaContextCommon::new(
                 broker_rewrite_map,
@@ -136,7 +146,13 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             }
 
             kafka_client = Arc::new(client);
-            SHARED_KAFKA_CLIENT.lock().await.insert(
+            tracing::debug!(
+                "created kafka client for connection hash {} to broker {}",
+                connection_hash,
+                broker_address
+            );
+            let mut shared_client_guard = SHARED_KAFKA_CLIENT.lock().await;
+            shared_client_guard.insert(
                 connection_hash,
                 SharedKafkaItem {
                     client: kafka_client.clone(),
@@ -174,7 +190,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             .fetch_stop_offset(topic_partitions.as_ref(), &watermarks)
             .await?;
 
-        let ret = topic_partitions
+        let ret: Vec<_> = topic_partitions
             .into_iter()
             .map(|partition| KafkaSplit {
                 topic: self.topic.clone(),

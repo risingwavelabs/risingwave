@@ -140,7 +140,6 @@ pub async fn create_source_worker_handle(
 
         tokio::spawn(async move { worker.run(sync_call_rx).await })
     });
-
     Ok(ConnectorSourceWorkerHandle {
         handle,
         sync_call_tx,
@@ -1042,6 +1041,7 @@ impl SourceManager {
                     if let Some(item) = share_client_guard.get_mut(&entry) {
                         item.ref_count -= 1;
                         if item.ref_count == 0 {
+                            tracing::info!("removing shared kafka client entry {}", entry);
                             share_client_guard.remove(&entry);
                         }
                     }
