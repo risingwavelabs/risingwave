@@ -21,7 +21,7 @@ use anyhow::{anyhow, Context};
 use assert_matches::assert_matches;
 use parking_lot::Mutex;
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::meta::PausedReason;
 use tokio::select;
@@ -58,6 +58,7 @@ enum QueueStatus {
 }
 
 struct ScheduledQueueItem {
+    database_id: DatabaseId,
     command: Command,
     notifiers: Vec<Notifier>,
     send_latency_timer: HistogramTimer,
@@ -124,6 +125,7 @@ impl Inner {
     /// Create a new scheduled barrier with the given `checkpoint`, `command` and `notifiers`.
     fn new_scheduled(
         &self,
+        database_id: DatabaseId,
         command: Command,
         notifiers: impl IntoIterator<Item = Notifier>,
     ) -> ScheduledQueueItem {
@@ -131,6 +133,7 @@ impl Inner {
         let span = tracing_span();
 
         ScheduledQueueItem {
+            database_id,
             command,
             notifiers: notifiers.into_iter().collect(),
             send_latency_timer: self.metrics.barrier_send_latency.start_timer(),
@@ -220,7 +223,11 @@ impl BarrierScheduler {
     /// Returns the barrier info of each command.
     ///
     /// TODO: atomicity of multiple commands is not guaranteed.
-    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
+    async fn run_multiple_commands(
+        &self,
+        database_id: DatabaseId,
+        commands: Vec<Command>,
+    ) -> MetaResult<()> {
         let mut contexts = Vec::with_capacity(commands.len());
         let mut scheduleds = Vec::with_capacity(commands.len());
 
@@ -230,6 +237,7 @@ impl BarrierScheduler {
 
             contexts.push((started_rx, collect_rx));
             scheduleds.push(self.inner.new_scheduled(
+                database_id,
                 command,
                 once(Notifier {
                     started: Some(started_tx),
@@ -263,31 +271,39 @@ impl BarrierScheduler {
     /// configuration change.
     ///
     /// Returns the barrier info of the actual command.
-    pub async fn run_config_change_command_with_pause(&self, command: Command) -> MetaResult<()> {
-        self.run_multiple_commands(vec![
-            Command::pause(PausedReason::ConfigChange),
-            command,
-            Command::resume(PausedReason::ConfigChange),
-        ])
+    pub async fn run_config_change_command_with_pause(
+        &self,
+        database_id: DatabaseId,
+        command: Command,
+    ) -> MetaResult<()> {
+        self.run_multiple_commands(
+            database_id,
+            vec![
+                Command::pause(PausedReason::ConfigChange),
+                command,
+                Command::resume(PausedReason::ConfigChange),
+            ],
+        )
         .await
     }
 
     /// Run a command and return when it's completely finished.
     ///
     /// Returns the barrier info of the actual command.
-    pub async fn run_command(&self, command: Command) -> MetaResult<()> {
+    pub async fn run_command(&self, database_id: DatabaseId, command: Command) -> MetaResult<()> {
         tracing::trace!("run_command: {:?}", command);
-        let ret = self.run_multiple_commands(vec![command]).await;
+        let ret = self.run_multiple_commands(database_id, vec![command]).await;
         tracing::trace!("run_command finished");
         ret
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self) -> MetaResult<HummockVersionId> {
+    pub async fn flush(&self, database_id: DatabaseId) -> MetaResult<HummockVersionId> {
         let start = Instant::now();
 
         tracing::debug!("start barrier flush");
-        self.run_multiple_commands(vec![Command::Flush]).await?;
+        self.run_multiple_commands(database_id, vec![Command::Flush])
+            .await?;
 
         let elapsed = Instant::now().duration_since(start);
         tracing::debug!("barrier flushed in {:?}", elapsed);
@@ -335,7 +351,7 @@ impl ScheduledBarriers {
                 let checkpoint = item.command.need_checkpoint() || checkpoint;
                 item.send_latency_timer.observe_duration();
                 Scheduled {
-                    command: Some((item.command, item.notifiers)),
+                    command: Some((item.database_id, item.command, item.notifiers)),
                     span: item.span,
                     checkpoint,
                 }

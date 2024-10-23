@@ -27,7 +27,7 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model::{actor, fragment, ObjectId, StreamingParallelism, WorkerId};
@@ -2312,16 +2312,7 @@ impl GlobalStreamManager {
     ///     * automatic parallelism control for [`TableParallelism::Adaptive`] when worker nodes changed
     pub async fn reschedule_actors(
         &self,
-        reschedules: HashMap<FragmentId, WorkerReschedule>,
-        options: RescheduleOptions,
-        table_parallelism: Option<HashMap<TableId, TableParallelism>>,
-    ) -> MetaResult<()> {
-        self.reschedule_actors_impl(reschedules, options, table_parallelism)
-            .await
-    }
-
-    async fn reschedule_actors_impl(
-        &self,
+        database_id: DatabaseId,
         reschedules: HashMap<FragmentId, WorkerReschedule>,
         options: RescheduleOptions,
         table_parallelism: Option<HashMap<TableId, TableParallelism>>,
@@ -2368,7 +2359,7 @@ impl GlobalStreamManager {
         let _source_pause_guard = self.source_manager.paused.lock().await;
 
         self.barrier_scheduler
-            .run_config_change_command_with_pause(command)
+            .run_config_change_command_with_pause(database_id, command)
             .await?;
 
         tracing::info!("reschedule done");
@@ -2497,15 +2488,22 @@ impl GlobalStreamManager {
             return Ok(false);
         };
 
-        self.reschedule_actors(
-            reschedules,
-            RescheduleOptions {
-                resolve_no_shuffle_upstream: false,
-                skip_create_new_actors: false,
-            },
-            None,
-        )
-        .await?;
+        for (database_id, reschedules) in self
+            .metadata_manager
+            .split_fragment_map_by_database(reschedules)
+            .await?
+        {
+            self.reschedule_actors(
+                DatabaseId::new(database_id as _),
+                reschedules,
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream: false,
+                    skip_create_new_actors: false,
+                },
+                None,
+            )
+            .await?;
+        }
 
         Ok(true)
     }
