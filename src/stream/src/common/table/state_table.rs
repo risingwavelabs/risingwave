@@ -29,7 +29,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::{IsSingleton, VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -363,6 +363,7 @@ where
 
         let distribution =
             TableDistribution::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
+        assert_eq!(distribution.is_singleton(), table_catalog.is_singleton());
 
         let pk_data_types = pk_indices
             .iter()

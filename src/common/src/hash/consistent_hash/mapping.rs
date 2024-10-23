@@ -139,11 +139,12 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         }
     }
 
-    /// Create a vnode mapping with the single item. Should only be used for singletons.
+    /// Create a vnode mapping with the single item and length of 1.
     ///
-    /// For backwards compatibility, [`VirtualNode::COUNT_FOR_COMPAT`] is used as the vnode count.
+    /// Should only be used for singletons. If you want a different vnode count, call
+    /// [`VnodeMapping::new_uniform`] with `std::iter::once(item)` and desired length.
     pub fn new_single(item: T::Item) -> Self {
-        Self::new_uniform(std::iter::once(item), VirtualNode::COUNT_FOR_COMPAT)
+        Self::new_uniform(std::iter::once(item), 1)
     }
 
     /// The length (or count) of the vnode in this mapping.
