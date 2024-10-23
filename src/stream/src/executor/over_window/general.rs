@@ -428,11 +428,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     (old_row, true)
                 } else {
                     // Retrieve old row from state table.
-                    let table_pk = part_key
-                        .0
-                        .as_ref()
-                        .chain((&new_row).project(&this.order_key_indices))
-                        .chain((&new_row).project(&this.input_pk_indices));
+                    let table_pk = (&new_row).project(this.state_table.pk_indices());
                     // The accesses to the state table is ordered by table PK, so ideally we
                     // can leverage the block cache under the hood.
                     if let Some(old_row) = this.state_table.get_row(table_pk).await? {
