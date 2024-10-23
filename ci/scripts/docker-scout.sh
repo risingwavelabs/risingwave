@@ -26,10 +26,8 @@ echo "--- scout quickview"
 docker-scout quickview ${image} -o /scout/quickview.output
 ls
 cat scout/quickview.output
+buildkite-agent meta-data set "SCOUT_REPORT" "$(cat scout/quickview.output)"
 echo "--- scout recommendations"
 docker-scout recommendations "${image}"
 echo "--- scout cves"
 docker-scout cves "${image}"
-
-echo "--- scout report"
-buildkite-agent meta-data set "SCOUT_REPORT" "$(cat scout/quickview.output)"

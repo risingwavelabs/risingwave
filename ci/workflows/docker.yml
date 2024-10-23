@@ -96,8 +96,8 @@ steps:
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
     retry: *auto-retry
-    notify:
-      - slack:
-          channels:
-            - "#notification-buildkite"
-          message: "Docker Scout Report\n$(buildkite-agent meta-data get SCOUT_REPORT)"
+
+  - label: "generate notification step"
+    depends_on:
+      - "docker-scout"
+    command: ci/scripts/docker-scout-notify.sh
