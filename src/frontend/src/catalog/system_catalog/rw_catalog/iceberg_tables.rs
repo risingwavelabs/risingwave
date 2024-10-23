@@ -67,18 +67,13 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
     println!("conn_str: {}", conn_str);
     let (client, conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls)
         .await
-        .map_err(|e| {
-            anyhow!(
-                "postgres_query_executor: connection error: {:?}",
-                e.as_report()
-            )
-        })?;
+        .map_err(|e| anyhow!(e))?;
 
     tokio::spawn(async move {
         if let Err(e) = conn.await {
             tracing::error!(
-                "postgres_query_executor: connection error: {:?}",
-                e.as_report()
+                error = ?e.as_report(),
+                "iceberg_tables connection error"
             );
         }
     });
@@ -86,7 +81,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
     let rows = client
         .query("select * from iceberg_tables", &[])
         .await
-        .context("postgres_query received error from remote server")?;
+        .context("iceberg_tables received error from remote server")?;
 
     let schema = Schema::new(vec![
         Field::with_name(Varchar, "catalog_name"),
