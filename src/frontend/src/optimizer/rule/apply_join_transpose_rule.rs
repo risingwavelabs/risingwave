@@ -24,7 +24,9 @@ use crate::expr::{
     InputRef,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNodeBinary};
+use crate::optimizer::plan_node::{
+    LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNode, PlanTreeNodeBinary,
+};
 use crate::optimizer::plan_visitor::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
 use crate::optimizer::rule::apply_offset_rewriter::ApplyCorrelatedIndicesConverter;
 use crate::optimizer::PlanRef;
@@ -122,10 +124,14 @@ impl Rule for ApplyJoinTransposeRule {
             return None;
         }
 
-        assert!(
-            join.output_indices_are_trivial(),
-            "ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule"
-        );
+        // ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule.
+        // As this rule will be applied until we reach the fixed point, if the join has output indices, apply ProjectJoinSeparateRule first and return is safety.
+        if !join.output_indices_are_trivial() {
+            let new_apply_right = crate::optimizer::rule::ProjectJoinSeparateRule::create()
+                .apply(join.clone().into())
+                .unwrap();
+            return Some(apply.clone_with_inputs(&[apply_left, new_apply_right]));
+        }
 
         let (push_left, push_right) = match join.join_type() {
             // `LeftSemi`, `LeftAnti`, `LeftOuter` can only push to left side if it's right side has
