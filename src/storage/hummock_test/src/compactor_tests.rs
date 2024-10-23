@@ -2124,7 +2124,7 @@ pub(crate) mod tests {
 
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id, Some(created_tables.clone()))
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
 
@@ -2177,7 +2177,7 @@ pub(crate) mod tests {
 
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id, Some(created_tables.clone()))
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
 
@@ -2221,7 +2221,7 @@ pub(crate) mod tests {
         epoch += millisec_interval_epoch;
 
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id, Some(created_tables.clone()))
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
 
@@ -2363,7 +2363,7 @@ pub(crate) mod tests {
 
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id, Some(created_tables.clone()))
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
     }

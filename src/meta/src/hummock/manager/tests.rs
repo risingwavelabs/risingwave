@@ -2534,10 +2534,10 @@ async fn test_merge_compaction_group_task_expired() {
 
     // will cancel the task2
     hummock_manager
-        .merge_compaction_group(
+        .merge_compaction_group_for_test(
             left_compaction_group_id,
             right_compaction_group_id,
-            Some(created_tables),
+            created_tables,
         )
         .await
         .unwrap();

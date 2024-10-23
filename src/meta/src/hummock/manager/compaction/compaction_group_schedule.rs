@@ -45,6 +45,25 @@ impl HummockManager {
         &self,
         group_1: CompactionGroupId,
         group_2: CompactionGroupId,
+    ) -> Result<()> {
+        self.merge_compaction_group_impl(group_1, group_2, None)
+            .await
+    }
+
+    pub async fn merge_compaction_group_for_test(
+        &self,
+        group_1: CompactionGroupId,
+        group_2: CompactionGroupId,
+        created_tables: HashSet<u32>,
+    ) -> Result<()> {
+        self.merge_compaction_group_impl(group_1, group_2, Some(created_tables))
+            .await
+    }
+
+    pub async fn merge_compaction_group_impl(
+        &self,
+        group_1: CompactionGroupId,
+        group_2: CompactionGroupId,
         created_tables: Option<HashSet<u32>>,
     ) -> Result<()> {
         let compaction_guard = self.compaction.write().await;
@@ -79,6 +98,7 @@ impl HummockManager {
 
         let created_tables = if let Some(created_tables) = created_tables {
             // if the created_tables is provided, use it directly, most for test
+            assert!(cfg!(debug_assertions));
             created_tables
         } else {
             match self.metadata_manager.get_created_table_ids().await {
@@ -913,7 +933,7 @@ impl HummockManager {
         }
 
         match self
-            .merge_compaction_group(group.group_id, next_group.group_id, None)
+            .merge_compaction_group(group.group_id, next_group.group_id)
             .await
         {
             Ok(()) => {

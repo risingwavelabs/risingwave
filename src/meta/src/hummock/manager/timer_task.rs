@@ -542,15 +542,8 @@ impl HummockManager {
         );
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
-        // sort by first table id for deterministic merge order
-        group_infos.sort_by_key(|group| {
-            let table_ids = group
-                .table_statistic
-                .keys()
-                .cloned()
-                .collect::<BTreeSet<_>>();
-            table_ids.iter().next().cloned()
-        });
+        group_infos.sort_by_key(|group| group.group_size);
+        group_infos.reverse();
 
         for group in group_infos {
             if group.table_statistic.len() == 1 {
