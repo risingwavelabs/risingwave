@@ -257,8 +257,11 @@ impl StateTableAccessor for FakeRemoteTableAccessor {
     }
 }
 
+/// `CompactionCatalogManager` is a manager to manage all `Table` which used in compaction
 pub struct CompactionCatalogManager {
+    // `table_id_to_catalog` is a map to store all `Table` which used in compaction
     table_id_to_catalog: RwLock<HashMap<StateTableId, Arc<Table>>>,
+    // `table_accessor` is a accessor to fetch `Table` from meta when the table not found
     table_accessor: Box<dyn StateTableAccessor>,
 }
 
@@ -278,20 +281,25 @@ impl CompactionCatalogManager {
 }
 
 impl CompactionCatalogManager {
+    /// `update` is used to update `Table` in `table_id_to_catalog` from notification
     pub fn update(&self, table_id: u32, catalog: Arc<Table>) {
         self.table_id_to_catalog.write().insert(table_id, catalog);
     }
 
+    /// `sync` is used to sync all `Table` in `table_id_to_catalog` from notification whole snapshot
     pub fn sync(&self, catalog_map: HashMap<u32, Arc<Table>>) {
         let mut guard = self.table_id_to_catalog.write();
         guard.clear();
         guard.extend(catalog_map);
     }
 
+    /// `remove` is used to remove `Table` in `table_id_to_catalog` by `table_id`
     pub fn remove(&self, table_id: u32) {
         self.table_id_to_catalog.write().remove(&table_id);
     }
 
+    /// `acquire` is used to acquire `CompactionCatalogAgent` by `table_ids`
+    /// if the table not found in `table_id_to_catalog`, it will fetch from meta
     pub async fn acquire(
         &self,
         mut table_ids: Vec<StateTableId>,
@@ -301,7 +309,6 @@ impl CompactionCatalogManager {
             // the table in sst has been deleted
 
             // use full key as default
-            // return Ok(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
             return Err(HummockError::other("table_id_set is empty"));
         }
 
@@ -354,6 +361,7 @@ impl CompactionCatalogManager {
         )))
     }
 
+    /// `build_compaction_catalog_agent` is used to build `CompactionCatalogAgent` by `table_catalogs`
     pub fn build_compaction_catalog_agent(
         table_catalogs: HashMap<StateTableId, Arc<Table>>,
     ) -> CompactionCatalogAgentRef {
@@ -375,7 +383,8 @@ impl CompactionCatalogManager {
 }
 
 /// `CompactionCatalogAgent` is a wrapper of `filter_key_extractor_manager` and `table_id_to_vnode`
-/// which is used to extract key and get vnode count
+/// The `CompactionCatalogAgent` belongs to a compaction task call, which we will build from the `table_ids` contained in a compact task and use it during the compaction.
+/// The `CompactionCatalogAgent` can act as a agent for the `CompactionCatalogManager`, providing `extract` and `vnode_count` capabilities.
 pub struct CompactionCatalogAgent {
     filter_key_extractor_manager: Arc<FilterKeyExtractorImpl>,
     table_id_to_vnode: HashMap<StateTableId, usize>,
@@ -426,7 +435,7 @@ impl CompactionCatalogAgent {
         *self
             .table_id_to_vnode
             .get(&table_id)
-            .expect(&format!("table_id not found {}", table_id))
+            .unwrap_or_else(|| panic!("table_id not found {}", table_id))
     }
 
     pub fn table_id_to_vnode_ref(&self) -> &HashMap<StateTableId, usize> {
