@@ -583,5 +583,4 @@
       ) as kv
     from rawdata
   expected_outputs:
-    - batch_plan
-    - stream_plan
+    - optimized_logical_plan_for_batch
