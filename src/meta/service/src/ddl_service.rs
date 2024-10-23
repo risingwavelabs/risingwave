@@ -22,12 +22,11 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::error::MetaErrorInner;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
 use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Comment, CreateType, Secret, Table};
+use risingwave_pb::catalog::{Comment, CreateType, Secret, Table};
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
@@ -45,7 +44,7 @@ use crate::rpc::ddl_controller::{
     DdlCommand, DdlController, DropMode, ReplaceTableInfo, StreamingJobId,
 };
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
-use crate::{MetaError, MetaResult};
+use crate::MetaError;
 
 #[derive(Clone)]
 pub struct DdlServiceImpl {
@@ -728,7 +727,7 @@ impl DdlService for DdlServiceImpl {
             return Err(Status::invalid_argument("request is empty"));
         }
 
-        return match req.payload.unwrap() {
+        match req.payload.unwrap() {
             create_connection_request::Payload::PrivateLink(_) => {
                 panic!("Private Link Connection has been deprecated")
             }
@@ -1013,20 +1012,6 @@ impl DdlService for DdlServiceImpl {
         }
 
         Ok(Response::new(AutoSchemaChangeResponse {}))
-    }
-}
-
-impl DdlServiceImpl {
-    async fn validate_connection(&self, connection_id: u32) -> MetaResult<()> {
-        let connection = self
-            .metadata_manager
-            .catalog_controller
-            .get_connection_by_id(connection_id as _)
-            .await?;
-        if let Some(connection::Info::PrivateLinkService(_)) = &connection.info {
-            panic!("Private Link Connection has been deprecated")
-        }
-        Ok(())
     }
 }
 
