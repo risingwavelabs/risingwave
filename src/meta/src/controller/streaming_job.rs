@@ -68,7 +68,6 @@ use crate::controller::utils::{
     rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::error::bail_invalid_parameter;
 use crate::manager::{NotificationVersion, StreamingJob};
 use crate::model::{StreamContext, TableParallelism};
 use crate::stream::SplitAssignment;
@@ -711,10 +710,14 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), id))?;
 
         if original_max_parallelism != max_parallelism as i32 {
-            bail_invalid_parameter!(
-                "cannot use a different max parallelism when altering or sinking into an existing table, \
-                please `SET STREAMING_MAX_PARALLELISM TO {}` first",
-                original_max_parallelism
+            // We already override the max parallelism in `StreamFragmentGraph` before entering this function.
+            // This should not happen in normal cases.
+            bail!(
+                "cannot use a different max parallelism \
+                 when altering or creating/dropping a sink into an existing table, \
+                 original: {}, new: {}",
+                original_max_parallelism,
+                max_parallelism
             );
         }
 
