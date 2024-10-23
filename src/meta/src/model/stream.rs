@@ -30,9 +30,7 @@ use risingwave_pb::meta::table_parallelism::{
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, PbFragmentTypeFlag, PbStreamContext, StreamActor, StreamNode,
-};
+use risingwave_pb::stream_plan::{FragmentTypeFlag, PbStreamContext, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
 use crate::model::MetadataModelResult;
@@ -337,17 +335,6 @@ impl TableFragments {
             .values()
             .filter(move |fragment| check_type(fragment.get_fragment_type_mask()))
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
-    }
-
-    /// Check if the fragment type mask is injectable.
-    pub fn is_injectable(fragment_type_mask: u32) -> bool {
-        (fragment_type_mask
-            & (PbFragmentTypeFlag::Source as u32
-                | PbFragmentTypeFlag::Now as u32
-                | PbFragmentTypeFlag::Values as u32
-                | PbFragmentTypeFlag::BarrierRecv as u32
-                | PbFragmentTypeFlag::SnapshotBackfillStreamScan as u32))
-            != 0
     }
 
     /// Returns mview actor ids.
