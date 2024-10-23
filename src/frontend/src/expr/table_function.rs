@@ -354,7 +354,7 @@ impl TableFunction {
         static MYSQL_ARGS_LEN: usize = 7;
         let args = {
             if args.len() != MYSQL_ARGS_LEN {
-                return Err(BindError("postgres_query function only accepts 7 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, server_id varchar, postgres_query varchar)".to_string()).into());
+                return Err(BindError("mysql_query function only accepts 7 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, server_id varchar, mysql_query varchar)".to_string()).into());
             }
             let mut cast_args = Vec::with_capacity(MYSQL_ARGS_LEN);
             for arg in args {
@@ -370,10 +370,9 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         let Some(scalar) = value else {
                             return Err(BindError(
-                                "postgres_query function does not accept null arguments"
-                                    .to_string(),
+                                "mysql_query function does not accept null arguments".to_string(),
                             )
-                                .into());
+                            .into());
                         };
                         evaled_args.push(scalar.into_utf8().into());
                     }
@@ -382,9 +381,9 @@ impl TableFunction {
                     }
                     None => {
                         return Err(BindError(
-                            "postgres_query function only accepts constant arguments".to_string(),
+                            "mysql_query function only accepts constant arguments".to_string(),
                         )
-                            .into());
+                        .into());
                     }
                 }
             }
@@ -396,7 +395,7 @@ impl TableFunction {
             return Err(crate::error::ErrorCode::BindError(
                 "postgres_query can't be used in the madsim mode".to_string(),
             )
-                .into());
+            .into());
         }
 
         #[cfg(not(madsim))]
@@ -412,10 +411,10 @@ impl TableFunction {
                             evaled_args[3],
                             evaled_args[4]
                         )
-                            .as_str(),
+                        .as_str(),
                         tokio_postgres::NoTls,
                     )
-                        .await?;
+                    .await?;
 
                     tokio::spawn(async move {
                         if let Err(e) = connection.await {
@@ -452,7 +451,7 @@ impl TableFunction {
                                     format!("unsupported column type: {}", column.type_())
                                         .to_string(),
                                 )
-                                    .into());
+                                .into());
                             }
                         };
                         rw_types.push((name, data_type));
