@@ -19,7 +19,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
@@ -49,14 +48,8 @@ use crate::hummock::{
     HummockManager,
 };
 
-pub enum NewTableFragmentInfo {
-    Normal {
-        mv_table_id: Option<TableId>,
-        internal_table_ids: Vec<TableId>,
-    },
-    NewCompactionGroup {
-        table_ids: HashSet<TableId>,
-    },
+pub struct NewTableFragmentInfo {
+    pub table_ids: HashSet<TableId>,
 }
 
 #[derive(Default)]
@@ -131,73 +124,48 @@ impl HummockManager {
         let mut compaction_group_config: Option<Arc<CompactionConfig>> = None;
 
         // Add new table
-        for new_table_fragment_info in new_table_fragment_infos {
-            match new_table_fragment_info {
-                NewTableFragmentInfo::Normal {
-                    mv_table_id,
-                    internal_table_ids,
-                } => {
-                    on_handle_add_new_table(
-                        state_table_info,
-                        &internal_table_ids,
-                        StaticCompactionGroupId::StateDefault as u64,
-                        &mut table_compaction_group_mapping,
-                        &mut new_table_ids,
-                    )?;
+        for NewTableFragmentInfo { table_ids } in new_table_fragment_infos {
+            let (compaction_group_manager, compaction_group_config) =
+                if let Some(compaction_group_manager) = &mut compaction_group_manager_txn {
+                    (
+                        compaction_group_manager,
+                        (*compaction_group_config
+                            .as_ref()
+                            .expect("must be set with compaction_group_manager_txn"))
+                        .clone(),
+                    )
+                } else {
+                    let compaction_group_manager_guard =
+                        self.compaction_group_manager.write().await;
+                    let new_compaction_group_config =
+                        compaction_group_manager_guard.default_compaction_config();
+                    compaction_group_config = Some(new_compaction_group_config.clone());
+                    (
+                        compaction_group_manager_txn.insert(
+                            CompactionGroupManager::start_owned_compaction_groups_txn(
+                                compaction_group_manager_guard,
+                            ),
+                        ),
+                        new_compaction_group_config,
+                    )
+                };
+            let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
+            new_compaction_groups.insert(new_compaction_group_id, compaction_group_config.clone());
+            compaction_group_manager.insert(
+                new_compaction_group_id,
+                CompactionGroup {
+                    group_id: new_compaction_group_id,
+                    compaction_config: compaction_group_config,
+                },
+            );
 
-                    on_handle_add_new_table(
-                        state_table_info,
-                        &mv_table_id,
-                        StaticCompactionGroupId::MaterializedView as u64,
-                        &mut table_compaction_group_mapping,
-                        &mut new_table_ids,
-                    )?;
-                }
-                NewTableFragmentInfo::NewCompactionGroup { table_ids } => {
-                    let (compaction_group_manager, compaction_group_config) =
-                        if let Some(compaction_group_manager) = &mut compaction_group_manager_txn {
-                            (
-                                compaction_group_manager,
-                                (*compaction_group_config
-                                    .as_ref()
-                                    .expect("must be set with compaction_group_manager_txn"))
-                                .clone(),
-                            )
-                        } else {
-                            let compaction_group_manager_guard =
-                                self.compaction_group_manager.write().await;
-                            let new_compaction_group_config =
-                                compaction_group_manager_guard.default_compaction_config();
-                            compaction_group_config = Some(new_compaction_group_config.clone());
-                            (
-                                compaction_group_manager_txn.insert(
-                                    CompactionGroupManager::start_owned_compaction_groups_txn(
-                                        compaction_group_manager_guard,
-                                    ),
-                                ),
-                                new_compaction_group_config,
-                            )
-                        };
-                    let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
-                    new_compaction_groups
-                        .insert(new_compaction_group_id, compaction_group_config.clone());
-                    compaction_group_manager.insert(
-                        new_compaction_group_id,
-                        CompactionGroup {
-                            group_id: new_compaction_group_id,
-                            compaction_config: compaction_group_config,
-                        },
-                    );
-
-                    on_handle_add_new_table(
-                        state_table_info,
-                        &table_ids,
-                        new_compaction_group_id,
-                        &mut table_compaction_group_mapping,
-                        &mut new_table_ids,
-                    )?;
-                }
-            }
+            on_handle_add_new_table(
+                state_table_info,
+                &table_ids,
+                new_compaction_group_id,
+                &mut table_compaction_group_mapping,
+                &mut new_table_ids,
+            )?;
         }
 
         let commit_sstables = self
