@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::time::Duration;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -27,12 +28,55 @@ use super::{MqttError, MqttProperties};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
+static CONNECTED_TIMEOUT_MS: u64 = 500;
+
+struct ConnectedState {
+    is_connected: AtomicBool,
+    notify: tokio::sync::Notify,
+}
+impl ConnectedState {
+    fn new() -> Self {
+        Self {
+            is_connected: AtomicBool::new(false),
+            notify: tokio::sync::Notify::new(),
+        }
+    }
+
+    fn set_is_connected(&self, connected: bool) {
+        self.is_connected
+            .store(connected, std::sync::atomic::Ordering::Relaxed);
+        if connected {
+            self.notify.notify_waiters();
+        }
+    }
+
+    async fn wait_connected(&self, timeout_ms: u64) -> bool {
+        if self.is_connected.load(std::sync::atomic::Ordering::Relaxed) {
+            return true;
+        }
+        let mut timeout = tokio::time::interval(Duration::from_millis(timeout_ms));
+        timeout.tick().await;
+        loop {
+            let notified = self.notify.notified();
+            tokio::select! {
+                _ = timeout.tick() => {
+                    return false;
+                }
+                _ = notified => {
+                    if self.is_connected.load(std::sync::atomic::Ordering::Relaxed) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+}
 pub struct MqttSplitEnumerator {
     topic: String,
     #[expect(dead_code)]
     client: rumqttc::v5::AsyncClient,
     topics: Arc<RwLock<HashSet<String>>>,
-    connected: Arc<AtomicBool>,
+    connected_state: Arc<ConnectedState>,
     stopped: Arc<AtomicBool>,
 }
 
@@ -61,8 +105,8 @@ impl SplitEnumerator for MqttSplitEnumerator {
 
         let topics = Arc::new(RwLock::new(topics));
 
-        let connected = Arc::new(AtomicBool::new(false));
-        let connected_clone = connected.clone();
+        let connected_state = Arc::new(ConnectedState::new());
+        let connected_state_clone = connected_state.clone();
 
         let stopped = Arc::new(AtomicBool::new(false));
         let stopped_clone = stopped.clone();
@@ -70,9 +114,10 @@ impl SplitEnumerator for MqttSplitEnumerator {
         let topics_clone = topics.clone();
         tokio::spawn(async move {
             while !stopped_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                match eventloop.poll().await {
+                let a = eventloop.poll().await;
+                match a {
                     Ok(Event::Outgoing(Outgoing::Subscribe(_))) => {
-                        connected_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                        connected_state_clone.set_is_connected(true);
                     }
                     Ok(Event::Incoming(Incoming::Publish(p))) => {
                         let topic = String::from_utf8_lossy(&p.topic).to_string();
@@ -96,7 +141,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
                             topic,
                             err.as_report(),
                         );
-                        connected_clone.store(false, std::sync::atomic::Ordering::Relaxed);
+                        connected_state_clone.set_is_connected(false);
                         cloned_client
                             .subscribe(topic.clone(), rumqttc::v5::mqttbytes::QoS::AtMostOnce)
                             .await
@@ -110,13 +155,17 @@ impl SplitEnumerator for MqttSplitEnumerator {
             client,
             topics,
             topic: properties.topic,
-            connected,
+            connected_state,
             stopped,
         })
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<MqttSplit>> {
-        if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self
+            .connected_state
+            .wait_connected(CONNECTED_TIMEOUT_MS)
+            .await
+        {
             return Err(ConnectorError::from(MqttError(format!(
                 "Failed to connect to MQTT broker for topic {}",
                 self.topic
