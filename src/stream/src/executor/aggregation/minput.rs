@@ -190,6 +190,8 @@ impl MaterializedInputState {
         if !self.cache.is_synced() {
             stats.agg_state_cache_miss_count += 1;
 
+            // Measure how long it takes to refill the cache
+            let start = std::time::Instant::now();
             let mut cache_filler = self.cache.begin_syncing();
             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
                 &(Bound::Unbounded, Bound::Unbounded);
@@ -226,6 +228,8 @@ impl MaterializedInputState {
                 cache_filler.append(cache_key, cache_value);
             }
             cache_filler.finish();
+
+            let duration = start.elapsed().as_secs();
         }
         assert!(self.cache.is_synced());
 
