@@ -32,4 +32,4 @@ echo "--- scout cves"
 docker-scout cves "${image}"
 
 echo "--- scout report"
-export SCOUT_REPORT=$(cat scout/quickview.output)
+buildkite-agent meta-data set "SCOUT_REPORT" "$(cat scout/quickview.output)"

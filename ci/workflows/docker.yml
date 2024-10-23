@@ -100,4 +100,4 @@ steps:
       - slack:
           channels:
             - "#notification-buildkite"
-          message: "Docker Scout Report\n${SCOUT_REPORT}"
+          message: "Docker Scout Report\n$(buildkite-agent meta-data get SCOUT_REPORT)"
