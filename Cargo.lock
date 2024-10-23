@@ -11346,6 +11346,7 @@ dependencies = [
  "maplit",
  "md5",
  "memcomparable",
+ "mysql_async",
  "num-integer",
  "parking_lot 0.12.1",
  "parse-display",

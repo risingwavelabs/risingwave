@@ -15,6 +15,8 @@
 use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
+use mysql_async::consts::ColumnType as MySqlColumnType;
+use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{create_parquet_stream_builder, list_s3_directory};
@@ -22,8 +24,8 @@ pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
 use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
-use tokio_postgres;
 use tokio_postgres::types::Type as TokioPgType;
+use {mysql_async, tokio_postgres};
 
 use super::{infer_type, Expr, ExprImpl, ExprRewriter, Literal, RwResult};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
@@ -351,10 +353,10 @@ impl TableFunction {
     }
 
     pub fn new_mysql_query(args: Vec<ExprImpl>) -> RwResult<Self> {
-        static MYSQL_ARGS_LEN: usize = 7;
+        static MYSQL_ARGS_LEN: usize = 6;
         let args = {
             if args.len() != MYSQL_ARGS_LEN {
-                return Err(BindError("mysql_query function only accepts 7 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, server_id varchar, mysql_query varchar)".to_string()).into());
+                return Err(BindError("mysql_query function only accepts 6 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, mysql_query varchar)".to_string()).into());
             }
             let mut cast_args = Vec::with_capacity(MYSQL_ARGS_LEN);
             for arg in args {
@@ -402,53 +404,43 @@ impl TableFunction {
         {
             let schema = tokio::task::block_in_place(|| {
                 RUNTIME.block_on(async {
-                    let (client, connection) = tokio_postgres::connect(
-                        format!(
-                            "host={} port={} user={} password={} dbname={}",
-                            evaled_args[0],
-                            evaled_args[1],
-                            evaled_args[2],
-                            evaled_args[3],
-                            evaled_args[4]
-                        )
-                        .as_str(),
-                        tokio_postgres::NoTls,
-                    )
-                    .await?;
+                    let database_opts: mysql_async::Opts = mysql_async::OptsBuilder::default()
+                        .ip_or_hostname(evaled_args[0].clone())
+                        .tcp_port(evaled_args[1].parse::<u16>().unwrap())
+                        .user(Some(evaled_args[2].clone()))
+                        .pass(Some(evaled_args[3].clone()))
+                        .db_name(Some(evaled_args[4].clone()))
+                        .into();
 
-                    tokio::spawn(async move {
-                        if let Err(e) = connection.await {
-                            tracing::error!(
-                                "postgres_query_executor: connection error: {:?}",
-                                e.as_report()
-                            );
-                        }
-                    });
+                    let pool = mysql_async::Pool::new(database_opts);
+                    let mut conn = pool.get_conn().await?;
 
-                    let statement = client.prepare(evaled_args[5].as_str()).await?;
+                    let query = evaled_args[6].clone();
+                    let statement = conn.prep(query).await?;
 
                     let mut rw_types = vec![];
+                    #[allow(clippy::never_loop)]
                     for column in statement.columns() {
-                        let name = column.name().to_string();
-                        let data_type = match *column.type_() {
-                            TokioPgType::BOOL => DataType::Boolean,
-                            TokioPgType::INT2 => DataType::Int16,
-                            TokioPgType::INT4 => DataType::Int32,
-                            TokioPgType::INT8 => DataType::Int64,
-                            TokioPgType::FLOAT4 => DataType::Float32,
-                            TokioPgType::FLOAT8 => DataType::Float64,
-                            TokioPgType::NUMERIC => DataType::Decimal,
-                            TokioPgType::DATE => DataType::Date,
-                            TokioPgType::TIME => DataType::Time,
-                            TokioPgType::TIMESTAMP => DataType::Timestamp,
-                            TokioPgType::TIMESTAMPTZ => DataType::Timestamptz,
-                            TokioPgType::TEXT | TokioPgType::VARCHAR => DataType::Varchar,
-                            TokioPgType::INTERVAL => DataType::Interval,
-                            TokioPgType::JSONB => DataType::Jsonb,
-                            TokioPgType::BYTEA => DataType::Bytea,
+                        let name = column.name_str().to_string();
+                        let data_type = match column.column_type() {
+                            // TokioPgType::BOOL => DataType::Boolean,
+                            // TokioPgType::INT2 => DataType::Int16,
+                            // TokioPgType::INT4 => DataType::Int32,
+                            // TokioPgType::INT8 => DataType::Int64,
+                            // TokioPgType::FLOAT4 => DataType::Float32,
+                            // TokioPgType::FLOAT8 => DataType::Float64,
+                            // TokioPgType::NUMERIC => DataType::Decimal,
+                            // TokioPgType::DATE => DataType::Date,
+                            // TokioPgType::TIME => DataType::Time,
+                            // TokioPgType::TIMESTAMP => DataType::Timestamp,
+                            // TokioPgType::TIMESTAMPTZ => DataType::Timestamptz,
+                            // TokioPgType::TEXT | TokioPgType::VARCHAR => DataType::Varchar,
+                            // TokioPgType::INTERVAL => DataType::Interval,
+                            // TokioPgType::JSONB => DataType::Jsonb,
+                            // TokioPgType::BYTEA => DataType::Bytea,
                             _ => {
                                 return Err(crate::error::ErrorCode::BindError(
-                                    format!("unsupported column type: {}", column.type_())
+                                    format!("unsupported column type: {:?}", column.column_type())
                                         .to_string(),
                                 )
                                 .into());
