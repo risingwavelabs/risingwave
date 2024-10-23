@@ -21,7 +21,7 @@ use risingwave_pb::plan_common::StorageTableDesc;
 
 use super::{ColumnDesc, ColumnId, TableId};
 use crate::catalog::get_dist_key_in_pk_indices;
-use crate::hash::VnodeCountCompat;
+use crate::hash::{VnodeCount, VnodeCountCompat};
 use crate::util::sort_util::ColumnOrder;
 
 /// Includes necessary information for compute node to access data of the table.
@@ -117,7 +117,7 @@ impl TableDesc {
             versioned: self.versioned,
             stream_key: self.stream_key.iter().map(|&x| x as u32).collect(),
             vnode_col_idx_in_pk,
-            maybe_vnode_count: Some(self.vnode_count as u32),
+            maybe_vnode_count: VnodeCount::set(self.vnode_count).to_protobuf(),
         })
     }
 
