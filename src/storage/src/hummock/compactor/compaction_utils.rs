@@ -33,7 +33,7 @@ use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbTableSchema};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::compactor::{
     ConcatSstableIterator, MultiCompactionFilter, StateCleanUpCompactionFilter, TaskProgress,
     TtlCompactionFilter,
@@ -55,7 +55,7 @@ pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
     pub options: SstableBuilderOptions,
     pub policy: CachePolicy,
     pub remote_rpc_cost: Arc<AtomicU64>,
-    pub filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+    pub compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     pub sstable_writer_factory: W,
     pub _phantom: PhantomData<F>,
 }
@@ -87,7 +87,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
                 self.options.capacity / DEFAULT_ENTRY_SIZE + 1,
             ),
             self.options.clone(),
-            self.filter_key_extractor.clone(),
+            self.compaction_catalog_agent_ref.clone(),
             Some(self.limiter.clone()),
         );
         Ok(builder)

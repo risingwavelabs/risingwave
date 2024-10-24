@@ -15,7 +15,9 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use itertools::Itertools;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_pb::compactor::{dispatch_compaction_task_request, DispatchCompactionTaskRequest};
 use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
@@ -34,7 +36,7 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -80,8 +82,8 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     GetObjectId, HummockResult, SstableBuilderOptions, SstableObjectIdManager, Xor16FilterBuilder,
 };
-use crate::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, StaticFilterKeyExtractorManager,
+use crate::compaction_catalog_manager::{
+    CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
 };
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
@@ -130,7 +132,7 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Option<Arc<TaskProgress>>,
         task_id: Option<HummockCompactionTaskId>,
         split_index: Option<usize>,
@@ -155,7 +157,7 @@ impl Compactor {
                     factory,
                     iter,
                     compaction_filter,
-                    filter_key_extractor,
+                    compaction_catalog_agent_ref,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
                 )
@@ -166,7 +168,7 @@ impl Compactor {
                     factory,
                     iter,
                     compaction_filter,
-                    filter_key_extractor,
+                    compaction_catalog_agent_ref,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
                 )
@@ -230,7 +232,7 @@ impl Compactor {
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Option<Arc<TaskProgress>>,
         object_id_getter: Box<dyn GetObjectId>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
@@ -240,7 +242,7 @@ impl Compactor {
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
             remote_rpc_cost: self.get_id_time.clone(),
-            filter_key_extractor,
+            compaction_catalog_agent_ref: compaction_catalog_agent_ref.clone(),
             sstable_writer_factory: writer_factory,
             _phantom: PhantomData,
         };
@@ -253,6 +255,7 @@ impl Compactor {
             self.context
                 .storage_opts
                 .compactor_concurrent_uploading_sst_count,
+            compaction_catalog_agent_ref,
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,
@@ -280,7 +283,7 @@ pub fn start_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
-    filter_key_extractor_manager: FilterKeyExtractorManager,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -470,7 +473,7 @@ pub fn start_compactor(
 
                         let meta_client = hummock_meta_client.clone();
                         let sstable_object_id_manager = sstable_object_id_manager.clone();
-                        let filter_key_extractor_manager = filter_key_extractor_manager.clone();
+                        let compaction_catalog_manager_ref = compaction_catalog_manager_ref.clone();
 
                         match event {
                             ResponseEvent::CompactTask(compact_task) => {
@@ -515,14 +518,55 @@ pub fn start_compactor(
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
-                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker) =
-                                        compactor_runner::compact(
-                                            context.clone(),
-                                            compact_task,
-                                            rx,
-                                            Box::new(sstable_object_id_manager.clone()),
-                                            filter_key_extractor_manager.clone(),
-                                        ).await;
+                                    let existing_table_ids: HashSet<u32> = HashSet::from_iter(compact_task.existing_table_ids.clone());
+                                    let compact_table_ids = Vec::from_iter(
+                                        compact_task
+                                            .input_ssts
+                                            .iter()
+                                            .flat_map(|level| level.table_infos.iter())
+                                            .flat_map(|sst| sst.table_ids.clone())
+                                            .filter(|table_id| existing_table_ids.contains(table_id))
+                                            .sorted()
+                                            .unique(),
+                                    );
+
+                                     let ((compact_task, table_stats, object_timestamps), _memory_tracker) = match compaction_catalog_manager_ref.acquire(compact_table_ids.clone()).await {
+                                        Ok(compaction_catalog_agent_ref) => {
+                                            let acquire_table_ids: HashSet<StateTableId> = compaction_catalog_agent_ref.table_ids().collect();
+                                            if acquire_table_ids.len() != compact_table_ids.len() {
+                                                let diff = compact_table_ids.into_iter().collect::<HashSet<_>>()
+                                                    .symmetric_difference(&acquire_table_ids)
+                                                    .cloned()
+                                                    .collect::<Vec<_>>();
+                                                tracing::warn!(
+                                                    dif= ?diff,
+                                                    "Some table ids are not acquired."
+                                                );
+                                                let task_status = TaskStatus::ExecuteFailed;
+                                                (
+                                                    compact_done(compact_task, context.clone(), vec![], task_status),
+                                                    None,
+                                                )
+                                            } else {
+                                                compactor_runner::compact(
+                                                    context.clone(),
+                                                    compact_task,
+                                                    rx,
+                                                    Box::new(sstable_object_id_manager.clone()),
+                                                    compaction_catalog_agent_ref,
+                                                ).await
+                                            }
+                                        },
+                                        Err(e) => {
+                                            tracing::error!(error = %e.as_report(), "Failed to acquire catalog");
+                                            let task_status = TaskStatus::ExecuteFailed;
+                                            (
+                                                compact_done(compact_task, context.clone(), vec![], task_status),
+                                                None,
+                                            )
+                                        }
+                                    };
+
                                     shutdown.lock().unwrap().remove(&task_id);
                                     running_task_parallelism.fetch_sub(parallelism as u32, Ordering::SeqCst);
 
@@ -703,16 +747,10 @@ pub fn start_shared_compactor(
                             output_object_ids,
                             task: dispatch_task,
                         } = request.into_inner();
-                        let id_to_tables = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
-                            acc.insert(table.id, table);
+                        let table_id_to_catalog = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
+                            acc.insert(table.id, Arc::new(table));
                             acc
                         });
-                        let static_filter_key_extractor_manager: Arc<StaticFilterKeyExtractorManager> =
-                            Arc::new(StaticFilterKeyExtractorManager::new(id_to_tables));
-                        let filter_key_extractor_manager =
-                            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(
-                                static_filter_key_extractor_manager,
-                            );
 
                         let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
                         output_object_ids_deque.extend(output_object_ids);
@@ -725,12 +763,13 @@ pub fn start_shared_compactor(
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
+                                    let compaction_catalog_agent_ref = CompactionCatalogManager::build_compaction_catalog_agent(table_id_to_catalog);
                                     let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact(
                                         context.clone(),
                                         compact_task,
                                         rx,
                                         Box::new(shared_compactor_object_id_manager),
-                                        filter_key_extractor_manager.clone(),
+                                        compaction_catalog_agent_ref,
                                     )
                                     .await;
                                     shutdown.lock().unwrap().remove(&task_id);

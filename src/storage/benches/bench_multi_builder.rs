@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::env;
 use std::ops::Range;
 use std::sync::atomic::AtomicU64;
@@ -24,11 +25,13 @@ use foyer::{Engine, HybridCacheBuilder};
 use rand::random;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, S3ObjectStore,
 };
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::iterator::{ConcatIterator, ConcatIteratorInner, HummockIterator};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
@@ -83,7 +86,11 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
             .create_sst_writer(id, writer_options)
             .await
             .unwrap();
-        let builder = SstableBuilder::for_test(id, writer, self.options.clone());
+        let table_id_to_vnode = HashMap::from_iter(vec![(
+            TableId::default().into(),
+            VirtualNode::COUNT_FOR_TEST,
+        )]);
+        let builder = SstableBuilder::for_test(id, writer, self.options.clone(), table_id_to_vnode);
 
         Ok(builder)
     }
@@ -192,6 +199,8 @@ fn bench_builder(
 
     let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
 
+    let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+
     let mut group = c.benchmark_group("bench_multi_builder");
     group
         .sample_size(SAMPLE_COUNT)
@@ -205,6 +214,7 @@ fn bench_builder(
                         StreamingSstableWriterFactory::new(sstable_store.clone()),
                         get_builder_options(capacity_mb),
                     ),
+                    compaction_catalog_agent_ref.clone(),
                 ))
             })
         });
@@ -217,6 +227,7 @@ fn bench_builder(
                         BatchSstableWriterFactory::new(sstable_store.clone()),
                         get_builder_options(capacity_mb),
                     ),
+                    compaction_catalog_agent_ref.clone(),
                 ))
             })
         });
@@ -249,6 +260,8 @@ fn bench_table_scan(c: &mut Criterion) {
     let object_store = Arc::new(ObjectStoreImpl::InMem(store));
     let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
 
+    let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+
     let ssts = runtime.block_on(async {
         build_tables(CapacitySplitTableBuilder::for_test(
             LocalTableBuilderFactory::new(
@@ -256,6 +269,7 @@ fn bench_table_scan(c: &mut Criterion) {
                 BatchSstableWriterFactory::new(sstable_store.clone()),
                 get_builder_options(capacity_mb),
             ),
+            compaction_catalog_agent_ref.clone(),
         ))
         .await
     });
