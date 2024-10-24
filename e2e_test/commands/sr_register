@@ -27,4 +27,4 @@ if [[ -z $subject || -z $encoding ]]; then
 fi
 
 jq -Rs "{\"schema\": ., \"schemaType\": \"$encoding\"}" \
-| curl -X POST -H 'content-type:application/vnd.schemaregistry.v1+json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/${subject}/versions"
+| curl -X POST -H 'content-type:application/vnd.schemaregistry.v1+json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL:-http://schemaregistry:8082}/subjects/${subject}/versions"
