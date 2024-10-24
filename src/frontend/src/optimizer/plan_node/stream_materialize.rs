@@ -34,7 +34,7 @@ use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::error::Result;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::plan_can_use_backgronud_ddl;
+use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -89,7 +89,7 @@ impl StreamMaterialize {
 
         let create_type = if matches!(table_type, TableType::MaterializedView)
             && input.ctx().session_ctx().config().background_ddl()
-            && plan_can_use_backgronud_ddl(&input)
+            && plan_can_use_background_ddl(&input)
         {
             CreateType::Background
         } else {
