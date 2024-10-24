@@ -211,7 +211,8 @@ pub enum CreateStreamingJobType {
 /// collected.
 #[derive(Debug, Clone, strum::Display)]
 pub enum Command {
-    /// `Flush` command will generate a checkpoint barrier
+    /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
+    /// all messages before the checkpoint barrier should have been committed.
     Flush,
 
     /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
@@ -907,11 +908,8 @@ impl CommandContext {
 
     /// Returns the paused reason after executing the current command.
     pub fn next_paused_reason(&self) -> Option<PausedReason> {
-        let Some(command) = &self.command else {
-            return None;
-        };
-        match command {
-            Command::Pause(reason) => {
+        match &self.command {
+            Some(Command::Pause(reason)) => {
                 // Only pause when the cluster is not already paused.
                 if self.current_paused_reason.is_none() {
                     Some(*reason)
@@ -920,7 +918,7 @@ impl CommandContext {
                 }
             }
 
-            Command::Resume(reason) => {
+            Some(Command::Resume(reason)) => {
                 // Only resume when the cluster is paused with the same reason.
                 if self.current_paused_reason == Some(*reason) {
                     None

@@ -57,7 +57,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
     IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
-    TransactionTrait, Value,
+    SelectColumns, TransactionTrait, Value,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -103,6 +103,7 @@ pub struct CatalogController {
 
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
+    pub(crate) database_id: DatabaseId,
     pub(crate) streaming_job_ids: Vec<ObjectId>,
     /// Dropped state table list, need to unregister from hummock.
     pub(crate) state_table_ids: Vec<TableId>,
@@ -418,6 +419,7 @@ impl CatalogController {
             .await;
         Ok((
             ReleaseContext {
+                database_id,
                 streaming_job_ids: streaming_jobs,
                 state_table_ids,
                 source_ids,
@@ -428,6 +430,17 @@ impl CatalogController {
             },
             version,
         ))
+    }
+
+    pub async fn get_object_database_id(&self, object_id: ObjectId) -> MetaResult<DatabaseId> {
+        let inner = self.inner.read().await;
+        let (database_id,): (Option<DatabaseId>,) = Object::find_by_id(object_id)
+            .select_column(object::Column::DatabaseId)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+        Ok(database_id.ok_or_else(|| anyhow!("object has no database id: {object_id}"))?)
     }
 
     pub async fn create_schema(&self, schema: PbSchema) -> MetaResult<NotificationVersion> {
@@ -2109,6 +2122,9 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
         assert_eq!(obj.obj_type, object_type);
+        let database_id = obj
+            .database_id
+            .ok_or_else(|| anyhow!("dropped object should have database_id"))?;
 
         let mut to_drop_objects = match drop_mode {
             DropMode::Cascade => get_referring_objects_cascade(object_id, &txn).await?,
@@ -2273,6 +2289,18 @@ impl CatalogController {
             to_drop_objects.extend(to_drop_internal_table_objs);
         }
 
+        let to_drop_objects = to_drop_objects;
+
+        to_drop_objects.iter().for_each(|obj| {
+            if let Some(obj_database_id) = obj.database_id {
+                assert_eq!(
+                    database_id, obj_database_id,
+                    "dropped objects not in the same database: {:?}",
+                    obj
+                );
+            }
+        });
+
         let (source_fragments, removed_actors, removed_fragments) =
             resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
@@ -2324,6 +2352,7 @@ impl CatalogController {
 
         Ok((
             ReleaseContext {
+                database_id,
                 streaming_job_ids: to_drop_streaming_jobs,
                 state_table_ids: to_drop_state_table_ids,
                 source_ids: to_drop_source_ids,
