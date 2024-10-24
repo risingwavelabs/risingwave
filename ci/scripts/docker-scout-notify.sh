@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 buildkite-agent meta-data get SCOUT_REPORT > scout.report
-report=$(sed 's/\\n/          \\n/g')
+report=$(sed 's/^/          /g' scout.report)
 
 cat >> step.yaml << EOF
 - label: "docker scout slack notification"
