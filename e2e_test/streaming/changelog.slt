@@ -10,8 +10,9 @@ create table t2 (v1 int, v2 int);
 statement ok
 create table t3 (v1 int primary key, v2 int);
 
+# test public.t1 due to https://github.com/risingwavelabs/risingwave/issues/18747
 statement ok
-create materialized view mv1 as with sub as changelog from t1 select * from sub;
+create materialized view mv1 as with sub as changelog from public.t1 select * from sub;
 
 statement ok
 create materialized view mv2 as with sub as changelog from t2 select * from sub;

@@ -4000,7 +4000,7 @@ impl Parser<'_> {
                 parser_err!("Expected 'changelog' but found '{}'", changelog);
             }
             self.expect_keyword(Keyword::FROM)?;
-            Ok(CteInner::ChangeLog(self.parse_identifier()?))
+            Ok(CteInner::ChangeLog(self.parse_object_name()?))
         }
     }
 
