@@ -126,6 +126,9 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     let compaction_catalog_agent_ref = compaction_catalog_manager_ref
         .acquire(existing_table_ids.iter().copied().collect())
         .await?;
+    let existing_table_ids = compaction_catalog_agent_ref
+        .table_ids()
+        .collect::<HashSet<_>>();
     payload.retain(|imm| {
         let ret = existing_table_ids.contains(&imm.table_id.table_id);
         if !ret {

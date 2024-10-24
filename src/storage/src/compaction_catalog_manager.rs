@@ -342,13 +342,6 @@ impl CompactionCatalogManager {
                         ))
                     })?;
 
-            if state_tables.len() != table_ids.len() {
-                return Err(HummockError::other(format!(
-                    "table_ids not found in catalog {:?}",
-                    table_ids
-                )));
-            }
-
             let mut guard = self.table_id_to_catalog.write();
             for table_id in table_ids {
                 if let Some(table) = state_tables.remove(&table_id) {
@@ -450,6 +443,10 @@ impl CompactionCatalogAgent {
 
     pub fn table_id_to_vnode_ref(&self) -> &HashMap<StateTableId, usize> {
         &self.table_id_to_vnode
+    }
+
+    pub fn table_ids(&self) -> impl Iterator<Item = StateTableId> + '_ {
+        self.table_id_to_vnode.keys().cloned()
     }
 }
 

@@ -17,6 +17,7 @@ mod compaction_filter;
 pub mod compaction_utils;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_pb::compactor::{dispatch_compaction_task_request, DispatchCompactionTaskRequest};
 use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
@@ -529,15 +530,32 @@ pub fn start_compactor(
                                             .unique(),
                                     );
 
-                                     let ((compact_task, table_stats, object_timestamps), _memory_tracker) = match compaction_catalog_manager_ref.acquire(compact_table_ids).await {
+                                     let ((compact_task, table_stats, object_timestamps), _memory_tracker) = match compaction_catalog_manager_ref.acquire(compact_table_ids.clone()).await {
                                         Ok(compaction_catalog_agent_ref) => {
-                                            compactor_runner::compact(
-                                                context.clone(),
-                                                compact_task,
-                                                rx,
-                                                Box::new(sstable_object_id_manager.clone()),
-                                                compaction_catalog_agent_ref,
-                                            ).await
+                                            let acquire_table_ids: HashSet<StateTableId> = compaction_catalog_agent_ref.table_ids().collect();
+                                            if acquire_table_ids.len() != compact_table_ids.len() {
+                                                let diff = compact_table_ids.into_iter().collect::<HashSet<_>>()
+                                                    .symmetric_difference(&acquire_table_ids)
+                                                    .cloned()
+                                                    .collect::<Vec<_>>();
+                                                tracing::warn!(
+                                                    dif= ?diff,
+                                                    "Some table ids are not acquired."
+                                                );
+                                                let task_status = TaskStatus::ExecuteFailed;
+                                                (
+                                                    compact_done(compact_task, context.clone(), vec![], task_status),
+                                                    None,
+                                                )
+                                            } else {
+                                                compactor_runner::compact(
+                                                    context.clone(),
+                                                    compact_task,
+                                                    rx,
+                                                    Box::new(sstable_object_id_manager.clone()),
+                                                    compaction_catalog_agent_ref,
+                                                ).await
+                                            }
                                         },
                                         Err(e) => {
                                             tracing::error!(error = %e.as_report(), "Failed to acquire catalog");
