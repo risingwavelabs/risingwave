@@ -15,7 +15,7 @@ system ok
 rpk topic create 'avro_alter_source_test'
 
 system ok
-sr_register avro_alter_source_test-value '{"type":"record","name":"Root","fields":[{"name":"foo","type":"string"}]}'
+sr_register avro_alter_source_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"foo","type":"string"}]}'
 
 statement ok
 create source s
@@ -29,7 +29,7 @@ FORMAT PLAIN ENCODE AVRO (
 
 # create a new version of schema and produce a message
 system ok
-sr_register avro_alter_source_test-value '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}'
+sr_register avro_alter_source_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}'
 
 system ok
 echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic avro_alter_source_test

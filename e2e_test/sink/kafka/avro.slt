@@ -58,7 +58,7 @@ system ok
 rpk topic create test-rw-sink-plain-avro
 
 system ok
-jq '{"schema": tojson}' << EOF | curl -X POST -H 'content-type: application/json' -d @- 'http://schemaregistry:8082/subjects/test-rw-sink-plain-avro-value/versions'
+sr_register test-rw-sink-plain-avro-value AVRO << EOF
 {
   "type": "record",
   "name": "Simple",
@@ -106,7 +106,7 @@ format plain encode avro (
 key encode text;
 
 system ok
-jq '{"schema": tojson}' << EOF | curl -X POST -H 'content-type: application/json' -d @- 'http://schemaregistry:8082/subjects/test-rw-sink-plain-avro-key/versions'
+sr_register test-rw-sink-plain-avro-key AVRO << EOF
 {
   "type": "record",
   "name": "Key",
