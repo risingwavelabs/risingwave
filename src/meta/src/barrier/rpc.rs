@@ -270,7 +270,11 @@ impl ControlStreamManager {
             &command_ctx.kind,
             pre_applied_graph_info,
             applied_graph_info,
-            command_ctx.command.actors_to_create(),
+            command_ctx
+                .command
+                .as_ref()
+                .map(|command| command.actors_to_create())
+                .unwrap_or_default(),
             subscriptions_to_add,
             subscriptions_to_remove,
         )

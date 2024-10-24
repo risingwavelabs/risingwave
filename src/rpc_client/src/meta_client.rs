@@ -905,8 +905,8 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId> {
-        let request = FlushRequest { checkpoint };
+    pub async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
+        let request = FlushRequest { database_id };
         let resp = self.inner.flush(request).await?;
         Ok(HummockVersionId::new(resp.hummock_version_id))
     }

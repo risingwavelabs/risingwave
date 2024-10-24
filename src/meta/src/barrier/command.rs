@@ -211,11 +211,9 @@ pub enum CreateStreamingJobType {
 /// collected.
 #[derive(Debug, Clone, strum::Display)]
 pub enum Command {
-    /// `Plain` command generates a barrier with the mutation it carries.
-    ///
-    /// Barriers from all actors marked as `Created` state will be collected.
-    /// After the barrier is collected, it does nothing.
-    Plain(Option<Mutation>),
+    /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
+    /// all messages before the checkpoint barrier should have been committed.
+    Flush,
 
     /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
     /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
@@ -305,10 +303,6 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn barrier() -> Self {
-        Self::Plain(None)
-    }
-
     pub fn pause(reason: PausedReason) -> Self {
         Self::Pause(reason)
     }
@@ -319,7 +313,7 @@ impl Command {
 
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
-            Command::Plain(_) => None,
+            Command::Flush => None,
             Command::Pause(_) => None,
             Command::Resume(_) => None,
             Command::DropStreamingJobs {
@@ -398,7 +392,7 @@ impl Command {
 
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        !matches!(self, Command::Plain(None) | Command::Resume(_))
+        !matches!(self, Command::Resume(_))
     }
 }
 
@@ -446,7 +440,7 @@ pub struct CommandContext {
 
     pub current_paused_reason: Option<PausedReason>,
 
-    pub command: Command,
+    pub command: Option<Command>,
 
     pub kind: BarrierKind,
 
@@ -479,7 +473,7 @@ impl CommandContext {
         curr_epoch: TracedEpoch,
         table_ids_to_commit: HashSet<TableId>,
         current_paused_reason: Option<PausedReason>,
-        command: Command,
+        command: Option<Command>,
         kind: BarrierKind,
         barrier_manager_context: GlobalBarrierManagerContext,
         span: tracing::Span,
@@ -504,7 +498,7 @@ impl Command {
     pub fn to_mutation(&self, current_paused_reason: Option<&PausedReason>) -> Option<Mutation> {
         let mutation =
             match self {
-                Command::Plain(mutation) => mutation.clone(),
+                Command::Flush => None,
 
                 Command::Pause(_) => {
                     // Only pause when the cluster is not already paused.
@@ -908,13 +902,14 @@ impl Command {
 impl CommandContext {
     pub fn to_mutation(&self) -> Option<Mutation> {
         self.command
-            .to_mutation(self.current_paused_reason.as_ref())
+            .as_ref()
+            .and_then(|command| command.to_mutation(self.current_paused_reason.as_ref()))
     }
 
     /// Returns the paused reason after executing the current command.
     pub fn next_paused_reason(&self) -> Option<PausedReason> {
         match &self.command {
-            Command::Pause(reason) => {
+            Some(Command::Pause(reason)) => {
                 // Only pause when the cluster is not already paused.
                 if self.current_paused_reason.is_none() {
                     Some(*reason)
@@ -923,7 +918,7 @@ impl CommandContext {
                 }
             }
 
-            Command::Resume(reason) => {
+            Some(Command::Resume(reason)) => {
                 // Only resume when the cluster is paused with the same reason.
                 if self.current_paused_reason == Some(*reason) {
                     None
@@ -977,8 +972,11 @@ impl CommandContext {
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(&self) -> MetaResult<()> {
-        match &self.command {
-            Command::Plain(_) => {}
+        let Some(command) = &self.command else {
+            return Ok(());
+        };
+        match command {
+            Command::Flush => {}
 
             Command::Throttle(_) => {}
 

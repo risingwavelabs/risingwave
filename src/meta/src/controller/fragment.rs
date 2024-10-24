@@ -26,9 +26,9 @@ use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ActorUpstreamActors,
-    ConnectorSplits, ExprContext, FragmentId, I32Array, JobStatus, ObjectId, SinkId, SourceId,
-    StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ActorUpstreamActors,
+    ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus, ObjectId, SinkId,
+    SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -51,8 +51,8 @@ use risingwave_pb::stream_plan::{
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
-    QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
+    ColumnTrait, DbErr, EntityOrSelect, EntityTrait, JoinType, ModelTrait, PaginatorTrait,
+    QueryFilter, QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
@@ -657,6 +657,24 @@ impl CatalogController {
             .await?;
 
         Ok(object_ids)
+    }
+
+    pub async fn list_fragment_database_ids(
+        &self,
+        select_fragment_ids: Option<Vec<FragmentId>>,
+    ) -> MetaResult<Vec<(FragmentId, DatabaseId)>> {
+        let inner = self.inner.read().await;
+        let select = Fragment::find()
+            .select()
+            .column(fragment::Column::FragmentId)
+            .column(object::Column::DatabaseId)
+            .join(JoinType::InnerJoin, fragment::Relation::Object.def());
+        let select = if let Some(select_fragment_ids) = select_fragment_ids {
+            select.filter(fragment::Column::FragmentId.is_in(select_fragment_ids))
+        } else {
+            select
+        };
+        Ok(select.into_tuple().all(&inner.db).await?)
     }
 
     pub async fn get_job_fragments_by_id(&self, job_id: ObjectId) -> MetaResult<PbTableFragments> {

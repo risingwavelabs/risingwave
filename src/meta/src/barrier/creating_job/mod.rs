@@ -201,14 +201,14 @@ impl CreatingStreamingJobControl {
         command_ctx: &Arc<CommandContext>,
     ) -> MetaResult<()> {
         let table_id = self.info.table_fragments.table_id();
-        let start_consume_upstream = if let Command::MergeSnapshotBackfillStreamingJobs(
-            jobs_to_merge,
-        ) = &command_ctx.command
-        {
-            jobs_to_merge.contains_key(&table_id)
-        } else {
-            false
-        };
+        let start_consume_upstream =
+            if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) =
+                &command_ctx.command
+            {
+                jobs_to_merge.contains_key(&table_id)
+            } else {
+                false
+            };
         if start_consume_upstream {
             info!(
                 table_id = self.info.table_fragments.table_id().table_id,
