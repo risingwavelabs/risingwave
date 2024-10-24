@@ -32,9 +32,22 @@ create source mysql_mytest with (
  port = '${MYSQL_TCP_PORT:8306}',
  username = 'rwcdc',
  password = secret mysql_pwd,
- database.name = 'mytest,kdb',
+ database.name = 'mytest',
  server.id = '5601'
 );
+
+
+statement ok
+create source mysql_source with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'rwcdc',
+ password = secret mysql_pwd,
+ database.name = 'mytest,kdb',
+ server.id = '5602'
+);
+
 
 statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
 create materialized view mv as select * from mysql_mytest;
@@ -122,7 +135,7 @@ create table orders_test (
 
 
 statement ok
-create table kt1 (*) from mysql_mytest table 'kdb.kt1';
+create table kt1 (*) from mysql_source table 'kdb.kt1';
 
 statement ok
 create materialized view products_test_cnt as select count(*) as cnt from rw.products_test;
