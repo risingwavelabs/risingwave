@@ -114,8 +114,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
         let topics_clone = topics.clone();
         tokio::spawn(async move {
             while !stopped_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                let a = eventloop.poll().await;
-                match a {
+                match eventloop.poll().await {
                     Ok(Event::Outgoing(Outgoing::Subscribe(_))) => {
                         connected_state_clone.set_is_connected(true);
                     }
