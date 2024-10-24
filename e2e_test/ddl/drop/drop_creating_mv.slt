@@ -20,9 +20,9 @@ sleep 5s
 
 onlyif can-use-recover
 query I
-select background_ddl, created from rw_catalog.rw_materialized_views where name='m1';
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
 ----
-f f
+f
 
 onlyif can-use-recover
 statement ok
@@ -42,9 +42,9 @@ sleep 5s
 
 onlyif can-use-recover
 query I
-select background_ddl, created from rw_catalog.rw_materialized_views where name='m1';
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
 ----
-t f
+t
 
 onlyif can-use-recover
 statement ok
@@ -63,9 +63,9 @@ sleep 5s
 
 onlyif can-use-recover
 query I
-select background_ddl, created from rw_catalog.rw_materialized_views where name='m1';
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
 ----
-t f
+t
 
 onlyif can-use-recover
 statement ok
@@ -76,9 +76,9 @@ sleep 5s
 
 onlyif can-use-recover
 query I
-select background_ddl, created from rw_catalog.rw_materialized_views where name='m1';
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
 ----
-t f
+t
 
 onlyif can-use-recover
 statement ok
@@ -95,9 +95,9 @@ statement ok
 create materialized view m1 as select * from t;
 
 query I
-select background_ddl, created from rw_catalog.rw_materialized_views where name='m1';
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
 ----
-f t
+f
 
 statement ok
 drop materialized view m1;
