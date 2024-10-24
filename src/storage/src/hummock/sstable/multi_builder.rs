@@ -397,7 +397,9 @@ mod tests {
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
 
     use super::*;
-    use crate::compaction_catalog_manager::CompactionCatalogAgent;
+    use crate::compaction_catalog_manager::{
+        CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
+    };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
     use crate::hummock::DEFAULT_RESTART_INTERVAL;
@@ -526,27 +528,28 @@ mod tests {
             ..Default::default()
         };
 
-        let table_partition_vnode =
-            BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
-
-        let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0, 1, 2, 3, 4, 5]);
-        let mut builder = CapacitySplitTableBuilder::new(
-            LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts),
-            Arc::new(CompactorMetrics::unused()),
-            None,
-            table_partition_vnode,
-            None,
-            compaction_catalog_agent_ref,
-        );
-
-        let mut table_key = VirtualNode::from_index(0).to_be_bytes().to_vec();
-        table_key.extend_from_slice("a".as_bytes());
-
-        let switch_builder =
-            builder.check_switch_builder(&UserKey::for_test(TableId::from(1), &table_key));
-        assert!(switch_builder);
-
         {
+            let table_partition_vnode =
+                BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
+
+            let compaction_catalog_agent_ref =
+                CompactionCatalogAgent::for_test(vec![0, 1, 2, 3, 4, 5]);
+            let mut builder = CapacitySplitTableBuilder::new(
+                LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts.clone()),
+                Arc::new(CompactorMetrics::unused()),
+                None,
+                table_partition_vnode,
+                None,
+                compaction_catalog_agent_ref,
+            );
+
+            let mut table_key = VirtualNode::from_index(0).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(1), &table_key));
+            assert!(switch_builder);
+
             let mut table_key = VirtualNode::from_index(62).to_be_bytes().to_vec();
             table_key.extend_from_slice("a".as_bytes());
             let switch_builder =
@@ -564,19 +567,123 @@ mod tests {
             let switch_builder =
                 builder.check_switch_builder(&UserKey::for_test(TableId::from(1), &table_key));
             assert!(switch_builder);
+
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(2), &table_key));
+            assert!(switch_builder);
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(3), &table_key));
+            assert!(switch_builder);
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(4), &table_key));
+            assert!(switch_builder);
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(5), &table_key));
+            assert!(!switch_builder);
         }
 
-        let switch_builder =
-            builder.check_switch_builder(&UserKey::for_test(TableId::from(2), &table_key));
-        assert!(switch_builder);
-        let switch_builder =
-            builder.check_switch_builder(&UserKey::for_test(TableId::from(3), &table_key));
-        assert!(switch_builder);
-        let switch_builder =
-            builder.check_switch_builder(&UserKey::for_test(TableId::from(4), &table_key));
-        assert!(switch_builder);
-        let switch_builder =
-            builder.check_switch_builder(&UserKey::for_test(TableId::from(5), &table_key));
-        assert!(!switch_builder);
+        {
+            // Test different table vnode count
+
+            let full_key_filter_key_extractor =
+                Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
+
+            let table_partition_vnode =
+                BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
+
+            let table_id_to_vnode = HashMap::from_iter(vec![(1, 64), (2, 128), (3, 256)]);
+            let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
+                full_key_filter_key_extractor,
+                table_id_to_vnode,
+            ));
+
+            let mut builder = CapacitySplitTableBuilder::new(
+                LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts),
+                Arc::new(CompactorMetrics::unused()),
+                None,
+                table_partition_vnode,
+                None,
+                compaction_catalog_agent_ref,
+            );
+
+            let mut table_key = VirtualNode::from_index(0).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(1), &table_key));
+            assert!(switch_builder);
+
+            let mut table_key = VirtualNode::from_index(15).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(1), &table_key));
+            assert!(!switch_builder);
+
+            let mut table_key = VirtualNode::from_index(16).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(1), &table_key));
+            assert!(switch_builder);
+
+            let mut table_key = VirtualNode::from_index(0).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(2), &table_key));
+            assert!(switch_builder);
+
+            let mut table_key = VirtualNode::from_index(16).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(2), &table_key));
+            assert!(!switch_builder);
+
+            let mut table_key = VirtualNode::from_index(31).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(2), &table_key));
+            assert!(!switch_builder);
+
+            let mut table_key = VirtualNode::from_index(32).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(2), &table_key));
+            assert!(switch_builder);
+
+            let mut table_key = VirtualNode::from_index(64).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(2), &table_key));
+            assert!(switch_builder);
+
+            let mut table_key = VirtualNode::from_index(0).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(3), &table_key));
+            assert!(switch_builder);
+
+            let mut table_key = VirtualNode::from_index(16).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(3), &table_key));
+            assert!(!switch_builder);
+
+            let mut table_key = VirtualNode::from_index(32).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(3), &table_key));
+            assert!(!switch_builder);
+
+            let mut table_key = VirtualNode::from_index(63).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(3), &table_key));
+            assert!(!switch_builder);
+
+            let mut table_key = VirtualNode::from_index(64).to_be_bytes().to_vec();
+            table_key.extend_from_slice("a".as_bytes());
+            let switch_builder =
+                builder.check_switch_builder(&UserKey::for_test(TableId::from(3), &table_key));
+            assert!(switch_builder);
+        }
     }
 }

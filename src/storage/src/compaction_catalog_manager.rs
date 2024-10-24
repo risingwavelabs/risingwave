@@ -344,7 +344,7 @@ impl CompactionCatalogManager {
 
             if state_tables.len() != table_ids.len() {
                 return Err(HummockError::other(format!(
-                    "table_ids not found in meta {:?}",
+                    "table_ids not found in catalog {:?}",
                     table_ids
                 )));
             }
@@ -685,6 +685,31 @@ mod tests {
             let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();
 
             assert_eq!(pk_prefix_len, output_key.len());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_compaction_catalog_manager_exception() {
+        let compaction_catalog_manager = super::CompactionCatalogManager::default();
+
+        {
+            let ret = compaction_catalog_manager.acquire(vec![]).await;
+            assert!(ret.is_err());
+            if let Err(e) = ret {
+                assert_eq!(e.to_string(), "Other error: table_id_set is empty");
+            }
+        }
+
+        {
+            // network error with FakeRemoteTableAccessor
+            let ret = compaction_catalog_manager.acquire(vec![1]).await;
+            assert!(ret.is_err());
+            if let Err(e) = ret {
+                assert_eq!(
+                    e.to_string(),
+                    "Other error: request rpc list_tables for meta failed: fake accessor does not support fetch remote table"
+                );
+            }
         }
     }
 }
