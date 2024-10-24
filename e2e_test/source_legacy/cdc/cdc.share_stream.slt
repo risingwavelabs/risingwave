@@ -37,18 +37,6 @@ create source mysql_mytest with (
 );
 
 
-statement ok
-create source mysql_source with (
- connector = 'mysql-cdc',
- hostname = '${MYSQL_HOST:localhost}',
- port = '${MYSQL_TCP_PORT:8306}',
- username = 'rwcdc',
- password = secret mysql_pwd,
- database.name = 'mytest,kdb',
- server.id = '5602'
-);
-
-
 statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
 create materialized view mv as select * from mysql_mytest;
 
@@ -90,6 +78,19 @@ HASH {MVIEW}
 SINGLE {STREAM_SCAN}
 SINGLE {CDC_FILTER}
 HASH {SOURCE,DML}
+
+
+statement ok
+create source mysql_source with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'rwcdc',
+ password = secret mysql_pwd,
+ database.name = 'mytest,kdb',
+ server.id = '5602'
+);
+
 
 statement ok
 CREATE TABLE IF NOT EXISTS mysql_all_types(
