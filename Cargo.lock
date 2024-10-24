@@ -10777,6 +10777,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "bincode 1.3.3",
+ "hex",
  "parking_lot 0.12.1",
  "prost 0.13.1",
  "risingwave_pb",
