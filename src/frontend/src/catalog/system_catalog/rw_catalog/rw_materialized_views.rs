@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::CreateType;
+use risingwave_common::catalog::{CreateType, StreamJobStatus};
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
@@ -35,6 +35,7 @@ struct RwMaterializedView {
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
     background_ddl: bool,
+    created: bool,
 }
 
 #[system_catalog(table, "rw_catalog.rw_materialized_views")]
@@ -65,6 +66,7 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
                 initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
                 created_at_cluster_version: table.created_at_cluster_version.clone(),
                 background_ddl: table.create_type == CreateType::Background,
+                created: table.stream_job_status == StreamJobStatus::Created,
             })
         })
         .collect())
