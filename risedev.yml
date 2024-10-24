@@ -139,7 +139,7 @@ profile:
       AWS_SECRET_ACCESS_KEY: "hummockadmin"
       RW_BACKEND: "postgres"
       RW_SQL_USERNAME: "postgres"
-      RW_SQL_PASSWORD: ""
+      RW_SQL_PASSWORD: "123"
       RW_SQL_ENDPOINT: "127.0.0.1:8432"
       RW_SQL_DATABASE: "metadata"
       CONNECTOR_LIBS_PATH: ".risingwave/bin/connector-node/libs"
