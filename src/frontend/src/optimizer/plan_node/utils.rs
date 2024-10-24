@@ -380,7 +380,10 @@ pub fn infer_kv_log_store_table_catalog_inner(
 /// cannot use background ddl.
 pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
     if plan.inputs().is_empty() {
-        if plan.as_stream_now().is_some() {
+        if plan.as_stream_source_scan().is_some()
+            || plan.as_stream_now().is_some()
+            || plan.as_stream_source().is_some()
+        {
             true
         } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
