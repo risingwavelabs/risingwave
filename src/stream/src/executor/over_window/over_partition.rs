@@ -70,13 +70,13 @@ const MAGIC_CACHE_SIZE: usize = 1024;
 const MAGIC_JITTER_PREVENTION: usize = MAGIC_CACHE_SIZE / 8;
 
 pub(super) fn shrink_partition_cache(
-    this_partition_key: &OwnedRow,
+    deduped_part_key: &OwnedRow,
     range_cache: &mut PartitionCache,
     cache_policy: CachePolicy,
     recently_accessed_range: RangeInclusive<StateKey>,
 ) {
     tracing::trace!(
-        this_partition_key=?this_partition_key,
+        partition=?deduped_part_key,
         cache_policy=?cache_policy,
         recently_accessed_range=?recently_accessed_range,
         "find the range to retain in the range cache"
@@ -218,7 +218,7 @@ pub(super) fn shrink_partition_cache(
     };
 
     tracing::trace!(
-        this_partition_key=?this_partition_key,
+        partition=?deduped_part_key,
         retain_range=?(&start..=&end),
         "retain range in the range cache"
     );
@@ -289,7 +289,7 @@ impl<'a> AffectedRange<'a> {
 /// By putting this type inside `private` module, we can avoid misuse of the internal fields and
 /// methods.
 pub(super) struct OverPartition<'a, S: StateStore> {
-    this_partition_key: &'a OwnedRow,
+    deduped_part_key: &'a OwnedRow,
     range_cache: &'a mut PartitionCache,
     cache_policy: CachePolicy,
 
@@ -311,7 +311,7 @@ const MAGIC_BATCH_SIZE: usize = 512;
 impl<'a, S: StateStore> OverPartition<'a, S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        this_partition_key: &'a OwnedRow,
+        deduped_part_key: &'a OwnedRow,
         cache: &'a mut PartitionCache,
         cache_policy: CachePolicy,
         calls: &'a [WindowFuncCall],
@@ -336,7 +336,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             .any(|call| call.frame.bounds.end_is_unbounded());
 
         Self {
-            this_partition_key,
+            deduped_part_key,
             range_cache: cache,
             cache_policy,
 
@@ -654,17 +654,17 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
             if need_extend_leftward {
                 self.stats.left_miss_count += 1;
-                tracing::trace!(partition=?self.this_partition_key, "partition cache left extension triggered");
+                tracing::trace!(partition=?self.deduped_part_key, "partition cache left extension triggered");
                 let left_most = self.cache_real_first_key().unwrap_or(delta_first).clone();
                 self.extend_cache_leftward_by_n(table, &left_most).await?;
             }
             if need_extend_rightward {
                 self.stats.right_miss_count += 1;
-                tracing::trace!(partition=?self.this_partition_key, "partition cache right extension triggered");
+                tracing::trace!(partition=?self.deduped_part_key, "partition cache right extension triggered");
                 let right_most = self.cache_real_last_key().unwrap_or(delta_last).clone();
                 self.extend_cache_rightward_by_n(table, &right_most).await?;
             }
-            tracing::trace!(partition=?self.this_partition_key, "partition cache extended");
+            tracing::trace!(partition=?self.deduped_part_key, "partition cache extended");
         }
     }
 
@@ -921,16 +921,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             return Ok(());
         }
 
-        tracing::trace!(partition=?self.this_partition_key, "loading the whole partition into cache");
+        tracing::trace!(partition=?self.deduped_part_key, "loading the whole partition into cache");
 
         let mut new_cache = PartitionCache::new(); // shouldn't use `new_empty_partition_cache` here because we don't want sentinels
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let table_iter = table
-            .iter_with_prefix(
-                self.this_partition_key,
-                sub_range,
-                PrefetchOptions::default(),
-            )
+            .iter_with_prefix(self.deduped_part_key, sub_range, PrefetchOptions::default())
             .await?;
 
         #[for_await]
@@ -965,7 +961,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         {
             // completely not overlapping, for the sake of simplicity, we re-init the cache
             tracing::debug!(
-                partition=?self.this_partition_key,
+                partition=?self.deduped_part_key,
                 cache_first=?cache_real_first_key,
                 cache_last=?cache_real_last_key,
                 range=?range,
@@ -981,7 +977,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Included(self.row_conv.state_key_to_table_sub_pk(range.end())?),
             );
             tracing::debug!(
-                partition=?self.this_partition_key,
+                partition=?self.deduped_part_key,
                 table_sub_range=?table_sub_range,
                 "cache is empty, just loading the given range"
             );
@@ -1003,7 +999,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 ),
             );
             tracing::trace!(
-                partition=?self.this_partition_key,
+                partition=?self.deduped_part_key,
                 table_sub_range=?table_sub_range,
                 "loading the left half of given range"
             );
@@ -1022,7 +1018,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Included(self.row_conv.state_key_to_table_sub_pk(range.end())?),
             );
             tracing::trace!(
-                partition=?self.this_partition_key,
+                partition=?self.deduped_part_key,
                 table_sub_range=?table_sub_range,
                 "loading the right half of given range"
             );
@@ -1135,7 +1131,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     ) -> StreamExecutorResult<()> {
         let stream = table
             .iter_with_prefix(
-                self.this_partition_key,
+                self.deduped_part_key,
                 &table_sub_range,
                 PrefetchOptions::default(),
             )
@@ -1167,7 +1163,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             );
             let rev_stream = table
                 .rev_iter_with_prefix(
-                    self.this_partition_key,
+                    self.deduped_part_key,
                     &sub_range,
                     PrefetchOptions::default(),
                 )
@@ -1211,7 +1207,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             );
             let stream = table
                 .iter_with_prefix(
-                    self.this_partition_key,
+                    self.deduped_part_key,
                     &sub_range,
                     PrefetchOptions::default(),
                 )
