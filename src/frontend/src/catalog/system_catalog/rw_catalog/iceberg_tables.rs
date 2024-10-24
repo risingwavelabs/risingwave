@@ -27,6 +27,11 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
+// JDBC/SQL catalog integration docs: https://iceberg.apache.org/docs/1.6.1/jdbc/#configurations
+// `iceberg_tables` definition in iceberg java sdk https://github.com/apache/iceberg/blob/4850b622c778deb4b234880bfd7643070e0a5458/core/src/main/java/org/apache/iceberg/jdbc/JdbcUtil.java#L125-L146
+// This system table is used to store the iceberg tables' metadata and only show the tables that the user has access to,
+// so it can be used by other query engine to fetch iceberg catalog and provide a access control layer.
+
 #[derive(Fields)]
 #[primary_key(catalog_name, table_namespace, table_name)]
 struct IcebergTables {
