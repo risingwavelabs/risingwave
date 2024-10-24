@@ -229,7 +229,8 @@ impl MaterializedInputState {
             }
             cache_filler.finish();
 
-            let duration = start.elapsed().as_secs();
+            let duration = start.elapsed().as_secs_f64();
+            stats.agg_state_cache_refill_duration_secs += duration;
         }
         assert!(self.cache.is_synced());
 

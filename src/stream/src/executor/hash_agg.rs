@@ -173,12 +173,14 @@ struct ExecutionStats {
     /// Agg state cache stats.
     agg_state_cache_lookup_count: u64,
     agg_state_cache_miss_count: u64,
+    agg_state_cache_refill_duration_secs: f64,
 }
 
 impl ExecutionStats {
     fn merge_state_cache_stats(&mut self, other: AggStateCacheStats) {
         self.agg_state_cache_lookup_count += other.agg_state_cache_lookup_count;
         self.agg_state_cache_miss_count += other.agg_state_cache_miss_count;
+        self.agg_state_cache_refill_duration_secs += other.agg_state_cache_refill_duration_secs;
     }
 }
 
@@ -525,6 +527,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         vars.metrics
             .agg_state_cache_miss_count
             .inc_by(std::mem::take(&mut vars.stats.agg_state_cache_miss_count));
+        vars.metrics
+            .agg_state_cache_refill_duration_secs
+            .observe(std::mem::take(
+                &mut vars.stats.agg_state_cache_refill_duration_secs,
+            ));
     }
 
     async fn commit_state_tables(

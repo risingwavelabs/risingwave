@@ -22,9 +22,10 @@ use prometheus::{
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
-    LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounter,
-    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec, MetricVecRelabelExt,
-    RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
+    LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogram, LabelGuardedHistogramVec,
+    LabelGuardedIntCounter, LabelGuardedIntCounterVec, LabelGuardedIntGauge,
+    LabelGuardedIntGaugeVec, MetricVecRelabelExt, RelabeledGuardedHistogramVec,
+    RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -111,6 +112,7 @@ pub struct StreamingMetrics {
     agg_distinct_cached_entry_count: LabelGuardedIntGaugeVec<3>,
     agg_state_cache_lookup_count: LabelGuardedIntCounterVec<3>,
     agg_state_cache_miss_count: LabelGuardedIntCounterVec<3>,
+    agg_state_cache_refill_duration_secs: LabelGuardedHistogramVec<3>,
 
     // Streaming TopN
     group_top_n_cache_miss_count: LabelGuardedIntCounterVec<3>,
@@ -564,6 +566,18 @@ impl StreamingMetrics {
             "stream_agg_state_cache_miss_count",
             "Aggregation executor state cache miss count",
             &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "stream_agg_state_cache_refill_duration_secs",
+            "Aggregation executor state cache refill duration",
+            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+        );
+        let agg_state_cache_refill_duration_secs = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "actor_id", "fragment_id"], // FIXME(kwannoel): what's the granularity?
             registry
         )
         .unwrap();
@@ -1081,6 +1095,7 @@ impl StreamingMetrics {
             agg_distinct_cached_entry_count,
             agg_state_cache_lookup_count,
             agg_state_cache_miss_count,
+            agg_state_cache_refill_duration_secs,
             group_top_n_cache_miss_count,
             group_top_n_total_query_cache_count,
             group_top_n_cached_entry_count,
@@ -1349,6 +1364,9 @@ impl StreamingMetrics {
             agg_state_cache_miss_count: self
                 .agg_state_cache_miss_count
                 .with_guarded_label_values(label_list),
+            agg_state_cache_refill_duration_secs: self
+                .agg_state_cache_refill_duration_secs
+                .with_guarded_label_values(label_list),
         }
     }
 
@@ -1551,6 +1569,7 @@ pub struct HashAggMetrics {
     pub agg_dirty_groups_heap_size: LabelGuardedIntGauge<3>,
     pub agg_state_cache_lookup_count: LabelGuardedIntCounter<3>,
     pub agg_state_cache_miss_count: LabelGuardedIntCounter<3>,
+    pub agg_state_cache_refill_duration_secs: LabelGuardedHistogram<3>,
 }
 
 pub struct AggDistinctDedupMetrics {
