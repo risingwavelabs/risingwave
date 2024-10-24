@@ -423,21 +423,17 @@ impl TableFunction {
                     for column in statement.columns() {
                         let name = column.name_str().to_string();
                         let data_type = match column.column_type() {
-                            // TokioPgType::BOOL => DataType::Boolean,
-                            // TokioPgType::INT2 => DataType::Int16,
-                            // TokioPgType::INT4 => DataType::Int32,
-                            // TokioPgType::INT8 => DataType::Int64,
-                            // TokioPgType::FLOAT4 => DataType::Float32,
-                            // TokioPgType::FLOAT8 => DataType::Float64,
-                            // TokioPgType::NUMERIC => DataType::Decimal,
-                            // TokioPgType::DATE => DataType::Date,
-                            // TokioPgType::TIME => DataType::Time,
-                            // TokioPgType::TIMESTAMP => DataType::Timestamp,
-                            // TokioPgType::TIMESTAMPTZ => DataType::Timestamptz,
-                            // TokioPgType::TEXT | TokioPgType::VARCHAR => DataType::Varchar,
-                            // TokioPgType::INTERVAL => DataType::Interval,
-                            // TokioPgType::JSONB => DataType::Jsonb,
-                            // TokioPgType::BYTEA => DataType::Bytea,
+                            MySqlColumnType::MYSQL_TYPE_BIT => DataType::Boolean,
+                            MySqlColumnType::MYSQL_TYPE_SHORT => DataType::Int16,
+                            MySqlColumnType::MYSQL_TYPE_LONG => DataType::Int32,
+                            MySqlColumnType::MYSQL_TYPE_LONGLONG => DataType::Int64,
+                            MySqlColumnType::MYSQL_TYPE_FLOAT => DataType::Float32,
+                            MySqlColumnType::MYSQL_TYPE_DOUBLE => DataType::Float64,
+                            MySqlColumnType::MYSQL_TYPE_DECIMAL => DataType::Decimal,
+                            MySqlColumnType::MYSQL_TYPE_DATE => DataType::Date,
+                            MySqlColumnType::MYSQL_TYPE_TIME => DataType::Time,
+                            MySqlColumnType::MYSQL_TYPE_TIMESTAMP => DataType::Timestamp,
+                            MySqlColumnType::MYSQL_TYPE_VARCHAR => DataType::Varchar,
                             _ => {
                                 return Err(crate::error::ErrorCode::BindError(
                                     format!("unsupported column type: {:?}", column.column_type())
