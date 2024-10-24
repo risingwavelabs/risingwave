@@ -457,7 +457,7 @@ impl TableFunction {
             Ok(TableFunction {
                 args,
                 return_type: schema,
-                function_type: TableFunctionType::PostgresQuery,
+                function_type: TableFunctionType::MysqlQuery,
                 user_defined: None,
             })
         }
