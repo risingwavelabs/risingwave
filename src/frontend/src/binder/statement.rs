@@ -14,8 +14,9 @@
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{DeclareCursor, Statement};
 
+use super::declare_cursor::BoundDeclareCursor;
 use super::delete::BoundDelete;
 use super::fetch_cursor::BoundFetchCursor;
 use super::update::BoundUpdate;
@@ -30,6 +31,7 @@ pub enum BoundStatement {
     Delete(Box<BoundDelete>),
     Update(Box<BoundUpdate>),
     Query(Box<BoundQuery>),
+    DeclareCursor(Box<BoundDeclareCursor>),
     FetchCursor(Box<BoundFetchCursor>),
     CreateView(Box<BoundCreateView>),
 }
@@ -50,6 +52,7 @@ impl BoundStatement {
                 .as_ref()
                 .map_or(vec![], |s| s.fields().into()),
             BoundStatement::Query(q) => q.schema().fields().into(),
+            BoundStatement::DeclareCursor(_) => vec![],
             BoundStatement::FetchCursor(f) => f
                 .returning_schema
                 .as_ref()
@@ -92,6 +95,21 @@ impl Binder {
 
             Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(*q)?.into())),
 
+            Statement::DeclareCursor { stmt } => {
+                if let DeclareCursor::Query(body) = stmt.declare_cursor {
+                    let query = self.bind_query(*body)?;
+                    Ok(BoundStatement::DeclareCursor(
+                        BoundDeclareCursor {
+                            cursor_name: stmt.cursor_name,
+                            query: query.into(),
+                        }
+                        .into(),
+                    ))
+                } else {
+                    bail_not_implemented!("unsupported statement {:?}", stmt)
+                }
+            }
+
             // Note(eric): Can I just bind CreateView to Query??
             Statement::CreateView {
                 or_replace,
@@ -133,6 +151,7 @@ impl RewriteExprsRecursive for BoundStatement {
             BoundStatement::Delete(inner) => inner.rewrite_exprs_recursive(rewriter),
             BoundStatement::Update(inner) => inner.rewrite_exprs_recursive(rewriter),
             BoundStatement::Query(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundStatement::DeclareCursor(inner) => inner.rewrite_exprs_recursive(rewriter),
             BoundStatement::FetchCursor(_) => {}
             BoundStatement::CreateView(inner) => inner.rewrite_exprs_recursive(rewriter),
         }
