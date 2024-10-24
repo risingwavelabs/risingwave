@@ -323,7 +323,6 @@ impl CompactionCatalogManager {
                         Arc::new(FilterKeyExtractorImpl::from_table(table_catalog.as_ref())),
                     );
                     table_id_to_vnode.insert(*table_id, table_catalog.vnode_count());
-
                     false
                 }
 
@@ -342,6 +341,14 @@ impl CompactionCatalogManager {
                             e.as_report()
                         ))
                     })?;
+
+            if state_tables.len() != table_ids.len() {
+                return Err(HummockError::other(format!(
+                    "table_ids not found in meta {:?}",
+                    table_ids
+                )));
+            }
+
             let mut guard = self.table_id_to_catalog.write();
             for table_id in table_ids {
                 if let Some(table) = state_tables.remove(&table_id) {
@@ -432,10 +439,13 @@ impl CompactionCatalogAgent {
     }
 
     pub fn vnode_count(&self, table_id: StateTableId) -> usize {
-        *self
-            .table_id_to_vnode
-            .get(&table_id)
-            .unwrap_or_else(|| panic!("table_id not found {}", table_id))
+        *self.table_id_to_vnode.get(&table_id).unwrap_or_else(|| {
+            panic!(
+                "table_id not found {} all_table_ids {:?}",
+                table_id,
+                self.table_id_to_vnode.keys()
+            )
+        })
     }
 
     pub fn table_id_to_vnode_ref(&self) -> &HashMap<StateTableId, usize> {

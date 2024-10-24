@@ -15,6 +15,7 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use itertools::Itertools;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{dispatch_compaction_task_request, DispatchCompactionTaskRequest};
 use risingwave_pb::hummock::report_compaction_task_request::{
@@ -523,9 +524,10 @@ pub fn start_compactor(
                                             .iter()
                                             .flat_map(|level| level.table_infos.iter())
                                             .flat_map(|sst| sst.table_ids.clone())
-                                            .filter(|table_id| existing_table_ids.contains(table_id)),
+                                            .filter(|table_id| existing_table_ids.contains(table_id))
+                                            .sorted()
+                                            .unique(),
                                     );
-
 
                                      let ((compact_task, table_stats, object_timestamps), _memory_tracker) = match compaction_catalog_manager_ref.acquire(compact_table_ids).await {
                                         Ok(compaction_catalog_agent_ref) => {
