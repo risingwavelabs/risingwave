@@ -707,7 +707,7 @@ fn gen_table_plan_inner(
             return Err(ErrorCode::InvalidInputSyntax(
                 "When PRIMARY KEY constraint applied to an APPEND ONLY table, the ON CONFLICT behavior must be DO NOTHING.".to_owned(),
             )
-            .into());
+                .into());
         }
         Some(on_conflict)
     } else {
@@ -885,18 +885,17 @@ fn derive_with_options_for_cdc_table(
 ) -> Result<WithOptionsSecResolved> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
-    let mut connect_properties = source_with_properties.clone();
+    let mut with_options = source_with_properties.clone();
     if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
-        let table_name = match connector.as_str() {
+        match connector.as_str() {
             MYSQL_CDC_CONNECTOR => {
-                let db_name = connect_properties.get(DATABASE_NAME_KEY).ok_or_else(|| {
-                    anyhow!("{} not found in source properties", DATABASE_NAME_KEY)
+                // MySQL doesn't allow '.' in database name and table name, so we can split the
+                // external table name by '.' to get the table name
+                let (db_name, table_name) = external_table_name.split_once('.').ok_or_else(|| {
+                    anyhow!("The upstream table name must contain database name prefix, e.g. 'database.table'")
                 })?;
-
-                let prefix = format!("{}.", db_name.as_str());
-                external_table_name
-                    .strip_prefix(prefix.as_str())
-                    .ok_or_else(|| anyhow!("The upstream table name must contain database name prefix, e.g. 'mydb.table'."))?
+                with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
+                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
             }
             POSTGRES_CDC_CONNECTOR => {
                 let (schema_name, table_name) = external_table_name
@@ -904,9 +903,8 @@ fn derive_with_options_for_cdc_table(
                     .ok_or_else(|| anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'"))?;
 
                 // insert 'schema.name' into connect properties
-                connect_properties.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
-
-                table_name
+                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
+                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
             }
             SQL_SERVER_CDC_CONNECTOR => {
                 // SQL Server external table name is in 'databaseName.schemaName.tableName' pattern,
@@ -924,9 +922,8 @@ fn derive_with_options_for_cdc_table(
                     })?;
 
                 // insert 'schema.name' into connect properties
-                connect_properties.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
-
-                table_name
+                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
+                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
             }
             _ => {
                 return Err(RwError::from(anyhow!(
@@ -935,9 +932,8 @@ fn derive_with_options_for_cdc_table(
                 )));
             }
         };
-        connect_properties.insert(TABLE_NAME_KEY.into(), table_name.into());
     }
-    Ok(connect_properties)
+    Ok(with_options)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1034,7 +1030,7 @@ pub(super) async fn handle_create_table_plan(
                     )?;
                     source.clone()
                 };
-                let connect_properties = derive_with_options_for_cdc_table(
+                let cdc_with_options = derive_with_options_for_cdc_table(
                     &source.with_properties,
                     cdc_table.external_table_name.clone(),
                 )?;
@@ -1042,7 +1038,7 @@ pub(super) async fn handle_create_table_plan(
                 let (columns, pk_names) = derive_schema_for_cdc_table(
                     &column_defs,
                     &constraints,
-                    connect_properties.clone(),
+                    cdc_with_options.clone(),
                     wildcard_idx.is_some(),
                     None,
                 )
@@ -1057,7 +1053,7 @@ pub(super) async fn handle_create_table_plan(
                     column_defs,
                     columns,
                     pk_names,
-                    connect_properties,
+                    cdc_with_options,
                     col_id_gen,
                     on_conflict,
                     with_version_column,
@@ -1162,7 +1158,7 @@ struct CdcSchemaChangeArgs {
 async fn derive_schema_for_cdc_table(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    connect_properties: WithOptionsSecResolved,
+    cdc_with_options: WithOptionsSecResolved,
     need_auto_schema_map: bool,
     schema_change_args: Option<CdcSchemaChangeArgs>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
@@ -1176,7 +1172,7 @@ async fn derive_schema_for_cdc_table(
                     "Please define the schema manually".to_owned(),
                 )
             })?;
-        let (options, secret_refs) = connect_properties.into_parts();
+        let (options, secret_refs) = cdc_with_options.into_parts();
         let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
             .context("failed to extract external table config")?;
 
