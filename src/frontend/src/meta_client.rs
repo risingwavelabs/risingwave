@@ -39,8 +39,6 @@ use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
-use crate::catalog::DatabaseId;
-
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
 /// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,
 /// `WorkerNodeManager`, etc. So frontend rarely needs to call `MetaClient` directly.
@@ -50,7 +48,7 @@ use crate::catalog::DatabaseId;
 pub trait FrontendMetaClient: Send + Sync {
     async fn try_unregister(&self);
 
-    async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId>;
+    async fn flush(&self) -> Result<HummockVersionId>;
 
     async fn wait(&self) -> Result<()>;
 
@@ -135,8 +133,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.try_unregister().await;
     }
 
-    async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
-        self.0.flush(database_id).await
+    async fn flush(&self) -> Result<HummockVersionId> {
+        self.0.flush().await
     }
 
     async fn wait(&self) -> Result<()> {

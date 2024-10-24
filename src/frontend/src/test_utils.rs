@@ -917,7 +917,7 @@ pub struct MockFrontendMetaClient {}
 impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
 
-    async fn flush(&self, _database_id: DatabaseId) -> RpcResult<HummockVersionId> {
+    async fn flush(&self) -> RpcResult<HummockVersionId> {
         Ok(INVALID_VERSION_ID)
     }
 

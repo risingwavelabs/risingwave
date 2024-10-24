@@ -29,7 +29,7 @@ use risingwave_connector::source::{
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
-use risingwave_meta_model::{DatabaseId, SourceId};
+use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
@@ -315,7 +315,7 @@ impl SourceManagerCore {
     ///
     /// `self.actor_splits` will not be updated. It will be updated by `Self::apply_source_change`,
     /// after the mutation barrier has been collected.
-    async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitAssignment>> {
+    async fn reassign_splits(&self) -> MetaResult<SplitAssignment> {
         let mut split_assignment: SplitAssignment = HashMap::new();
 
         for (source_id, handle) in &self.managed_sources {
@@ -421,9 +421,7 @@ impl SourceManagerCore {
             }
         }
 
-        self.metadata_manager
-            .split_fragment_map_by_database(split_assignment)
-            .await
+        Ok(split_assignment)
     }
 
     fn apply_source_change(
@@ -1125,16 +1123,9 @@ impl SourceManager {
         };
 
         if !split_assignment.is_empty() {
-            for (database_id, split_assignment) in split_assignment {
-                let command = Command::SourceSplitAssignment(split_assignment);
-                tracing::info!(command = ?command, "pushing down split assignment command");
-                self.barrier_scheduler
-                    .run_command(
-                        risingwave_common::catalog::DatabaseId::new(database_id as _),
-                        command,
-                    )
-                    .await?;
-            }
+            let command = Command::SourceSplitAssignment(split_assignment);
+            tracing::info!(command = ?command, "pushing down split assignment command");
+            self.barrier_scheduler.run_command(command).await?;
         }
 
         Ok(())

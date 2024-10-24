@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::stream::{RescheduleOptions, ScaleControllerRef, WorkerReschedule};
@@ -137,7 +137,6 @@ impl ScaleService for ScaleServiceImpl {
 
         self.stream_manager
             .reschedule_actors(
-                DatabaseId::new(0),
                 worker_reschedules
                     .into_iter()
                     .map(|(fragment_id, reschedule)| {

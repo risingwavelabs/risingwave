@@ -211,8 +211,7 @@ pub enum CreateStreamingJobType {
 /// collected.
 #[derive(Debug, Clone, strum::Display)]
 pub enum Command {
-    /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
-    /// all messages before the checkpoint barrier should have been committed.
+    /// `Flush` command will generate a checkpoint barrier
     Flush,
 
     /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**

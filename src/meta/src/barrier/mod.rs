@@ -25,7 +25,7 @@ use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::{bail, must_match};
@@ -125,7 +125,7 @@ enum BarrierManagerStatus {
 
 /// Scheduled command with its notifiers.
 struct Scheduled {
-    command: Option<(DatabaseId, Command, Vec<Notifier>)>,
+    command: Option<(Command, Vec<Notifier>)>,
     span: tracing::Span,
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
@@ -823,7 +823,7 @@ impl GlobalBarrierManager {
             span,
         } = scheduled;
 
-        let (mut command, mut notifiers) = if let Some((_, command, notifiers)) = command {
+        let (mut command, mut notifiers) = if let Some((command, notifiers)) = command {
             (Some(command), notifiers)
         } else {
             (None, vec![])

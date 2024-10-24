@@ -605,20 +605,19 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!("preparing drop subscription");
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-        let subscription = self
+        let table_id = self
             .metadata_manager
             .catalog_controller
             .get_subscription_by_id(subscription_id)
-            .await?;
-        let table_id = subscription.dependent_table_id;
-        let database_id = subscription.database_id.into();
+            .await?
+            .dependent_table_id;
         let (_, version) = self
             .metadata_manager
             .catalog_controller
             .drop_relation(ObjectType::Subscription, subscription_id as _, drop_mode)
             .await?;
         self.stream_manager
-            .drop_subscription(database_id, subscription_id as _, table_id)
+            .drop_subscription(subscription_id as _, table_id)
             .await;
         tracing::debug!("finish drop subscription");
         Ok(version)
@@ -1010,7 +1009,7 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                let (aborted, _) = self
+                let aborted = self
                     .metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id as _, false)
@@ -1277,7 +1276,6 @@ impl DdlController {
         }
 
         let ReleaseContext {
-            database_id,
             streaming_job_ids,
             state_table_ids,
             source_ids,
@@ -1321,7 +1319,6 @@ impl DdlController {
         // drop streaming jobs.
         self.stream_manager
             .drop_streaming_jobs(
-                risingwave_common::catalog::DatabaseId::new(database_id as _),
                 removed_actors.into_iter().map(|id| id as _).collect(),
                 streaming_job_ids,
                 state_table_ids,
