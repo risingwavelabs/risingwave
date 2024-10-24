@@ -1088,18 +1088,6 @@ fn sanity_check_for_cdc_table(
     constraints: &Vec<TableConstraint>,
     source_watermarks: &Vec<SourceWatermark>,
 ) -> Result<()> {
-    for c in column_defs {
-        for op in &c.options {
-            if let ColumnOption::GeneratedColumns(_) = op.option {
-                return Err(ErrorCode::NotSupported(
-                    "generated column defined on the table created from a CDC source".into(),
-                    "Remove the generated column in the column list".into(),
-                )
-                .into());
-            }
-        }
-    }
-
     // wildcard cannot be used with column definitions
     if wildcard_idx.is_some() && !column_defs.is_empty() {
         return Err(ErrorCode::NotSupported(
