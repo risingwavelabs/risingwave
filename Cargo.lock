@@ -6157,7 +6157,6 @@ dependencies = [
  "rustls-native-certs 0.6.3",
  "tokio",
  "tokio-rustls 0.24.1",
- "webpki-roots 0.25.2",
 ]
 
 [[package]]
@@ -6170,11 +6169,14 @@ dependencies = [
  "http 1.1.0",
  "hyper 1.4.1",
  "hyper-util",
+ "log",
  "rustls 0.22.4",
+ "rustls-native-certs 0.7.0",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.25.0",
  "tower-service",
+ "webpki-roots 0.26.1",
 ]
 
 [[package]]
@@ -9747,7 +9749,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -11736,7 +11738,7 @@ dependencies = [
  "fail",
  "futures",
  "hyper 0.14.27",
- "hyper-rustls 0.24.2",
+ "hyper-rustls 0.26.0",
  "hyper-tls 0.5.0",
  "itertools 0.13.0",
  "madsim",
