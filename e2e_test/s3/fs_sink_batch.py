@@ -37,7 +37,6 @@ def do_test(config, file_num, item_num_per_file, prefix):
         s3.credentials.secret = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_sink/',
-        s3.file_type = 'parquet',
         type = 'append-only',
         rollover_seconds = 5,
         max_row_count = 5,
