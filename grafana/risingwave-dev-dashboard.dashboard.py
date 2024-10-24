@@ -594,6 +594,65 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_count(
+                    "Compaction Group Count",
+                    "The number of compaction groups",
+                    [
+                        panels.target(
+                            f"{metric('storage_compaction_group_count')}",
+                            "compaction group count",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Compaction Group Size",
+                    "The size of compaction group",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compaction_group_size')}) by (group)",
+                            "compaction group size - cg{{group}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_count(
+                    "Compaction Group File Count",
+                    "The file count of compaction group",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compaction_group_file_count')}) by (group)",
+                            "compaction group file count - cg{{group}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Compaction Group Throughput",
+                    "The throughput of compaction group",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compaction_group_throughput')}) by (group)",
+                            "compaction group throughput - cg{{group}}",
+                        ),
+                    ],
+                ),
+
+                 panels.timeseries_count(
+                    "Compaction Group Schedule",
+                    "The times of move_state_table occurs",
+                    [
+                        panels.target(
+                            f"sum({table_metric('storage_split_compaction_group_count')}) by (group)",
+                            "split compaction group - left cg{{group}}",
+                        ),
+                        panels.target(
+                            f"sum({table_metric('storage_merge_compaction_group_count')}) by (group)",
+                            "merge compaction group - left cg{{group}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
@@ -3401,20 +3460,6 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                                 + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                             ),
                             [50, 99, "max"],
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Compaction Group Schedule",
-                    "The times of move_state_table occurs",
-                    [
-                        panels.target(
-                            f"sum({table_metric('storage_split_compaction_group_count')}) by (group)",
-                            "split compaction group cg{{group}}",
-                        ),
-                        panels.target(
-                            f"sum({table_metric('storage_merge_compaction_group_count')}) by (group)",
-                            "merge compaction group cg{{group}}",
                         ),
                     ],
                 ),

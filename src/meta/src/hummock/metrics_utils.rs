@@ -353,6 +353,7 @@ pub fn remove_compaction_group_in_sst_stat(
     remove_compacting_task_stat(metrics, compaction_group_id, max_level);
     remove_split_stat(metrics, compaction_group_id);
     remove_compact_task_metrics(metrics, compaction_group_id, max_level);
+    remove_compaction_group_stat(metrics, compaction_group_id);
 }
 
 pub fn remove_compacting_task_stat(
@@ -384,6 +385,32 @@ pub fn remove_split_stat(metrics: &MetaMetrics, compaction_group_id: CompactionG
 
     metrics
         .branched_sst_count
+        .remove_label_values(&[&label_str])
+        .ok();
+}
+
+pub fn remove_compaction_group_stat(metrics: &MetaMetrics, compaction_group_id: CompactionGroupId) {
+    let label_str = compaction_group_id.to_string();
+    metrics
+        .compaction_group_size
+        .remove_label_values(&[&label_str])
+        .ok();
+    metrics
+        .compaction_group_file_count
+        .remove_label_values(&[&label_str])
+        .ok();
+    metrics
+        .compaction_group_throughput
+        .remove_label_values(&[&label_str])
+        .ok();
+
+    metrics
+        .split_compaction_group_count
+        .remove_label_values(&[&label_str])
+        .ok();
+
+    metrics
+        .merge_compaction_group_count
         .remove_label_values(&[&label_str])
         .ok();
 }
