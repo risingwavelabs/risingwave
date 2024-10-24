@@ -32,6 +32,6 @@ struct IcebergNamespaceProperties {
 }
 
 #[system_catalog(table, "rw_catalog.iceberg_namespace_properties")]
-async fn read(_reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergNamespaceProperties>> {
+fn read(_reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergNamespaceProperties>> {
     Ok(vec![])
 }
