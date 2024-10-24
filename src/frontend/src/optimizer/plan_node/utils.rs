@@ -380,9 +380,11 @@ pub fn infer_kv_log_store_table_catalog_inner(
 /// since that plan node maps to `backfill` executor, which supports recovery.
 /// Some other leaf nodes like `StreamValues` do not support recovery, and they
 /// cannot use background ddl.
-pub(crate) fn plan_can_use_backgronud_ddl(plan: &PlanRef) -> bool {
+pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
     if plan.inputs().is_empty() {
-        if plan.as_stream_source_scan().is_some() {
+        if plan.as_stream_source_scan().is_some()
+            || plan.as_stream_now().is_some()
+        {
             true
         } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
@@ -392,7 +394,7 @@ pub(crate) fn plan_can_use_backgronud_ddl(plan: &PlanRef) -> bool {
         }
     } else {
         assert!(!plan.inputs().is_empty());
-        plan.inputs().iter().all(plan_can_use_backgronud_ddl)
+        plan.inputs().iter().all(plan_can_use_background_ddl)
     }
 }
 
