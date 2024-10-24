@@ -37,9 +37,19 @@ impl<'a> FromSql<'a> for ScalarImpl {
             Type::INTERVAL => ScalarImpl::from(Interval::from_sql(ty, raw)?),
             Type::BYTEA => ScalarImpl::from(Vec::<u8>::from_sql(ty, raw)?.into_boxed_slice()),
             Type::VARCHAR | Type::TEXT => ScalarImpl::from(String::from_sql(ty, raw)?),
+            ref ty
+                if (ty.name() == "citext"
+                    || ty.name() == "ltree"
+                    || ty.name() == "lquery"
+                    || ty.name() == "ltxtquery") =>
+            {
+                ScalarImpl::from(String::from_sql(ty, raw)?)
+            }
             // Serial, Int256, Struct, List and Decimal are not supported here
             // Note: The Decimal type is specially handled in the `ScalarAdapter`.
-            _ => bail_not_implemented!("the postgres decoding for {ty} is unsupported"),
+            _ => {
+                bail_not_implemented!("the postgres decoding for {ty} is unsupported")
+            }
         })
     }
 
@@ -61,6 +71,9 @@ impl<'a> FromSql<'a> for ScalarImpl {
                 | Type::BYTEA
                 | Type::VARCHAR
                 | Type::TEXT
-        )
+        ) || (ty.name() == "citext"
+            || ty.name() == "ltree"
+            || ty.name() == "lquery"
+            || ty.name() == "ltxtquery")
     }
 }
