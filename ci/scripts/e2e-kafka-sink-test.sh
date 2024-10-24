@@ -150,7 +150,7 @@ echo "preparing confluent schema registry"
 python3 -m pip install --break-system-packages requests confluent-kafka
 
 echo "testing protobuf"
-sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/protobuf.slt'
+risedev slt 'e2e_test/sink/kafka/protobuf.slt'
 
 echo "testing avro"
-sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/avro.slt'
+risedev slt 'e2e_test/sink/kafka/avro.slt'
