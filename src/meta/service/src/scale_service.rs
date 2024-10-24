@@ -118,54 +118,48 @@ impl ScaleService for ScaleServiceImpl {
         } = request.into_inner();
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_write_guard().await;
-        for (database_id, worker_reschedules) in self
+
+        let streaming_job_ids = self
             .metadata_manager
-            .split_fragment_map_by_database(worker_reschedules)
-            .await?
-        {
-            let database_id = DatabaseId::new(database_id as _);
-            let streaming_job_ids = self
-                .metadata_manager
-                .catalog_controller
-                .get_fragment_job_id(
-                    worker_reschedules
-                        .keys()
-                        .map(|id| *id as FragmentId)
-                        .collect(),
-                )
-                .await?;
+            .catalog_controller
+            .get_fragment_job_id(
+                worker_reschedules
+                    .keys()
+                    .map(|id| *id as FragmentId)
+                    .collect(),
+            )
+            .await?;
 
-            let table_parallelisms = streaming_job_ids
-                .into_iter()
-                .map(|id| (TableId::new(id as _), TableParallelism::Custom))
-                .collect();
+        let table_parallelisms = streaming_job_ids
+            .into_iter()
+            .map(|id| (TableId::new(id as _), TableParallelism::Custom))
+            .collect();
 
-            self.stream_manager
-                .reschedule_actors(
-                    database_id,
-                    worker_reschedules
-                        .into_iter()
-                        .map(|(fragment_id, reschedule)| {
-                            let PbWorkerReschedule { worker_actor_diff } = reschedule;
-                            (
-                                fragment_id,
-                                WorkerReschedule {
-                                    worker_actor_diff: worker_actor_diff
-                                        .into_iter()
-                                        .map(|(worker_id, diff)| (worker_id as _, diff as _))
-                                        .collect(),
-                                },
-                            )
-                        })
-                        .collect(),
-                    RescheduleOptions {
-                        resolve_no_shuffle_upstream,
-                        skip_create_new_actors: false,
-                    },
-                    Some(table_parallelisms),
-                )
-                .await?;
-        }
+        self.stream_manager
+            .reschedule_actors(
+                DatabaseId::new(0),
+                worker_reschedules
+                    .into_iter()
+                    .map(|(fragment_id, reschedule)| {
+                        let PbWorkerReschedule { worker_actor_diff } = reschedule;
+                        (
+                            fragment_id,
+                            WorkerReschedule {
+                                worker_actor_diff: worker_actor_diff
+                                    .into_iter()
+                                    .map(|(worker_id, diff)| (worker_id as _, diff as _))
+                                    .collect(),
+                            },
+                        )
+                    })
+                    .collect(),
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream,
+                    skip_create_new_actors: false,
+                },
+                Some(table_parallelisms),
+            )
+            .await?;
 
         Ok(Response::new(RescheduleResponse {
             success: true,
