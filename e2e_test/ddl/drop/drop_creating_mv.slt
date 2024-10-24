@@ -18,6 +18,11 @@ risedev psql -c 'create materialized view m1 as select * from t;' &
 onlyif can-use-recover
 sleep 5s
 
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+f
+
 onlyif can-use-recover
 statement ok
 drop materialized view m1;
@@ -32,6 +37,11 @@ create materialized view m1 as select * from t;
 
 onlyif can-use-recover
 sleep 5s
+
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+t
 
 onlyif can-use-recover
 statement ok
@@ -48,12 +58,22 @@ create materialized view m1 as select * from t;
 onlyif can-use-recover
 sleep 5s
 
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+t
+
 onlyif can-use-recover
 statement ok
 recover;
 
 onlyif can-use-recover
 sleep 10s
+
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+t
 
 onlyif can-use-recover
 statement ok
@@ -68,6 +88,11 @@ set background_ddl=false;
 
 statement ok
 create materialized view m1 as select * from t;
+
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+f
 
 statement ok
 drop materialized view m1;
