@@ -16,7 +16,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::Fields;
-use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, FetchCursorStatement, Statement};
+use risingwave_sqlparser::ast::{
+    ExplainFormat, ExplainOptions, ExplainType, FetchCursorStatement, Statement,
+};
 use thiserror_ext::AsReport;
 
 use super::create_index::{gen_create_index_plan, resolve_index_schema};
@@ -191,6 +193,7 @@ async fn do_handle_explain(
         let explain_trace = context.is_explain_trace();
         let explain_verbose = context.is_explain_verbose();
         let explain_type = context.explain_type();
+        let explain_format = context.explain_format();
 
         if explain_trace {
             let trace = context.take_trace();
@@ -224,7 +227,10 @@ async fn do_handle_explain(
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(plan) = &plan {
-                    blocks.push(plan.explain_to_string());
+                    match explain_format {
+                        ExplainFormat::Text => blocks.push(plan.explain_to_string()),
+                        ExplainFormat::Json => blocks.push(plan.explain_to_json()),
+                    }
                 }
             }
             ExplainType::Logical => {
@@ -259,6 +265,21 @@ pub async fn handle_explain(
 ) -> Result<RwPgResponse> {
     if analyze {
         bail_not_implemented!(issue = 4856, "explain analyze");
+    }
+    if options.trace && options.explain_format == ExplainFormat::Json {
+        return Err(ErrorCode::NotSupported(
+            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+        )
+        .into());
+    }
+    if options.explain_type == ExplainType::DistSql && options.explain_format == ExplainFormat::Json
+    {
+        return Err(ErrorCode::NotSupported(
+            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+        )
+        .into());
     }
 
     let mut blocks = Vec::new();

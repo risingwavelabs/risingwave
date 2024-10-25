@@ -2122,3 +2122,74 @@
                   │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
                   └─StreamExchange { dist: HashShard(t6.l) }
                     └─StreamTableScan { table: t6, columns: [t6.k, t6.l, t6._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t6._row_id], pk: [_row_id], dist: UpstreamHashShard(t6._row_id) }
+- name: improve join transpose rule to handle join with output indices
+  sql: |
+    with rawdata as (
+      select 'first' as w, '{"x":{"value":123},"y":{"value":[1,2,3]},"z":{"value":[{"a":4,"b":5},{"a":6,"b":7}]}}'::jsonb as rawjson
+      union all
+      select 'second', '{"x":{"value":456},"y":{"value":[7,8,9]},"z":{"value":[{"a":0,"b":1},{"a":2,"b":3}]}}'::jsonb
+    )
+    select
+      array(
+        select
+          array(
+            select 1
+            from jsonb_array_elements(
+              case
+                when jsonb_typeof(o.value->'value') = 'array' then o.value->'value'
+                else '[]'::jsonb
+              end
+            ) with ordinality as x(v, i), jsonb_each (
+              case
+                when jsonb_typeof(v) = 'object' then v
+                else '{}'::jsonb
+              end
+            ) as j
+        )
+        from jsonb_each(rawjson) AS o
+        where jsonb_typeof(o.value) = 'object' and o.value ? 'value'
+      ) as kv
+    from rawdata
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: [$expr6] }
+    ├─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
+    └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Coalesce(array_agg($expr5) filter(IsNotNull(1:Int32)), ARRAY[]:List(List(Int32))) as $expr6] }
+      └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [array_agg($expr5) filter(IsNotNull(1:Int32))] }
+        └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr5, 1:Int32] }
+          ├─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
+          │ └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
+          └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr5, 1:Int32] }
+            └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom($expr1, $expr2) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr5] }
+              ├─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr1] }
+              │ └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
+              │   └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
+              │     └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
+              │       └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
+              └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2, Coalesce(array_agg(1:Int32) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr5] }
+                └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2], aggs: [array_agg(1:Int32) filter(IsNotNull(1:Int32))] }
+                  └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom($expr2, $expr3) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2, 1:Int32, 1:Int32] }
+                    ├─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2], aggs: [] }
+                    │ └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr2] }
+                    │   └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
+                    │     └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
+                    │       └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
+                    │         └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
+                    └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3, 1:Int32, 1:Int32] }
+                      └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb)), JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))) AND IsNotDistinctFrom(JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb)), JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))) AND IsNotDistinctFrom($expr3, $expr4) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3] }
+                        ├─LogicalProjectSet { select_list: [$0, $1, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
+                        │ └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3], aggs: [] }
+                        │   └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr3] }
+                        │     └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
+                        │       └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
+                        │         └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
+                        │           └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
+                        └─LogicalProjectSet { select_list: [$0, $1, $2, $3, JsonbEach(Case((JsonbTypeof($3) = 'object':Varchar), $3, '{}':Jsonb))] }
+                          └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb)), JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
+                            └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))], aggs: [] }
+                              └─LogicalProjectSet { select_list: [$0, $1, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
+                                └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4], aggs: [] }
+                                  └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr4] }
+                                    └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
+                                      └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
+                                        └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
+                                          └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }

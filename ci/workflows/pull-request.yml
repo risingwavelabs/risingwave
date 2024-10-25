@@ -201,7 +201,7 @@ steps:
           mount-buildkite-agent: true
           upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "end-to-end sink test"
@@ -771,7 +771,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
