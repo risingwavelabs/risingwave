@@ -341,7 +341,7 @@ impl Binder {
                 );
                 self.ensure_table_function_allowed()?;
                 return Ok(TableFunction::new_mysql_query(args)
-                    .context("postgres_query error")?
+                    .context("mysql_query error")?
                     .into());
             }
             // UDTF
