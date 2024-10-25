@@ -53,12 +53,13 @@ impl Rule for SourceToIcebergScanRule {
             })
             .join()
             .unwrap();
-            // delete and data
-            // join: join == && seq_id > seq_id
+            // data file scan
             let data_iceberg_scan = LogicalIcebergScan::new(source, IcebergScanType::DataScan);
+            // equality delete scan
             let delete_iceberg_scan =
                 LogicalIcebergScan::new(source, IcebergScanType::EqualityDeleteScan);
             let data_columns_len = data_iceberg_scan.core.schema().len();
+            // The join condition is delete_column_names is equal and sequence number is less than, join type is left anti
             let eq_join_expr = data_iceberg_scan
                 .core
                 .schema()
