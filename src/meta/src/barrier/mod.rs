@@ -1042,7 +1042,7 @@ impl CheckpointControl {
         }
 
         // Collect the jobs to finish
-        if let (BarrierKind::Checkpoint(_), Command::Plain) = (&barrier_info.kind, &command)
+        if let (BarrierKind::Checkpoint(_), Command::Plain(None)) = (&barrier_info.kind, &command)
             && let Some(jobs_to_merge) = self.jobs_to_merge()
         {
             command = Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge);

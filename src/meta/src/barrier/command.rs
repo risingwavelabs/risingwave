@@ -213,7 +213,7 @@ pub enum Command {
     ///
     /// Barriers from all actors marked as `Created` state will be collected.
     /// After the barrier is collected, it does nothing.
-    Plain,
+    Plain(Option<Mutation>),
 
     /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
     /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
@@ -306,7 +306,7 @@ pub enum Command {
 
 impl Command {
     pub fn barrier() -> Self {
-        Self::Plain
+        Self::Plain(None)
     }
 
     pub fn pause(reason: PausedReason) -> Self {
@@ -319,7 +319,7 @@ impl Command {
 
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
-            Command::Plain => None,
+            Command::Plain(_) => None,
             Command::Pause(_) => None,
             Command::Resume(_) => None,
             Command::DropStreamingJobs {
@@ -405,7 +405,7 @@ impl Command {
 
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        !matches!(self, Command::Plain | Command::Resume(_))
+        !matches!(self, Command::Plain(None) | Command::Resume(_))
     }
 }
 
@@ -494,7 +494,7 @@ impl Command {
     pub fn to_mutation(&self, current_paused_reason: Option<PausedReason>) -> Option<Mutation> {
         let mutation =
             match self {
-                Command::Plain => None,
+                Command::Plain(mutation) => mutation.clone(),
 
                 Command::Pause(_) => {
                     // Only pause when the cluster is not already paused.
@@ -967,7 +967,7 @@ impl CommandContext {
         barrier_manager_context: &GlobalBarrierWorkerContextImpl,
     ) -> MetaResult<()> {
         match &self.command {
-            Command::Plain => {}
+            Command::Plain(_) => {}
 
             Command::Throttle(_) => {}
 
