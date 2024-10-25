@@ -243,7 +243,7 @@ message Connection {
   uint32 database_id = 3;
   string name = 4;
   oneof info {
-    PrivateLinkService private_link_service = 5;
+    PrivateLinkService private_link_service = 5 [deprecated = true];
   }
   uint32 owner = 6;
 }
