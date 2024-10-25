@@ -15,7 +15,7 @@ export MCLI_DOWNLOAD_BIN=https://rw-ci-deps-dist.s3.amazonaws.com/mc
 export GCLOUD_DOWNLOAD_TGZ=https://rw-ci-deps-dist.s3.amazonaws.com/google-cloud-cli-475.0.0-linux-x86_64.tar.gz
 export NEXTEST_HIDE_PROGRESS_BAR=true
 export RW_TELEMETRY_TYPE=test
-export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef"
+export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef0123456789abcdef"
 export RUST_MIN_STACK=4194304
 
 unset LANG
