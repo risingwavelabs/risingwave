@@ -434,11 +434,6 @@ IcebergConfig:
     default: Default::default
 KafkaConfig:
   fields:
-  - name: properties.bootstrap.server
-    field_type: String
-    required: true
-    alias:
-    - kafka.brokers
   - name: topic
     field_type: String
     required: true
@@ -448,79 +443,9 @@ KafkaConfig:
     field_type: Duration
     required: false
     default: 'Duration :: from_secs (5)'
-  - name: properties.security.protocol
-    field_type: String
-    comments: |-
-      Security protocol used for RisingWave to communicate with Kafka brokers. Could be
-      PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
-    required: false
-  - name: properties.ssl.endpoint.identification.algorithm
-    field_type: String
-    required: false
-  - name: properties.ssl.ca.location
-    field_type: String
-    comments: Path to CA certificate file for verifying the broker's key.
-    required: false
-  - name: properties.ssl.ca.pem
-    field_type: String
-    comments: CA certificate string (PEM format) for verifying the broker's key.
-    required: false
-  - name: properties.ssl.certificate.location
-    field_type: String
-    comments: Path to client's certificate file (PEM).
-    required: false
-  - name: properties.ssl.certificate.pem
-    field_type: String
-    comments: Client's public key string (PEM format) used for authentication.
-    required: false
-  - name: properties.ssl.key.location
-    field_type: String
-    comments: Path to client's private key file (PEM).
-    required: false
-  - name: properties.ssl.key.pem
-    field_type: String
-    comments: Client's private key string (PEM format) used for authentication.
-    required: false
-  - name: properties.ssl.key.password
-    field_type: String
-    comments: Passphrase of client's private key.
-    required: false
-  - name: properties.sasl.mechanism
-    field_type: String
-    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
-    required: false
-  - name: properties.sasl.username
-    field_type: String
-    comments: SASL username for SASL/PLAIN and SASL/SCRAM.
-    required: false
-  - name: properties.sasl.password
-    field_type: String
-    comments: SASL password for SASL/PLAIN and SASL/SCRAM.
-    required: false
-  - name: properties.sasl.kerberos.service.name
-    field_type: String
-    comments: Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
-    required: false
-  - name: properties.sasl.kerberos.keytab
-    field_type: String
-    comments: Path to client's Kerberos keytab file under SASL/GSSAPI.
-    required: false
-  - name: properties.sasl.kerberos.principal
-    field_type: String
-    comments: Client's Kerberos principal name under SASL/GSSAPI.
-    required: false
-  - name: properties.sasl.kerberos.kinit.cmd
-    field_type: String
-    comments: Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
-    required: false
-  - name: properties.sasl.kerberos.min.time.before.relogin
-    field_type: String
-    comments: Minimum time in milliseconds between key refresh attempts under SASL/GSSAPI.
-    required: false
-  - name: properties.sasl.oauthbearer.config
-    field_type: String
-    comments: Configurations for SASL/OAUTHBEARER.
-    required: false
+  - name: connection
+    field_type: crate::connector_common::KafkaConnection
+    required: true
   - name: properties.retry.max
     field_type: u32
     required: false
@@ -542,7 +467,7 @@ KafkaConfig:
       Maximum Kafka protocol request message size. Due to differing framing overhead between
       protocol versions the producer is unable to reliably enforce a strict max message limit at
       produce time and may exceed the maximum size by one message in protocol ProduceRequests,
-      the broker will enforce the the topic's max.message.bytes limit
+      the broker will enforce the topic's max.message.bytes limit
     required: false
   - name: properties.receive.message.max.bytes
     field_type: usize
@@ -682,6 +607,86 @@ KafkaConfig:
     required: false
     alias:
     - profile
+KafkaConnection:
+  fields:
+  - name: properties.bootstrap.server
+    field_type: String
+    required: true
+    alias:
+    - kafka.brokers
+  - name: properties.security.protocol
+    field_type: String
+    comments: |-
+      Security protocol used for RisingWave to communicate with Kafka brokers. Could be
+      PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    required: false
+  - name: properties.ssl.endpoint.identification.algorithm
+    field_type: String
+    required: false
+  - name: properties.ssl.ca.location
+    field_type: String
+    comments: Path to CA certificate file for verifying the broker's key.
+    required: false
+  - name: properties.ssl.ca.pem
+    field_type: String
+    comments: CA certificate string (PEM format) for verifying the broker's key.
+    required: false
+  - name: properties.ssl.certificate.location
+    field_type: String
+    comments: Path to client's certificate file (PEM).
+    required: false
+  - name: properties.ssl.certificate.pem
+    field_type: String
+    comments: Client's public key string (PEM format) used for authentication.
+    required: false
+  - name: properties.ssl.key.location
+    field_type: String
+    comments: Path to client's private key file (PEM).
+    required: false
+  - name: properties.ssl.key.pem
+    field_type: String
+    comments: Client's private key string (PEM format) used for authentication.
+    required: false
+  - name: properties.ssl.key.password
+    field_type: String
+    comments: Passphrase of client's private key.
+    required: false
+  - name: properties.sasl.mechanism
+    field_type: String
+    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
+    required: false
+  - name: properties.sasl.username
+    field_type: String
+    comments: SASL username for SASL/PLAIN and SASL/SCRAM.
+    required: false
+  - name: properties.sasl.password
+    field_type: String
+    comments: SASL password for SASL/PLAIN and SASL/SCRAM.
+    required: false
+  - name: properties.sasl.kerberos.service.name
+    field_type: String
+    comments: Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
+    required: false
+  - name: properties.sasl.kerberos.keytab
+    field_type: String
+    comments: Path to client's Kerberos keytab file under SASL/GSSAPI.
+    required: false
+  - name: properties.sasl.kerberos.principal
+    field_type: String
+    comments: Client's Kerberos principal name under SASL/GSSAPI.
+    required: false
+  - name: properties.sasl.kerberos.kinit.cmd
+    field_type: String
+    comments: Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
+    required: false
+  - name: properties.sasl.kerberos.min.time.before.relogin
+    field_type: String
+    comments: Minimum time in milliseconds between key refresh attempts under SASL/GSSAPI.
+    required: false
+  - name: properties.sasl.oauthbearer.config
+    field_type: String
+    comments: Configurations for SASL/OAUTHBEARER.
+    required: false
 KinesisSinkConfig:
   fields:
   - name: stream
