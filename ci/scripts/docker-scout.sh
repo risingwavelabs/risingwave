@@ -24,9 +24,16 @@ function docker-scout {
 }
 echo "--- scout quickview"
 docker-scout quickview ${image} -o /scout/quickview.output
-ls
 cat scout/quickview.output
-buildkite-agent meta-data set "SCOUT_REPORT" "$(cat scout/quickview.output)"
+read C H M L <<< $(grep 'Target'  scout/quickview.output | awk -F'[ │ ]+' '{print $4, $5, $6, $7}' | sed 's/[CHML]//g')
+cat >> scout/report.output << EOF
+Docker Scout Report:
+  - Critical: $C
+  - High: $H
+  - Medium: $M
+  - Low: $L
+EOF
+buildkite-agent meta-data set "SCOUT_REPORT" "$(cat scout/report.output)"
 echo "--- scout recommendations"
 docker-scout recommendations "${image}"
 echo "--- scout cves"
