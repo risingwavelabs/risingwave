@@ -27,7 +27,7 @@ use risingwave_common::bail;
 use risingwave_common::metrics::LabelGuardedMetric;
 use thiserror_ext::AsReport;
 
-use crate::error::ConnectorResult;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::{
@@ -175,7 +175,8 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             Ok(client) => client.client.clone(),
             Err(e) => {
                 SHARED_KAFKA_CLIENT.remove(&properties.connection).await;
-                bail!("{}", anyhow!(e.as_report()));
+                #[allow(rw::format_error)]
+                bail!("{}", e.as_report());
             }
         };
 
