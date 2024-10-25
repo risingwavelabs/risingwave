@@ -14,6 +14,7 @@
 
 use std::sync::{Arc, LazyLock};
 
+use anyhow::Context;
 use itertools::Itertools;
 use mysql_async::consts::ColumnType as MySqlColumnType;
 use mysql_async::prelude::*;
@@ -413,10 +414,16 @@ impl TableFunction {
                         .into();
 
                     let pool = mysql_async::Pool::new(database_opts);
-                    let mut conn = pool.get_conn().await?;
+                    let mut conn = pool
+                        .get_conn()
+                        .await
+                        .context("failed to connect to mysql in binder")?;
 
                     let query = evaled_args[6].clone();
-                    let statement = conn.prep(query).await?;
+                    let statement = conn
+                        .prep(query)
+                        .await
+                        .context("failed to prepare mysql_query in binder")?;
 
                     let mut rw_types = vec![];
                     #[allow(clippy::never_loop)]
