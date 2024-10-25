@@ -187,7 +187,8 @@ async fn test_merger_sum_aggr() {
                     pk_indices: PkIndices::new(),
                     identity: "MergeExecutor".to_string(),
                 },
-                MergeExecutor::for_test(actor_ctx.id, outputs, shared_context.clone(), schema).boxed(),
+                MergeExecutor::for_test(actor_ctx.id, outputs, shared_context.clone(), schema)
+                    .boxed(),
             );
 
             // for global aggregator, we need to sum data and sum row count

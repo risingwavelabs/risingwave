@@ -46,6 +46,7 @@ pub(crate) struct MergeExecutorInput {
     shared_context: Arc<SharedContext>,
     executor_stats: Arc<StreamingMetrics>,
     info: ExecutorInfo,
+    chunk_size: usize,
 }
 
 impl MergeExecutorInput {
@@ -56,6 +57,7 @@ impl MergeExecutorInput {
         shared_context: Arc<SharedContext>,
         executor_stats: Arc<StreamingMetrics>,
         info: ExecutorInfo,
+        chunk_size: usize,
     ) -> Self {
         Self {
             upstream,
@@ -64,6 +66,7 @@ impl MergeExecutorInput {
             shared_context,
             executor_stats,
             info,
+            chunk_size,
         }
     }
 
@@ -88,6 +91,8 @@ impl MergeExecutorInput {
                 self.shared_context,
                 self.executor_stats,
                 barrier_rx,
+                self.chunk_size,
+                self.info.schema.clone(),
             )
             .boxed(),
         };
@@ -844,8 +849,12 @@ mod tests {
             handles.push(handle);
         }
 
-        let merger =
-            MergeExecutor::for_test(actor_id, rxs, barrier_test_env.shared_context.clone(),Schema::new(vec![]));
+        let merger = MergeExecutor::for_test(
+            actor_id,
+            rxs,
+            barrier_test_env.shared_context.clone(),
+            Schema::new(vec![]),
+        );
         let mut merger = merger.boxed().execute();
         for (idx, epoch) in epochs {
             // expect n chunks
