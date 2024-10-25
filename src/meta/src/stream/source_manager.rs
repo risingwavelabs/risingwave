@@ -23,6 +23,7 @@ use std::time::Duration;
 use anyhow::Context;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_connector::connector_common::KafkaConnection;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::kafka::SHARED_KAFKA_CLIENT;
 use risingwave_connector::source::{
@@ -111,7 +112,7 @@ pub async fn create_source_worker_handle(
     let current_splits_ref = splits.clone();
 
     let connector_properties = extract_prop_from_new_source(source)?;
-    let share_client_entry = get_kafka_connection_hash(&connector_properties);
+    let share_client_entry = get_kafka_connection(&connector_properties);
     let enable_scale_in = connector_properties.enable_split_scale_in();
     let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = dispatch_source_prop!(connector_properties, prop, {
@@ -266,7 +267,7 @@ pub struct ConnectorSourceWorkerHandle {
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
     enable_scale_in: bool,
-    pub share_client_entry: Option<u64>,
+    pub share_client_entry: Option<KafkaConnection>,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -1041,7 +1042,10 @@ impl SourceManager {
                     if let Some(item) = share_client_guard.get_mut(&entry) {
                         item.ref_count -= 1;
                         if item.ref_count == 0 {
-                            tracing::info!("removing shared kafka client entry {}", entry);
+                            tracing::info!(
+                                "removing shared kafka client entry to broker {:?}",
+                                entry.brokers
+                            );
                             share_client_guard.remove(&entry);
                         }
                     }
@@ -1064,7 +1068,7 @@ impl SourceManager {
 
         let connector_properties = extract_prop_from_existing_source(&source)?;
 
-        let share_client_entry = get_kafka_connection_hash(&connector_properties);
+        let share_client_entry = get_kafka_connection(&connector_properties);
 
         let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1197,11 +1201,11 @@ pub fn build_actor_split_impls(
         .collect()
 }
 
-fn get_kafka_connection_hash(connector_properties: &ConnectorProperties) -> Option<u64> {
+fn get_kafka_connection(connector_properties: &ConnectorProperties) -> Option<KafkaConnection> {
     {
         // for kafka source: get the hash of connection props as shared source entry (on meta)
         if let ConnectorProperties::Kafka(kafka_props) = connector_properties {
-            return Some(kafka_props.connection.get_hash());
+            return Some(kafka_props.connection.clone());
         }
         None
     }

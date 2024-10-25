@@ -29,12 +29,13 @@ use crate::error::ConnectorResult;
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::{
-    KafkaContextCommon, KafkaProperties, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
+    KafkaConnection, KafkaContextCommon, KafkaProperties, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
 use crate::source::SourceEnumeratorContextRef;
 
-pub static SHARED_KAFKA_CLIENT: LazyLock<tokio::sync::Mutex<HashMap<u64, SharedKafkaItem>>> =
-    LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
+pub static SHARED_KAFKA_CLIENT: LazyLock<
+    tokio::sync::Mutex<HashMap<KafkaConnection, SharedKafkaItem>>,
+> = LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 
 pub struct SharedKafkaItem {
     pub client: Arc<BaseConsumer<RwConsumerContext>>,
@@ -78,8 +79,6 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let common_props = &properties.common;
 
         let broker_address = properties.connection.brokers.clone();
-
-        let connection_hash = properties.connection.get_hash();
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
@@ -107,10 +106,9 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 
         let kafka_client: Arc<BaseConsumer<RwConsumerContext>>;
         let mut shared_client_guard = SHARED_KAFKA_CLIENT.lock().await;
-        if let Some(item) = shared_client_guard.get_mut(&connection_hash) {
+        if let Some(item) = shared_client_guard.get_mut(&properties.connection) {
             tracing::info!(
-                "reusing kafka client for connection hash {}, to broker {}",
-                connection_hash,
+                "reusing kafka client for connection to broker {}",
                 broker_address
             );
             kafka_client = item.client.clone();
@@ -147,13 +145,12 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 
             kafka_client = Arc::new(client);
             tracing::debug!(
-                "created kafka client for connection hash {} to broker {}",
-                connection_hash,
+                "created kafka client for connection to broker {}",
                 broker_address
             );
             let mut shared_client_guard = SHARED_KAFKA_CLIENT.lock().await;
             shared_client_guard.insert(
-                connection_hash,
+                properties.connection,
                 SharedKafkaItem {
                     client: kafka_client.clone(),
                     ref_count: 1,

@@ -162,7 +162,7 @@ impl AwsAuthProps {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash)]
+#[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash, Eq)]
 pub struct KafkaConnection {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
