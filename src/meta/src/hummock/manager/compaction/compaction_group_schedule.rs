@@ -39,6 +39,7 @@ use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::{commit_multi_var, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
+use crate::hummock::TableThroughputStatistic;
 
 impl HummockManager {
     pub async fn merge_compaction_group(
@@ -266,7 +267,7 @@ impl HummockManager {
 
     pub async fn try_split_compaction_group(
         &self,
-        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+        table_write_throughput: &HashMap<u32, VecDeque<TableThroughputStatistic>>,
         checkpoint_secs: u64,
         group: &TableGroupInfo,
         created_tables: &HashSet<u32>,
@@ -303,7 +304,7 @@ impl HummockManager {
 
     pub async fn try_move_table_to_dedicated_cg(
         &self,
-        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+        table_write_throughput: &HashMap<u32, VecDeque<TableThroughputStatistic>>,
         table_id: &u32,
         table_size: &u64,
         is_creating_table: bool,
@@ -321,11 +322,13 @@ impl HummockManager {
         let mut is_low_write_throughput = true;
         if let Some(history) = table_write_throughput.get(table_id) {
             if history.len() >= window_size {
-                is_high_write_throughput = history.iter().all(|throughput| {
-                    *throughput / checkpoint_secs > self.env.opts.table_write_throughput_threshold
+                is_high_write_throughput = history.iter().all(|statistic| {
+                    statistic.throughput / checkpoint_secs
+                        > self.env.opts.table_write_throughput_threshold
                 });
-                is_low_write_throughput = history.iter().any(|throughput| {
-                    *throughput / checkpoint_secs < self.env.opts.min_table_split_write_throughput
+                is_low_write_throughput = history.iter().any(|statistic| {
+                    statistic.throughput / checkpoint_secs
+                        < self.env.opts.min_table_split_write_throughput
                 });
             }
         }

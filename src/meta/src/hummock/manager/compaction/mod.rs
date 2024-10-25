@@ -1463,13 +1463,15 @@ impl HummockManager {
                 params.checkpoint_frequency() * barrier_interval_ms / 1000,
             );
             // check latest write throughput
-            let history_table_throughput = self.history_table_throughput.read();
+            let history_table_throughput_guard = self.history_table_throughput.read();
             for (table_id, compact_table_size) in table_size_info {
-                let write_throughput = history_table_throughput
+                let write_throughput = history_table_throughput_guard
                     .get(&table_id)
-                    .map(|que| que.back().cloned().unwrap_or(0))
+                    .and_then(|que| que.back())
+                    .map(|item| item.throughput)
                     .unwrap_or(0)
                     / checkpoint_secs;
+
                 if compact_table_size > compact_task_table_size_partition_threshold_high
                     && default_partition_count > 0
                 {

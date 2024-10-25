@@ -196,6 +196,12 @@ impl HummockManager {
                                     }
 
                                     hummock_manager.on_handle_schedule_group().await;
+
+                                    // TODO(li0k): replace with config after PR #18806
+                                    const RECLAIM_TABLE_WRITE_THROUGHPUT_PERIOD_SEC: i64 = 60 * 10; // 10 minutes
+                                    hummock_manager.reclaim_table_write_throughput(
+                                        RECLAIM_TABLE_WRITE_THROUGHPUT_PERIOD_SEC,
+                                    );
                                 }
 
                                 HummockTimerEvent::Report => {

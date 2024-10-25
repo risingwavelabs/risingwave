@@ -32,6 +32,7 @@ use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::CompactionConfig;
 use sea_orm::TransactionTrait;
 
+use super::TableThroughputStatistic;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::transaction::{
@@ -335,10 +336,14 @@ impl HummockManager {
 
     fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
         let mut table_infos = self.history_table_throughput.write();
+        let timestamp = chrono::Utc::now().timestamp();
         for (table_id, stat) in table_stats {
             let throughput = (stat.total_value_size + stat.total_key_size) as u64;
             let entry = table_infos.entry(table_id).or_default();
-            entry.push_back(throughput);
+            entry.push_back(TableThroughputStatistic {
+                throughput,
+                timestamp,
+            });
             if entry.len() > self.env.opts.table_info_statistic_history_times {
                 entry.pop_front();
             }
@@ -421,6 +426,20 @@ impl HummockManager {
         }
 
         Ok(commit_sstables)
+    }
+
+    pub(crate) fn reclaim_table_write_throughput(&self, reclaim_interval: i64) {
+        let mut table_infos = self.history_table_throughput.write();
+        let now = chrono::Utc::now().timestamp();
+        for (_table_id, statistics) in table_infos.iter_mut() {
+            while let Some(stat) = statistics.front() {
+                if now - stat.timestamp > reclaim_interval {
+                    statistics.pop_front();
+                } else {
+                    break;
+                }
+            }
+        }
     }
 }
 
