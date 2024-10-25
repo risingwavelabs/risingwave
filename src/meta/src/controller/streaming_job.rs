@@ -1450,7 +1450,6 @@ impl CatalogController {
                 removed_actors,
                 vnode_bitmap_updates,
                 actor_splits,
-                injectable: _,
                 newly_created_actors,
                 upstream_fragment_dispatcher_ids,
                 upstream_dispatcher_mapping,

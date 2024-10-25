@@ -314,7 +314,7 @@ impl BarrierScheduler {
 }
 
 /// The receiver side of the barrier scheduling queue.
-/// Held by the [`super::GlobalBarrierManager`] to execute these commands.
+/// Held by the [`super::GlobalBarrierWorker`] to execute these commands.
 pub struct ScheduledBarriers {
     min_interval: Option<Interval>,
 

@@ -367,7 +367,7 @@ impl CreateMviewProgressTracker {
             // for checkpoint, we should also clear it.
             self.cancel_command(table_id);
         }
-        if command_ctx.kind.is_checkpoint() {
+        if command_ctx.barrier_info.kind.is_checkpoint() {
             self.take_finished_jobs()
         } else {
             vec![]
