@@ -720,11 +720,14 @@ impl CatalogController {
 
     pub async fn get_max_parallelism_by_id(&self, job_id: ObjectId) -> MetaResult<usize> {
         let inner = self.inner.read().await;
-        let job = StreamingJob::find_by_id(job_id)
+        let max_parallelism: i32 = StreamingJob::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::MaxParallelism)
+            .into_tuple()
             .one(&inner.db)
             .await?
             .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
-        Ok(job.max_parallelism as usize)
+        Ok(max_parallelism as usize)
     }
 
     /// Get all actor ids in the target streaming jobs.

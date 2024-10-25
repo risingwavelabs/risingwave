@@ -700,12 +700,33 @@ impl CatalogController {
             ));
         }
 
+        // 3. check parallelism.
+        let original_max_parallelism: i32 = StreamingJobModel::find_by_id(id as ObjectId)
+            .select_only()
+            .column(streaming_job::Column::MaxParallelism)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), id))?;
+
+        if original_max_parallelism != max_parallelism as i32 {
+            // We already override the max parallelism in `StreamFragmentGraph` before entering this function.
+            // This should not happen in normal cases.
+            bail!(
+                "cannot use a different max parallelism \
+                 when altering or creating/dropping a sink into an existing table, \
+                 original: {}, new: {}",
+                original_max_parallelism,
+                max_parallelism
+            );
+        }
+
         let parallelism = match specified_parallelism {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
 
-        // 3. create streaming object for new replace table.
+        // 4. create streaming object for new replace table.
         let obj_id = Self::create_streaming_job_obj(
             &txn,
             ObjectType::Table,
@@ -719,7 +740,7 @@ impl CatalogController {
         )
         .await?;
 
-        // 4. record dependency for new replace table.
+        // 5. record dependency for new replace table.
         ObjectDependency::insert(object_dependency::ActiveModel {
             oid: Set(id as _),
             used_by: Set(obj_id as _),
