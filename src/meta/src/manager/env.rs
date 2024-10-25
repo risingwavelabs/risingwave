@@ -20,8 +20,8 @@ use risingwave_common::config::{CompactionConfig, DefaultParallelism, ObjectStor
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::{bail, system_param};
+use risingwave_meta_model::prelude::Cluster;
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
-use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
@@ -126,6 +126,8 @@ pub struct MetaOpts {
     pub full_gc_interval_sec: u64,
     /// Max number of object per full GC job can fetch.
     pub full_gc_object_limit: u64,
+    /// Duration in seconds to retain garbage collection history data.
+    pub gc_history_retention_time_sec: u64,
     /// Max number of inflight time travel query.
     pub max_inflight_time_travel_query: u64,
     /// Enable sanity check when SSTs are committed
@@ -262,6 +264,7 @@ impl MetaOpts {
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
             full_gc_object_limit: 100_000,
+            gc_history_retention_time_sec: 3600 * 24 * 7,
             max_inflight_time_travel_query: 1000,
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
@@ -299,7 +302,9 @@ impl MetaOpts {
             object_store_config: ObjectStoreConfig::default(),
             max_trivial_move_task_count_per_loop: 256,
             max_get_task_probe_times: 5,
-            secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
+            secret_store_private_key: Some(
+                hex::decode("0123456789abcdef0123456789abcdef").unwrap(),
+            ),
             temp_secret_file_dir: "./secrets".to_string(),
             table_info_statistic_history_times: 240,
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,

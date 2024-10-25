@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use tracing::warn;
 

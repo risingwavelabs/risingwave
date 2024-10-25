@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
+use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
@@ -179,7 +180,7 @@ impl TableCatalogBuilder {
             created_at_cluster_version: None,
             retention_seconds: None,
             cdc_table_id: None,
-            vnode_count: None, // will be filled in by the meta service later
+            vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
         }
     }
 
@@ -377,9 +378,16 @@ pub fn infer_kv_log_store_table_catalog_inner(
 
 /// Check that all leaf nodes must be stream table scan,
 /// since that plan node maps to `backfill` executor, which supports recovery.
-pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
+/// Some other leaf nodes like `StreamValues` do not support recovery, and they
+/// cannot use background ddl.
+pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
     if plan.inputs().is_empty() {
-        if let Some(scan) = plan.as_stream_table_scan() {
+        if plan.as_stream_source_scan().is_some()
+            || plan.as_stream_now().is_some()
+            || plan.as_stream_source().is_some()
+        {
+            true
+        } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
                 || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
         } else {
@@ -387,7 +395,7 @@ pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
         }
     } else {
         assert!(!plan.inputs().is_empty());
-        plan.inputs().iter().all(plan_has_backfill_leaf_nodes)
+        plan.inputs().iter().all(plan_can_use_background_ddl)
     }
 }
 

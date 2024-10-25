@@ -22,7 +22,7 @@ use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_hummock_sdk::level::Level;
-use risingwave_meta_model_v2::table::TableType;
+use risingwave_meta_model::table::TableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::meta::EventLog;

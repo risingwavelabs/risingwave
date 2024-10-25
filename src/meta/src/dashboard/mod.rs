@@ -57,7 +57,7 @@ pub(super) mod handlers {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
-    use risingwave_meta_model_v2::WorkerId;
+    use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{PbDatabase, PbSchema, Sink, Source, Subscription, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
@@ -326,7 +326,7 @@ pub(super) mod handlers {
         let object_dependencies = srv
             .metadata_manager
             .catalog_controller
-            .list_object_dependencies()
+            .list_all_object_dependencies()
             .await
             .map_err(err)?;
 

@@ -17,19 +17,17 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::bail;
 use rumqttc::v5::{ConnectionError, Event, Incoming};
 use rumqttc::Outgoing;
 use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
 
 use super::source::MqttSplit;
-use super::MqttProperties;
-use crate::error::ConnectorResult;
+use super::{MqttError, MqttProperties};
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct MqttSplitEnumerator {
-    #[expect(dead_code)]
     topic: String,
     #[expect(dead_code)]
     client: rumqttc::v5::AsyncClient,
@@ -119,18 +117,10 @@ impl SplitEnumerator for MqttSplitEnumerator {
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<MqttSplit>> {
         if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
-            let start = std::time::Instant::now();
-            loop {
-                if self.connected.load(std::sync::atomic::Ordering::Relaxed) {
-                    break;
-                }
-
-                if start.elapsed().as_secs() > 10 {
-                    bail!("Failed to connect to mqtt broker");
-                }
-
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            }
+            return Err(ConnectorError::from(MqttError(format!(
+                "Failed to connect to MQTT broker for topic {}",
+                self.topic
+            ))));
         }
 
         let topics = self.topics.read().await;

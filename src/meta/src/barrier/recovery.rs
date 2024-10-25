@@ -21,7 +21,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model_v2::{StreamingParallelism, WorkerId};
+use risingwave_meta_model::{StreamingParallelism, WorkerId};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -87,6 +87,7 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
+    // FIXME: didn't consider Values here
     async fn recover_background_mv_progress(&self) -> MetaResult<CreateMviewProgressTracker> {
         let mgr = &self.metadata_manager;
         let mviews = mgr

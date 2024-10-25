@@ -19,17 +19,17 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash;
 use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
-use risingwave_meta_model_migration::WithQuery;
-use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::fragment::DistributionType;
-use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::*;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::actor::ActorStatus;
+use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
     view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
     PrivilegeId, SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
 };
+use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
 };
@@ -1082,7 +1082,13 @@ where
     ))
 }
 
-pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> NotificationInfo {
+/// Build a relation group for notifying the deletion of the given objects.
+///
+/// Note that only id fields are filled in the relation info, as the arguments are partial objects.
+/// As a result, the returned notification info should only be used for deletion.
+pub(crate) fn build_relation_group_for_delete(
+    relation_objects: Vec<PartialObject>,
+) -> NotificationInfo {
     let mut relations = vec![];
     for obj in relation_objects {
         match obj.obj_type {

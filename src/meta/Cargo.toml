@@ -58,8 +58,8 @@ risingwave_connector = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_license = { workspace = true }
 risingwave_meta_dashboard = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_meta_model_migration = { workspace = true }
-risingwave_meta_model_v2 = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
@@ -84,7 +84,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tower = { version = "0.4", features = ["util", "load-shed"] }
+tower = { version = "0.5", features = ["util", "load-shed"] }
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4"] }

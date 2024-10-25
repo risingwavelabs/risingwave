@@ -21,7 +21,7 @@ use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
-use risingwave_meta_model_v2::{SourceId, StreamingParallelism};
+use risingwave_meta_model::{SourceId, StreamingParallelism};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -312,7 +312,7 @@ impl StreamManagerService for StreamServiceImpl {
         let dependencies = self
             .metadata_manager
             .catalog_controller
-            .list_object_dependencies()
+            .list_created_object_dependencies()
             .await?;
 
         Ok(Response::new(ListObjectDependenciesResponse {

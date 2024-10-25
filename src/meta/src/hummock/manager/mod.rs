@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, HummockCompactionTaskId,
     HummockContextId, HummockVersionId,
 };
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::{
     compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
     hummock_version_stats,
 };
@@ -410,11 +410,6 @@ impl HummockManager {
             .collect();
 
         self.delete_object_tracker.clear();
-        // Not delete stale objects when archive or time travel is enabled
-        if !self.env.opts.enable_hummock_data_archive && !self.time_travel_enabled().await {
-            versioning_guard.mark_objects_for_deletion(context_info, &self.delete_object_tracker);
-        }
-
         self.initial_compaction_group_config_after_load(
             versioning_guard,
             self.compaction_group_manager.write().await.deref_mut(),

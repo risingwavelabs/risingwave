@@ -19,17 +19,17 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
+use risingwave_meta_model::actor::ActorStatus;
+use risingwave_meta_model::actor_dispatcher::DispatcherType;
+use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
+use risingwave_meta_model::{
+    actor, actor_dispatcher, fragment, streaming_job, ActorId, ActorMapping, ActorUpstreamActors,
+    ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
+};
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
     UnionType, WithClause, WithQuery,
-};
-use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
-use risingwave_meta_model_v2::fragment::DistributionType;
-use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
-use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, streaming_job, ActorId, ActorMapping, ActorUpstreamActors,
-    ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
 };
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, DerivePartialModel, EntityTrait, FromQueryResult,

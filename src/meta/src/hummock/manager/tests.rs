@@ -15,7 +15,7 @@
 #![cfg(test)]
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -121,7 +121,7 @@ fn get_compaction_group_object_ids(
 }
 
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
-    use risingwave_meta_model_v2::hummock_pinned_version;
+    use risingwave_meta_model::hummock_pinned_version;
     use sea_orm::EntityTrait;
     hummock_pinned_version::Entity::find()
         .all(&env.meta_store_ref().conn)
@@ -1192,7 +1192,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize
     );
     assert_eq!(
@@ -1213,7 +1214,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
@@ -1242,7 +1244,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
@@ -1270,7 +1273,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize + 3
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
@@ -2414,4 +2418,152 @@ async fn test_unregister_moved_table() {
             .collect_vec(),
         vec![100]
     );
+}
+
+#[tokio::test]
+async fn test_merge_compaction_group_task_expired() {
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+    let original_groups = hummock_manager
+        .get_current_version()
+        .await
+        .levels
+        .keys()
+        .cloned()
+        .sorted()
+        .collect_vec();
+    assert_eq!(original_groups, vec![2, 3]);
+
+    hummock_manager
+        .register_table_ids_for_test(&[(100, 2), (101, 2)])
+        .await
+        .unwrap();
+    let sst_1 = LocalSstableInfo {
+        sst_info: gen_sstable_info(1, vec![100], test_epoch(20)),
+        table_stats: Default::default(),
+        created_at: u64::MAX,
+    };
+
+    let sst_2 = LocalSstableInfo {
+        sst_info: gen_sstable_info(2, vec![100, 101], test_epoch(20)),
+        table_stats: Default::default(),
+        created_at: u64::MAX,
+    };
+    let mut sst_3 = sst_2.clone();
+    let mut sst_4 = sst_1.clone();
+    sst_3.sst_info.sst_id = 3;
+    sst_3.sst_info.object_id = 3;
+    sst_4.sst_info.sst_id = 4;
+    sst_4.sst_info.object_id = 4;
+    hummock_meta_client
+        .commit_epoch(
+            30,
+            SyncResult {
+                uncommitted_ssts: vec![sst_1, sst_2, sst_3, sst_4],
+                ..Default::default()
+            },
+            false,
+        )
+        .await
+        .unwrap();
+
+    // Now group 2 has member tables [100,101,102], so split [100, 101] can succeed even though
+    // there is no data of 102.
+    hummock_manager
+        .register_table_ids_for_test(&[(102, 2)])
+        .await
+        .unwrap();
+    let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
+
+    // for task pending
+    let _task = hummock_manager
+        .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+        .await
+        .unwrap()
+        .unwrap();
+
+    // will cancel the task
+    hummock_manager
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
+        .await
+        .unwrap();
+
+    let current_version = hummock_manager.get_current_version().await;
+    let left_compaction_group_id =
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
+    let right_compaction_group_id =
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
+    assert_eq!(current_version.levels.len(), 3);
+    assert_eq!(
+        current_version
+            .state_table_info
+            .compaction_group_member_table_ids(right_compaction_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .sorted()
+            .collect_vec(),
+        vec![101, 102]
+    );
+    assert_eq!(
+        current_version
+            .state_table_info
+            .compaction_group_member_table_ids(left_compaction_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
+        vec![100]
+    );
+
+    let current_version_2 = hummock_manager.get_current_version().await;
+    // The compaction task is cancelled or failed.
+    assert_eq!(current_version_2, current_version);
+
+    let task2 = hummock_manager
+        .get_compact_task(
+            right_compaction_group_id,
+            &mut default_compaction_selector(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    // will cancel the task2
+    hummock_manager
+        .merge_compaction_group(left_compaction_group_id, right_compaction_group_id)
+        .await
+        .unwrap();
+
+    let report_sst_id = 100;
+    let ret = hummock_manager
+        .report_compact_task(
+            task2.task_id,
+            TaskStatus::Success,
+            vec![SstableInfo {
+                object_id: report_sst_id,
+                sst_id: report_sst_id,
+                key_range: KeyRange::default(),
+                table_ids: vec![100],
+                min_epoch: 20,
+                max_epoch: 20,
+                file_size: 100,
+                sst_size: 100,
+                ..Default::default()
+            }],
+            None,
+            HashMap::default(),
+        )
+        .await
+        .unwrap();
+    // has been cancelled by merge
+    assert!(!ret);
+
+    let current_version_3 = hummock_manager.get_current_version().await;
+    let sst_ids = current_version_3
+        .get_sst_ids_by_group_id(left_compaction_group_id)
+        .collect::<HashSet<_>>();
+    // task 2 report failed due to the compaction group is merged
+    assert!(!sst_ids.contains(&report_sst_id));
 }

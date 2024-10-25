@@ -108,6 +108,8 @@ impl OptimizationStage {
 
 use std::sync::LazyLock;
 
+use risingwave_sqlparser::ast::ExplainFormat;
+
 pub struct LogicalOptimizer {}
 
 static DAG_TO_TREE: LazyLock<OptimizationStage> = LazyLock::new(|| {
@@ -197,12 +199,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: LazyLock<OptimizationStage> =
     LazyLock::new(|| {
         OptimizationStage::new(
             "General Unnesting(Translate Apply)",
-            vec![
-                TranslateApplyRule::create(true),
-                // Separate the project from a join if necessary because `ApplyJoinTransposeRule`
-                // can't handle a join with `output_indices`.
-                ProjectJoinSeparateRule::create(),
-            ],
+            vec![TranslateApplyRule::create(true)],
             ApplyOrder::TopDown,
         )
     });
@@ -211,12 +208,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: LazyLock<OptimizationStage> 
     LazyLock::new(|| {
         OptimizationStage::new(
             "General Unnesting(Translate Apply)",
-            vec![
-                TranslateApplyRule::create(false),
-                // Separate the project from a join if necessary because `ApplyJoinTransposeRule`
-                // can't handle a join with `output_indices`.
-                ProjectJoinSeparateRule::create(),
-            ],
+            vec![TranslateApplyRule::create(false)],
             ApplyOrder::TopDown,
         )
     });
@@ -684,7 +676,14 @@ impl LogicalOptimizer {
         InputRefValidator.validate(plan.clone());
 
         if ctx.is_explain_logical() {
-            ctx.store_logical(plan.explain_to_string());
+            match ctx.explain_format() {
+                ExplainFormat::Text => {
+                    ctx.store_logical(plan.explain_to_string());
+                }
+                ExplainFormat::Json => {
+                    ctx.store_logical(plan.explain_to_json());
+                }
+            }
         }
 
         Ok(plan)
@@ -789,7 +788,14 @@ impl LogicalOptimizer {
         InputRefValidator.validate(plan.clone());
 
         if ctx.is_explain_logical() {
-            ctx.store_logical(plan.explain_to_string());
+            match ctx.explain_format() {
+                ExplainFormat::Text => {
+                    ctx.store_logical(plan.explain_to_string());
+                }
+                ExplainFormat::Json => {
+                    ctx.store_logical(plan.explain_to_json());
+                }
+            }
         }
 
         Ok(plan)

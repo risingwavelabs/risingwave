@@ -25,10 +25,10 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
-use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::*;
-use risingwave_meta_model_v2::table::TableType;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
@@ -66,10 +66,11 @@ use tracing::info;
 use super::utils::{check_subscription_name_duplicate, get_fragment_ids_by_jobs};
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
-    build_relation_group, check_connection_name_duplicate, check_database_name_duplicate,
-    check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
-    check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
-    ensure_user_id, extract_external_table_name_from_definition, get_referring_objects,
+    build_relation_group_for_delete, check_connection_name_duplicate,
+    check_database_name_duplicate, check_function_signature_duplicate,
+    check_relation_name_duplicate, check_schema_name_duplicate, check_secret_name_duplicate,
+    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
+    extract_external_table_name_from_definition, get_referring_objects,
     get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
     resolve_source_register_info_for_jobs, PartialObject,
 };
@@ -671,25 +672,42 @@ impl CatalogController {
         Ok(tables)
     }
 
-    pub async fn list_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+    pub async fn list_all_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        self.list_object_dependencies(true).await
+    }
+
+    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        self.list_object_dependencies(false).await
+    }
+
+    async fn list_object_dependencies(
+        &self,
+        include_creating: bool,
+    ) -> MetaResult<Vec<PbObjectDependencies>> {
         let inner = self.inner.read().await;
 
-        let dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
-            .select_only()
-            .columns([
-                object_dependency::Column::Oid,
-                object_dependency::Column::UsedBy,
-            ])
-            .join(
-                JoinType::InnerJoin,
-                object_dependency::Relation::Object1.def(),
-            )
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+        let dependencies: Vec<(ObjectId, ObjectId)> = {
+            let filter = if include_creating {
+                Expr::value(true)
+            } else {
+                streaming_job::Column::JobStatus.eq(JobStatus::Created)
+            };
+            ObjectDependency::find()
+                .select_only()
+                .columns([
+                    object_dependency::Column::Oid,
+                    object_dependency::Column::UsedBy,
+                ])
+                .join(
+                    JoinType::InnerJoin,
+                    object_dependency::Relation::Object1.def(),
+                )
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         let mut obj_dependencies = dependencies
             .into_iter()
             .map(|(oid, used_by)| PbObjectDependencies {
@@ -720,20 +738,24 @@ impl CatalogController {
             }
         }));
 
-        let sink_dependencies: Vec<(SinkId, TableId)> = Sink::find()
-            .select_only()
-            .columns([sink::Column::SinkId, sink::Column::TargetTable])
-            .join(JoinType::InnerJoin, sink::Relation::Object.def())
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(
+        let sink_dependencies: Vec<(SinkId, TableId)> = {
+            let filter = if include_creating {
+                sink::Column::TargetTable.is_not_null()
+            } else {
                 streaming_job::Column::JobStatus
                     .eq(JobStatus::Created)
-                    .and(sink::Column::TargetTable.is_not_null()),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+                    .and(sink::Column::TargetTable.is_not_null())
+            };
+            Sink::find()
+                .select_only()
+                .columns([sink::Column::SinkId, sink::Column::TargetTable])
+                .join(JoinType::InnerJoin, sink::Relation::Object.def())
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
             PbObjectDependencies {
                 object_id: table_id as _,
@@ -741,22 +763,26 @@ impl CatalogController {
             }
         }));
 
-        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = Subscription::find()
-            .select_only()
-            .columns([
-                subscription::Column::SubscriptionId,
-                subscription::Column::DependentTableId,
-            ])
-            .join(JoinType::InnerJoin, subscription::Relation::Object.def())
-            .filter(
+        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = {
+            let filter = if include_creating {
+                subscription::Column::DependentTableId.is_not_null()
+            } else {
                 subscription::Column::SubscriptionState
                     .eq(Into::<i32>::into(SubscriptionState::Created))
-                    .and(subscription::Column::DependentTableId.is_not_null()),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+                    .and(subscription::Column::DependentTableId.is_not_null())
+            };
+            Subscription::find()
+                .select_only()
+                .columns([
+                    subscription::Column::SubscriptionId,
+                    subscription::Column::DependentTableId,
+                ])
+                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         obj_dependencies.extend(subscription_dependencies.into_iter().map(
             |(subscription_id, table_id)| PbObjectDependencies {
                 object_id: subscription_id as _,
@@ -891,7 +917,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let relation_group = build_relation_group(
+        let relation_group = build_relation_group_for_delete(
             dirty_mview_objs
                 .into_iter()
                 .chain(dirty_mview_internal_table_objs.into_iter())
@@ -2305,7 +2331,7 @@ impl CatalogController {
 
         // notify about them.
         self.notify_users_update(user_infos).await;
-        let relation_group = build_relation_group(to_drop_objects);
+        let relation_group = build_relation_group_for_delete(to_drop_objects);
 
         let version = self
             .notify_frontend(NotificationOperation::Delete, relation_group)
