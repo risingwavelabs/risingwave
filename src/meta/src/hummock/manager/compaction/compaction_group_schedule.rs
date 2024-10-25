@@ -39,6 +39,7 @@ use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::{commit_multi_var, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
+use crate::hummock::TableThroughputStatistic;
 
 impl HummockManager {
     pub async fn merge_compaction_group(

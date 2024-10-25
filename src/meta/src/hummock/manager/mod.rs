@@ -98,7 +98,7 @@ pub struct HummockManager {
     version_checkpoint_path: String,
     version_archive_dir: String,
     pause_version_checkpoint: AtomicBool,
-    history_table_throughput: parking_lot::RwLock<HashMap<u32, VecDeque<u64>>>,
+    history_table_throughput: parking_lot::RwLock<HashMap<u32, VecDeque<TableThroughputStatistic>>>,
 
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
@@ -494,4 +494,10 @@ async fn write_exclusive_cluster_id(
             Err(e.into())
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct TableThroughputStatistic {
+    pub throughput: u64,
+    pub timestamp: i64,
 }
