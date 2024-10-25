@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Exits as soon as any line fails.
+set -euo pipefail
+
 buildkite-agent meta-data get SCOUT_REPORT > scout.report
 cat >> step.yaml << EOF
 steps:
