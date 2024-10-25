@@ -175,7 +175,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             Ok(client) => client.client.clone(),
             Err(e) => {
                 SHARED_KAFKA_CLIENT.remove(&properties.connection).await;
-                bail!("{}", e.as_report());
+                bail!("{}", anyhow!(e.as_report()));
             }
         };
 
