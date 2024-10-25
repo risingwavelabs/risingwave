@@ -1059,6 +1059,16 @@ impl DdlController {
                     ..
                 } = replace_table_info;
 
+                // Ensure the max parallelism unchanged before replacing table.
+                let original_max_parallelism = self
+                    .metadata_manager
+                    .get_job_max_parallelism(streaming_job.id().into())
+                    .await?;
+                let fragment_graph = PbStreamFragmentGraph {
+                    max_parallelism: original_max_parallelism as _,
+                    ..fragment_graph
+                };
+
                 let fragment_graph =
                     StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
                 streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
@@ -1196,6 +1206,16 @@ impl DdlController {
                 object_id as _
             } else {
                 panic!("additional replace table event only occurs when dropping sink into table")
+            };
+
+            // Ensure the max parallelism unchanged before replacing table.
+            let original_max_parallelism = self
+                .metadata_manager
+                .get_job_max_parallelism(streaming_job.id().into())
+                .await?;
+            let fragment_graph = PbStreamFragmentGraph {
+                max_parallelism: original_max_parallelism as _,
+                ..fragment_graph
             };
 
             let fragment_graph =
@@ -1343,6 +1363,16 @@ impl DdlController {
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
+
+        // Ensure the max parallelism unchanged before replacing table.
+        let original_max_parallelism = self
+            .metadata_manager
+            .get_job_max_parallelism(streaming_job.id().into())
+            .await?;
+        let fragment_graph = PbStreamFragmentGraph {
+            max_parallelism: original_max_parallelism as _,
+            ..fragment_graph
+        };
 
         // 1. build fragment graph.
         let fragment_graph = StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
