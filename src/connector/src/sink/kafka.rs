@@ -35,7 +35,7 @@ use with_options::WithOptions;
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
 use crate::connector_common::{
-    AwsAuthProps, KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon,
+    AwsAuthProps, KafkaCommon, KafkaConnection, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon,
 };
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -215,7 +215,7 @@ pub struct KafkaConfig {
     pub common: KafkaCommon,
 
     #[serde(flatten)]
-    pub connection: crate::connector_common::KafkaConnection,
+    pub connection: KafkaConnection,
 
     #[serde(
         rename = "properties.retry.max",
