@@ -1082,7 +1082,7 @@ impl GlobalBarrierManagerContext {
         if is_first_time {
             commit_info
                 .new_table_fragment_infos
-                .push(NewTableFragmentInfo::NewCompactionGroup {
+                .push(NewTableFragmentInfo {
                     table_ids: tables_to_commit,
                 });
         };
@@ -1562,14 +1562,16 @@ fn collect_commit_epoch_info(
         && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
     {
         let table_fragments = &info.table_fragments;
-        vec![NewTableFragmentInfo::Normal {
-            mv_table_id: table_fragments.mv_table_id().map(TableId::new),
-            internal_table_ids: table_fragments
-                .internal_table_ids()
-                .into_iter()
-                .map(TableId::new)
-                .collect(),
-        }]
+        let mut table_ids: HashSet<_> = table_fragments
+            .internal_table_ids()
+            .into_iter()
+            .map(TableId::new)
+            .collect();
+        if let Some(mv_table_id) = table_fragments.mv_table_id() {
+            table_ids.insert(TableId::new(mv_table_id));
+        }
+
+        vec![NewTableFragmentInfo { table_ids }]
     } else {
         vec![]
     };

@@ -177,13 +177,12 @@ impl HummockMetaClient for MockHummockMetaClient {
         {
             vec![]
         } else {
-            vec![NewTableFragmentInfo::Normal {
-                mv_table_id: None,
-                internal_table_ids: commit_table_ids
+            vec![NewTableFragmentInfo {
+                table_ids: commit_table_ids
                     .iter()
                     .cloned()
                     .map(TableId::from)
-                    .collect_vec(),
+                    .collect(),
             }]
         };
 
