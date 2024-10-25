@@ -19,9 +19,9 @@ mod key_v2;
 pub mod table_distribution;
 
 pub use consistent_hash::bitmap::*;
-pub use consistent_hash::compat::*;
 pub use consistent_hash::mapping::*;
 pub use consistent_hash::vnode::*;
+pub use consistent_hash::vnode_count::*;
 pub use dispatcher::{calc_hash_key_kind, HashKeyDispatcher};
 pub use key::{
     Crc32HashCode, HashCode, HashKeyDe, HashKeySer, HeapNullBitmap, NullBitmap,
