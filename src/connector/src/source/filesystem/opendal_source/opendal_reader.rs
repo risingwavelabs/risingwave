@@ -280,7 +280,6 @@ pub fn extract_valid_column_indices(
                         })
                 })
                 .collect();
-            valid_column_indices.sort();
             Ok(valid_column_indices)
         }
         None => Ok(vec![]),
