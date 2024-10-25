@@ -83,7 +83,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                         var ret = res.getInt(1);
                         if (ret == 0) {
                             throw ValidatorUtils.invalidArgument(
-                                    String.format("MySQL database '%s' doesn't exist", dbName));
+                                    String.format("MySQL database '%s' doesn't exist", dbName.trim()));
                         }
                     }
                 }
