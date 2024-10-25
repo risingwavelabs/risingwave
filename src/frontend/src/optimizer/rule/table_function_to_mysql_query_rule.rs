@@ -21,7 +21,7 @@ use super::{BoxedRule, Rule};
 use crate::expr::{Expr, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 // use crate::optimizer::plan_node::{LogicalMySqlQuery, LogicalTableFunction};
-use crate::optimizer::plan_node::LogicalTableFunction;
+use crate::optimizer::plan_node::{LogicalMySqlQuery, LogicalTableFunction};
 use crate::optimizer::PlanRef;
 
 /// Transform a special `TableFunction` (with `MYSQL_QUERY` table function type) into a `LogicalMySqlQuery`
@@ -65,20 +65,19 @@ impl Rule for TableFunctionToMySqlQueryRule {
             let database = eval_args[4].clone();
             let query = eval_args[5].clone();
 
-            None
-            // Some(
-            //     LogicalMySqlQuery::new(
-            //         logical_table_function.ctx(),
-            //         schema,
-            //         hostname,
-            //         port,
-            //         username,
-            //         password,
-            //         database,
-            //         query,
-            //     )
-            //     .into(),
-            // )
+            Some(
+                LogicalMySqlQuery::new(
+                    logical_table_function.ctx(),
+                    schema,
+                    hostname,
+                    port,
+                    username,
+                    password,
+                    database,
+                    query,
+                )
+                .into(),
+            )
         } else {
             unreachable!("TableFunction return type should be struct")
         }
