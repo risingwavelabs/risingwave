@@ -581,7 +581,7 @@ impl MetadataManager {
 
     pub async fn count_streaming_job(&self) -> MetaResult<usize> {
         self.catalog_controller
-            .list_streaming_job_states()
+            .list_streaming_job_infos()
             .await
             .map(|x| x.len())
     }

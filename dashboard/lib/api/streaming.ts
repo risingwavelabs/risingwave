@@ -53,14 +53,6 @@ export async function getRelationIdInfos(): Promise<RelationIdInfos> {
   return fragmentIds
 }
 
-export async function getFragments(): Promise<TableFragments[]> {
-  let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(
-    TableFragments.fromJSON
-  )
-  fragmentList = sortBy(fragmentList, (x) => x.tableId)
-  return fragmentList
-}
-
 export interface Relation {
   id: number
   name: string
@@ -73,6 +65,27 @@ export interface Relation {
   ownerName?: string
   schemaName?: string
   databaseName?: string
+}
+
+export interface StreamingJobInfo {
+  jobId: number
+  objType: string
+  name: string
+  jobStatus: string
+  parallelism: any
+  maxParallelism: number
+}
+
+export function formatParallelism(parallelism: any) {
+  if (typeof parallelism === "string") {
+    return parallelism
+  } else if (typeof parallelism === "object") {
+    let key = Object.keys(parallelism)[0]
+    let value = parallelism[key]
+    return `${key} (${value})`
+  } else {
+    return JSON.stringify(parallelism)
+  }
 }
 
 export interface StreamingJob extends Relation {
@@ -104,13 +117,8 @@ export function relationIsStreamingJob(x: Relation): x is StreamingJob {
 }
 
 export async function getStreamingJobs() {
-  let jobs = _.concat<StreamingJob>(
-    await getMaterializedViews(),
-    await getTables(),
-    await getIndexes(),
-    await getSinks()
-  )
-  jobs = sortBy(jobs, (x) => x.id)
+  let jobs: StreamingJobInfo[] = await api.get("/streaming_jobs")
+  jobs = sortBy(jobs, (x) => x.jobId)
   return jobs
 }
 
