@@ -19,7 +19,7 @@ use risingwave_common::catalog::Schema;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchPostgresQuery, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase,
+    generic, BatchMySqlQuery, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase,
     PlanRef, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::error::Result;
@@ -33,12 +33,12 @@ use crate::utils::{ColIndexMapping, Condition};
 use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LogicalPostgresQuery {
+pub struct LogicalMySqlQuery {
     pub base: PlanBase<Logical>,
-    pub core: generic::PostgresQuery,
+    pub core: generic::MySqlQuery,
 }
 
-impl LogicalPostgresQuery {
+impl LogicalMySqlQuery {
     pub fn new(
         ctx: OptimizerContextRef,
         schema: Schema,
@@ -49,7 +49,7 @@ impl LogicalPostgresQuery {
         database: String,
         query: String,
     ) -> Self {
-        let core = generic::PostgresQuery {
+        let core = generic::MySqlQuery {
             schema,
             hostname,
             port,
@@ -62,29 +62,29 @@ impl LogicalPostgresQuery {
 
         let base = PlanBase::new_logical_with_core(&core);
 
-        LogicalPostgresQuery { base, core }
+        LogicalMySqlQuery { base, core }
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalPostgresQuery}
-impl Distill for LogicalPostgresQuery {
+impl_plan_tree_node_for_leaf! {LogicalMySqlQuery}
+impl Distill for LogicalMySqlQuery {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![("columns", column_names_pretty(self.schema()))];
-        childless_record("LogicalPostgresQuery", fields)
+        childless_record("LogicalMySqlQuery", fields)
     }
 }
 
-impl ColPrunable for LogicalPostgresQuery {
+impl ColPrunable for LogicalMySqlQuery {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         LogicalProject::with_out_col_idx(self.clone().into(), required_cols.iter().cloned()).into()
     }
 }
 
-impl ExprRewritable for LogicalPostgresQuery {}
+impl ExprRewritable for LogicalMySqlQuery {}
 
-impl ExprVisitable for LogicalPostgresQuery {}
+impl ExprVisitable for LogicalMySqlQuery {}
 
-impl PredicatePushdown for LogicalPostgresQuery {
+impl PredicatePushdown for LogicalMySqlQuery {
     fn predicate_pushdown(
         &self,
         predicate: Condition,
@@ -95,21 +95,21 @@ impl PredicatePushdown for LogicalPostgresQuery {
     }
 }
 
-impl ToBatch for LogicalPostgresQuery {
+impl ToBatch for LogicalMySqlQuery {
     fn to_batch(&self) -> Result<PlanRef> {
-        Ok(BatchPostgresQuery::new(self.core.clone()).into())
+        Ok(BatchMySqlQuery::new(self.core.clone()).into())
     }
 }
 
-impl ToStream for LogicalPostgresQuery {
+impl ToStream for LogicalMySqlQuery {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        bail!("postgres_query function is not supported in streaming mode")
+        bail!("mysql_query function is not supported in streaming mode")
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        bail!("postgres_query function is not supported in streaming mode")
+        bail!("mysql_query function is not supported in streaming mode")
     }
 }
