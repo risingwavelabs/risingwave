@@ -130,7 +130,7 @@ impl TryToBatchPb for BatchLogSeqScan {
                 )),
             }),
             // It's currently true.
-            ordered: true,
+            ordered: !self.order().is_any(),
         }))
     }
 }
