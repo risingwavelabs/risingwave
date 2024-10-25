@@ -1506,7 +1506,7 @@ pub async fn handle_create_table(
                 MetaBackend::Sqlite => {
                     format!("jdbc:sqlite:{}", meta_store_database.clone())
                 }
-                MetaBackend::Etcd | MetaBackend::Sql | MetaBackend::Mem => {
+                MetaBackend::Sql | MetaBackend::Mem => {
                     bail!(
                         "Unsupported meta backend for iceberg engine table: {}",
                         meta_store_backend

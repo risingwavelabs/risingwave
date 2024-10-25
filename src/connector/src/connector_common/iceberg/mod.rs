@@ -808,7 +808,7 @@ mod v2 {
                     format!("sqlite://{}?mode=rwc", meta_store_database.clone()),
                     SqlBindStyle::QMark,
                 ),
-                MetaBackend::Etcd | MetaBackend::Sql | MetaBackend::Mem => {
+                MetaBackend::Sql | MetaBackend::Mem => {
                     bail!(
                         "Unsupported meta backend for iceberg engine table: {}",
                         meta_store_backend

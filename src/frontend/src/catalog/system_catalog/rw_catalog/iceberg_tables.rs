@@ -69,7 +69,6 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
         host, port, meta_store_user, meta_store_password, meta_store_database
     );
 
-    println!("conn_str: {}", conn_str);
     let (client, conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls)
         .await
         .map_err(|e| anyhow!(e))?;
