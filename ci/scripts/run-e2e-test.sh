@@ -35,8 +35,11 @@ cluster_start() {
     mkdir -p "$PREFIX_LOG"
     risedev clean-data
     risedev pre-start-dev
+    risedev dev standalone-minio-sqlite &
+    PID=$!
+    sleep 1
     start_standalone "$PREFIX_LOG"/standalone.log &
-    risedev dev standalone-minio-sqlite
+    wait $PID
   elif [[ $mode == "single-node" ]]; then
     mkdir -p "$PREFIX_LOG"
     risedev clean-data
@@ -255,8 +258,11 @@ if [[ "$mode" == "standalone" ]]; then
   mkdir -p "$PREFIX_LOG"
   risedev clean-data
   risedev pre-start-dev
+  risedev dev standalone-minio-sqlite-compactor &
+  PID=$!
+  sleep 1
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
-  risedev dev standalone-minio-sqlite-compactor
+  wait $PID
   wait_standalone
   if compactor_is_online
   then
@@ -272,8 +278,11 @@ if [[ "$mode" == "standalone" ]]; then
   mkdir -p "$PREFIX_LOG"
   risedev clean-data
   risedev pre-start-dev
+  risedev dev standalone-minio-sqlite &
+  PID=$!
+  sleep 1
   start_standalone "$PREFIX_LOG"/standalone.log &
-  risedev dev standalone-minio-sqlite
+  wait $PID
   wait_standalone
   if ! compactor_is_online
   then
