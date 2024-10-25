@@ -5,10 +5,10 @@ system ok
 rpk topic create test-rw-sink-upsert-avro
 
 system ok
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-upsert-avro-value' src/connector/src/test_data/all-types.avsc
+jq '.fields = (.fields | map(select(.name | test("unsupported|mon_day_sec_field") | not)))' src/connector/src/test_data/all-types.avsc | sr_register 'test-rw-sink-upsert-avro-value' AVRO
 
 system ok
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-upsert-avro-key' src/connector/src/test_data/all-types.avsc 'string_field,int32_field'
+jq '.fields = (.fields | map(select(.name | test("string_field|int32_field"))))' src/connector/src/test_data/all-types.avsc | sr_register 'test-rw-sink-upsert-avro-key' AVRO
 
 statement ok
 create table from_kafka ( *, gen_i32_field int as int32_field + 2, primary key (some_key) )
