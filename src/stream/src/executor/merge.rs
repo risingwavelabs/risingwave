@@ -703,13 +703,7 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let (tx, rx) = channel_for_test();
-        let input = LocalInput::new(
-            rx,
-            1,
-            2,
-            test_env.shared_context.local_barrier_manager.clone(),
-        )
-        .boxed_input();
+        let input = LocalInput::new(rx, 1).boxed_input();
         let mut buffer = BufferChunks::new(input, 100, Schema::new(vec![]));
 
         // Send a chunk
@@ -756,7 +750,7 @@ mod tests {
 
         // Send a barrier.
         let barrier = Barrier::new_test_barrier(test_epoch(1));
-        test_env.inject_barrier(&barrier, [], [2]);
+        test_env.inject_barrier(&barrier, [2]);
         tx.send(Message::Barrier(barrier.clone().into_dispatcher()))
             .await
             .unwrap();
@@ -768,7 +762,7 @@ mod tests {
         tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
         tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
         let barrier = Barrier::new_test_barrier(test_epoch(2));
-        test_env.inject_barrier(&barrier, [], [2]);
+        test_env.inject_barrier(&barrier, [2]);
         tx.send(Message::Barrier(barrier.clone().into_dispatcher()))
             .await
             .unwrap();
