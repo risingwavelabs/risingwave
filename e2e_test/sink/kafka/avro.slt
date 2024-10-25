@@ -4,9 +4,11 @@ set sink_decouple = false;
 system ok
 rpk topic create test-rw-sink-upsert-avro
 
+# use jq to remove 2 fields/columns before registration
 system ok
 jq '.fields = (.fields | map(select(.name | test("unsupported|mon_day_sec_field") | not)))' src/connector/src/test_data/all-types.avsc | sr_register 'test-rw-sink-upsert-avro-value' AVRO
 
+# use jq to select 2 fields/columns used as key
 system ok
 jq '.fields = (.fields | map(select(.name | test("string_field|int32_field"))))' src/connector/src/test_data/all-types.avsc | sr_register 'test-rw-sink-upsert-avro-key' AVRO
 
