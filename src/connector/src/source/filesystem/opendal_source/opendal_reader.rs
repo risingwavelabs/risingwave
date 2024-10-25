@@ -262,7 +262,7 @@ pub fn extract_valid_column_indices(
                 parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())
                     .map_err(anyhow::Error::from)?;
 
-            let mut valid_column_indices: Vec<usize> = rw_columns
+            let valid_column_indices: Vec<usize> = rw_columns
                 .iter()
                 .filter_map(|column| {
                     parquet_column_names
