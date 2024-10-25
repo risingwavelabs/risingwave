@@ -29,6 +29,7 @@ hytra = "0.1.2"
 iceberg = { workspace = true }
 itertools = { workspace = true }
 memcomparable = "0.2"
+mysql_async = { workspace = true }
 opendal = { workspace = true }
 parking_lot = { workspace = true }
 parquet = { workspace = true }

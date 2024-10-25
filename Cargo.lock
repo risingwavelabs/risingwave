@@ -10476,6 +10476,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
+ "mysql_async",
  "opendal 0.49.2",
  "parking_lot 0.12.1",
  "parquet 53.0.0",

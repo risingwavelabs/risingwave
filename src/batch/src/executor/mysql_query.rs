@@ -15,6 +15,8 @@
 use anyhow::Context;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
+use mysql_async;
+use mysql_async::prelude::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
@@ -129,21 +131,20 @@ impl MySqlQueryExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         tracing::debug!("mysql_query_executor: started");
-        // let conn_str = format!(
-        //     "host={} port={} user={} password={} dbname={}",
-        //     self.host, self.port, self.username, self.password, self.database
-        // );
-        // let (client, conn) = tokio_mysql::connect(&conn_str, tokio_mysql::NoTls).await?;
-        //
-        // tokio::spawn(async move {
-        //     if let Err(e) = conn.await {
-        //         tracing::error!(
-        //             "mysql_query_executor: connection error: {:?}",
-        //             e.as_report()
-        //         );
-        //     }
-        // });
-        //
+        let database_opts: mysql_async::Opts = mysql_async::OptsBuilder::default()
+            .ip_or_hostname(self.host)
+            .tcp_port(self.port.parse::<u16>().unwrap()) // FIXME
+            .user(Some(self.username))
+            .pass(Some(self.password))
+            .db_name(Some(self.database))
+            .into();
+
+        let pool = mysql_async::Pool::new(database_opts);
+        let mut conn = pool
+            .get_conn()
+            .await
+            .context("failed to connect to mysql in binder")?;
+
         // let params: &[&str] = &[];
         // let row_stream = client
         //     .query_raw(&self.query, params)
