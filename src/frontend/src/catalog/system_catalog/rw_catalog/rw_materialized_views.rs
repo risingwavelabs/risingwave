@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::CreateType;
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
@@ -33,6 +34,7 @@ struct RwMaterializedView {
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
+    background_ddl: bool,
 }
 
 #[system_catalog(table, "rw_catalog.rw_materialized_views")]
@@ -45,7 +47,7 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
 
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_created_mvs().map(|table| RwMaterializedView {
+            schema.iter_all_mvs().map(|table| RwMaterializedView {
                 id: table.id.table_id as i32,
                 name: table.name().into(),
                 schema_id: schema.id() as i32,
@@ -62,6 +64,7 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
                 created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
                 initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
                 created_at_cluster_version: table.created_at_cluster_version.clone(),
+                background_ddl: table.create_type == CreateType::Background,
             })
         })
         .collect())

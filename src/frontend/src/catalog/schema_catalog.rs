@@ -557,6 +557,14 @@ impl SchemaCatalog {
     }
 
     /// Iterate all materialized views, excluding the indices.
+    pub fn iter_all_mvs(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name))
+            .map(|(_, v)| v)
+    }
+
+    /// Iterate created materialized views, excluding the indices.
     pub fn iter_created_mvs(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()

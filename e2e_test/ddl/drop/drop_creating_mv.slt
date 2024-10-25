@@ -19,10 +19,17 @@ onlyif can-use-recover
 sleep 5s
 
 onlyif can-use-recover
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+f
+
+onlyif can-use-recover
 statement ok
 drop materialized view m1;
 
 ############## Test drop background mv BEFORE recovery
+
 statement ok
 set background_ddl=true;
 
@@ -32,6 +39,12 @@ create materialized view m1 as select * from t;
 
 onlyif can-use-recover
 sleep 5s
+
+onlyif can-use-recover
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+t
 
 onlyif can-use-recover
 statement ok
@@ -49,11 +62,23 @@ onlyif can-use-recover
 sleep 5s
 
 onlyif can-use-recover
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+t
+
+onlyif can-use-recover
 statement ok
 recover;
 
 onlyif can-use-recover
-sleep 10s
+sleep 5s
+
+onlyif can-use-recover
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+t
 
 onlyif can-use-recover
 statement ok
@@ -68,6 +93,11 @@ set background_ddl=false;
 
 statement ok
 create materialized view m1 as select * from t;
+
+query I
+select background_ddl from rw_catalog.rw_materialized_views where name='m1';
+----
+f
 
 statement ok
 drop materialized view m1;
