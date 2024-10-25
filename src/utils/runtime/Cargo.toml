@@ -26,6 +26,7 @@ pprof = { version = "0.13", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
 rlimit = "0.10"
+rustls = { version = "0.23.5"}
 # Explicitly specify the tokio version used in RisingWave runtime
 rw-tokio = { version = "=1.38.0", package = "tokio" }
 thiserror-ext = { workspace = true }

@@ -119,7 +119,6 @@ impl PubsubProperties {
 
     pub(crate) async fn subscription_client(&self) -> ConnectorResult<Subscription> {
         self.initialize_env();
-
         // Validate config
         let config = ClientConfig::default().with_auth().await?;
         let client = Client::new(config)
