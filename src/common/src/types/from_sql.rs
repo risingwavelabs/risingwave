@@ -36,7 +36,9 @@ impl<'a> FromSql<'a> for ScalarImpl {
             Type::JSONB => ScalarImpl::from(JsonbVal::from_sql(ty, raw)?),
             Type::INTERVAL => ScalarImpl::from(Interval::from_sql(ty, raw)?),
             Type::BYTEA => ScalarImpl::from(Vec::<u8>::from_sql(ty, raw)?.into_boxed_slice()),
-            Type::VARCHAR | Type::TEXT => ScalarImpl::from(String::from_sql(ty, raw)?),
+            Type::VARCHAR | Type::TEXT | Type::BPCHAR => {
+                ScalarImpl::from(String::from_sql(ty, raw)?)
+            }
             ref ty
                 if (ty.name() == "citext"
                     || ty.name() == "ltree"
@@ -71,6 +73,7 @@ impl<'a> FromSql<'a> for ScalarImpl {
                 | Type::BYTEA
                 | Type::VARCHAR
                 | Type::TEXT
+                | Type::BPCHAR
         ) || (ty.name() == "citext"
             || ty.name() == "ltree"
             || ty.name() == "lquery"
