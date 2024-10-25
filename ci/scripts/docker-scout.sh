@@ -22,6 +22,7 @@ mkdir -p scout
 function docker-scout {
     docker run -it -e DOCKER_SCOUT_HUB_USER=risingwavelabs -e DOCKER_SCOUT_HUB_PASSWORD=$DOCKER_TOKEN -u root -v /var/run/docker.sock:/var/run/docker.sock -v $PWD/scout:/scout docker/scout-cli "$@"
 }
+
 echo "--- scout quickview"
 docker-scout quickview ${image} -o /scout/quickview.output
 cat scout/quickview.output
@@ -33,8 +34,11 @@ Docker Scout Report:
             - Medium: $M
             - Low: $L
 EOF
+
 buildkite-agent meta-data set "SCOUT_REPORT" "$(cat scout/report.output)"
+
 echo "--- scout recommendations"
 docker-scout recommendations "${image}"
+
 echo "--- scout cves"
 docker-scout cves "${image}"
