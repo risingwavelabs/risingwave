@@ -30,7 +30,7 @@ use std::ops::RangeBounds;
 use std::str::FromStr;
 
 use paste::paste;
-use risingwave_license::TEST_PAID_LICENSE_KEY;
+use risingwave_license::{LicenseKey, LicenseKeyRef};
 use risingwave_pb::meta::PbSystemParams;
 
 use self::diff::SystemParamsDiff;
@@ -60,15 +60,7 @@ impl_param_value!(u32);
 impl_param_value!(u64);
 impl_param_value!(f64);
 impl_param_value!(String => &'a str);
-
-/// Set the default value of `license_key` to [`TEST_PAID_LICENSE_KEY`] in debug mode.
-fn default_license_key() -> String {
-    if cfg!(debug_assertions) {
-        TEST_PAID_LICENSE_KEY.to_owned()
-    } else {
-        "".to_owned()
-    }
-}
+impl_param_value!(LicenseKey => LicenseKeyRef<'a>);
 
 /// Define all system parameters here.
 ///
@@ -83,23 +75,23 @@ fn default_license_key() -> String {
 macro_rules! for_all_params {
     ($macro:ident) => {
         $macro! {
-            // name                                     type    default value                               mut?    doc
-            { barrier_interval_ms,                      u32,    Some(1000_u32),                             true,   "The interval of periodic barrier.", },
-            { checkpoint_frequency,                     u64,    Some(1_u64),                                true,   "There will be a checkpoint for every n barriers.", },
-            { sstable_size_mb,                          u32,    Some(256_u32),                              false,  "Target size of the Sstable.", },
-            { parallel_compact_size_mb,                 u32,    Some(512_u32),                              false,  "The size of parallel task for one compact/flush job.", },
-            { block_size_kb,                            u32,    Some(64_u32),                               false,  "Size of each block in bytes in SST.", },
-            { bloom_false_positive,                     f64,    Some(0.001_f64),                            false,  "False positive probability of bloom filter.", },
-            { state_store,                              String, None,                                       false,  "URL for the state store", },
-            { data_directory,                           String, None,                                       false,  "Remote directory for storing data and metadata objects.", },
-            { backup_storage_url,                       String, None,                                       true,   "Remote storage url for storing snapshots.", },
-            { backup_storage_directory,                 String, None,                                       true,   "Remote directory for storing snapshots.", },
-            { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   "Max number of concurrent creating streaming jobs.", },
-            { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
-            { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
-            { use_new_object_prefix_strategy,           bool,   None,                                       false,  "Whether to split object prefix.", },
-            { license_key,                              String, Some(default_license_key()),                true,   "The license key to activate enterprise features.", },
-            { time_travel_retention_ms,                 u64,    Some(0_u64),                                true,   "The data retention period for time travel, where 0 indicates that it's disabled.", },
+            // name                                     type                            default value                   mut?    doc
+            { barrier_interval_ms,                      u32,                            Some(1000_u32),                 true,   "The interval of periodic barrier.", },
+            { checkpoint_frequency,                     u64,                            Some(1_u64),                    true,   "There will be a checkpoint for every n barriers.", },
+            { sstable_size_mb,                          u32,                            Some(256_u32),                  false,  "Target size of the Sstable.", },
+            { parallel_compact_size_mb,                 u32,                            Some(512_u32),                  false,  "The size of parallel task for one compact/flush job.", },
+            { block_size_kb,                            u32,                            Some(64_u32),                   false,  "Size of each block in bytes in SST.", },
+            { bloom_false_positive,                     f64,                            Some(0.001_f64),                false,  "False positive probability of bloom filter.", },
+            { state_store,                              String,                         None,                           false,  "URL for the state store", },
+            { data_directory,                           String,                         None,                           false,  "Remote directory for storing data and metadata objects.", },
+            { backup_storage_url,                       String,                         None,                           true,   "Remote storage url for storing snapshots.", },
+            { backup_storage_directory,                 String,                         None,                           true,   "Remote directory for storing snapshots.", },
+            { max_concurrent_creating_streaming_jobs,   u32,                            Some(1_u32),                    true,   "Max number of concurrent creating streaming jobs.", },
+            { pause_on_next_bootstrap,                  bool,                           Some(false),                    true,   "Whether to pause all data sources on next bootstrap.", },
+            { enable_tracing,                           bool,                           Some(false),                    true,   "Whether to enable distributed tracing.", },
+            { use_new_object_prefix_strategy,           bool,                           None,                           false,  "Whether to split object prefix.", },
+            { license_key,                              risingwave_license::LicenseKey, Some(Default::default()),       true,   "The license key to activate enterprise features.", },
+            { time_travel_retention_ms,                 u64,                            Some(600000_u64),              true,   "The data retention period for time travel.", },
         }
     };
 }
@@ -160,8 +152,6 @@ macro_rules! def_default {
 pub mod default {
     use std::sync::LazyLock;
 
-    use super::*;
-
     for_all_params!(def_default_opt);
     for_all_params!(def_default);
 }
@@ -190,7 +180,7 @@ macro_rules! impl_system_params_to_kv {
             check_missing_params(params)?;
             let mut ret = Vec::new();
             $(ret.push((
-                key_of!($field).to_string(),
+                key_of!($field).to_owned(),
                 params.$field.as_ref().unwrap().to_string(),
             ));)*
             Ok(ret)
@@ -203,7 +193,7 @@ macro_rules! impl_derive_missing_fields {
         pub fn derive_missing_fields(params: &mut PbSystemParams) {
             $(
                 if params.$field.is_none() && let Some(v) = OverrideFromParams::$field(params) {
-                    params.$field = Some(v);
+                    params.$field = Some(v.into());
                 }
             )*
         }
@@ -240,8 +230,8 @@ macro_rules! impl_system_params_from_kv {
             if !kvs.is_empty() {
                 let unrecognized_params = kvs.into_iter().map(|(k, v)| {
                     (
-                        std::str::from_utf8(k.as_ref()).unwrap().to_string(),
-                        std::str::from_utf8(v.as_ref()).unwrap().to_string()
+                        std::str::from_utf8(k.as_ref()).unwrap().to_owned(),
+                        std::str::from_utf8(v.as_ref()).unwrap().to_owned(),
                     )
                 }).collect::<Vec<_>>();
                 tracing::warn!("unrecognized system params {:?}", unrecognized_params);
@@ -331,7 +321,7 @@ macro_rules! impl_set_system_param {
             match key {
                 $(
                     key_of!($field) => {
-                        let v = if let Some(v) = value {
+                        let v: $type = if let Some(v) = value {
                             #[allow(rw::format_error)]
                             v.as_ref().parse().map_err(|e| format!("cannot parse parameter value: {e}"))?
                         } else {
@@ -341,12 +331,12 @@ macro_rules! impl_set_system_param {
 
                         let changed = SystemParamsReader::new(&*params).$field() != v;
                         if changed {
-                            let new_value = v.to_string();
                             let diff = SystemParamsDiff {
                                 $field: Some(v.to_owned()),
                                 ..Default::default()
                             };
-                            params.$field = Some(v);
+                            params.$field = Some(v.into());                                 // do not use `to_string` to avoid writing redacted values
+                            let new_value = params.$field.as_ref().unwrap().to_string();    // can now use `to_string` on protobuf primitive types
                             Ok(Some((new_value, diff)))
                         } else {
                             Ok(None)
@@ -383,12 +373,12 @@ macro_rules! impl_system_params_for_test {
         pub fn system_params_for_test() -> PbSystemParams {
             let mut ret = PbSystemParams {
                 $(
-                    $field: $default,
+                    $field: ($default as Option<$type>).map(Into::into),
                 )*
                 ..Default::default() // `None` for deprecated params
             };
-            ret.data_directory = Some("hummock_001".to_string());
-            ret.state_store = Some("hummock+memory".to_string());
+            ret.data_directory = Some("hummock_001".to_owned());
+            ret.state_store = Some("hummock+memory".to_owned());
             ret.backup_storage_url = Some("memory".into());
             ret.backup_storage_directory = Some("backup".into());
             ret.use_new_object_prefix_strategy = Some(false);
@@ -426,6 +416,17 @@ impl ValidateOnSet for OverrideValidateOnSet {
     fn backup_storage_url(v: &String) -> Result<()> {
         if v.trim().is_empty() {
             return Err("backup_storage_url cannot be empty".into());
+        }
+        Ok(())
+    }
+
+    fn time_travel_retention_ms(v: &u64) -> Result<()> {
+        // This is intended to guarantee that non-time-travel batch query can still function even compute node's recent versions doesn't include the desired version.
+        let min_retention_ms = 600_000;
+        if *v < min_retention_ms {
+            return Err(format!(
+                "time_travel_retention_ms cannot be less than {min_retention_ms}"
+            ));
         }
         Ok(())
     }
@@ -482,19 +483,40 @@ mod tests {
     fn test_set() {
         let mut p = system_params_for_test();
         // Unrecognized param.
-        assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
+        assert!(set_system_param(&mut p, "?", Some("?".to_owned())).is_err());
         // Value out of range.
-        assert!(
-            set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("-1".to_string())).is_err()
-        );
+        assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("-1".to_owned())).is_err());
         // Set immutable.
-        assert!(set_system_param(&mut p, STATE_STORE_KEY, Some("?".to_string())).is_err());
+        assert!(set_system_param(&mut p, STATE_STORE_KEY, Some("?".to_owned())).is_err());
         // Parse error.
-        assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("?".to_string())).is_err());
+        assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("?".to_owned())).is_err());
         // Normal set.
-        assert!(
-            set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("500".to_string())).is_ok()
-        );
+        assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("500".to_owned())).is_ok());
         assert_eq!(p.checkpoint_frequency, Some(500));
+    }
+
+    // Test that we always redact the value of the license key when displaying it, but when it comes to
+    // persistency, we still write and get the real value.
+    #[test]
+    fn test_redacted_type() {
+        let mut p = system_params_for_test();
+
+        let new_license_key_value = "new_license_key_value";
+        assert_ne!(p.license_key(), new_license_key_value);
+
+        let (new_string_value, diff) =
+            set_system_param(&mut p, LICENSE_KEY_KEY, Some(new_license_key_value))
+                .expect("should succeed")
+                .expect("should changed");
+
+        // New string value should be the same as what we set.
+        // This should not be redacted.
+        assert_eq!(new_string_value, new_license_key_value);
+
+        let new_value = diff.license_key.unwrap();
+        // `to_string` repr will be redacted.
+        assert_eq!(new_value.to_string(), "<redacted>");
+        // while `Into<String>` still shows the real value.
+        assert_eq!(String::from(new_value.as_ref()), new_license_key_value);
     }
 }

@@ -17,11 +17,12 @@ use std::marker::PhantomData;
 
 use anyhow::Context;
 use itertools::Itertools;
-use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{
-    ExpandedWorkerSlotMapping, HashKey, HashKeyDispatcher, VirtualNode, WorkerSlotId,
+    ExpandedWorkerSlotMapping, HashKey, HashKeyDispatcher, VirtualNode, VnodeCountCompat,
+    WorkerSlotId,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::{DataType, Datum};
@@ -134,7 +135,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
                     ..Default::default()
                 }),
             }),
-            epoch: Some(self.epoch.clone()),
+            epoch: Some(self.epoch),
             tracing_context: TracingContext::from_current_span().to_protobuf(),
         };
 
@@ -237,7 +238,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             &plan_node,
             &task_id,
             self.context.clone(),
-            self.epoch.clone(),
+            self.epoch,
             self.shutdown_rx.clone(),
         );
 
@@ -408,12 +409,11 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             })
             .collect();
 
+        let vnodes = Some(Bitmap::ones(table_desc.vnode_count()).into());
+
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
-            table_distribution: TableDistribution::new_from_storage_table_desc(
-                Some(TableDistribution::all_vnodes()),
-                table_desc,
-            ),
+            table_distribution: TableDistribution::new_from_storage_table_desc(vnodes, table_desc),
             vnode_mapping,
             outer_side_key_types,
             inner_side_schema,

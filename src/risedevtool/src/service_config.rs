@@ -48,7 +48,6 @@ pub struct ComputeNodeConfig {
 #[serde(deny_unknown_fields)]
 pub enum MetaBackend {
     Memory,
-    Etcd,
     Sqlite,
     Postgres,
     Mysql,
@@ -72,7 +71,6 @@ pub struct MetaNodeConfig {
     pub user_managed: bool,
 
     pub meta_backend: MetaBackend,
-    pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub provide_sqlite_backend: Option<Vec<SqliteConfig>>,
     pub provide_postgres_backend: Option<Vec<PostgresConfig>>,
     pub provide_mysql_backend: Option<Vec<MySqlConfig>>,
@@ -164,28 +162,6 @@ pub struct MinioConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
-pub struct EtcdConfig {
-    #[serde(rename = "use")]
-    phantom_use: Option<String>,
-    pub id: String,
-
-    // TODO: only one node etcd is supported.
-    pub address: String,
-    #[serde(with = "string")]
-    pub port: u16,
-    pub listen_address: String,
-
-    pub peer_port: u16,
-    pub unsafe_no_fsync: bool,
-
-    pub exporter_port: u16,
-
-    pub provide_etcd: Option<Vec<EtcdConfig>>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[serde(deny_unknown_fields)]
 pub struct SqliteConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -217,7 +193,6 @@ pub struct PrometheusConfig {
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
-    pub provide_etcd: Option<Vec<EtcdConfig>>,
     pub provide_redpanda: Option<Vec<RedPandaConfig>>,
     pub provide_frontend: Option<Vec<FrontendConfig>>,
 }
@@ -412,6 +387,26 @@ pub struct PostgresConfig {
     pub persist_data: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct SqlServerConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -420,7 +415,6 @@ pub enum ServiceConfig {
     Frontend(FrontendConfig),
     Compactor(CompactorConfig),
     Minio(MinioConfig),
-    Etcd(EtcdConfig),
     Sqlite(SqliteConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
@@ -434,6 +428,7 @@ pub enum ServiceConfig {
     RedPanda(RedPandaConfig),
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
+    SqlServer(SqlServerConfig),
 }
 
 impl ServiceConfig {
@@ -444,7 +439,6 @@ impl ServiceConfig {
             Self::Frontend(c) => &c.id,
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
-            Self::Etcd(c) => &c.id,
             Self::Sqlite(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
@@ -457,6 +451,7 @@ impl ServiceConfig {
             Self::Opendal(c) => &c.id,
             Self::MySql(c) => &c.id,
             Self::Postgres(c) => &c.id,
+            Self::SqlServer(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
         }
     }
@@ -469,7 +464,6 @@ impl ServiceConfig {
             Self::Frontend(c) => Some(c.port),
             Self::Compactor(c) => Some(c.port),
             Self::Minio(c) => Some(c.port),
-            Self::Etcd(c) => Some(c.port),
             Self::Sqlite(_) => None,
             Self::Prometheus(c) => Some(c.port),
             Self::Grafana(c) => Some(c.port),
@@ -482,6 +476,7 @@ impl ServiceConfig {
             Self::Opendal(_) => None,
             Self::MySql(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
+            Self::SqlServer(c) => Some(c.port),
             Self::SchemaRegistry(c) => Some(c.port),
         }
     }
@@ -493,7 +488,6 @@ impl ServiceConfig {
             Self::Frontend(c) => c.user_managed,
             Self::Compactor(c) => c.user_managed,
             Self::Minio(_c) => false,
-            Self::Etcd(_c) => false,
             Self::Sqlite(_c) => false,
             Self::Prometheus(_c) => false,
             Self::Grafana(_c) => false,
@@ -506,6 +500,7 @@ impl ServiceConfig {
             Self::Opendal(_c) => false,
             Self::MySql(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
+            Self::SqlServer(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
         }
     }

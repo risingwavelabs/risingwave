@@ -22,14 +22,89 @@ use prometheus::Histogram;
 use risingwave_common::array::StreamChunkBuilder;
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::LabelGuardedMetric;
+use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
 use super::watermark::*;
 use super::*;
-use crate::executor::exchange::input::new_input;
+use crate::executor::exchange::input::{
+    assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
+};
 use crate::executor::prelude::*;
 use crate::task::SharedContext;
+
+pub(crate) enum MergeExecutorUpstream {
+    Singleton(BoxedInput),
+    Merge(SelectReceivers),
+}
+
+pub(crate) struct MergeExecutorInput {
+    upstream: MergeExecutorUpstream,
+    actor_context: ActorContextRef,
+    upstream_fragment_id: UpstreamFragmentId,
+    shared_context: Arc<SharedContext>,
+    executor_stats: Arc<StreamingMetrics>,
+    info: ExecutorInfo,
+}
+
+impl MergeExecutorInput {
+    pub(crate) fn new(
+        upstream: MergeExecutorUpstream,
+        actor_context: ActorContextRef,
+        upstream_fragment_id: UpstreamFragmentId,
+        shared_context: Arc<SharedContext>,
+        executor_stats: Arc<StreamingMetrics>,
+        info: ExecutorInfo,
+    ) -> Self {
+        Self {
+            upstream,
+            actor_context,
+            upstream_fragment_id,
+            shared_context,
+            executor_stats,
+            info,
+        }
+    }
+
+    pub(crate) fn into_executor(self, barrier_rx: mpsc::UnboundedReceiver<Barrier>) -> Executor {
+        let fragment_id = self.actor_context.fragment_id;
+        let executor = match self.upstream {
+            MergeExecutorUpstream::Singleton(input) => ReceiverExecutor::new(
+                self.actor_context,
+                fragment_id,
+                self.upstream_fragment_id,
+                input,
+                self.shared_context,
+                self.executor_stats,
+                barrier_rx,
+            )
+            .boxed(),
+            MergeExecutorUpstream::Merge(inputs) => MergeExecutor::new(
+                self.actor_context,
+                fragment_id,
+                self.upstream_fragment_id,
+                inputs,
+                self.shared_context,
+                self.executor_stats,
+                barrier_rx,
+            )
+            .boxed(),
+        };
+        (self.info, executor).into()
+    }
+}
+
+impl Stream for MergeExecutorInput {
+    type Item = DispatcherMessageStreamItem;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match &mut self.get_mut().upstream {
+            MergeExecutorUpstream::Singleton(input) => input.poll_next_unpin(cx),
+            MergeExecutorUpstream::Merge(inputs) => inputs.poll_next_unpin(cx),
+        }
+    }
+}
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
@@ -38,7 +113,7 @@ pub struct MergeExecutor {
     actor_context: ActorContextRef,
 
     /// Upstream channels.
-    upstreams: Vec<BoxedInput>,
+    upstreams: SelectReceivers,
 
     /// Belonged fragment id.
     fragment_id: FragmentId,
@@ -51,6 +126,8 @@ pub struct MergeExecutor {
 
     /// Streaming metrics.
     metrics: Arc<StreamingMetrics>,
+
+    barrier_rx: mpsc::UnboundedReceiver<Barrier>,
 
     /// Chunk size for the `StreamChunkBuilder`
     chunk_size: usize,
@@ -65,19 +142,21 @@ impl MergeExecutor {
         ctx: ActorContextRef,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
-        inputs: Vec<BoxedInput>,
+        upstreams: SelectReceivers,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
+        barrier_rx: mpsc::UnboundedReceiver<Barrier>,
         chunk_size: usize,
         schema: Schema,
     ) -> Self {
         Self {
             actor_context: ctx,
-            upstreams: inputs,
+            upstreams,
             fragment_id,
             upstream_fragment_id,
             context,
             metrics,
+            barrier_rx,
             chunk_size,
             schema,
         }
@@ -93,39 +172,47 @@ impl MergeExecutor {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
-        Self::new(
-            ActorContext::for_test(actor_id),
-            514,
-            1919,
+        let barrier_rx = shared_context
+            .local_barrier_manager
+            .subscribe_barrier(actor_id);
+
+        let metrics = StreamingMetrics::unused();
+        let actor_ctx = ActorContext::for_test(actor_id);
+        let upstream = Self::new_select_receiver(
             inputs
                 .into_iter()
                 .enumerate()
-                .map(|(idx, input)| {
-                    LocalInput::new(
-                        input,
-                        idx as ActorId,
-                        actor_id,
-                        shared_context.local_barrier_manager.clone(),
-                    )
-                    .boxed_input()
-                })
+                .map(|(idx, input)| LocalInput::new(input, idx as ActorId).boxed_input())
                 .collect(),
+            &metrics,
+            &actor_ctx,
+        );
+
+        Self::new(
+            actor_ctx,
+            514,
+            1919,
+            upstream,
             shared_context,
-            StreamingMetrics::unused().into(),
+            metrics.into(),
+            barrier_rx,
             1024,
             schema,
         )
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self: Box<Self>) {
-        let merge_barrier_align_duration = if self.metrics.level >= MetricLevel::Debug {
+    pub(crate) fn new_select_receiver(
+        upstreams: Vec<BoxedInput>,
+        metrics: &StreamingMetrics,
+        actor_context: &ActorContext,
+    ) -> SelectReceivers {
+        let merge_barrier_align_duration = if metrics.level >= MetricLevel::Debug {
             Some(
-                self.metrics
+                metrics
                     .merge_barrier_align_duration
-                    .with_label_values(&[
-                        &self.actor_context.id.to_string(),
-                        &self.actor_context.fragment_id.to_string(),
+                    .with_guarded_label_values(&[
+                        &actor_context.id.to_string(),
+                        &actor_context.fragment_id.to_string(),
                     ]),
             )
         } else {
@@ -133,11 +220,16 @@ impl MergeExecutor {
         };
 
         // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(
-            self.actor_context.id,
-            self.upstreams,
+        SelectReceivers::new(
+            actor_context.id,
+            upstreams,
             merge_barrier_align_duration.clone(),
-        );
+        )
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(mut self: Box<Self>) {
+        let select_all = self.upstreams;
         let select_all = BufferChunks::new(select_all, self.chunk_size, self.schema);
         let actor_id = self.actor_context.id;
 
@@ -154,7 +246,8 @@ impl MergeExecutor {
             metrics
                 .actor_input_buffer_blocking_duration_ns
                 .inc_by(start_time.elapsed().as_nanos() as u64);
-            let mut msg: Message = msg?;
+            let msg: DispatcherMessage = msg?;
+            let mut msg: Message = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
 
             match &mut msg {
                 Message::Watermark(_) => {
@@ -230,10 +323,10 @@ impl MergeExecutor {
                             let mut select_new = SelectReceivers::new(
                                 self.actor_context.id,
                                 new_upstreams,
-                                merge_barrier_align_duration.clone(),
+                                select_all.merge_barrier_align_duration(),
                             );
                             let new_barrier = expect_first_barrier(&mut select_new).await?;
-                            assert_eq!(barrier, &new_barrier);
+                            assert_equal_dispatcher_barrier(barrier, &new_barrier);
 
                             // Add the new upstreams to select.
                             select_all.add_upstreams_from(select_new);
@@ -267,6 +360,11 @@ impl MergeExecutor {
 
                         select_all.update_actor_ids();
                     }
+
+                    if barrier.is_stop(actor_id) {
+                        yield msg;
+                        break;
+                    }
                 }
             }
 
@@ -285,7 +383,7 @@ impl Execute for MergeExecutor {
 /// A stream for merging messages from multiple upstreams.
 pub struct SelectReceivers {
     /// The barrier we're aligning to. If this is `None`, then `blocked_upstreams` is empty.
-    barrier: Option<Barrier>,
+    barrier: Option<DispatcherBarrier>,
     /// The upstreams that're blocked by the `barrier`.
     blocked: Vec<BoxedInput>,
     /// The upstreams that're not blocked and can be polled.
@@ -302,7 +400,7 @@ pub struct SelectReceivers {
 }
 
 impl Stream for SelectReceivers {
-    type Item = std::result::Result<Message, StreamExecutorError>;
+    type Item = DispatcherMessageStreamItem;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.active.is_terminated() {
@@ -322,19 +420,21 @@ impl Stream for SelectReceivers {
                 Some((Some(Ok(message)), remaining)) => {
                     let actor_id = remaining.actor_id();
                     match message {
-                        Message::Chunk(chunk) => {
+                        DispatcherMessage::Chunk(chunk) => {
                             // Continue polling this upstream by pushing it back to `active`.
                             self.active.push(remaining.into_future());
-                            return Poll::Ready(Some(Ok(Message::Chunk(chunk))));
+                            return Poll::Ready(Some(Ok(DispatcherMessage::Chunk(chunk))));
                         }
-                        Message::Watermark(watermark) => {
+                        DispatcherMessage::Watermark(watermark) => {
                             // Continue polling this upstream by pushing it back to `active`.
                             self.active.push(remaining.into_future());
                             if let Some(watermark) = self.handle_watermark(actor_id, watermark) {
-                                return Poll::Ready(Some(Ok(Message::Watermark(watermark))));
+                                return Poll::Ready(Some(Ok(DispatcherMessage::Watermark(
+                                    watermark,
+                                ))));
                             }
                         }
-                        Message::Barrier(barrier) => {
+                        DispatcherMessage::Barrier(barrier) => {
                             // Block this upstream by pushing it to `blocked`.
                             if self.blocked.is_empty()
                                 && self.merge_barrier_align_duration.is_some()
@@ -346,8 +446,8 @@ impl Stream for SelectReceivers {
                                 if current_barrier.epoch != barrier.epoch {
                                     return Poll::Ready(Some(Err(
                                         StreamExecutorError::align_barrier(
-                                            current_barrier.clone(),
-                                            barrier,
+                                            current_barrier.clone().map_mutation(|_| None),
+                                            barrier.map_mutation(|_| None),
                                         ),
                                     )));
                                 }
@@ -382,17 +482,11 @@ impl Stream for SelectReceivers {
         assert!(self.active.is_terminated());
         let barrier = self.barrier.take().unwrap();
 
-        // If this barrier asks the actor to stop, we do not reset the active upstreams so that the
-        // next call would return `Poll::Ready(None)` due to `is_terminated`.
         let upstreams = std::mem::take(&mut self.blocked);
-        if barrier.is_stop(self.actor_id) {
-            drop(upstreams);
-        } else {
-            self.extend_active(upstreams);
-            assert!(!self.active.is_terminated());
-        }
+        self.extend_active(upstreams);
+        assert!(!self.active.is_terminated());
 
-        Poll::Ready(Some(Ok(Message::Barrier(barrier))))
+        Poll::Ready(Some(Ok(DispatcherMessage::Barrier(barrier))))
     }
 }
 
@@ -474,6 +568,10 @@ impl SelectReceivers {
             .map(|s| s.into_inner().unwrap())
             .filter(|u| !upstream_actor_ids.contains(&u.actor_id()));
         self.extend_active(new_upstreams);
+    }
+
+    fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram, 2>> {
+        self.merge_barrier_align_duration.clone()
     }
 }
 
@@ -688,13 +786,7 @@ mod tests {
             rxs.push(rx);
         }
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let merger = MergeExecutor::for_test(
-            233,
-            rxs,
-            barrier_test_env.shared_context.clone(),
-            Schema::new(vec![]),
-        );
-        let actor_id = merger.actor_context.id;
+        let actor_id = 233;
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64)
@@ -708,13 +800,18 @@ mod tests {
             .map(|(_, epoch)| {
                 let barrier = Barrier::with_prev_epoch_for_test(*epoch, *prev_epoch);
                 *prev_epoch = *epoch;
-                barrier_test_env.inject_barrier(&barrier, [], [actor_id]);
+                barrier_test_env.inject_barrier(&barrier, [actor_id]);
                 (*epoch, barrier)
             })
             .collect();
         let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch)
             .with_mutation(Mutation::Stop(HashSet::default()));
-        barrier_test_env.inject_barrier(&b2, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b2, [actor_id]);
+        barrier_test_env
+            .shared_context
+            .local_barrier_manager
+            .flush_all_events()
+            .await;
 
         for (tx_id, tx) in txs.into_iter().enumerate() {
             let epochs = epochs.clone();
@@ -747,6 +844,8 @@ mod tests {
             handles.push(handle);
         }
 
+        let merger =
+            MergeExecutor::for_test(actor_id, rxs, barrier_test_env.shared_context.clone(),Schema::new(vec![]));
         let mut merger = merger.boxed().execute();
         for (idx, epoch) in epochs {
             // expect n chunks
@@ -818,13 +917,45 @@ mod tests {
             .try_collect()
             .unwrap();
 
+        let merge_updates = maplit::hashmap! {
+            (actor_id, upstream_fragment_id) => MergeUpdate {
+                actor_id,
+                upstream_fragment_id,
+                new_upstream_fragment_id: None,
+                added_upstream_actor_id: vec![new],
+                removed_upstream_actor_id: vec![old],
+            }
+        };
+
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: Default::default(),
+                merges: merge_updates,
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
+        barrier_test_env.inject_barrier(&b1, [actor_id]);
+        barrier_test_env
+            .shared_context
+            .local_barrier_manager
+            .flush_all_events()
+            .await;
+
+        let barrier_rx = ctx.local_barrier_manager.subscribe_barrier(actor_id);
+        let actor_ctx = ActorContext::for_test(actor_id);
+        let upstream = MergeExecutor::new_select_receiver(inputs, &metrics, &actor_ctx);
+
         let mut merge = MergeExecutor::new(
-            ActorContext::for_test(actor_id),
+            actor_ctx,
             fragment_id,
             upstream_fragment_id,
-            inputs,
+            upstream,
             ctx.clone(),
             metrics.clone(),
+            barrier_rx,
             1024,
             Schema::new(vec![]),
         )
@@ -867,28 +998,6 @@ mod tests {
         recv!().unwrap().as_chunk().unwrap();
         assert_recv_pending!();
 
-        // 4. Send a configuration change barrier.
-        let merge_updates = maplit::hashmap! {
-            (actor_id, upstream_fragment_id) => MergeUpdate {
-                actor_id,
-                upstream_fragment_id,
-                new_upstream_fragment_id: None,
-                added_upstream_actor_id: vec![new],
-                removed_upstream_actor_id: vec![old],
-            }
-        };
-
-        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
-            UpdateMutation {
-                dispatchers: Default::default(),
-                merges: merge_updates,
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-            },
-        ));
-        barrier_test_env.inject_barrier(&b1, [], [actor_id]);
         send!(
             [untouched, old],
             Message::Barrier(b1.clone().into_dispatcher())
@@ -995,7 +1104,6 @@ mod tests {
         let remote_input = {
             let pool = ComputeClientPool::for_test();
             RemoteInput::new(
-                test_env.shared_context.local_barrier_manager.clone(),
                 pool,
                 addr.into(),
                 (0, 0),
@@ -1005,11 +1113,7 @@ mod tests {
             )
         };
 
-        test_env.inject_barrier(
-            &exchange_client_test_barrier(),
-            [],
-            [remote_input.actor_id()],
-        );
+        test_env.inject_barrier(&exchange_client_test_barrier(), [remote_input.actor_id()]);
 
         pin_mut!(remote_input);
 

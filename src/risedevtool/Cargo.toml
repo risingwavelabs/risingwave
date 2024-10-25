@@ -23,7 +23,7 @@ clap = { workspace = true }
 console = "0.15"
 fs-err = "2.11.0"
 glob = "0.3"
-google-cloud-pubsub = "0.25"
+google-cloud-pubsub = "0.29"
 indicatif = "0.17"
 itertools = { workspace = true }
 rdkafka = { workspace = true }

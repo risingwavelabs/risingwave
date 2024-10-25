@@ -148,6 +148,23 @@ select series(3);
 statement ok
 drop function series;
 
+
+statement ok
+create function sum_array(integer[]) returns integer language rust as $$
+    fn sum_array(xs: &[i32]) -> i32 {
+        xs.iter().sum()
+    }
+$$;
+
+query I
+select sum_array(array[1, 2, 3]);
+----
+6
+
+statement ok
+drop function sum_array;
+
+
 # XXX: this test is disabled in CI because it prints "panicked at" which makes the test fail
 # statement ok
 # create function panic() returns int language rust as $$

@@ -47,7 +47,7 @@ impl Rule for AggGroupBySimplifyRule {
                 if !new_group_key.contains(i) {
                     let data_type = agg_input.schema().fields[i].data_type();
                     new_agg_calls.push(PlanAggCall {
-                        agg_kind: PbAggKind::InternalLastSeenValue.into(),
+                        agg_type: PbAggKind::InternalLastSeenValue.into(),
                         return_type: data_type.clone(),
                         inputs: vec![InputRef::new(i, data_type)],
                         distinct: false,

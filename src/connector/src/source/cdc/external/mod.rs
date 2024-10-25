@@ -237,7 +237,17 @@ pub struct ExternalTableConfig {
     /// Choices include `disabled`, `preferred`, and `required`.
     /// This field is optional.
     #[serde(rename = "ssl.mode", default = "Default::default")]
-    pub sslmode: SslMode,
+    #[serde(alias = "debezium.database.sslmode")]
+    pub ssl_mode: SslMode,
+
+    #[serde(rename = "ssl.root.cert")]
+    #[serde(alias = "debezium.database.sslrootcert")]
+    pub ssl_root_cert: Option<String>,
+
+    /// `encrypt` specifies whether connect to SQL Server using SSL.
+    /// Only "true" means using SSL. All other values are treated as "false".
+    #[serde(rename = "database.encrypt", default = "Default::default")]
+    pub encrypt: String,
 }
 
 impl ExternalTableConfig {
@@ -253,7 +263,7 @@ impl ExternalTableConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
     #[serde(alias = "disable")]
@@ -262,6 +272,14 @@ pub enum SslMode {
     Preferred,
     #[serde(alias = "require")]
     Required,
+    /// verify that the server is trustworthy by checking the certificate chain
+    /// up to the root certificate stored on the client.
+    #[serde(alias = "verify-ca")]
+    VerifyCa,
+    /// Besides verify the certificate, will also verify that the serverhost name
+    /// matches the name stored in the server certificate.
+    #[serde(alias = "verify-full")]
+    VerifyFull,
 }
 
 impl Default for SslMode {
@@ -277,6 +295,8 @@ impl fmt::Display for SslMode {
             SslMode::Disabled => "disabled",
             SslMode::Preferred => "preferred",
             SslMode::Required => "required",
+            SslMode::VerifyCa => "verify-ca",
+            SslMode::VerifyFull => "verify-full",
         })
     }
 }

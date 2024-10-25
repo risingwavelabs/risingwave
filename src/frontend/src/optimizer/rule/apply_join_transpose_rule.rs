@@ -24,7 +24,9 @@ use crate::expr::{
     InputRef,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNodeBinary};
+use crate::optimizer::plan_node::{
+    LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNode, PlanTreeNodeBinary,
+};
 use crate::optimizer::plan_visitor::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
 use crate::optimizer::rule::apply_offset_rewriter::ApplyCorrelatedIndicesConverter;
 use crate::optimizer::PlanRef;
@@ -122,15 +124,22 @@ impl Rule for ApplyJoinTransposeRule {
             return None;
         }
 
-        assert!(
-            join.output_indices_are_trivial(),
-            "ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule"
-        );
+        // ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule.
+        // As this rule will be applied until we reach the fixed point, if the join has output indices, apply ProjectJoinSeparateRule first and return is safety.
+        if !join.output_indices_are_trivial() {
+            let new_apply_right = crate::optimizer::rule::ProjectJoinSeparateRule::create()
+                .apply(join.clone().into())
+                .unwrap();
+            return Some(apply.clone_with_inputs(&[apply_left, new_apply_right]));
+        }
 
         let (push_left, push_right) = match join.join_type() {
             // `LeftSemi`, `LeftAnti`, `LeftOuter` can only push to left side if it's right side has
             // no correlated id. Otherwise push to both sides.
-            JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftOuter => {
+            JoinType::LeftSemi
+            | JoinType::LeftAnti
+            | JoinType::LeftOuter
+            | JoinType::AsofLeftOuter => {
                 if !join_right_has_correlated_id {
                     (true, false)
                 } else {
@@ -147,7 +156,7 @@ impl Rule for ApplyJoinTransposeRule {
                 }
             }
             // `Inner` can push to one side if the other side is not dependent on it.
-            JoinType::Inner => {
+            JoinType::Inner | JoinType::AsofInner => {
                 if join_cond_has_correlated_id
                     && !join_right_has_correlated_id
                     && !join_left_has_correlated_id
@@ -236,7 +245,12 @@ impl ApplyJoinTransposeRule {
             JoinType::LeftSemi | JoinType::LeftAnti => {
                 left_apply_condition.extend(apply_on);
             }
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::FullOuter
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter => {
                 let apply_len = apply_left_len + join.schema().len();
                 let mut d_t1_bit_set = FixedBitSet::with_capacity(apply_len);
                 d_t1_bit_set.set_range(0..apply_left_len + join_left_len, true);
@@ -316,7 +330,12 @@ impl ApplyJoinTransposeRule {
             JoinType::RightSemi | JoinType::RightAnti => {
                 right_apply_condition.extend(apply_on);
             }
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::FullOuter
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter => {
                 let apply_len = apply_left_len + join.schema().len();
                 let mut d_t2_bit_set = FixedBitSet::with_capacity(apply_len);
                 d_t2_bit_set.set_range(0..apply_left_len, true);
@@ -456,7 +475,12 @@ impl ApplyJoinTransposeRule {
             JoinType::RightSemi | JoinType::RightAnti => {
                 right_apply_condition.extend(apply_on);
             }
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::FullOuter
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter => {
                 let apply_len = apply_left_len + join.schema().len();
                 let mut d_t1_bit_set = FixedBitSet::with_capacity(apply_len);
                 let mut d_t2_bit_set = FixedBitSet::with_capacity(apply_len);
@@ -464,7 +488,7 @@ impl ApplyJoinTransposeRule {
                 d_t2_bit_set.set_range(0..apply_left_len, true);
                 d_t2_bit_set.set_range(apply_left_len + join_left_len..apply_len, true);
 
-                for (key, group) in &apply_on.into_iter().group_by(|expr| {
+                for (key, group) in &apply_on.into_iter().chunk_by(|expr| {
                     let collect_bit_set = expr.collect_input_refs(apply_len);
                     if collect_bit_set.is_subset(&d_t1_bit_set) {
                         0
@@ -555,7 +579,12 @@ impl ApplyJoinTransposeRule {
             JoinType::LeftSemi | JoinType::LeftAnti | JoinType::RightSemi | JoinType::RightAnti => {
                 new_join.into()
             }
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::FullOuter
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter => {
                 let mut output_indices_mapping = ColIndexMapping::new(
                     output_indices.iter().map(|x| Some(*x)).collect(),
                     target_size,

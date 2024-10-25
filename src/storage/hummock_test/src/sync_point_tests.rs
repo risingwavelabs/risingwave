@@ -49,11 +49,11 @@ use crate::test_utils::gen_key_from_bytes;
 #[cfg(feature = "sync_point")]
 #[serial]
 async fn test_syncpoints_sstable_object_id_manager() {
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_id) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     let sstable_object_id_manager =
         Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
@@ -115,11 +115,11 @@ async fn test_syncpoints_sstable_object_id_manager() {
 #[tokio::test]
 #[serial]
 async fn test_syncpoints_test_failpoints_fetch_ids() {
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_id) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     let sstable_object_id_manager =
         Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
@@ -201,7 +201,7 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let ((result_task, task_stats), _) = compact(
+    let ((result_task, task_stats, object_timestamps), _) = compact(
         compact_ctx,
         compact_task.clone(),
         rx,
@@ -216,6 +216,7 @@ pub async fn compact_once(
             result_task.task_status,
             result_task.sorted_output_ssts,
             Some(to_prost_table_stats_map(task_stats)),
+            object_timestamps,
         )
         .await
         .unwrap();
@@ -230,19 +231,25 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .level0_tier_compact_file_number(1)
         .max_bytes_for_level_base(4096)
         .build();
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) =
         setup_compute_env_with_config(8080, config).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
     let existing_table_id: u32 = 1;
 
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
-        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+        get_notification_client_for_test(
+            env,
+            hummock_manager_ref.clone(),
+            cluster_ctl_ref,
+            worker_id,
+        )
+        .await,
         &hummock_manager_ref,
-        TableId::from(existing_table_id),
+        &[existing_table_id],
     )
     .await;
     let (compact_ctx, filter_key_extractor_manager) =
@@ -302,7 +309,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         test_epoch(101),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(&hummock_meta_client, &storage, test_epoch(100)).await;
+    flush_and_commit(
+        &hummock_meta_client,
+        &storage,
+        test_epoch(100),
+        local.table_id(),
+    )
+    .await;
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
@@ -337,7 +350,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         test_epoch(102),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(&hummock_meta_client, &storage, test_epoch(101)).await;
+    flush_and_commit(
+        &hummock_meta_client,
+        &storage,
+        test_epoch(101),
+        local.table_id(),
+    )
+    .await;
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
@@ -372,7 +391,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         test_epoch(103),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(&hummock_meta_client, &storage, test_epoch(102)).await;
+    flush_and_commit(
+        &hummock_meta_client,
+        &storage,
+        test_epoch(102),
+        local.table_id(),
+    )
+    .await;
     // move this two file to the same level.
     compact_once(
         hummock_manager_ref.clone(),
@@ -401,7 +426,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         u64::MAX,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(&hummock_meta_client, &storage, test_epoch(103)).await;
+    flush_and_commit(
+        &hummock_meta_client,
+        &storage,
+        test_epoch(103),
+        local.table_id(),
+    )
+    .await;
     // move this two file to the same level.
     compact_once(
         hummock_manager_ref.clone(),

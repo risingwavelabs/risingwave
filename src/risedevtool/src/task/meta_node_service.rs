@@ -19,7 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 
-use super::{ExecuteContext, Task};
+use super::{risingwave_cmd, ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::{
     add_hummock_backend, add_tempo_endpoint, Application, HummockInMemoryStrategy, MetaBackend,
@@ -33,14 +33,6 @@ pub struct MetaNodeService {
 impl MetaNodeService {
     pub fn new(config: MetaNodeConfig) -> Result<Self> {
         Ok(Self { config })
-    }
-
-    fn meta_node(&self) -> Result<Command> {
-        let prefix_bin = env::var("PREFIX_BIN")?;
-
-        Ok(Command::new(
-            Path::new(&prefix_bin).join("risingwave").join("meta-node"),
-        ))
     }
 
     /// Apply command args according to config
@@ -86,21 +78,6 @@ impl MetaNodeService {
                     .arg("sql")
                     .arg("--sql-endpoint")
                     .arg("sqlite::memory:");
-            }
-            MetaBackend::Etcd => {
-                let etcd_config = config.provide_etcd_backend.as_ref().unwrap();
-                assert!(!etcd_config.is_empty());
-                is_persistent_meta_store = true;
-
-                cmd.arg("--backend")
-                    .arg("etcd")
-                    .arg("--etcd-endpoints")
-                    .arg(
-                        etcd_config
-                            .iter()
-                            .map(|etcd| format!("{}:{}", etcd.address, etcd.port))
-                            .join(","),
-                    );
             }
             MetaBackend::Sqlite => {
                 let sqlite_config = config.provide_sqlite_backend.as_ref().unwrap();
@@ -216,7 +193,7 @@ impl MetaNodeService {
         }
         if is_persistent_meta_store && !is_persistent_backend {
             return Err(anyhow!(
-                "When using a persistent meta store (etcd), a persistent state store is required (e.g. minio, aws-s3, etc.)."
+                "When using a persistent meta store (sql), a persistent state store is required (e.g. minio, aws-s3, etc.)."
             ));
         }
 
@@ -234,7 +211,7 @@ impl Task for MetaNodeService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let mut cmd = self.meta_node()?;
+        let mut cmd = risingwave_cmd("meta-node")?;
 
         if crate::util::is_enable_backtrace() {
             cmd.env("RUST_BACKTRACE", "1");

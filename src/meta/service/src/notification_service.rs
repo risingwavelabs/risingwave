@@ -15,7 +15,9 @@
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
-use risingwave_meta::manager::{MetadataManager, SessionParamsManagerImpl};
+use risingwave_hummock_sdk::FrontendHummockVersion;
+use risingwave_meta::controller::catalog::Catalog;
+use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
@@ -35,7 +37,7 @@ use tonic::{Request, Response, Status};
 
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{Catalog, MetaSrvEnv, Notification, NotificationVersion, WorkerKey};
+use crate::manager::{MetaSrvEnv, Notification, NotificationVersion, WorkerKey};
 use crate::serving::ServingVnodeMappingRef;
 
 pub struct NotificationServiceImpl {
@@ -70,96 +72,57 @@ impl NotificationServiceImpl {
     async fn get_catalog_snapshot(
         &self,
     ) -> MetaResult<(Catalog, Vec<UserInfo>, NotificationVersion)> {
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let catalog_guard = mgr.catalog_manager.get_catalog_core_guard().await;
-                let (
-                    databases,
-                    schemas,
-                    tables,
-                    sources,
-                    sinks,
-                    subscriptions,
-                    indexes,
-                    views,
-                    functions,
-                    connections,
-                    secrets,
-                ) = catalog_guard.database.get_catalog();
-                let users = catalog_guard.user.list_users();
-                let notification_version = self.env.notification_manager().current_version().await;
-                Ok((
-                    (
-                        databases,
-                        schemas,
-                        tables,
-                        sources,
-                        sinks,
-                        subscriptions,
-                        indexes,
-                        views,
-                        functions,
-                        connections,
-                        secrets,
-                    ),
-                    users,
-                    notification_version,
-                ))
-            }
-            MetadataManager::V2(mgr) => {
-                let catalog_guard = mgr.catalog_controller.get_inner_read_guard().await;
-                let (
-                    (
-                        databases,
-                        schemas,
-                        tables,
-                        sources,
-                        sinks,
-                        subscriptions,
-                        indexes,
-                        views,
-                        functions,
-                        connections,
-                        secrets,
-                    ),
-                    users,
-                ) = catalog_guard.snapshot().await?;
-                let notification_version = self.env.notification_manager().current_version().await;
-                Ok((
-                    (
-                        databases,
-                        schemas,
-                        tables,
-                        sources,
-                        sinks,
-                        subscriptions,
-                        indexes,
-                        views,
-                        functions,
-                        connections,
-                        secrets,
-                    ),
-                    users,
-                    notification_version,
-                ))
-            }
-        }
+        let catalog_guard = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
+        let (
+            (
+                databases,
+                schemas,
+                tables,
+                sources,
+                sinks,
+                subscriptions,
+                indexes,
+                views,
+                functions,
+                connections,
+                secrets,
+            ),
+            users,
+        ) = catalog_guard.snapshot().await?;
+        let notification_version = self.env.notification_manager().current_version().await;
+        Ok((
+            (
+                databases,
+                schemas,
+                tables,
+                sources,
+                sinks,
+                subscriptions,
+                indexes,
+                views,
+                functions,
+                connections,
+                secrets,
+            ),
+            users,
+            notification_version,
+        ))
     }
 
     /// Get decrypted secret snapshot
     async fn get_decrypted_secret_snapshot(
         &self,
     ) -> MetaResult<(Vec<Secret>, NotificationVersion)> {
-        let secrets = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let catalog_guard = mgr.catalog_manager.get_catalog_core_guard().await;
-                catalog_guard.database.list_secrets()
-            }
-            MetadataManager::V2(mgr) => {
-                let catalog_guard = mgr.catalog_controller.get_inner_read_guard().await;
-                catalog_guard.list_secrets().await?
-            }
-        };
+        let catalog_guard = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
+        let secrets = catalog_guard.list_secrets().await?;
         let notification_version = self.env.notification_manager().current_version().await;
 
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
@@ -194,24 +157,17 @@ impl NotificationServiceImpl {
     async fn get_worker_slot_mapping_snapshot(
         &self,
     ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let fragment_guard = mgr.fragment_manager.get_fragment_read_guard().await;
-                let worker_slot_mappings =
-                    fragment_guard.all_running_fragment_mappings().collect_vec();
-                let notification_version = self.env.notification_manager().current_version().await;
-                Ok((worker_slot_mappings, notification_version))
-            }
-            MetadataManager::V2(mgr) => {
-                let fragment_guard = mgr.catalog_controller.get_inner_read_guard().await;
-                let worker_slot_mappings = fragment_guard
-                    .all_running_fragment_mappings()
-                    .await?
-                    .collect_vec();
-                let notification_version = self.env.notification_manager().current_version().await;
-                Ok((worker_slot_mappings, notification_version))
-            }
-        }
+        let fragment_guard = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
+        let worker_slot_mappings = fragment_guard
+            .all_running_fragment_mappings()
+            .await?
+            .collect_vec();
+        let notification_version = self.env.notification_manager().current_version().await;
+        Ok((worker_slot_mappings, notification_version))
     }
 
     fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
@@ -226,42 +182,29 @@ impl NotificationServiceImpl {
     }
 
     async fn get_worker_node_snapshot(&self) -> MetaResult<(Vec<WorkerNode>, NotificationVersion)> {
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let cluster_guard = mgr.cluster_manager.get_cluster_core_guard().await;
-                let nodes =
-                    cluster_guard.list_worker_node(Some(WorkerType::ComputeNode), Some(Running));
-                let notification_version = self.env.notification_manager().current_version().await;
-                Ok((nodes, notification_version))
-            }
-            MetadataManager::V2(mgr) => {
-                let cluster_guard = mgr.cluster_controller.get_inner_read_guard().await;
-                let nodes = cluster_guard
-                    .list_workers(Some(WorkerType::ComputeNode.into()), Some(Running.into()))
-                    .await?;
-                let notification_version = self.env.notification_manager().current_version().await;
-                Ok((nodes, notification_version))
-            }
-        }
+        let cluster_guard = self
+            .metadata_manager
+            .cluster_controller
+            .get_inner_read_guard()
+            .await;
+        let nodes = cluster_guard
+            .list_workers(Some(WorkerType::ComputeNode.into()), Some(Running.into()))
+            .await?;
+        let notification_version = self.env.notification_manager().current_version().await;
+        Ok((nodes, notification_version))
     }
 
     async fn get_tables_and_creating_tables_snapshot(
         &self,
     ) -> MetaResult<(Vec<Table>, NotificationVersion)> {
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let catalog_guard = mgr.catalog_manager.get_catalog_core_guard().await;
-                let tables = catalog_guard.database.list_tables();
-                let notification_version = self.env.notification_manager().current_version().await;
-                Ok((tables, notification_version))
-            }
-            MetadataManager::V2(mgr) => {
-                let catalog_guard = mgr.catalog_controller.get_inner_read_guard().await;
-                let tables = catalog_guard.list_all_state_tables().await?;
-                let notification_version = self.env.notification_manager().current_version().await;
-                Ok((tables, notification_version))
-            }
-        }
+        let catalog_guard = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
+        let tables = catalog_guard.list_all_state_tables().await?;
+        let notification_version = self.env.notification_manager().current_version().await;
+        Ok((tables, notification_version))
     }
 
     async fn compactor_subscribe(&self) -> MetaResult<MetaSnapshot> {
@@ -305,12 +248,18 @@ impl NotificationServiceImpl {
 
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
 
-        let hummock_snapshot = Some(self.hummock_manager.latest_snapshot());
+        let hummock_version = self
+            .hummock_manager
+            .on_current_version(|version| {
+                FrontendHummockVersion::from_version(version).to_protobuf()
+            })
+            .await;
 
-        let session_params = match self.env.session_params_manager_impl_ref() {
-            SessionParamsManagerImpl::Kv(manager) => manager.get_params().await,
-            SessionParamsManagerImpl::Sql(controller) => controller.get_params().await,
-        };
+        let session_params = self
+            .env
+            .session_params_manager_impl_ref()
+            .get_params()
+            .await;
 
         let session_params = Some(GetSessionParamsResponse {
             params: serde_json::to_string(&session_params)
@@ -331,7 +280,7 @@ impl NotificationServiceImpl {
             secrets: decrypted_secrets,
             users,
             nodes,
-            hummock_snapshot,
+            hummock_version: Some(hummock_version),
             version: Some(SnapshotVersion {
                 catalog_version,
                 worker_node_version,
@@ -346,13 +295,16 @@ impl NotificationServiceImpl {
 
     async fn hummock_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await?;
-        let hummock_version = self.hummock_manager.get_current_version().await;
+        let hummock_version = self
+            .hummock_manager
+            .on_current_version(|version| version.into())
+            .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
 
         Ok(MetaSnapshot {
             tables,
-            hummock_version: Some(hummock_version.into()),
+            hummock_version: Some(hummock_version),
             version: Some(SnapshotVersion {
                 catalog_version,
                 ..Default::default()
@@ -403,12 +355,7 @@ impl NotificationService for NotificationServiceImpl {
 
         let meta_snapshot = match subscribe_type {
             SubscribeType::Compactor => self.compactor_subscribe().await?,
-            SubscribeType::Frontend => {
-                self.hummock_manager
-                    .pin_snapshot(req.get_worker_id())
-                    .await?;
-                self.frontend_subscribe().await?
-            }
+            SubscribeType::Frontend => self.frontend_subscribe().await?,
             SubscribeType::Hummock => {
                 self.hummock_manager
                     .pin_version(req.get_worker_id())

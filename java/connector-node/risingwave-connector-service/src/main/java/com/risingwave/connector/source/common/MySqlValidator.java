@@ -15,7 +15,6 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.proto.Data;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -45,9 +44,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
         var dbHost = userProps.get(DbzConnectorConfig.HOST);
         var dbPort = userProps.get(DbzConnectorConfig.PORT);
-        var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
-        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.MYSQL, dbHost, dbPort, dbName);
-
+        var jdbcUrl = String.format("jdbc:mysql://%s:%s", dbHost, dbPort);
         var properties = new Properties();
         properties.setProperty("user", userProps.get(DbzConnectorConfig.USER));
         properties.setProperty("password", userProps.get(DbzConnectorConfig.PASSWORD));
@@ -72,6 +69,27 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             if ((major > 8) || (major == 8 && minor >= 4)) {
                 throw ValidatorUtils.failedPrecondition("MySQL version should be less than 8.4");
             }
+
+            // "database.name" is a comma-separated list of database names
+            var dbNames = userProps.get(DbzConnectorConfig.DB_NAME);
+            for (var dbName : dbNames.split(",")) {
+                // check the existence of the database
+                try (var stmt =
+                        jdbcConnection.prepareStatement(
+                                ValidatorUtils.getSql("mysql.check_db_exist"))) {
+                    stmt.setString(1, dbName.trim());
+                    var res = stmt.executeQuery();
+                    while (res.next()) {
+                        var ret = res.getInt(1);
+                        if (ret == 0) {
+                            throw ValidatorUtils.invalidArgument(
+                                    String.format(
+                                            "MySQL database '%s' doesn't exist", dbName.trim()));
+                        }
+                    }
+                }
+            }
+
             validateBinlogConfig();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
@@ -227,9 +245,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 }
             }
 
-            if (!isPrimaryKeyMatch(tableSchema, pkFields)) {
-                throw ValidatorUtils.invalidArgument("Primary key mismatch");
-            }
+            primaryKeyCheck(tableSchema, pkFields);
         }
     }
 
@@ -240,16 +256,24 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         }
     }
 
-    private boolean isPrimaryKeyMatch(TableSchema sourceSchema, Set<String> pkFields) {
+    private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields)
+            throws RuntimeException {
         if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
-            return false;
+            throw ValidatorUtils.invalidArgument(
+                    "Primary key mismatch: the SQL schema defines "
+                            + sourceSchema.getPrimaryKeys().size()
+                            + " primary key columns, but the source table in MySQL has "
+                            + pkFields.size()
+                            + " columns.");
         }
         for (var colName : sourceSchema.getPrimaryKeys()) {
             if (!pkFields.contains(colName.toLowerCase())) {
-                return false;
+                throw ValidatorUtils.invalidArgument(
+                        "Primary key mismatch: The primary key list of the source table in MySQL does not contain '"
+                                + colName
+                                + "'.");
             }
         }
-        return true;
     }
 
     private boolean isDataTypeCompatible(String mysqlDataType, Data.DataType.TypeName typeName) {

@@ -39,10 +39,11 @@ use risingwave_connector::source::cdc::external::{
 };
 use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;
-use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_stream::common::table::state_table::StateTable;
+use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
@@ -211,12 +212,16 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         ColumnDesc::unnamed(ColumnId::from(4), state_schema[4].data_type.clone()),
     ];
 
-    let state_table = StateTable::new_without_distribution(
+    let state_table = StateTable::from_table_catalog(
+        &gen_pbtable(
+            TableId::from(0x42),
+            column_descs,
+            vec![OrderType::ascending()],
+            vec![0],
+            0,
+        ),
         memory_state_store.clone(),
-        TableId::from(0x42),
-        column_descs.clone(),
-        vec![OrderType::ascending()],
-        vec![0_usize],
+        None,
     )
     .await;
 
@@ -379,7 +384,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         table.clone(),
         vec![ScanRange::full()],
         true,
-        to_committed_batch_query_epoch(u64::MAX),
+        test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_string(),
         None,

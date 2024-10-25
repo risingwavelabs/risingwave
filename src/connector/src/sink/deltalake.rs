@@ -18,12 +18,13 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
-use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
-use deltalake::protocol::{DeltaOperation, SaveMode};
-use deltalake::table::builder::s3_storage_options::{
+use deltalake::aws::storage::s3_constants::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
     AWS_SECRET_ACCESS_KEY,
 };
+use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
+use deltalake::operations::transaction::CommitBuilder;
+use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
 use deltalake::DeltaTable;
 use risingwave_common::array::arrow::DeltaLakeConvert;
@@ -31,30 +32,30 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::{Deserialize, Serialize};
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
-use super::catalog::desc::SinkDesc;
 use super::coordinate::CoordinatedSinkWriter;
-use super::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
+use super::decouple_checkpoint_log_sink::{
+    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
+};
 use super::writer::SinkWriter;
 use super::{
-    Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterParam,
+    Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
-use crate::deserialize_optional_u64_from_string;
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
 pub const GCS_SERVICE_ACCOUNT: &str = "service_account_key";
 
+#[serde_as]
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct DeltaLakeCommon {
     #[serde(rename = "s3.access.key")]
@@ -69,10 +70,12 @@ pub struct DeltaLakeCommon {
     pub s3_endpoint: Option<String>,
     #[serde(rename = "gcs.service.account")]
     pub gcs_service_account: Option<String>,
-    /// Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
-    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
-    pub commit_checkpoint_interval: Option<u64>,
+    /// Commit every n(>0) checkpoints, default is 10.
+    #[serde(default = "default_commit_checkpoint_interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub commit_checkpoint_interval: u64,
 }
+
 impl DeltaLakeCommon {
     pub async fn create_deltalake_client(&self) -> Result<DeltaTable> {
         let table = match Self::get_table_url(&self.location)? {
@@ -106,6 +109,7 @@ impl DeltaLakeCommon {
                 }
                 storage_options.insert(AWS_ALLOW_HTTP.to_string(), "true".to_string());
                 storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_string(), "true".to_string());
+                deltalake::aws::register_handlers(None);
                 deltalake::open_table_with_storage_options(s3_path.clone(), storage_options).await?
             }
             DeltaTableUrl::Local(local_path) => deltalake::open_table(local_path).await?,
@@ -119,6 +123,7 @@ impl DeltaLakeCommon {
                         ))
                     })?,
                 );
+                deltalake::gcp::register_handlers(None);
                 deltalake::open_table_with_storage_options(gcs_path.clone(), storage_options)
                     .await?
             }
@@ -246,7 +251,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
                 for ((rw_name, rw_type), dl_field) in rw_struct
                     .names()
                     .zip_eq_fast(rw_struct.types())
-                    .zip_eq_fast(dl_struct.fields())
+                    .zip_eq_debug(dl_struct.fields())
                 {
                     result = check_field_type(rw_type, dl_field.data_type())?
                         && result
@@ -280,30 +285,6 @@ impl Sink for DeltaLakeSink {
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let config_decouple = if let Some(interval) =
-            desc.properties.get("commit_checkpoint_interval")
-            && interval.parse::<u64>().unwrap_or(0) > 1
-        {
-            true
-        } else {
-            false
-        };
-
-        match user_specified {
-            SinkDecouple::Default => Ok(config_decouple),
-            SinkDecouple::Disable => {
-                if config_decouple {
-                    return Err(SinkError::Config(anyhow!(
-                        "config conflict: DeltaLake config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                    )));
-                }
-                Ok(false)
-            }
-            SinkDecouple::Enable => Ok(true),
-        }
-    }
-
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let inner = DeltaLakeSinkWriter::new(
             self.config.clone(),
@@ -311,6 +292,8 @@ impl Sink for DeltaLakeSink {
             self.param.downstream_pk.clone(),
         )
         .await?;
+
+        let metrics = SinkWriterMetrics::new(&writer_param);
         let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -328,13 +311,13 @@ impl Sink for DeltaLakeSink {
         .await?;
 
         let commit_checkpoint_interval =
-            NonZeroU64::new(self.config.common.commit_checkpoint_interval.unwrap_or(1)).expect(
+            NonZeroU64::new(self.config.common.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
-            writer_param.sink_metrics,
+            metrics,
             commit_checkpoint_interval,
         ))
     }
@@ -351,7 +334,6 @@ impl Sink for DeltaLakeSink {
         let deltalake_fields: HashMap<&String, &DeltaLakeDataType> = table
             .get_schema()?
             .fields()
-            .iter()
             .map(|f| (f.name(), f.data_type()))
             .collect();
         if deltalake_fields.len() != self.param.schema().fields().len() {
@@ -380,9 +362,9 @@ impl Sink for DeltaLakeSink {
                 )));
             }
         }
-        if self.config.common.commit_checkpoint_interval == Some(0) {
+        if self.config.common.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
-                "commit_checkpoint_interval must be greater than 0"
+                "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
         Ok(())
@@ -521,7 +503,7 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
         if write_adds.is_empty() {
             return Ok(());
         }
-        let partition_cols = self.table.get_metadata()?.partition_columns.clone();
+        let partition_cols = self.table.metadata()?.partition_columns.clone();
         let partition_by = if !partition_cols.is_empty() {
             Some(partition_cols)
         } else {
@@ -532,14 +514,15 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
             partition_by,
             predicate: None,
         };
-        let version = deltalake::operations::transaction::commit(
-            self.table.log_store().as_ref(),
-            &write_adds,
-            operation,
-            &self.table.state,
-            None,
-        )
-        .await?;
+        let version = CommitBuilder::default()
+            .with_actions(write_adds)
+            .build(
+                Some(self.table.snapshot()?),
+                self.table.log_store().clone(),
+                operation,
+            )
+            .await?
+            .version();
         self.table.update().await?;
         tracing::info!(
             "Succeeded to commit ti DeltaLake table in epoch {epoch} version {version}."
@@ -597,8 +580,18 @@ mod test {
         let path = dir.path().to_str().unwrap();
         CreateBuilder::new()
             .with_location(path)
-            .with_column("id", SchemaDataType::integer(), false, Default::default())
-            .with_column("name", SchemaDataType::string(), false, Default::default())
+            .with_column(
+                "id",
+                SchemaDataType::Primitive(deltalake::kernel::PrimitiveType::Integer),
+                false,
+                Default::default(),
+            )
+            .with_column(
+                "name",
+                SchemaDataType::Primitive(deltalake::kernel::PrimitiveType::String),
+                false,
+                Default::default(),
+            )
             .await
             .unwrap();
 

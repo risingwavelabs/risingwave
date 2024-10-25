@@ -54,6 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "telemetry",
         "user",
         "secret",
+        "frontend_service",
     ];
     let protos: Vec<String> = proto_files
         .iter()
@@ -79,6 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".stream_plan.SourceBackfillNode",
         ".stream_plan.StreamSource",
         ".batch_plan.SourceNode",
+        ".batch_plan.IcebergScanNode",
     ];
 
     // Build protobuf structs.
@@ -90,7 +92,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Put generated files in /src may also benefit IDEs https://github.com/risingwavelabs/risingwave/pull/2581
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR envvar is missing"));
     let file_descriptor_set_path: PathBuf = out_dir.join("file_descriptor_set.bin");
-    tonic_build::configure()
+
+    let tonic_config = tonic_build::configure()
         .file_descriptor_set_path(file_descriptor_set_path.as_path())
         .compile_well_known_types(true)
         .protoc_arg("--experimental_allow_proto3_optional")
@@ -130,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.DefaultColumnDesc", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash, Copy)]")
+        .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
@@ -144,6 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "plan_common.AdditionalColumnPartition",
             "#[derive(Eq, Hash)]",
         )
+        .type_attribute("plan_common.AdditionalColumnPayload", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalColumnTimestamp",
             "#[derive(Eq, Hash)]",
@@ -162,10 +166,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "plan_common.AdditionalCollectionName",
             "#[derive(Eq, Hash)]",
         )
+        .type_attribute("plan_common.AsOfJoinDesc", "#[derive(Eq, Hash)]")
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
         .type_attribute("common.Buffer", "#[derive(Eq)]")
-        // Eq is required to derive `FromJsonQueryResult` for models in risingwave_meta_model_v2.
+        // Eq is required to derive `FromJsonQueryResult` for models in risingwave_meta_model.
         .type_attribute("hummock.TableStats", "#[derive(Eq)]")
         .type_attribute("hummock.SstableInfo", "#[derive(Eq)]")
         .type_attribute("hummock.KeyRange", "#[derive(Eq)]")
@@ -176,7 +181,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.GroupDestroy", "#[derive(Eq)]")
         .type_attribute("hummock.GroupMetaChange", "#[derive(Eq)]")
         .type_attribute("hummock.GroupTableChange", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupMerge", "#[derive(Eq)]")
         .type_attribute("hummock.GroupDelta", "#[derive(Eq)]")
+        .type_attribute("hummock.NewL0SubLevel", "#[derive(Eq)]")
         .type_attribute("hummock.LevelHandler.RunningCompactTask", "#[derive(Eq)]")
         .type_attribute("hummock.LevelHandler", "#[derive(Eq)]")
         .type_attribute("hummock.TableOption", "#[derive(Eq)]")
@@ -188,10 +195,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(
             "hummock.TableWatermarks.EpochNewWatermarks",
             "#[derive(Eq)]",
-        )
-        // ===================
+        );
+
+    // If any configuration for `prost_build` is not exposed by `tonic_build`, specify it here.
+    let mut prost_config = prost_build::Config::new();
+    prost_config.skip_debug([
+        "meta.SystemParams",
+        "plan_common.ColumnDesc",
+        "data.DataType",
+        // TODO:
+        //"stream_plan.StreamNode"
+    ]);
+    // Compile the proto files.
+    tonic_config
         .out_dir(out_dir.as_path())
-        .compile(&protos, &[proto_dir.to_string()])
+        .compile_with_config(prost_config, &protos, &[proto_dir.to_string()])
         .expect("Failed to compile grpc!");
 
     // Implement `serde::Serialize` on those structs.

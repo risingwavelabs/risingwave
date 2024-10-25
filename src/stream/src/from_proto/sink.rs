@@ -20,6 +20,7 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{
     SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
@@ -33,7 +34,7 @@ use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
 use crate::common::log_store_impl::kv_log_store::{
     KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
 };
-use crate::executor::SinkExecutor;
+use crate::executor::{SinkExecutor, StreamExecutorError};
 use crate::telemetry::report_event;
 
 pub struct SinkExecutorBuilder;
@@ -159,7 +160,10 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let connector = {
             let sink_type = properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
-                SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))
+                StreamExecutorError::from((
+                    SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)),
+                    sink_id.sink_id,
+                ))
             })?;
 
             match_sink_name_str!(
@@ -167,19 +171,24 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 SinkType,
                 Ok(SinkType::SINK_NAME),
                 |other| {
-                    Err(SinkError::Config(anyhow!(
-                        "unsupported sink connector {}",
-                        other
+                    Err(StreamExecutorError::from((
+                        SinkError::Config(anyhow!("unsupported sink connector {}", other)),
+                        sink_id.sink_id,
                     )))
                 }
             )
         }?;
         let format_desc = match &sink_desc.format_desc {
             // Case A: new syntax `format ... encode ...`
-            Some(f) => Some(f.clone().try_into()?),
+            Some(f) => Some(
+                f.clone()
+                    .try_into()
+                    .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?,
+            ),
             None => match sink_desc.properties.get(SINK_TYPE_OPTION) {
                 // Case B: old syntax `type = '...'`
-                Some(t) => SinkFormatDesc::from_legacy_type(connector, t)?,
+                Some(t) => SinkFormatDesc::from_legacy_type(connector, t)
+                    .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?,
                 // Case C: no format + encode required
                 None => None,
             },
@@ -188,21 +197,12 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let properties_with_secret =
             LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
 
-        let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)?;
-
-        let actor_id_str = format!("{}", params.actor_context.id);
-        let sink_id_str = format!("{}", sink_id.sink_id);
-
-        let sink_metrics = params.executor_stats.new_sink_metrics(
-            &actor_id_str,
-            &sink_id_str,
-            &sink_name,
-            connector,
-        );
+        let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)
+            .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?;
 
         let sink_param = SinkParam {
             sink_id,
-            sink_name,
+            sink_name: sink_name.clone(),
             properties: properties_with_secret,
             columns: columns
                 .iter()
@@ -220,8 +220,12 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             executor_id: params.executor_id,
             vnode_bitmap: params.vnode_bitmap.clone(),
             meta_client: params.env.meta_client().map(SinkMetaClient::MetaClient),
-            sink_metrics,
             extra_partition_col_idx: sink_desc.extra_partition_col_idx.map(|v| v as usize),
+
+            actor_id: params.actor_context.id,
+            sink_id,
+            sink_name,
+            connector: connector.to_string(),
         };
 
         let log_store_identity = format!(

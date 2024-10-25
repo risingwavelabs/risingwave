@@ -211,6 +211,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::JsonbPathQueryArray
             | Type::JsonbPathQueryFirst
             | Type::JsonbSet
+            | Type::JsonbPopulateMap
             | Type::IsJson
             | Type::ToJsonb
             | Type::Sind
@@ -249,7 +250,19 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::InetNtoa
             | Type::InetAton
             | Type::QuoteLiteral
-            | Type::QuoteNullable =>
+            | Type::QuoteNullable
+            | Type::MapFromEntries
+            | Type::MapAccess
+            | Type::MapKeys
+            | Type::MapValues
+            | Type::MapEntries
+            | Type::MapFromKeyValues
+            | Type::MapCat
+            | Type::MapContains
+            | Type::MapDelete
+            | Type::MapInsert
+            | Type::MapLength
+            | Type::VnodeUser =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -258,7 +271,7 @@ impl ExprVisitor for ImpureAnalyzer {
                     .for_each(|expr| self.visit_expr(expr));
             }
             // expression output is not deterministic
-            Type::Vnode
+            Type::Vnode // obtain vnode count from the context
             | Type::TestPaidTier
             | Type::Proctime
             | Type::PgSleep

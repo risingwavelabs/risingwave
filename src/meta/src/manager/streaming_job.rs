@@ -21,7 +21,7 @@ use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use strum::{EnumDiscriminants, EnumIs};
 
-use super::{get_refed_secret_ids_from_sink, get_refed_secret_ids_from_source};
+use super::{get_referred_secret_ids_from_sink, get_referred_secret_ids_from_source};
 use crate::model::FragmentId;
 use crate::MetaResult;
 
@@ -133,6 +133,10 @@ impl StreamingJob {
     }
 }
 
+// TODO: basically we want to ensure that the `Table` persisted in the catalog is the same as the
+// one in the `Materialize` node in the actor. However, they are currently handled separately
+// and can be out of sync. Shall we directly copy the whole struct from the actor to the catalog
+// to avoid `set`ting each field separately?
 impl StreamingJob {
     pub fn set_id(&mut self, id: u32) {
         match self {
@@ -155,6 +159,16 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {
                 table.fragment_id = id;
+            }
+            Self::Sink(_, _) | Self::Source(_) => {}
+        }
+    }
+
+    /// Set the vnode count of the table.
+    pub fn set_table_vnode_count(&mut self, vnode_count: usize) {
+        match self {
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {
+                table.maybe_vnode_count = Some(vnode_count as u32);
             }
             Self::Sink(_, _) | Self::Source(_) => {}
         }
@@ -302,15 +316,15 @@ impl StreamingJob {
     // Get the secret ids that are referenced by this job.
     pub fn dependent_secret_ids(&self) -> MetaResult<HashSet<u32>> {
         match self {
-            StreamingJob::Sink(sink, _) => Ok(get_refed_secret_ids_from_sink(sink)),
+            StreamingJob::Sink(sink, _) => Ok(get_referred_secret_ids_from_sink(sink)),
             StreamingJob::Table(source, _, _) => {
                 if let Some(source) = source {
-                    get_refed_secret_ids_from_source(source)
+                    get_referred_secret_ids_from_source(source)
                 } else {
                     Ok(HashSet::new())
                 }
             }
-            StreamingJob::Source(source) => get_refed_secret_ids_from_source(source),
+            StreamingJob::Source(source) => get_referred_secret_ids_from_source(source),
             StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => Ok(HashSet::new()),
         }
     }

@@ -15,8 +15,9 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::{
     connection, database, function, index, object, schema, secret, sink, source, subscription,
     table, view,
 };
@@ -38,6 +39,7 @@ pub mod cluster;
 pub mod fragment;
 pub mod id;
 pub mod rename;
+pub mod scale;
 pub mod session_params;
 pub mod streaming_job;
 pub mod system_param;
@@ -59,16 +61,17 @@ pub struct SqlMetaStore {
     pub conn: DatabaseConnection,
 }
 
+pub const IN_MEMORY_STORE: &str = "sqlite::memory:";
+
 impl SqlMetaStore {
     pub fn new(conn: DatabaseConnection) -> Self {
         Self { conn }
     }
 
     #[cfg(any(test, feature = "test"))]
-    #[cfg(not(madsim))]
     pub async fn for_test() -> Self {
         use risingwave_meta_model_migration::{Migrator, MigratorTrait};
-        let conn = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
         Migrator::up(&conn, None).await.unwrap();
         Self { conn }
     }
@@ -149,7 +152,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             cleaned_by_watermark: value.0.cleaned_by_watermark,
-            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            stream_job_status: PbStreamJobStatus::Created as _,
             create_type: PbCreateType::Foreground as _,
             version: value.0.version.map(|v| v.to_protobuf()),
             optional_associated_source_id: value
@@ -161,6 +164,8 @@ impl From<ObjectModel<table::Model>> for PbTable {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
+            cdc_table_id: value.0.cdc_table_id,
+            maybe_vnode_count: VnodeCount::set(value.0.vnode_count).to_protobuf(),
         }
     }
 }
@@ -200,6 +205,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
+            rate_limit: value.0.rate_limit.map(|v| v as _),
         }
     }
 }
@@ -233,14 +239,18 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             ),
             db_name: value.0.db_name,
             sink_from_name: value.0.sink_from_name,
-            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            stream_job_status: PbStreamJobStatus::Created as _,
             format_desc: value.0.sink_format_desc.map(|desc| desc.to_protobuf()),
             target_table: value.0.target_table.map(|id| id as _),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
             secret_refs: secret_ref_map,
-            original_target_columns: value.0.original_target_columns.to_protobuf(),
+            original_target_columns: value
+                .0
+                .original_target_columns
+                .map(|cols| cols.to_protobuf())
+                .unwrap_or_default(),
         }
     }
 }
@@ -280,7 +290,11 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             index_table_id: value.0.index_table_id as _,
             primary_table_id: value.0.primary_table_id as _,
             index_item: value.0.index_items.to_protobuf(),
-            index_column_properties: value.0.index_column_properties.to_protobuf(),
+            index_column_properties: value
+                .0
+                .index_column_properties
+                .map(|p| p.to_protobuf())
+                .unwrap_or_default(),
             index_columns_len: value.0.index_columns_len as _,
             initialized_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
@@ -288,7 +302,7 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             created_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
-            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            stream_job_status: PbStreamJobStatus::Created as _,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
         }

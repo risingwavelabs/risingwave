@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context as _;
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -52,8 +51,8 @@ impl SplitReader for NatsSplitReader {
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        // TODO: to simplify the logic, return 1 split for first version
-        assert!(splits.len() == 1);
+        // We guarantee the split num always align with parallelism
+        assert_eq!(splits.len(), 1);
         let split = splits.into_iter().next().unwrap();
         let split_id = split.split_id;
         let start_position = match &split.start_sequence {
@@ -62,31 +61,40 @@ impl SplitReader for NatsSplitReader {
                 Some(mode) => match mode.as_str() {
                     "latest" => NatsOffset::Latest,
                     "earliest" => NatsOffset::Earliest,
-                    "timestamp_millis" => {
-                        if let Some(time) = &properties.start_time {
-                            NatsOffset::Timestamp(time.parse().context(
-                                "failed to parse the start time as nats offset timestamp",
-                            )?)
+                    "timestamp" | "timestamp_millis" /* backward-compat */ => {
+                        if let Some(ts) = &properties.start_timestamp_millis {
+                            NatsOffset::Timestamp(*ts)
                         } else {
-                            bail!("scan_startup_timestamp_millis is required");
+                            bail!("scan.startup.timestamp.millis is required");
                         }
                     }
                     _ => {
-                        bail!("invalid scan_startup_mode, accept earliest/latest/timestamp_millis")
+                        bail!("invalid scan.startup.mode, accept earliest/latest/timestamp")
                     }
                 },
             },
+            // We have record on this Nats Split, contains the last seen offset (seq id) or reply subject
+            // We do not use the seq id as start position anymore,
+            // but just let the reader load from durable consumer on broker.
             start_position => start_position.to_owned(),
         };
+
+        let mut config = consumer::pull::Config {
+            ..Default::default()
+        };
+        properties.set_config(&mut config);
 
         let consumer = properties
             .common
             .build_consumer(
                 properties.stream.clone(),
+                properties.durable_consumer_name.clone(),
                 split_id.to_string(),
                 start_position.clone(),
+                config,
             )
             .await?;
+
         Ok(Self {
             consumer,
             properties,

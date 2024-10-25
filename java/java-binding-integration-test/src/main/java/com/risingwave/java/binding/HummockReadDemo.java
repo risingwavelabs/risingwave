@@ -50,11 +50,20 @@ public class HummockReadDemo {
             HummockVersion version = metaClient.pinVersion();
             Table tableCatalog = metaClient.getTable(dbName, tableName);
 
-            int vnodeCount = Binding.vnodeCount();
+            int vnodeCount = Binding.defaultVnodeCount();
+            if (tableCatalog.hasMaybeVnodeCount()) {
+                vnodeCount = tableCatalog.getMaybeVnodeCount();
+            }
 
             List<Integer> vnodeList = new ArrayList<>();
             for (int i = 0; i < vnodeCount; i++) {
                 vnodeList.add(i);
+            }
+
+            long epoch = 0;
+
+            if (version.getStateTableInfo().containsKey(tableCatalog.getId())) {
+                epoch = version.getStateTableInfo().get(tableCatalog.getId()).getCommittedEpoch();
             }
 
             ReadPlan readPlan =
@@ -63,7 +72,7 @@ public class HummockReadDemo {
                             .setObjectStoreUrl(objectStore)
                             .setKeyRange(keyRange)
                             .setTableId(tableCatalog.getId())
-                            .setEpoch(version.getMaxCommittedEpoch())
+                            .setEpoch(epoch)
                             .setVersion(version)
                             .setTableCatalog(tableCatalog)
                             .addAllVnodeIds(vnodeList)
@@ -84,13 +93,12 @@ public class HummockReadDemo {
                     throw new RuntimeException(
                             String.format("row count is %s, should be %s", count, expectedCount));
                 }
+            } finally {
+                metaClient.unpinVersion(version);
+                heartbeatFuture.cancel(true);
             }
-
-            metaClient.unpinVersion(version);
-
-            heartbeatFuture.cancel(false);
+        } finally {
+            scheduledThreadPool.shutdown();
         }
-
-        scheduledThreadPool.shutdown();
     }
 }

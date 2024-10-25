@@ -1,5 +1,8 @@
 control substitution on
 
+statement ok
+SET streaming_use_shared_source TO false;
+
 # https://github.com/risingwavelabs/risingwave/issues/16486
 
 # cleanup
@@ -66,3 +69,6 @@ ABC	1
 
 statement ok
 drop source s cascade;
+
+statement ok
+SET streaming_use_shared_source TO true;

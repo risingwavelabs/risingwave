@@ -109,12 +109,22 @@ impl PlanVisitor for CardinalityVisitor {
     fn visit_logical_top_n(&mut self, plan: &plan_node::LogicalTopN) -> Cardinality {
         let input = self.visit(plan.input());
 
-        match plan.limit_attr() {
+        let each_group = match plan.limit_attr() {
             TopNLimit::Simple(limit) => input.sub(plan.offset() as usize).min(limit as usize),
             TopNLimit::WithTies(limit) => {
                 assert_eq!(plan.offset(), 0, "ties with offset is not supported yet");
                 input.min((limit as usize)..)
             }
+        };
+
+        if plan.group_key().is_empty() {
+            each_group
+        } else {
+            let group_number = input.min(1..);
+            each_group
+                .mul(group_number)
+                // the output cardinality will never be more than the input, thus `.min(input)`
+                .min(input)
         }
     }
 
@@ -171,6 +181,11 @@ impl PlanVisitor for CardinalityVisitor {
 
             // TODO: refine the cardinality of full outer join
             JoinType::FullOuter => Cardinality::unknown(),
+
+            // For each row from one side, we match `0..=1` rows from the other side.
+            JoinType::AsofInner => left.mul(right.min(0..=1)),
+            // For each row from left side, we match exactly 1 row from the right side or a `NULL` row`.
+            JoinType::AsofLeftOuter => left,
         }
     }
 

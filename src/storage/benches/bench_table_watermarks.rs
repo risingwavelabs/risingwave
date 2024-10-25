@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::StateTableInfoDelta;
+use risingwave_pb::hummock::{PbHummockVersion, StateTableInfoDelta};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use spin::Mutex;
 use tokio::sync::mpsc::unbounded_channel;
@@ -37,18 +37,18 @@ use tokio::sync::mpsc::unbounded_channel;
 fn vnode_bitmaps(part_count: usize) -> impl Iterator<Item = Arc<Bitmap>> {
     static BITMAP_CACHE: LazyLock<Mutex<HashMap<usize, Vec<Arc<Bitmap>>>>> =
         LazyLock::new(|| Mutex::new(HashMap::new()));
-    assert_eq!(VirtualNode::COUNT % part_count, 0);
+    assert_eq!(VirtualNode::COUNT_FOR_TEST % part_count, 0);
     let mut cache = BITMAP_CACHE.lock();
     match cache.entry(part_count) {
         Entry::Occupied(entry) => entry.get().clone().into_iter(),
         Entry::Vacant(entry) => entry
             .insert({
-                let part_size = VirtualNode::COUNT / part_count;
+                let part_size = VirtualNode::COUNT_FOR_TEST / part_count;
                 (0..part_count)
                     .map(move |part_idx| {
                         let start = part_idx * part_size;
                         let end = part_idx * part_size + part_size;
-                        let mut bitmap = BitmapBuilder::zeroed(VirtualNode::COUNT);
+                        let mut bitmap = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
                         for i in start..end {
                             bitmap.set(i, true);
                         }
@@ -115,10 +115,11 @@ fn gen_version(
         new_epoch_idx,
         vnode_part_count,
     ));
-    let mut version = HummockVersion::default();
     let committed_epoch = test_epoch(new_epoch_idx as _);
-    version.id = new_epoch_idx as _;
-    version.max_committed_epoch = committed_epoch;
+    let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
+        id: new_epoch_idx as _,
+        ..Default::default()
+    });
     version.table_watermarks = (0..table_count)
         .map(|table_id| (TableId::new(table_id as _), table_watermarks.clone()))
         .collect();
@@ -130,7 +131,6 @@ fn gen_version(
                     TableId::new(table_id as _),
                     StateTableInfoDelta {
                         committed_epoch,
-                        safe_epoch: test_epoch(old_epoch_idx as _),
                         compaction_group_id: StaticCompactionGroupId::StateDefault as _,
                     },
                 )
@@ -164,7 +164,7 @@ fn bench_table_watermarks(c: &mut Criterion) {
                 let mut pinned_version =
                     PinnedVersion::new(versions.pop_front().unwrap(), unbounded_channel().0);
                 while let Some(version) = versions.pop_front() {
-                    pinned_version = pinned_version.new_pin_version(version);
+                    pinned_version = pinned_version.new_pin_version(version).unwrap();
                 }
             },
             BatchSize::SmallInput,
@@ -251,7 +251,7 @@ fn bench_table_watermarks(c: &mut Criterion) {
 
     c.bench_function("read latest watermark", |b| {
         b.iter(|| {
-            for i in 0..VirtualNode::COUNT {
+            for i in 0..VirtualNode::COUNT_FOR_TEST {
                 let _ = table_watermarks.latest_watermark(VirtualNode::from_index(i));
             }
         })
@@ -259,7 +259,7 @@ fn bench_table_watermarks(c: &mut Criterion) {
 
     c.bench_function("read committed watermark", |b| {
         b.iter(|| {
-            for i in 0..VirtualNode::COUNT {
+            for i in 0..VirtualNode::COUNT_FOR_TEST {
                 let _ = table_watermarks.read_watermark(
                     VirtualNode::from_index(i),
                     test_epoch(committed_epoch_idx as u64),

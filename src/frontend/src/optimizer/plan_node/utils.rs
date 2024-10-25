@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
+use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
@@ -137,6 +138,21 @@ impl TableCatalogBuilder {
             Some(w) => w,
             None => FixedBitSet::with_capacity(self.columns.len()),
         };
+
+        // If `dist_key_in_pk` is set, check if it matches with `distribution_key`.
+        // Note that we cannot derive in the opposite direction, because there can be a column
+        // appearing multiple times in the PK.
+        if let Some(dist_key_in_pk) = &self.dist_key_in_pk {
+            let derived_dist_key = dist_key_in_pk
+                .iter()
+                .map(|idx| self.pk[*idx].column_index)
+                .collect_vec();
+            assert_eq!(
+                derived_dist_key, distribution_key,
+                "dist_key mismatch with dist_key_in_pk"
+            );
+        }
+
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -178,6 +194,8 @@ impl TableCatalogBuilder {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: None,
+            cdc_table_id: None,
+            vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
         }
     }
 
@@ -287,7 +305,7 @@ pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
     let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
     // Accumulate the affected rows.
     let sum_agg = PlanAggCall {
-        agg_kind: PbAggKind::Sum.into(),
+        agg_type: PbAggKind::Sum.into(),
         return_type: DataType::Int64,
         inputs: vec![InputRef::new(0, DataType::Int64)],
         distinct: false,
@@ -375,9 +393,16 @@ pub fn infer_kv_log_store_table_catalog_inner(
 
 /// Check that all leaf nodes must be stream table scan,
 /// since that plan node maps to `backfill` executor, which supports recovery.
-pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
+/// Some other leaf nodes like `StreamValues` do not support recovery, and they
+/// cannot use background ddl.
+pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
     if plan.inputs().is_empty() {
-        if let Some(scan) = plan.as_stream_table_scan() {
+        if plan.as_stream_source_scan().is_some()
+            || plan.as_stream_now().is_some()
+            || plan.as_stream_source().is_some()
+        {
+            true
+        } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
                 || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
         } else {
@@ -385,7 +410,7 @@ pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
         }
     } else {
         assert!(!plan.inputs().is_empty());
-        plan.inputs().iter().all(plan_has_backfill_leaf_nodes)
+        plan.inputs().iter().all(plan_can_use_background_ddl)
     }
 }
 

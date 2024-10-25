@@ -14,6 +14,8 @@
 
 use std::sync::Mutex;
 
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
@@ -62,45 +64,49 @@ async fn test_merger_sum_aggr() {
         let input_schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let input = Executor::new(
-            ExecutorInfo {
-                schema: input_schema,
-                pk_indices: PkIndices::new(),
-                identity: "ReceiverExecutor".to_string(),
-            },
-            ReceiverExecutor::for_test(actor_id, input_rx, barrier_test_env.shared_context.clone())
-                .boxed(),
-        );
-        let agg_calls = vec![
-            AggCall::from_pretty("(count:int8)"),
-            AggCall::from_pretty("(sum:int8 $0:int8)"),
-        ];
-        let schema = generate_agg_schema(&input, &agg_calls, None);
-        // for the local aggregator, we need two states: row count and sum
-        let aggregator =
-            StatelessSimpleAggExecutor::new(actor_ctx.clone(), input, schema, agg_calls).unwrap();
+        let shared_context = barrier_test_env.shared_context.clone();
+        let expr_context = expr_context.clone();
         let (tx, rx) = channel_for_test();
-        let consumer = SenderConsumer {
-            input: aggregator.boxed(),
-            channel: Box::new(LocalOutput::new(233, tx)),
-        };
+        let actor_future = async move {
+            let input = Executor::new(
+                ExecutorInfo {
+                    schema: input_schema,
+                    pk_indices: PkIndices::new(),
+                    identity: "ReceiverExecutor".to_string(),
+                },
+                ReceiverExecutor::for_test(actor_id, input_rx, shared_context.clone()).boxed(),
+            );
+            let agg_calls = vec![
+                AggCall::from_pretty("(count:int8)"),
+                AggCall::from_pretty("(sum:int8 $0:int8)"),
+            ];
+            let schema = generate_agg_schema(&input, &agg_calls, None);
+            // for the local aggregator, we need two states: row count and sum
+            let aggregator =
+                StatelessSimpleAggExecutor::new(actor_ctx.clone(), input, schema, agg_calls)
+                    .unwrap();
+            let consumer = SenderConsumer {
+                input: aggregator.boxed(),
+                channel: Box::new(LocalOutput::new(233, tx)),
+            };
 
-        let actor = Actor::new(
-            consumer,
-            vec![],
-            StreamingMetrics::unused().into(),
-            actor_ctx,
-            expr_context.clone(),
-            barrier_test_env
-                .shared_context
-                .local_barrier_manager
-                .clone(),
-        );
-        (actor, rx)
+            let actor = Actor::new(
+                consumer,
+                vec![],
+                StreamingMetrics::unused().into(),
+                actor_ctx,
+                expr_context,
+                shared_context.local_barrier_manager.clone(),
+            );
+
+            actor.run().await
+        }
+        .boxed();
+        (actor_future, rx)
     };
 
     // join handles of all actors
-    let mut handles = vec![];
+    let mut actor_futures: Vec<BoxFuture<'static, _>> = vec![];
 
     // input and output channels of the local aggregation actors
     let mut inputs = vec![];
@@ -111,9 +117,9 @@ async fn test_merger_sum_aggr() {
     // create 17 local aggregation actors
     for _ in 0..17 {
         let (tx, rx) = channel_for_test();
-        let (actor, channel) = make_actor(rx);
+        let (actor_future, channel) = make_actor(rx);
         outputs.push(channel);
-        handles.push(tokio::spawn(actor.run()));
+        actor_futures.push(actor_future);
         inputs.push(Box::new(LocalOutput::new(233, tx)) as BoxedOutput);
     }
 
@@ -121,116 +127,132 @@ async fn test_merger_sum_aggr() {
 
     let actor_id = gen_next_actor_id();
     let (input, rx) = channel_for_test();
-    let receiver_op = Executor::new(
-        ExecutorInfo {
-            // input schema of local simple agg
-            schema: Schema::new(vec![Field::unnamed(DataType::Int64)]),
-            pk_indices: PkIndices::new(),
-            identity: "ReceiverExecutor".to_string(),
-        },
-        ReceiverExecutor::for_test(actor_id, rx, barrier_test_env.shared_context.clone()).boxed(),
-    );
-    let dispatcher = DispatchExecutor::new(
-        receiver_op,
-        vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
-            inputs,
-            vec![0],
-            0,
-        ))],
-        0,
-        0,
-        barrier_test_env.shared_context.clone(),
-        metrics,
-        config::default::developer::stream_chunk_size(),
-    );
-    let actor = Actor::new(
-        dispatcher,
-        vec![],
-        StreamingMetrics::unused().into(),
-        ActorContext::for_test(actor_id),
-        expr_context.clone(),
-        barrier_test_env
-            .shared_context
-            .local_barrier_manager
-            .clone(),
-    );
-    handles.push(tokio::spawn(actor.run()));
+    let actor_future = {
+        let shared_context = barrier_test_env.shared_context.clone();
+        let expr_context = expr_context.clone();
+        async move {
+            let receiver_op = Executor::new(
+                ExecutorInfo {
+                    // input schema of local simple agg
+                    schema: Schema::new(vec![Field::unnamed(DataType::Int64)]),
+                    pk_indices: PkIndices::new(),
+                    identity: "ReceiverExecutor".to_string(),
+                },
+                ReceiverExecutor::for_test(actor_id, rx, shared_context.clone()).boxed(),
+            );
+            let dispatcher = DispatchExecutor::new(
+                receiver_op,
+                vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
+                    inputs,
+                    vec![0],
+                    0,
+                ))],
+                0,
+                0,
+                shared_context.clone(),
+                metrics,
+                config::default::developer::stream_chunk_size(),
+            );
+            let actor = Actor::new(
+                dispatcher,
+                vec![],
+                StreamingMetrics::unused().into(),
+                ActorContext::for_test(actor_id),
+                expr_context,
+                shared_context.local_barrier_manager.clone(),
+            );
+            actor.run().await
+        }
+        .boxed()
+    };
+    actor_futures.push(actor_future);
 
     let actor_ctx = ActorContext::for_test(gen_next_actor_id());
 
-    // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let schema = Schema::new(vec![
-        Field::unnamed(DataType::Int64),
-        Field::unnamed(DataType::Int64),
-    ]);
-    let merger = Executor::new(
-        ExecutorInfo {
-            // output schema of local simple agg
-            schema: schema.clone(),
-            pk_indices: PkIndices::new(),
-            identity: "MergeExecutor".to_string(),
-        },
-        MergeExecutor::for_test(
-            actor_ctx.id,
-            outputs,
-            barrier_test_env.shared_context.clone(),
-            schema,
-        )
-        .boxed(),
-    );
-
-    // for global aggregator, we need to sum data and sum row count
-    let is_append_only = false;
-    let aggregator = new_boxed_simple_agg_executor(
-        actor_ctx.clone(),
-        MemoryStateStore::new(),
-        merger,
-        is_append_only,
-        vec![
-            AggCall::from_pretty("(sum0:int8 $0:int8)"),
-            AggCall::from_pretty("(sum:int8 $1:int8)"),
-            AggCall::from_pretty("(count:int8)"),
-        ],
-        2, // row_count_index
-        vec![],
-        2,
-    )
-    .await;
-
-    let projection = ProjectExecutor::new(
-        actor_ctx.clone(),
-        aggregator,
-        vec![
-            // TODO: use the new streaming_if_null expression here, and add `None` tests
-            NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 1)),
-        ],
-        MultiMap::new(),
-        vec![],
-        0.0,
-        false,
-    );
-
     let items = Arc::new(Mutex::new(vec![]));
-    let consumer = MockConsumer {
-        input: projection.boxed(),
-        data: items.clone(),
+    let actor_future = {
+        let shared_context = barrier_test_env.shared_context.clone();
+        let expr_context = expr_context.clone();
+        let items = items.clone();
+        async move {
+            // use a merge operator to collect data from dispatchers before sending them to aggregator
+            let schema = Schema::new(vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ]);
+            let merger = Executor::new(
+                ExecutorInfo {
+                    // output schema of local simple agg
+                    schema: schema.clone(),
+                    pk_indices: PkIndices::new(),
+                    identity: "MergeExecutor".to_string(),
+                },
+                MergeExecutor::for_test(actor_ctx.id, outputs, shared_context.clone(), schema).boxed(),
+            );
+
+            // for global aggregator, we need to sum data and sum row count
+            let is_append_only = false;
+            let aggregator = new_boxed_simple_agg_executor(
+                actor_ctx.clone(),
+                MemoryStateStore::new(),
+                merger,
+                is_append_only,
+                vec![
+                    AggCall::from_pretty("(sum0:int8 $0:int8)"),
+                    AggCall::from_pretty("(sum:int8 $1:int8)"),
+                    AggCall::from_pretty("(count:int8)"),
+                ],
+                2, // row_count_index
+                vec![],
+                2,
+                false,
+            )
+            .await;
+
+            let projection = ProjectExecutor::new(
+                actor_ctx.clone(),
+                aggregator,
+                vec![
+                    // TODO: use the new streaming_if_null expression here, and add `None` tests
+                    NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 1)),
+                ],
+                MultiMap::new(),
+                vec![],
+                0.0,
+                false,
+            );
+
+            let consumer = MockConsumer {
+                input: projection.boxed(),
+                data: items.clone(),
+            };
+            let actor = Actor::new(
+                consumer,
+                vec![],
+                StreamingMetrics::unused().into(),
+                actor_ctx.clone(),
+                expr_context,
+                shared_context.local_barrier_manager.clone(),
+            );
+            actor.run().await
+        }
+        .boxed()
     };
-    let actor = Actor::new(
-        consumer,
-        vec![],
-        StreamingMetrics::unused().into(),
-        actor_ctx.clone(),
-        expr_context.clone(),
-        barrier_test_env
-            .shared_context
-            .local_barrier_manager
-            .clone(),
-    );
-    handles.push(tokio::spawn(actor.run()));
+    actor_futures.push(actor_future);
 
     let mut epoch = test_epoch(1);
     let b1 = Barrier::new_test_barrier(epoch);
-    barrier_test_env.inject_barrier(&b1, [], actors.clone());
+    barrier_test_env.inject_barrier(&b1, actors.clone());
+    barrier_test_env
+        .shared_context
+        .local_barrier_manager
+        .flush_all_events()
+        .await;
+    let handles = actor_futures
+        .into_iter()
+        .map(|actor_future| tokio::spawn(actor_future))
+        .collect_vec();
+
     input
         .send(Message::Barrier(b1.into_dispatcher()))
         .await
@@ -246,7 +268,7 @@ async fn test_merger_sum_aggr() {
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
         let b = Barrier::new_test_barrier(epoch);
-        barrier_test_env.inject_barrier(&b, [], actors.clone());
+        barrier_test_env.inject_barrier(&b, actors.clone());
         input
             .send(Message::Barrier(b.into_dispatcher()))
             .await
@@ -255,7 +277,7 @@ async fn test_merger_sum_aggr() {
     }
     let b = Barrier::new_test_barrier(epoch)
         .with_mutation(Mutation::Stop(actors.clone().into_iter().collect()));
-    barrier_test_env.inject_barrier(&b, [], actors);
+    barrier_test_env.inject_barrier(&b, actors);
     input
         .send(Message::Barrier(b.into_dispatcher()))
         .await

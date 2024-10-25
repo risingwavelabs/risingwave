@@ -40,7 +40,7 @@ pub struct KinesisProperties {
 
     #[serde(rename = "scan.startup.timestamp.millis")]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    pub timestamp_offset: Option<i64>,
+    pub start_timestamp_millis: Option<i64>,
 
     #[serde(flatten)]
     pub common: KinesisCommon,
@@ -80,6 +80,6 @@ mod test {
 
         let kinesis_props: KinesisProperties =
             serde_json::from_value(serde_json::to_value(props).unwrap()).unwrap();
-        assert_eq!(kinesis_props.timestamp_offset, Some(123456789));
+        assert_eq!(kinesis_props.start_timestamp_millis, Some(123456789));
     }
 }

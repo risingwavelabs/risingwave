@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod pretty_serde;
+pub use pretty_serde::PrettySerde;
 mod column_index_mapping;
 use std::any::Any;
 use std::hash::{Hash, Hasher};
@@ -185,4 +187,18 @@ impl Hash for dyn DynHash {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.dyn_hash(state);
     }
+}
+
+pub fn ordinal(i: usize) -> String {
+    let s = i.to_string();
+    let suffix = if s.ends_with('1') && !s.ends_with("11") {
+        "st"
+    } else if s.ends_with('2') && !s.ends_with("12") {
+        "nd"
+    } else if s.ends_with('3') && !s.ends_with("13") {
+        "rd"
+    } else {
+        "th"
+    };
+    s + suffix
 }

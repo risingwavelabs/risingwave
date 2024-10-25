@@ -1,5 +1,6 @@
 import subprocess
 import psycopg2
+import threading
 import time
 
 
@@ -53,9 +54,9 @@ def test_cursor_snapshot():
         database="dev"
     )
 
-    execute_insert("declare cur subscription cursor for sub",conn)
+    execute_insert("declare cur subscription cursor for sub full",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([1,2],row[0],1)
+    check_rows_data([1,2],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
@@ -72,9 +73,9 @@ def test_cursor_snapshot_log_store():
         database="dev"
     )
 
-    execute_insert("declare cur subscription cursor for sub",conn)
+    execute_insert("declare cur subscription cursor for sub full",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([1,2],row[0],1)
+    check_rows_data([1,2],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("insert into t1 values(4,4)",conn)
@@ -82,9 +83,9 @@ def test_cursor_snapshot_log_store():
     execute_insert("insert into t1 values(5,5)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([4,4],row[0],1)
+    check_rows_data([4,4],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([5,5],row[0],1)
+    check_rows_data([5,5],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
@@ -108,11 +109,11 @@ def test_cursor_since_begin():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([4,4],row[0],1)
+    check_rows_data([4,4],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([5,5],row[0],1)
+    check_rows_data([5,5],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([6,6],row[0],1)
+    check_rows_data([6,6],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
@@ -137,7 +138,32 @@ def test_cursor_since_now():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([6,6],row[0],1)
+    check_rows_data([6,6],row[0],"Insert")
+    row = execute_query("fetch next from cur",conn)
+    assert row == []
+    execute_insert("close cur",conn)
+    drop_table_subscription()
+
+def test_cursor_without_since():
+    print(f"test_cursor_since_now")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+
+    execute_insert("insert into t1 values(4,4)",conn)
+    execute_insert("flush",conn)
+    execute_insert("insert into t1 values(5,5)",conn)
+    execute_insert("flush",conn)
+    execute_insert("declare cur subscription cursor for sub",conn)
+    time.sleep(2)
+    execute_insert("insert into t1 values(6,6)",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch next from cur",conn)
+    check_rows_data([6,6],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
@@ -163,27 +189,27 @@ def test_cursor_since_rw_timestamp():
     row = execute_query("fetch next from cur",conn)
     valuelen = len(row[0])
     rw_timestamp_1 = row[0][valuelen - 1]
-    check_rows_data([4,4],row[0],1)
+    check_rows_data([4,4],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     valuelen = len(row[0])
     rw_timestamp_2 = row[0][valuelen - 1] - 1
-    check_rows_data([5,5],row[0],1)
+    check_rows_data([5,5],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     valuelen = len(row[0])
     rw_timestamp_3 = row[0][valuelen - 1] + 1
-    check_rows_data([6,6],row[0],1)
+    check_rows_data([6,6],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_1}",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([4,4],row[0],1)
+    check_rows_data([4,4],row[0],"Insert")
     execute_insert("close cur",conn)
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_2}",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([5,5],row[0],1)
+    check_rows_data([5,5],row[0],"Insert")
     execute_insert("close cur",conn)
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_3}",conn)
@@ -203,9 +229,9 @@ def test_cursor_op():
         database="dev"
     )
 
-    execute_insert("declare cur subscription cursor for sub",conn)
+    execute_insert("declare cur subscription cursor for sub full",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([1,2],row[0],1)
+    check_rows_data([1,2],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
 
@@ -214,18 +240,18 @@ def test_cursor_op():
     execute_insert("update t1 set v2 = 10 where v1 = 4",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([4,4],row[0],1)
+    check_rows_data([4,4],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([4,4],row[0],4)
+    check_rows_data([4,4],row[0],"UpdateDelete")
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([4,10],row[0],3)
+    check_rows_data([4,10],row[0],"UpdateInsert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
 
     execute_insert("delete from t1 where v1 = 4",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([4,10],row[0],2)
+    check_rows_data([4,10],row[0],"Delete")
     row = execute_query("fetch next from cur",conn)
     assert row == []
 
@@ -242,23 +268,27 @@ def test_cursor_with_table_alter():
         database="dev"
     )
 
-    execute_insert("declare cur subscription cursor for sub",conn)
+    execute_insert("declare cur subscription cursor for sub full",conn)
     execute_insert("alter table t1 add v3 int",conn)
     execute_insert("insert into t1 values(4,4,4)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([1,2],row[0],1)
+    check_rows_data([1,2],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([4,4,4],row[0],1)
+    assert row == []
+    row = execute_query("fetch next from cur",conn)
+    check_rows_data([4,4,4],row[0],"Insert")
     execute_insert("insert into t1 values(5,5,5)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([5,5,5],row[0],1)
+    check_rows_data([5,5,5],row[0],"Insert")
     execute_insert("alter table t1 drop column v2",conn)
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    check_rows_data([6,6],row[0],1)
+    assert row == []
+    row = execute_query("fetch next from cur",conn)
+    check_rows_data([6,6],row[0],"Insert")
     drop_table_subscription()
 
 def test_cursor_fetch_n():
@@ -271,7 +301,7 @@ def test_cursor_fetch_n():
         database="dev"
     )
 
-    execute_insert("declare cur subscription cursor for sub",conn)
+    execute_insert("declare cur subscription cursor for sub full",conn)
     execute_insert("insert into t1 values(4,4)",conn)
     execute_insert("flush",conn)
     execute_insert("insert into t1 values(5,5)",conn)
@@ -290,18 +320,18 @@ def test_cursor_fetch_n():
     execute_insert("flush",conn)
     row = execute_query("fetch 6 from cur",conn)
     assert len(row) == 6
-    check_rows_data([1,2],row[0],1)
-    check_rows_data([4,4],row[1],1)
-    check_rows_data([5,5],row[2],1)
-    check_rows_data([6,6],row[3],1)
-    check_rows_data([7,7],row[4],1)
-    check_rows_data([8,8],row[5],1)
+    check_rows_data([1,2],row[0],"Insert")
+    check_rows_data([4,4],row[1],"Insert")
+    check_rows_data([5,5],row[2],"Insert")
+    check_rows_data([6,6],row[3],"Insert")
+    check_rows_data([7,7],row[4],"Insert")
+    check_rows_data([8,8],row[5],"Insert")
     row = execute_query("fetch 6 from cur",conn)
     assert len(row) == 4
-    check_rows_data([9,9],row[0],1)
-    check_rows_data([10,10],row[1],1)
-    check_rows_data([10,10],row[2],4)
-    check_rows_data([10,100],row[3],3)
+    check_rows_data([9,9],row[0],"Insert")
+    check_rows_data([10,10],row[1],"Insert")
+    check_rows_data([10,10],row[2],"UpdateDelete")
+    check_rows_data([10,100],row[3],"UpdateInsert")
     drop_table_subscription()
 
 def test_rebuild_table():
@@ -314,16 +344,204 @@ def test_rebuild_table():
         database="dev"
     )
 
-    execute_insert("declare cur subscription cursor for sub2",conn)
+    execute_insert("declare cur subscription cursor for sub2 full",conn)
     execute_insert("insert into t2 values(1,1)",conn)
     execute_insert("flush",conn)
     execute_insert("update t2 set v2 = 100 where v1 = 1",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch 4 from cur",conn)
     assert len(row) == 3
-    check_rows_data([1,1],row[0],1)
-    check_rows_data([1,1],row[1],4)
-    check_rows_data([1,100],row[2],3)
+    check_rows_data([1,1],row[0],"Insert")
+    check_rows_data([1,1],row[1],"UpdateDelete")
+    check_rows_data([1,100],row[2],"UpdateInsert")
+    drop_table_subscription()
+
+def test_block_cursor():
+    print(f"test_block_cursor")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("declare cur subscription cursor for sub2 full",conn)
+    execute_insert("insert into t2 values(1,1)",conn)
+    execute_insert("flush",conn)
+    execute_insert("update t2 set v2 = 100 where v1 = 1",conn)
+    execute_insert("flush",conn)
+    start_time = time.time()
+    row = execute_query("fetch 100 from cur with (timeout = '30s')",conn)
+    assert (time.time() - start_time) < 3
+    assert len(row) == 3
+    check_rows_data([1,1],row[0],"Insert")
+    check_rows_data([1,1],row[1],"UpdateDelete")
+    check_rows_data([1,100],row[2],"UpdateInsert")
+
+    # Test block cursor fetches data successfully
+    thread = threading.Thread(target=insert_into_table)
+    thread.start()
+    row = execute_query("fetch 100 from cur with (timeout = '5s')",conn)
+    check_rows_data([10,10],row[0],"Insert")
+    thread.join()
+
+    # Test block cursor timeout
+    row = execute_query("fetch 100 from cur with (timeout = '5s')",conn)
+    assert row == []
+
+    drop_table_subscription()
+
+def insert_into_table():
+    time.sleep(2)
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t2 values(10,10)",conn)
+
+def test_order_table_with_pk():
+    print(f"test_order_table_with_pk")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t2 values(6,6),(3,3),(5,5),(4,4),(7,7)",conn)
+    execute_insert("flush",conn)
+    execute_insert("declare cur subscription cursor for sub2 full",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    assert len(row) == 5
+    check_rows_data([3,3],row[0],"Insert")
+    check_rows_data([4,4],row[1],"Insert")
+    check_rows_data([5,5],row[2],"Insert")
+    check_rows_data([6,6],row[3],"Insert")
+    check_rows_data([7,7],row[4],"Insert")
+    execute_insert("insert into t2 values(16,16),(13,13),(15,15),(14,14),(17,17)",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    assert len(row) == 5
+    check_rows_data([13,13],row[0],"Insert")
+    check_rows_data([14,14],row[1],"Insert")
+    check_rows_data([15,15],row[2],"Insert")
+    check_rows_data([16,16],row[3],"Insert")
+    check_rows_data([17,17],row[4],"Insert")
+    execute_insert("update t2 set v2 = 100 where v1 > 10",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 10 from cur",conn)
+    assert len(row) == 10
+    check_rows_data([13,13],row[0],"UpdateDelete")
+    check_rows_data([13,100],row[1],"UpdateInsert")
+    check_rows_data([14,14],row[2],"UpdateDelete")
+    check_rows_data([14,100],row[3],"UpdateInsert")
+    check_rows_data([15,15],row[4],"UpdateDelete")
+    check_rows_data([15,100],row[5],"UpdateInsert")
+    check_rows_data([16,16],row[6],"UpdateDelete")
+    check_rows_data([16,100],row[7],"UpdateInsert")
+    check_rows_data([17,17],row[8],"UpdateDelete")
+    check_rows_data([17,100],row[9],"UpdateInsert")
+    drop_table_subscription()
+
+def test_order_table_with_row_id():
+    print(f"test_order_table_with_pk")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t1 values(6,6),(3,3),(5,5),(4,4),(7,7)",conn)
+    execute_insert("flush",conn)
+    execute_insert("declare cur subscription cursor for sub full",conn)
+    row = execute_query("fetch 10 from cur",conn)
+    ex_row = execute_query("select v1, v2 from t1 order by _row_id",conn)
+    assert len(row) == 6
+    assert len(ex_row) == 6
+    check_rows_data(ex_row[0],row[0],"Insert")
+    check_rows_data(ex_row[1],row[1],"Insert")
+    check_rows_data(ex_row[2],row[2],"Insert")
+    check_rows_data(ex_row[3],row[3],"Insert")
+    check_rows_data(ex_row[4],row[4],"Insert")
+    execute_insert("insert into t1 values(16,16),(13,13),(15,15),(14,14),(17,17)",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    ex_row = execute_query("select v1, v2 from t1 where v1 > 10 order by _row_id",conn)
+    assert len(row) == 5
+    assert len(ex_row) == 5
+    check_rows_data(ex_row[0],row[0],"Insert")
+    check_rows_data(ex_row[1],row[1],"Insert")
+    check_rows_data(ex_row[2],row[2],"Insert")
+    check_rows_data(ex_row[3],row[3],"Insert")
+    check_rows_data(ex_row[4],row[4],"Insert")
+    drop_table_subscription()
+
+def test_order_mv():
+    print(f"test_order_mv")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t4 values(6,6,6,6),(3,3,3,3),(5,5,5,5),(4,4,4,4),(7,7,7,7)",conn)
+    execute_insert("flush",conn)
+    execute_insert("declare cur subscription cursor for sub4 full",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    ex_row = execute_query("select v4, v2 from t4 order by _row_id",conn)
+    assert len(row) == 5
+    assert len(ex_row) == 5
+    check_rows_data(ex_row[0],row[0],"Insert")
+    check_rows_data(ex_row[1],row[1],"Insert")
+    check_rows_data(ex_row[2],row[2],"Insert")
+    check_rows_data(ex_row[3],row[3],"Insert")
+    check_rows_data(ex_row[4],row[4],"Insert")
+    execute_insert("insert into t4 values(16,16,16,16),(13,13,13,13),(15,15,15,15),(14,14,14,14),(17,17,17,17)",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    ex_row = execute_query("select v4, v2 from t4 where v2 > 10 order by _row_id",conn)
+    assert len(row) == 5
+    assert len(ex_row) == 5
+    check_rows_data(ex_row[0],row[0],"Insert")
+    check_rows_data(ex_row[1],row[1],"Insert")
+    check_rows_data(ex_row[2],row[2],"Insert")
+    check_rows_data(ex_row[3],row[3],"Insert")
+    check_rows_data(ex_row[4],row[4],"Insert")
+    drop_table_subscription()
+
+def test_order_multi_pk():
+    print(f"test_order_mutil_pk")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t5 values(6,6,6,6),(6,3,3,3),(5,5,5,5),(5,4,4,4),(7,7,7,7)",conn)
+    execute_insert("flush",conn)
+    execute_insert("declare cur subscription cursor for sub5 full",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    assert len(row) == 5
+    check_rows_data([5,4,4,4],row[0],"Insert")
+    check_rows_data([5,5,5,5],row[1],"Insert")
+    check_rows_data([6,3,3,3],row[2],"Insert")
+    check_rows_data([6,6,6,6],row[3],"Insert")
+    check_rows_data([7,7,7,7],row[4],"Insert")
+    execute_insert("insert into t5 values(16,16,16,16),(16,13,13,13),(15,15,15,15),(15,14,14,14),(17,17,17,17)",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 5 from cur",conn)
+    assert len(row) == 5
+    check_rows_data([15,14,14,14],row[0],"Insert")
+    check_rows_data([15,15,15,15],row[1],"Insert")
+    check_rows_data([16,13,13,13],row[2],"Insert")
+    check_rows_data([16,16,16,16],row[3],"Insert")
+    check_rows_data([17,17,17,17],row[4],"Insert")
+    drop_table_subscription()
 
 if __name__ == "__main__":
     test_cursor_snapshot()
@@ -331,7 +549,13 @@ if __name__ == "__main__":
     test_cursor_snapshot_log_store()
     test_cursor_since_rw_timestamp()
     test_cursor_since_now()
+    test_cursor_without_since()
     test_cursor_since_begin()
     test_cursor_with_table_alter()
     test_cursor_fetch_n()
     test_rebuild_table()
+    test_order_table_with_pk()
+    test_order_table_with_row_id()
+    test_order_mv()
+    test_order_multi_pk()
+    test_block_cursor()

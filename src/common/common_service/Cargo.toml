@@ -17,17 +17,19 @@ normal = ["workspace-hack"]
 [dependencies]
 async-trait = "0.1"
 axum = { workspace = true }
+axum-extra = { workspace = true, features = ["query"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = "0.14" # required by tonic
+http = "1"
 prometheus = { version = "0.13" }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
+serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tonic = { workspace = true }
-tower = { version = "0.4", features = ["util", "load-shed"] }
+tower = { version = "0.5", features = ["util", "load-shed"] }
 tower-http = { version = "0.5", features = ["add-extension", "compression-gzip"] }
 tracing = "0.1"
 

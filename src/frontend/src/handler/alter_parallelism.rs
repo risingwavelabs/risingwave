@@ -85,6 +85,7 @@ pub async fn handle_alter_parallelism(
                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
                 sink.id.sink_id()
             }
+            // TODO: support alter parallelism for shared source
             _ => bail!(
                 "invalid statement type for alter parallelism: {:?}",
                 stmt_type
@@ -94,12 +95,12 @@ pub async fn handle_alter_parallelism(
 
     let target_parallelism = extract_table_parallelism(parallelism)?;
 
+    let mut builder = RwPgResponse::builder(stmt_type);
+
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_parallelism(table_id, target_parallelism, deferred)
         .await?;
-
-    let mut builder = RwPgResponse::builder(stmt_type);
 
     if deferred {
         builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_string());

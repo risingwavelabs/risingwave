@@ -553,6 +553,8 @@ mod tests {
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
+            cdc_table_id: None,
+            maybe_vnode_count: None,
         }
     }
 

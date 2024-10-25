@@ -19,15 +19,20 @@ use std::sync::{Arc, LazyLock};
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
+use futures::FutureExt;
 use hytra::TrAdder;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::StreamingConfig;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::metrics::{IntGaugeExt, GLOBAL_ERROR_METRICS};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID};
+use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID, VNODE_COUNT};
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::PbStreamActor;
+use risingwave_rpc_client::MetaClient;
 use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
@@ -42,6 +47,7 @@ use crate::task::{ActorId, LocalBarrierManager};
 pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,
+    pub vnode_count: usize,
     pub mview_definition: String,
 
     // TODO(eric): these seem to be useless now?
@@ -54,7 +60,12 @@ pub struct ActorContext {
     /// This is the number of dispatchers when the actor is created. It will not be updated during runtime when new downstreams are added.
     pub initial_dispatch_num: usize,
     // mv_table_id to subscription id
-    pub related_subscriptions: HashMap<TableId, HashSet<u32>>,
+    pub related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
+
+    // Meta client. currently used for auto schema change. `None` for test only
+    pub meta_client: Option<MetaClient>,
+
+    pub streaming_config: Arc<StreamingConfig>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -64,6 +75,7 @@ impl ActorContext {
         Arc::new(Self {
             id,
             fragment_id: 0,
+            vnode_count: VirtualNode::COUNT_FOR_TEST,
             mview_definition: "".to_string(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
@@ -71,7 +83,9 @@ impl ActorContext {
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
             // Set 1 for test to enable sanity check on table
             initial_dispatch_num: 1,
-            related_subscriptions: HashMap::new(),
+            related_subscriptions: HashMap::new().into(),
+            meta_client: None,
+            streaming_config: Arc::new(StreamingConfig::default()),
         })
     }
 
@@ -80,18 +94,26 @@ impl ActorContext {
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         initial_dispatch_num: usize,
-        related_subscriptions: HashMap<TableId, HashSet<u32>>,
+        related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
+        meta_client: Option<MetaClient>,
+        streaming_config: Arc<StreamingConfig>,
     ) -> ActorContextRef {
         Arc::new(Self {
             id: stream_actor.actor_id,
             fragment_id: stream_actor.fragment_id,
             mview_definition: stream_actor.mview_definition.clone(),
+            vnode_count: (stream_actor.vnode_bitmap.as_ref())
+                // An unset `vnode_bitmap` means the actor is a singleton,
+                // where only `SINGLETON_VNODE` is set.
+                .map_or(1, |b| Bitmap::from(b).len()),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
             streaming_metrics,
             initial_dispatch_num,
             related_subscriptions,
+            meta_client,
+            streaming_config,
         })
     }
 
@@ -164,18 +186,26 @@ where
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
-        FRAGMENT_ID::scope(
-            self.actor_context.fragment_id,
-            expr_context_scope(self.expr_context.clone(), async move {
-                tokio::join!(
-                    // Drive the subtasks concurrently.
-                    join_all(std::mem::take(&mut self.subtasks)),
-                    self.run_consumer(),
-                )
-                .1
-            }),
-        )
-        .await
+        let expr_context = self.expr_context.clone();
+        let fragment_id = self.actor_context.fragment_id;
+        let vnode_count = self.actor_context.vnode_count;
+
+        let run = async move {
+            tokio::join!(
+                // Drive the subtasks concurrently.
+                join_all(std::mem::take(&mut self.subtasks)),
+                self.run_consumer(),
+            )
+            .1
+        }
+        .boxed();
+
+        // Attach contexts to the future.
+        let run = expr_context_scope(expr_context, run);
+        let run = FRAGMENT_ID::scope(fragment_id, run);
+        let run = VNODE_COUNT::scope(vnode_count, run);
+
+        run.await
     }
 
     async fn run_consumer(self) -> StreamResult<()> {
@@ -185,7 +215,6 @@ where
         .into()));
 
         let id = self.actor_context.id;
-
         let span_name = format!("Actor {id}");
 
         let new_span = |epoch: Option<EpochPair>| {
@@ -199,6 +228,13 @@ where
             )
         };
         let mut span = new_span(None);
+
+        let actor_count = self
+            .actor_context
+            .streaming_metrics
+            .actor_count
+            .with_guarded_label_values(&[&self.actor_context.fragment_id.to_string()]);
+        let _actor_count_guard = actor_count.inc_guard();
 
         let mut last_epoch: Option<EpochPair> = None;
         let mut stream = Box::pin(Box::new(self.consumer).execute());

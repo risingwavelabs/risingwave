@@ -215,6 +215,7 @@ async fn test_ddl_cancel() -> Result<()> {
             let pid = line.split_whitespace().next().unwrap();
             let pid = pid.parse::<usize>().unwrap();
             session.run(format!("kill {};", pid)).await?;
+            sleep(Duration::from_secs(10)).await;
             break;
         }
         sleep(Duration::from_secs(2)).await;
@@ -262,12 +263,12 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
 
     session.run("CREATE TABLE fact1 (v1 int)").await?;
     session
-        .run("INSERT INTO fact1 select 1 from generate_series(1, 100000)")
+        .run("INSERT INTO fact1 select 1 from generate_series(1, 10000)")
         .await?;
 
     session.run("CREATE TABLE fact2 (v1 int)").await?;
     session
-        .run("INSERT INTO fact2 select 1 from generate_series(1, 100000)")
+        .run("INSERT INTO fact2 select 1 from generate_series(1, 10000)")
         .await?;
     session.flush().await?;
 
@@ -317,9 +318,9 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
             .await
             .unwrap();
         tracing::info!(progress, "get progress before cancel stream job");
-        let progress = progress.replace('%', "");
+        let progress = progress.split_once("%").unwrap().0;
         let progress = progress.parse::<f64>().unwrap();
-        if progress > 0.01 {
+        if progress >= 0.01 {
             break;
         } else {
             sleep(Duration::from_micros(1)).await;

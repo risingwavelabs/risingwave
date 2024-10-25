@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::str::FromStr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -28,13 +29,16 @@ use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row as _;
-use risingwave_common::types::{write_date_time_tz, DataType, ScalarRefImpl, Timestamptz};
+use risingwave_common::types::{
+    write_date_time_tz, DataType, Interval, ScalarRefImpl, Timestamptz,
+};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select, SelectItem, SetExpr,
-    TableFactor, TableWithJoins,
+    CompatibleSourceSchema, ConnectorSchema, Expr, Ident, ObjectName, OrderByExpr, Query, Select,
+    SelectItem, SetExpr, TableFactor, TableWithJoins,
 };
+use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::session::{current, SessionImpl};
@@ -53,14 +57,14 @@ pin_project! {
         #[pin]
         chunk_stream: VS,
         column_types: Vec<DataType>,
-        formats: Vec<Format>,
+        pub formats: Vec<Format>,
         session_data: StaticSessionData,
     }
 }
 
 // Static session data frozen at the time of the creation of the stream
-struct StaticSessionData {
-    timezone: String,
+pub struct StaticSessionData {
+    pub timezone: String,
 }
 
 impl<VS> DataChunkToRowSetAdapter<VS>
@@ -110,7 +114,7 @@ where
 }
 
 /// Format scalars according to postgres convention.
-fn pg_value_format(
+pub fn pg_value_format(
     data_type: &DataType,
     d: ScalarRefImpl<'_>,
     format: Format,
@@ -230,12 +234,41 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
     }
 }
 
+pub fn gen_query_from_table_name_order_by(from_name: ObjectName, pk_names: Vec<String>) -> Query {
+    let mut query = gen_query_from_table_name(from_name);
+    query.order_by = pk_names
+        .into_iter()
+        .map(|pk| {
+            let expr = Expr::Identifier(Ident::with_quote_unchecked('"', pk));
+            OrderByExpr {
+                expr,
+                asc: None,
+                nulls_first: None,
+            }
+        })
+        .collect();
+    query
+}
+
 pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
     Epoch::from_unix_millis(unix_millis).0
 }
 
 pub fn convert_logstore_u64_to_unix_millis(logstore_u64: u64) -> u64 {
     Epoch::from(logstore_u64).as_unix_millis()
+}
+
+pub fn convert_interval_to_u64_seconds(interval: &String) -> RwResult<u64> {
+    let seconds = (Interval::from_str(interval)
+        .map_err(|err| {
+            ErrorCode::InternalError(format!(
+                "Covert interval to u64 error, please check format, error: {:?}",
+                err.to_report_string()
+            ))
+        })?
+        .epoch_in_micros()
+        / 1000000) as u64;
+    Ok(seconds)
 }
 
 #[cfg(test)]

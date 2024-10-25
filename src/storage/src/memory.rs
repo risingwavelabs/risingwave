@@ -735,7 +735,11 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = MemtableLocalStateStore<Self>;
 
     #[allow(clippy::unused_async)]
-    async fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+    async fn try_wait_epoch(
+        &self,
+        _epoch: HummockReadEpoch,
+        _options: TryWaitEpochOptions,
+    ) -> StorageResult<()> {
         // memory backend doesn't need to wait for epoch, so this is a no-op.
         Ok(())
     }
@@ -750,22 +754,8 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         }
     }
 
-    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
-
-    #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self, prev_epoch: u64) {
-        for (key, _) in self.inner.range((Unbounded, Unbounded), None).unwrap() {
-            assert!(key.epoch_with_gap.pure_epoch() <= prev_epoch);
-        }
-    }
-
-    #[allow(clippy::unused_async)]
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
         MemtableLocalStateStore::new(self.clone(), option)
-    }
-
-    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
-        Ok(())
     }
 }
 

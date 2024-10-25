@@ -13,60 +13,48 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::pin::Pin;
 
+use futures::future::Shared;
+use futures::FutureExt;
 use moka::sync::Cache;
 use risingwave_hummock_sdk::HummockEpoch;
-use tokio::sync::Mutex;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::HummockResult;
 
+type InflightResult = Shared<Pin<Box<dyn Future<Output = HummockResult<PinnedVersion>> + Send>>>;
+
 /// A naive cache to reduce number of RPC sent to meta node.
 pub struct SimpleTimeTravelVersionCache {
-    inner: Mutex<SimpleTimeTravelVersionCacheInner>,
+    cache: Cache<(u32, HummockEpoch), InflightResult>,
 }
 
 impl SimpleTimeTravelVersionCache {
-    pub fn new() -> Self {
-        Self {
-            inner: Mutex::new(SimpleTimeTravelVersionCacheInner::new()),
-        }
-    }
-
-    pub async fn get_or_insert(
-        &self,
-        epoch: HummockEpoch,
-        fetch: impl Future<Output = HummockResult<PinnedVersion>>,
-    ) -> HummockResult<PinnedVersion> {
-        let mut guard = self.inner.lock().await;
-        if let Some(v) = guard.get(&epoch) {
-            return Ok(v);
-        }
-        let version = fetch.await?;
-        guard.add(epoch, version);
-        Ok(guard.get(&epoch).unwrap())
-    }
-}
-
-struct SimpleTimeTravelVersionCacheInner {
-    cache: Cache<HummockEpoch, PinnedVersion>,
-}
-
-impl SimpleTimeTravelVersionCacheInner {
-    fn new() -> Self {
-        let capacity = std::env::var("RW_HUMMOCK_TIME_TRAVEL_CACHE_SIZE")
-            .unwrap_or_else(|_| "10".into())
-            .parse()
-            .unwrap();
+    pub fn new(capacity: u64) -> Self {
         let cache = Cache::builder().max_capacity(capacity).build();
         Self { cache }
     }
 
-    fn get(&self, epoch: &HummockEpoch) -> Option<PinnedVersion> {
-        self.cache.get(epoch)
-    }
-
-    fn add(&mut self, epoch: HummockEpoch, version: PinnedVersion) {
-        self.cache.insert(epoch, version);
+    pub async fn get_or_insert(
+        &self,
+        table_id: u32,
+        epoch: HummockEpoch,
+        fetch: impl Future<Output = HummockResult<PinnedVersion>> + Send + 'static,
+    ) -> HummockResult<PinnedVersion> {
+        self.cache
+            .entry((table_id, epoch))
+            .or_insert_with_if(
+                || fetch.boxed().shared(),
+                |inflight| {
+                    if let Some(result) = inflight.peek() {
+                        return result.is_err();
+                    }
+                    false
+                },
+            )
+            .value()
+            .clone()
+            .await
     }
 }

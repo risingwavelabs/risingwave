@@ -79,6 +79,7 @@ impl FsSplit {
 pub struct OpendalFsSplit<Src: OpendalSource> {
     pub name: String,
     pub offset: usize,
+    // For Parquet encoding, the `size` represents the number of rows, while for other encodings, the `size` denotes the file size.
     pub size: usize,
     _marker: PhantomData<Src>,
 }

@@ -24,7 +24,6 @@ use mysql_async::Opts;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
@@ -38,17 +37,16 @@ use tokio::task::JoinHandle;
 use url::form_urlencoded;
 use with_options::WithOptions;
 
+use super::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
 use super::doris_starrocks_connector::{
     HeaderBuilder, InserterInner, StarrocksTxnRequestBuilder, STARROCKS_DELETE_SIGN,
     STARROCKS_SUCCESS_STATUS,
 };
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
-    SinkCommitCoordinator, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    SinkCommitCoordinator, SinkError, SinkParam, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
-use crate::deserialize_optional_u64_from_string;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
 use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
@@ -105,15 +103,20 @@ pub struct StarrocksConfig {
     /// to Starrocks at every n checkpoints by leveraging the
     /// [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
     /// also, in this time, the `sink_decouple` option should be enabled as well.
-    /// Defaults to 1 if commit_checkpoint_interval <= 0
-    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
-    pub commit_checkpoint_interval: Option<u64>,
+    /// Defaults to 10 if commit_checkpoint_interval <= 0
+    #[serde(default = "default_commit_checkpoint_interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub commit_checkpoint_interval: u64,
 
     /// Enable partial update
     #[serde(rename = "starrocks.partial_update")]
     pub partial_update: Option<String>,
 
     pub r#type: String, // accept "append-only" or "upsert"
+}
+
+fn default_commit_checkpoint_interval() -> u64 {
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
 }
 
 impl StarrocksConfig {
@@ -129,9 +132,9 @@ impl StarrocksConfig {
                 SINK_TYPE_UPSERT
             )));
         }
-        if config.commit_checkpoint_interval == Some(0) {
+        if config.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
-                "commit_checkpoint_interval must be greater than 0"
+                "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
         Ok(config)
@@ -246,6 +249,9 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Int256 => Err(SinkError::Starrocks(
                 "INT256 is not supported for Starrocks sink.".to_string(),
             )),
+            risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
+                "MAP is not supported for Starrocks sink.".to_string(),
+            )),
         }
     }
 }
@@ -255,30 +261,6 @@ impl Sink for StarrocksSink {
     type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<StarrocksSinkWriter>>;
 
     const SINK_NAME: &'static str = STARROCKS_SINK;
-
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let config_decouple = if let Some(interval) =
-            desc.properties.get("commit_checkpoint_interval")
-            && interval.parse::<u64>().unwrap_or(0) > 1
-        {
-            true
-        } else {
-            false
-        };
-
-        match user_specified {
-            SinkDecouple::Default => Ok(config_decouple),
-            SinkDecouple::Disable => {
-                if config_decouple {
-                    return Err(SinkError::Config(anyhow!(
-                        "config conflict: StarRocks config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                    )));
-                }
-                Ok(false)
-            }
-            SinkDecouple::Enable => Ok(true),
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only && self.pk_indices.is_empty() {
@@ -320,7 +302,7 @@ impl Sink for StarrocksSink {
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let commit_checkpoint_interval =
-            NonZeroU64::new(self.config.commit_checkpoint_interval.unwrap_or(1)).expect(
+            NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
@@ -331,6 +313,8 @@ impl Sink for StarrocksSink {
             self.is_append_only,
             writer_param.executor_id,
         )?;
+
+        let metrics = SinkWriterMetrics::new(&writer_param);
         let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -349,7 +333,7 @@ impl Sink for StarrocksSink {
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
-            writer_param.sink_metrics,
+            metrics,
             commit_checkpoint_interval,
         ))
     }
@@ -411,17 +395,27 @@ impl StarrocksSinkWriter {
         is_append_only: bool,
         executor_id: u64,
     ) -> Result<Self> {
-        let mut fields_name = schema.names_str();
+        let mut field_names = schema.names_str();
         if !is_append_only {
-            fields_name.push(STARROCKS_DELETE_SIGN);
+            field_names.push(STARROCKS_DELETE_SIGN);
         };
+        // we should quote field names in `MySQL` style to prevent `StarRocks` from rejecting the request due to
+        // a field name being a reserved word. For example, `order`, 'from`, etc.
+        let field_names = field_names
+            .into_iter()
+            .map(|name| format!("`{}`", name))
+            .collect::<Vec<String>>();
+        let field_names_str = field_names
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<&str>>();
 
         let header = HeaderBuilder::new()
             .add_common_header()
             .set_user_password(config.common.user.clone(), config.common.password.clone())
             .add_json_format()
             .set_partial_update(config.partial_update.clone())
-            .set_columns_name(fields_name)
+            .set_columns_name(field_names_str)
             .set_db(config.common.database.clone())
             .set_table(config.common.table.clone())
             .build();
@@ -729,6 +723,8 @@ pub struct StarrocksInsertResultResponse {
     pub stream_load_plan_time_ms: Option<i32>,
     #[serde(rename = "ExistingJobStatus")]
     pub existing_job_status: Option<String>,
+    #[serde(rename = "ErrorURL")]
+    pub error_url: Option<String>,
 }
 
 pub struct StarrocksClient {
@@ -751,8 +747,10 @@ impl StarrocksClient {
 
         if !STARROCKS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                "Insert error: {:?}",
+                "Insert error: {}, {}, {:?}",
+                res.status,
                 res.message,
+                res.error_url,
             )));
         };
         Ok(res)
@@ -773,8 +771,10 @@ impl StarrocksTxnClient {
             .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
         if !STARROCKS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                "transaction error: {:?}",
+                "transaction error: {}, {}, {:?}",
+                res.status,
                 res.message,
+                res.error_url,
             )));
         }
         res.label.ok_or_else(|| {

@@ -26,6 +26,9 @@ pub struct TrivialMovePicker {
     level: usize,
     target_level: usize,
     overlap_strategy: Arc<dyn OverlapStrategy>,
+
+    // The minimum size of sst that can be selected as trivial move.
+    sst_allowed_trivial_move_min_size: u64,
 }
 
 impl TrivialMovePicker {
@@ -33,11 +36,13 @@ impl TrivialMovePicker {
         level: usize,
         target_level: usize,
         overlap_strategy: Arc<dyn OverlapStrategy>,
+        sst_allowed_trivial_move_min_size: u64,
     ) -> Self {
         Self {
             level,
             target_level,
             overlap_strategy,
+            sst_allowed_trivial_move_min_size,
         }
     }
 
@@ -50,6 +55,10 @@ impl TrivialMovePicker {
     ) -> Option<SstableInfo> {
         let mut skip_by_pending = false;
         for sst in select_tables {
+            if sst.sst_size < self.sst_allowed_trivial_move_min_size {
+                continue;
+            }
+
             if level_handlers[self.level].is_pending_compact(&sst.sst_id) {
                 skip_by_pending = true;
                 continue;
@@ -81,7 +90,7 @@ impl TrivialMovePicker {
             self.pick_trivial_move_sst(select_tables, target_tables, level_handlers, stats)
         {
             return Some(CompactionInput {
-                select_input_size: trivial_move_sst.file_size,
+                select_input_size: trivial_move_sst.sst_size,
                 total_file_count: 1,
                 input_levels: vec![
                     InputLevel {
@@ -101,5 +110,61 @@ impl TrivialMovePicker {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use std::sync::Arc;
+
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::compaction::create_overlap_strategy;
+    use crate::hummock::level_handler::LevelHandler;
+
+    #[test]
+    fn test_allowed_trivial_move_min_size() {
+        let sst = SstableInfo {
+            sst_id: 1,
+            file_size: 100,
+            sst_size: 100,
+            ..Default::default()
+        };
+
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .level0_sub_level_compact_level_count(1)
+                .build(),
+        );
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let overlap_strategy = create_overlap_strategy(config.compaction_mode());
+        {
+            let trivial_move_picker =
+                super::TrivialMovePicker::new(0, 1, overlap_strategy.clone(), 200);
+            let trivial_move_task = trivial_move_picker.pick_trivial_move_task(
+                &[sst.clone()],
+                &[],
+                &levels_handler,
+                &mut Default::default(),
+            );
+
+            assert!(trivial_move_task.is_none());
+        }
+
+        {
+            let trivial_move_picker =
+                super::TrivialMovePicker::new(0, 1, overlap_strategy.clone(), 50);
+
+            let trivial_move_task = trivial_move_picker.pick_trivial_move_task(
+                &[sst.clone()],
+                &[],
+                &levels_handler,
+                &mut Default::default(),
+            );
+
+            assert!(trivial_move_task.is_some());
+        }
     }
 }

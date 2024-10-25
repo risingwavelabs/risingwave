@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use icelake::types::{
     create_transform_function, Any as IcelakeDataType, BoxedTransformFunction, Transform,
 };
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
 use risingwave_common::row::OwnedRow;
@@ -75,7 +75,7 @@ impl risingwave_expr::expr::Expression for IcebergTransform {
     }
 }
 
-#[build_function("iceberg_transform(varchar, any) -> any", type_infer = "panic")]
+#[build_function("iceberg_transform(varchar, any) -> any", type_infer = "unreachable")]
 fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     let transform_type = {
         let datum = children[0].eval_const()?.unwrap();

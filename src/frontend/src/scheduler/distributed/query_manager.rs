@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
@@ -33,6 +33,7 @@ use tokio::sync::OwnedSemaphorePermit;
 use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
+use crate::catalog::TableId;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::{ExecutionContextRef, SchedulerResult};
 
@@ -190,6 +191,7 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
+        read_storage_tables: HashSet<TableId>,
     ) -> SchedulerResult<DistributedQueryStream> {
         if let Some(query_limit) = self.disrtibuted_query_limit
             && self.query_metrics.running_query_num.get() as u64 == query_limit
@@ -223,21 +225,20 @@ impl QueryManager {
             .start(
                 context.clone(),
                 worker_node_manager_reader,
-                pinned_snapshot,
+                pinned_snapshot.batch_query_epoch(&read_storage_tables)?,
                 self.compute_client_pool.clone(),
                 self.catalog_reader.clone(),
                 self.query_execution_info.clone(),
                 self.query_metrics.clone(),
             )
             .await
-            .map_err(|err| {
+            .inspect_err(|_| {
                 // Clean up query execution on error.
                 context
                     .session()
                     .env()
                     .query_manager()
                     .delete_query(&query_id);
-                err
             })?;
         Ok(query_result_fetcher.stream_from_channel())
     }

@@ -16,7 +16,7 @@ init_sqls = [
 
 slt = 'test_case/iceberg_sink_partition_upsert_table.slt'
 
-verify_schema = ['int','int','long','string']
+verify_schema = ['int','int','long','string', 'date']
 
 verify_sql = 'SELECT * FROM demo_db.partition_upsert_table ORDER BY id, v1 ASC'
 

@@ -15,7 +15,6 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
-#![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(extract_if)]
 #![feature(hash_extract_if)]
@@ -30,6 +29,9 @@
 #![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(const_option)]
+#![feature(anonymous_lifetime_in_impl_trait)]
+#![feature(duration_millis_float)]
+#![feature(option_get_or_insert_default)]
 
 pub mod backup_restore;
 pub mod barrier;
@@ -47,18 +49,16 @@ pub mod stream;
 pub mod telemetry;
 
 pub use error::{MetaError, MetaResult};
-pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
+use risingwave_common::config::MetaStoreConfig;
+pub use rpc::{ElectionClient, ElectionMember};
 
 use crate::manager::MetaOpts;
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
-    Etcd {
-        endpoints: Vec<String>,
-        credentials: Option<(String, String)>,
-    },
     Mem,
     Sql {
         endpoint: String,
+        config: MetaStoreConfig,
     },
 }

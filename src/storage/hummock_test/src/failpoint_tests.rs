@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -29,7 +30,8 @@ use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_tes
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreRead, WriteOptions,
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreRead,
+    TryWaitEpochOptions, WriteOptions,
 };
 use risingwave_storage::StateStore;
 
@@ -45,18 +47,18 @@ async fn test_failpoints_state_store_read_upload() {
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
-        worker_node.id,
+        worker_id as _,
     ));
 
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store.clone(),
         meta_client.clone(),
-        get_notification_client_for_test(env, hummock_manager_ref, worker_node),
+        get_notification_client_for_test(env, hummock_manager_ref, cluster_ctl_ref, worker_id)
+            .await,
     )
     .await
     .unwrap();
@@ -140,10 +142,17 @@ async fn test_failpoints_state_store_read_upload() {
     );
 
     // sync epoch1 test the read_error
-    let res = hummock_storage.seal_and_sync_epoch(1).await.unwrap();
-    meta_client.commit_epoch(1, res).await.unwrap();
+    let table_id_set = HashSet::from_iter([local.table_id()]);
+    let res = hummock_storage
+        .seal_and_sync_epoch(1, table_id_set.clone())
+        .await
+        .unwrap();
+    meta_client.commit_epoch(1, res, false).await.unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(1))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(1),
+            TryWaitEpochOptions::for_test(local.table_id()),
+        )
         .await
         .unwrap();
     // clear block cache
@@ -208,14 +217,22 @@ async fn test_failpoints_state_store_read_upload() {
     // test the upload_error
     fail::cfg(mem_upload_err, "return").unwrap();
 
-    let result = hummock_storage.seal_and_sync_epoch(3).await;
+    let result = hummock_storage
+        .seal_and_sync_epoch(3, table_id_set.clone())
+        .await;
     assert!(result.is_err());
     fail::remove(mem_upload_err);
 
-    let res = hummock_storage.seal_and_sync_epoch(3).await.unwrap();
-    meta_client.commit_epoch(3, res).await.unwrap();
+    let res = hummock_storage
+        .seal_and_sync_epoch(3, table_id_set)
+        .await
+        .unwrap();
+    meta_client.commit_epoch(3, res, false).await.unwrap();
     hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(3))
+        .try_wait_epoch(
+            HummockReadEpoch::Committed(3),
+            TryWaitEpochOptions::for_test(local.table_id()),
+        )
         .await
         .unwrap();
 

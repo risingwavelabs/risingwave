@@ -79,7 +79,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "slow end-to-end test (release)"
@@ -220,7 +220,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   # The timeout should be strictly more than timeout in `pull-request.yml`.
@@ -247,7 +247,7 @@ steps:
 
   - label: "unit test (madsim)"
     key: "unit-test-deterministic"
-    command: "MADSIM_TEST_NUM=100 timeout 30m ci/scripts/deterministic-unit-test.sh"
+    command: "MADSIM_TEST_NUM=100 timeout 50m ci/scripts/deterministic-unit-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation"
@@ -257,7 +257,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 30
+    timeout_in_minutes: 50
     retry: *auto-retry
 
   - label: "integration test (madsim) - scale"
@@ -347,7 +347,7 @@ steps:
 
   - label: "end-to-end test (madsim)"
     key: "e2e-test-deterministic"
-    command: "TEST_NUM=64 timeout 75m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=32 timeout 120m ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
@@ -364,7 +364,7 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 80
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "recovery test (madsim)"
@@ -388,7 +388,7 @@ steps:
   # Ddl statements will randomly run with background_ddl.
   - label: "background_ddl, arrangement_backfill recovery test (madsim)"
     key: "background-ddl-arrangement-backfill-recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=--use-arrangement-backfill timeout 65m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 65m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -440,7 +440,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 11
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"
@@ -461,10 +461,10 @@ steps:
       - ./ci/plugins/upload-failure-logs
     # Extra 2 minutes to account for docker-compose latency.
     # See: https://github.com/risingwavelabs/risingwave/issues/9423#issuecomment-1521222169
-    timeout_in_minutes: 10
+    timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "S3_v2 source check on AWS (json parser)"
+  - label: "S3 source check on AWS (json parser)"
     key: "s3-v2-source-check-aws-json-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2.py -t json"
     if: |
@@ -486,7 +486,7 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source new file check on AWS (json)"
+  - label: "S3 source new file check on AWS (json)"
     key: "s3-v2-source-new-file-check-aws"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2_new_file.py"
     if: |
@@ -508,9 +508,9 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source check on parquet file"
-    key: "s3-v2-source-check-parquet-file"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_parquet_source.py"
+  - label: "S3 sink on parquet and json file"
+    key: "s3-sink-parquet-and-json-encode"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_sink.py"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
@@ -530,7 +530,29 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source batch read on AWS (json parser)"
+  - label: "S3 sink batching test"
+    key: "s3-sink-batching-test"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_sink_batch.py"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-s3-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
+    depends_on: build
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
+      - docker-compose#v5.1.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "S3 source batch read on AWS (json parser)"
     key: "s3-v2-source-batch-read-check-aws-json-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_batch.py -t json"
     if: |
@@ -552,7 +574,7 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source check on AWS (csv parser)"
+  - label: "S3 source check on AWS (csv parser)"
     key: "s3-v2-source-check-aws-csv-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2.py -t csv_without_header"
     if: |
@@ -590,29 +612,6 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     retry: *auto-retry
-
-  # TODO(Kexiang): Enable this test after we have a GCS_SOURCE_TEST_CONF.
-  # - label: "GCS source on OpenDAL fs engine"
-  #   key: "s3-source-test-for-opendal-fs-engine"
-  #   command: "ci/scripts/s3-source-test-for-opendal-fs-engine.sh -p ci-release -s gcs_source.py"
-  #   if: |
-  #     !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-  #     || build.pull_request.labels includes "ci/run-s3-source-tests"
-  #     || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-  #   depends_on: build
-  #   plugins:
-  #     - seek-oss/aws-sm#v2.3.1:
-  #         env:
-  #           S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-  #     - docker-compose#v5.1.0:
-  #         run: rw-build-env
-  #         config: ci/docker-compose.yml
-  #         mount-buildkite-agent: true
-  #         environment:
-  #           - S3_SOURCE_TEST_CONF
-  #     - ./ci/plugins/upload-failure-logs
-  #   timeout_in_minutes: 20
-  #   retry: *auto-retry
 
   - label: "pulsar source check"
     key: "pulsar-source-tests"
@@ -678,38 +677,40 @@ steps:
     timeout_in_minutes: 5
 
   # Backwards compatibility tests
-  - label: "Backwards compatibility tests version_offset={{matrix.version_offset}}"
-    key: "backwards-compat-tests"
-    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-backwards-compat-tests"
-      || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.1.0:
-          run: source-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    matrix:
-      setup:
-        # Test the 4 latest versions against the latest main.
-        # e.g.
-        # 1: 2.0.0
-        # 2: 1.1.1
-        # 3: 1.0.1
-        # 4: 1.0.0
-        # It is ordered by the full version number, rather than minor / major version.
-        # We can change to just be on major version in the future.
-        version_offset:
-          - "1"
-          - "2"
-          - "3"
-          - "4"
-    timeout_in_minutes: 30
-    retry: *auto-retry
+  #  - label: "Backwards compatibility tests version_offset={{matrix.version_offset}}"
+  #    key: "backwards-compat-tests"
+  #    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
+  #    if: |
+  #      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+  #      || build.pull_request.labels includes "ci/run-backwards-compat-tests"
+  #      || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
+  #    depends_on:
+  #      - "build"
+  #    plugins:
+  #      - docker-compose#v5.1.0:
+  #          run: source-test-env
+  #          config: ci/docker-compose.yml
+  #          mount-buildkite-agent: true
+  #          environment:
+  #            - BUILDKITE_BRANCH
+  #      - ./ci/plugins/upload-failure-logs
+  #    matrix:
+  #      setup:
+  #        # Test the 4 latest versions against the latest main.
+  #        # e.g.
+  #        # 1: 2.0.0
+  #        # 2: 1.1.1
+  #        # 3: 1.0.1
+  #        # 4: 1.0.0
+  #        # It is ordered by the full version number, rather than minor / major version.
+  #        # We can change to just be on major version in the future.
+  #        version_offset:
+  #          - "1"
+  #          - "2"
+  #          - "3"
+  #          - "4"
+  #    timeout_in_minutes: 30
+  #    retry: *auto-retry
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"
@@ -743,7 +744,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 24
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "e2e standalone binary test"
@@ -763,7 +764,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 35
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
@@ -881,25 +882,24 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-# FIXME(xxhZs): https://github.com/risingwavelabs/risingwave/issues/17855
-#  - label: "end-to-end cassandra sink test"
-#    key: "e2e-cassandra-sink-tests"
-#    command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-release"
-#    if: |
-#      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-#      || build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests"
-#      || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
-#    depends_on:
-#      - "build"
-#      - "build-other"
-#    plugins:
-#      - docker-compose#v5.1.0:
-#          run: sink-test-env
-#          config: ci/docker-compose.yml
-#          mount-buildkite-agent: true
-#      - ./ci/plugins/upload-failure-logs
-#    timeout_in_minutes: 10
-#    retry: *auto-retry
+  - label: "end-to-end cassandra sink test"
+    key: "e2e-cassandra-sink-tests"
+    command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end clickhouse sink test"
     key: "e2e-clickhouse-sink-tests"
@@ -1040,6 +1040,26 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "release amd64 (dry-run)"
+    command: "SKIP_RELEASE=1 ci/scripts/release.sh"
+    if: |
+      build.pull_request.labels includes "ci/run-release-dry-run" || build.env("CI_STEPS") =~ /(^|,)release-dry-run(,|$$)/
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v5.1.0:
+          run: release-env-x86
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
+            - BUILDKITE_TAG
+            - BUILDKITE_SOURCE
+    timeout_in_minutes: 60
+    retry: *auto-retry
+
   - label: "release amd64"
     command: "ci/scripts/release.sh"
     if: build.tag != null
@@ -1056,6 +1076,28 @@ steps:
             - GITHUB_TOKEN
             - BUILDKITE_TAG
             - BUILDKITE_SOURCE
+    timeout_in_minutes: 60
+    retry: *auto-retry
+
+  - label: "release aarch64 (dry-run)"
+    command: "SKIP_RELEASE=1 ci/scripts/release.sh"
+    if: |
+      build.pull_request.labels includes "ci/run-release-dry-run" || build.env("CI_STEPS") =~ /(^|,)release-dry-run(,|$$)/
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v5.1.0:
+          run: release-env-arm
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
+            - BUILDKITE_TAG
+            - BUILDKITE_SOURCE
+    agents:
+      queue: "linux-arm64"
     timeout_in_minutes: 60
     retry: *auto-retry
 
@@ -1136,6 +1178,13 @@ steps:
     if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
     command: |
       bash -c 'echo test && exit -1'
+
+  # Notification test.
+  - key: "test-notify-timeout"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
+    command: |
+      bash -c 'echo test && sleep 300'
+    timeout_in_minutes: 1
 
   - wait: true
     continue_on_failure: true

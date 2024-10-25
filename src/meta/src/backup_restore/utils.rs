@@ -15,106 +15,68 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Context;
-use etcd_client::ConnectOptions;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
-use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
+use risingwave_common::config::{MetaBackend, MetaStoreConfig, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use sea_orm::DbBackend;
 
 use crate::backup_restore::RestoreOpts;
-use crate::controller::SqlMetaStore;
-use crate::storage::{EtcdMetaStore, MemStore, WrappedEtcdClient as EtcdClient};
+use crate::controller::{SqlMetaStore, IN_MEMORY_STORE};
 use crate::MetaStoreBackend;
 
-#[derive(Clone)]
-pub enum MetaStoreBackendImpl {
-    Etcd(EtcdMetaStore),
-    Mem(MemStore),
-    Sql(SqlMetaStore),
-}
-
-#[macro_export]
-macro_rules! dispatch_meta_store {
-    ($impl:expr, $store:ident, $body:tt) => {{
-        match $impl {
-            MetaStoreBackendImpl::Etcd($store) => $body,
-            MetaStoreBackendImpl::Mem($store) => $body,
-            MetaStoreBackendImpl::Sql(_) => panic!("not supported"),
-        }
-    }};
-}
-
 // Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
-pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendImpl> {
+pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
     let meta_store_backend = match opts.meta_store_type {
-        MetaBackend::Etcd => MetaStoreBackend::Etcd {
-            endpoints: opts
-                .etcd_endpoints
-                .split(',')
-                .map(|x| x.to_string())
-                .collect(),
-            credentials: match opts.etcd_auth {
-                true => Some((opts.etcd_username, opts.etcd_password)),
-                false => None,
-            },
-        },
         MetaBackend::Mem => MetaStoreBackend::Mem,
         MetaBackend::Sql => MetaStoreBackend::Sql {
             endpoint: opts.sql_endpoint,
+            config: MetaStoreConfig::default(),
         },
         MetaBackend::Sqlite => MetaStoreBackend::Sql {
             endpoint: format!("sqlite://{}?mode=rwc", opts.sql_endpoint),
+            config: MetaStoreConfig::default(),
         },
         MetaBackend::Postgres => MetaStoreBackend::Sql {
             endpoint: format!(
                 "postgres://{}:{}@{}/{}",
                 opts.sql_username, opts.sql_password, opts.sql_endpoint, opts.sql_database
             ),
+            config: MetaStoreConfig::default(),
         },
         MetaBackend::Mysql => MetaStoreBackend::Sql {
             endpoint: format!(
                 "mysql://{}:{}@{}/{}",
                 opts.sql_username, opts.sql_password, opts.sql_endpoint, opts.sql_database
             ),
+            config: MetaStoreConfig::default(),
         },
     };
     match meta_store_backend {
-        MetaStoreBackend::Etcd {
-            endpoints,
-            credentials,
-        } => {
-            let mut options = ConnectOptions::default()
-                .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5));
-            if let Some((username, password)) = &credentials {
-                options = options.with_user(username, password)
-            }
-            let client = EtcdClient::connect(endpoints, Some(options), credentials.is_some())
-                .await
-                .context("failed to connect etcd")?;
-            Ok(MetaStoreBackendImpl::Etcd(EtcdMetaStore::new(client)))
+        MetaStoreBackend::Mem => {
+            let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
+            Ok(SqlMetaStore::new(conn))
         }
-        MetaStoreBackend::Mem => Ok(MetaStoreBackendImpl::Mem(MemStore::new())),
-        MetaStoreBackend::Sql { endpoint } => {
+        MetaStoreBackend::Sql { endpoint, config } => {
             let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
-                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
                 // here we forcibly specify the number of connections as 1.
                 1
             } else {
-                10
+                config.max_connections
             };
             let mut options = sea_orm::ConnectOptions::new(endpoint);
             options
                 .max_connections(max_connection)
-                .connect_timeout(Duration::from_secs(10))
-                .idle_timeout(Duration::from_secs(30));
+                .min_connections(config.min_connections)
+                .connect_timeout(Duration::from_secs(config.connection_timeout_sec))
+                .idle_timeout(Duration::from_secs(config.idle_timeout_sec))
+                .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
             let conn = sea_orm::Database::connect(options)
                 .await
                 .map_err(|e| BackupError::MetaStorage(e.into()))?;
-            let meta_store_sql = SqlMetaStore::new(conn);
-            Ok(MetaStoreBackendImpl::Sql(meta_store_sql))
+            Ok(SqlMetaStore::new(conn))
         }
     }
 }

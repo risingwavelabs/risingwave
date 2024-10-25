@@ -69,7 +69,7 @@ check_version() {
   local VERSION=$1
   local raw_version=$(run_sql "SELECT version();")
   echo "--- Version"
-  echo "$raw_version"
+  echo "raw_version: $raw_version"
   local version=$(echo $raw_version | grep -i risingwave | sed 's/^.*risingwave-\([0-9]*\.[0-9]*\.[0-9]\).*$/\1/i')
   if [[ "$version" != "$VERSION" ]]; then
     echo "Version mismatch, expected $VERSION, got $version"
@@ -133,12 +133,24 @@ get_old_version() {
 
   # Then we sort them in descending order.
   echo "--- VERSIONS"
-  local sorted_versions=$(echo -e "$tags" | sort -t '.' -n)
+  local sorted_versions=$(echo -e "$tags" | sort -V)
   echo "$sorted_versions"
+
+  # We handle the edge case where the current branch is the one being released.
+  # If so, we need to prune it from the list.
+  # We cannot simply use 'git branch --show-current', because buildkite checks out with the commit,
+  # rather than branch. So the current state is detached.
+  # Instead we rely on BUILDKITE_BRANCH, provided by buildkite.
+  local current_branch=$(echo "$BUILDKITE_BRANCH" | tr -d 'v')
+  echo "--- CURRENT BRANCH: $current_branch"
+
+  echo "--- PRUNED VERSIONS"
+  local pruned_versions=$(echo -e "$sorted_versions" | grep -v "$current_branch")
+  echo "$pruned_versions"
 
   # Then we take the Nth latest version.
   # We set $OLD_VERSION to this.
-  OLD_VERSION=$(echo -e "$sorted_versions" | tail -n $VERSION_OFFSET | head -1)
+  OLD_VERSION=$(echo -e "$pruned_versions" | tail -n $VERSION_OFFSET | head -1)
 }
 
 get_new_version() {
@@ -182,7 +194,7 @@ seed_old_cluster() {
   cp -r e2e_test/tpch/* $TEST_DIR/tpch
 
   ./risedev clean-data
-  ./risedev d full-without-monitoring && rm .risingwave/log/*
+  ENABLE_PYTHON_UDF=1 ENABLE_JS_UDF=1 ./risedev d full-without-monitoring && rm .risingwave/log/*
 
   check_version "$OLD_VERSION"
 
@@ -233,6 +245,10 @@ seed_old_cluster() {
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_original.slt"
   fi
 
+  # work around https://github.com/risingwavelabs/risingwave/issues/18650
+  echo "--- wait for a version checkpoint"
+  sleep 60
+
   echo "--- Killing cluster"
   kill_cluster
   echo "--- Killed cluster"
@@ -240,7 +256,7 @@ seed_old_cluster() {
 
 validate_new_cluster() {
   echo "--- Start cluster on latest"
-  ./risedev d full-without-monitoring
+  ENABLE_PYTHON_UDF=1 ENABLE_JS_UDF=1 ./risedev d full-without-monitoring
 
   echo "--- Wait ${RECOVERY_DURATION}s for Recovery on Old Cluster Data"
   sleep $RECOVERY_DURATION

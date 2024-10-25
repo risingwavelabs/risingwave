@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use foyer::HybridCacheBuilder;
+use foyer::{Engine, HybridCacheBuilder};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
@@ -116,11 +116,8 @@ impl HummockServiceOpts {
         &mut self,
         meta_client: &MetaClient,
     ) -> Result<(MonitoredStateStore<HummockStorage>, Metrics)> {
-        let (heartbeat_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
-            meta_client.clone(),
-            Duration::from_millis(1000),
-            vec![],
-        );
+        let (heartbeat_handle, heartbeat_shutdown_sender) =
+            MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000));
         self.heartbeat_handle = Some(heartbeat_handle);
         self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);
 
@@ -182,13 +179,13 @@ impl HummockServiceOpts {
         let meta_cache = HybridCacheBuilder::new()
             .memory(opts.meta_cache_capacity_mb * (1 << 20))
             .with_shards(opts.meta_cache_shard_num)
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await?;
         let block_cache = HybridCacheBuilder::new()
             .memory(opts.block_cache_capacity_mb * (1 << 20))
             .with_shards(opts.block_cache_shard_num)
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await?;
 

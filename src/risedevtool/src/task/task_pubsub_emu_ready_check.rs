@@ -36,10 +36,13 @@ impl Task for PubsubReadyTaskCheck {
         ctx.pb.set_message("waiting for online...");
 
         // environment variables to use the pubsub emulator
-        std::env::set_var(
-            "PUBSUB_EMULATOR_HOST",
-            format!("{}:{}", self.config.address, self.config.port),
-        );
+        // SAFETY: RiseDev is for development purposes only.
+        unsafe {
+            std::env::set_var(
+                "PUBSUB_EMULATOR_HOST",
+                format!("{}:{}", self.config.address, self.config.port),
+            );
+        }
 
         thread::sleep(Duration::from_secs(5));
         let async_runtime = tokio::runtime::Builder::new_current_thread()

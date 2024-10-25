@@ -48,7 +48,7 @@
 
 use std::cmp::min;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -746,7 +746,7 @@ impl<'a> TableScanIoEstimator<'a> {
                 .sum::<usize>()
     }
 
-    pub fn estimate_data_type_size(data_type: &DataType) -> usize {
+    fn estimate_data_type_size(data_type: &DataType) -> usize {
         use std::mem::size_of;
 
         match data_type {
@@ -769,6 +769,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Jsonb => 20,
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
+            DataType::Map(_) => 20,
         }
     }
 
@@ -958,17 +959,6 @@ impl ExprVisitor for TableScanIoEstimator<'_> {
             }
         };
         self.cost = Some(cost);
-    }
-}
-
-#[derive(Default)]
-struct ExprInputRefFinder {
-    pub input_ref_index_set: HashSet<usize>,
-}
-
-impl ExprVisitor for ExprInputRefFinder {
-    fn visit_input_ref(&mut self, input_ref: &InputRef) {
-        self.input_ref_index_set.insert(input_ref.index);
     }
 }
 

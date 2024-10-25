@@ -40,10 +40,23 @@ impl<'a> std::fmt::Debug for DataTypeTestDisplay<'a> {
                 f.finish()?;
                 Ok(())
             }
-            DataType::List(t) => f
-                .debug_tuple("List")
-                .field(&DataTypeTestDisplay(t))
-                .finish(),
+            DataType::List(t) => {
+                if t.is_struct() {
+                    f.debug_tuple("List")
+                        .field(&DataTypeTestDisplay(t))
+                        .finish()
+                } else {
+                    write!(f, "List({:?})", &DataTypeTestDisplay(t))
+                }
+            }
+            DataType::Map(m) => {
+                write!(
+                    f,
+                    "Map({:?},{:?})",
+                    &DataTypeTestDisplay(m.key()),
+                    &DataTypeTestDisplay(m.value())
+                )
+            }
             _ => {
                 // do not use alternative display for simple types
                 write!(f, "{:?}", self.0)
@@ -76,6 +89,18 @@ impl<'a> std::fmt::Debug for ScalarRefImplTestDisplay<'a> {
                 .debug_list()
                 .entries(l.iter().map(DatumRefTestDisplay))
                 .finish(),
+            ScalarRefImpl::Map(m) => f
+                .debug_list()
+                .entries(m.inner().iter().map(DatumRefTestDisplay))
+                .finish(),
+            ScalarRefImpl::Jsonb(j) => {
+                let compact_str = format!("{}", j);
+                if compact_str.len() > 50 {
+                    write!(f, "Jsonb({:#?})", jsonbb::ValueRef::from(j))
+                } else {
+                    write!(f, "Jsonb({:#})", j)
+                }
+            }
             _ => {
                 // do not use alternative display for simple types
                 write!(f, "{:?}", self.0)
@@ -162,7 +187,13 @@ impl<'a> std::fmt::Debug for ColumnDescTestDisplay<'a> {
             write!(f, ", type_name: {}", type_name)?;
         }
         if !field_descs.is_empty() {
-            write!(f, ", field_descs: {:?}", field_descs)?;
+            write!(
+                f,
+                ", field_descs: [{}]",
+                field_descs.iter().format_with(", ", |field_desc, f| {
+                    f(&format_args!("{:?}", ColumnDescTestDisplay(field_desc)))
+                })
+            )?;
         }
         if let Some(generated_or_default_column) = generated_or_default_column {
             write!(

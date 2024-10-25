@@ -1,3 +1,5 @@
+set sink_decouple = false;
+
 CREATE SINK IF NOT EXISTS counts_sink
 FROM counts
 WITH (

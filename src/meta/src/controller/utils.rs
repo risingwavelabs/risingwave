@@ -14,22 +14,22 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash;
 use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
-use risingwave_meta_model_migration::WithQuery;
-use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::fragment::DistributionType;
-use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::*;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::actor::ActorStatus;
+use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
-    view, ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
+    view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
 };
+use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
 };
@@ -42,6 +42,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
+use risingwave_sqlparser::ast::Statement as SqlStatement;
+use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
     WithClause,
@@ -50,6 +52,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DerivePartialModel, EntityTrait, FromQueryResult, JoinType,
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
+use thiserror_ext::AsReport;
 
 use crate::{MetaError, MetaResult};
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -227,7 +230,7 @@ pub fn construct_sink_cycle_check_query(
         .to_owned()
 }
 
-#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[derive(Clone, DerivePartialModel, FromQueryResult, Debug)]
 #[sea_orm(entity = "Object")]
 pub struct PartialObject {
     pub oid: ObjectId,
@@ -253,6 +256,14 @@ pub struct PartialActorLocation {
     pub status: ActorStatus,
 }
 
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Actor")]
+pub struct PartialActorSplits {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub splits: Option<ConnectorSplits>,
+}
+
 #[derive(FromQueryResult)]
 pub struct FragmentDesc {
     pub fragment_id: FragmentId,
@@ -262,6 +273,7 @@ pub struct FragmentDesc {
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,
     pub parallelism: i64,
+    pub vnode_count: i64,
 }
 
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
@@ -1070,7 +1082,13 @@ where
     ))
 }
 
-pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> NotificationInfo {
+/// Build a relation group for notifying the deletion of the given objects.
+///
+/// Note that only id fields are filled in the relation info, as the arguments are partial objects.
+/// As a result, the returned notification info should only be used for deletion.
+pub(crate) fn build_relation_group_for_delete(
+    relation_objects: Vec<PartialObject>,
+) -> NotificationInfo {
     let mut relations = vec![];
     for obj in relation_objects {
         match obj.obj_type {
@@ -1136,4 +1154,44 @@ pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> Noti
         }
     }
     NotificationInfo::RelationGroup(PbRelationGroup { relations })
+}
+
+pub fn extract_external_table_name_from_definition(table_definition: &str) -> Option<String> {
+    let [mut definition]: [_; 1] = Parser::parse_sql(table_definition)
+        .context("unable to parse table definition")
+        .inspect_err(|e| {
+            tracing::error!(
+                target: "auto_schema_change",
+                error = %e.as_report(),
+                "failed to parse table definition")
+        })
+        .unwrap()
+        .try_into()
+        .unwrap();
+    if let SqlStatement::CreateTable { cdc_table_info, .. } = &mut definition {
+        cdc_table_info
+            .clone()
+            .map(|cdc_table_info| cdc_table_info.external_table_name)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_cdc_table_name() {
+        let ddl1 = "CREATE TABLE t1 () FROM pg_source TABLE 'public.t1'";
+        let ddl2 = "CREATE TABLE t2 (v1 int) FROM pg_source TABLE 'mydb.t2'";
+        assert_eq!(
+            extract_external_table_name_from_definition(ddl1),
+            Some("public.t1".into())
+        );
+        assert_eq!(
+            extract_external_table_name_from_definition(ddl2),
+            Some("mydb.t2".into())
+        );
+    }
 }

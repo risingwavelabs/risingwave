@@ -44,15 +44,13 @@ use risingwave_storage::hummock::compactor::{
     CompactorContext,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{
-    HummockMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
-};
+use risingwave_storage::hummock::utils::HummockMemoryCollector;
+use risingwave_storage::hummock::{MemoryLimiter, SstableObjectIdManager, SstableStore};
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
 };
 use risingwave_storage::opts::StorageOpts;
 use tokio::sync::mpsc;
-use tonic::transport::Endpoint;
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
@@ -60,9 +58,6 @@ use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
 use crate::CompactorOpts;
 
-const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
-// See `Endpoint::keep_alive_timeout`
-const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
 pub async fn prepare_start_parameters(
     config: RwConfig,
     system_params_reader: SystemParamsReader,
@@ -139,7 +134,7 @@ pub async fn prepare_start_parameters(
 
     let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
     let storage_memory_config = extract_storage_memory_config(&config);
-    let memory_collector: Arc<HummockMemoryCollector> = Arc::new(HummockMemoryCollector::new(
+    let memory_collector = Arc::new(HummockMemoryCollector::new(
         sstable_store.clone(),
         memory_limiter.clone(),
         storage_memory_config,
@@ -197,8 +192,7 @@ pub async fn compactor_serve(
         Default::default(),
         &config.meta,
     )
-    .await
-    .unwrap();
+    .await;
 
     info!("Assigned compactor id {}", meta_client.worker_id());
 
@@ -255,7 +249,6 @@ pub async fn compactor_serve(
         is_share_buffer_compact: false,
         compaction_executor,
         memory_limiter,
-
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
     };
@@ -265,7 +258,6 @@ pub async fn compactor_serve(
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            vec![sstable_object_id_manager.clone()],
         ),
         risingwave_storage::hummock::compactor::start_compactor(
             compactor_context.clone(),
@@ -334,17 +326,7 @@ pub async fn shared_compactor_serve(
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
-    let endpoint_str = opts.proxy_rpc_endpoint.clone().to_string();
-    let endpoint =
-        Endpoint::from_shared(opts.proxy_rpc_endpoint).expect("Fail to construct tonic Endpoint");
-    let channel = endpoint
-        .http2_keep_alive_interval(Duration::from_secs(ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
-        .keep_alive_timeout(Duration::from_secs(ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
-        .connect_timeout(Duration::from_secs(5))
-        .connect()
-        .await
-        .expect("Failed to create channel via proxy rpc endpoint.");
-    let grpc_proxy_client = GrpcCompactorProxyClient::new(channel, endpoint_str);
+    let grpc_proxy_client = GrpcCompactorProxyClient::new(opts.proxy_rpc_endpoint.clone()).await;
     let system_params_response = grpc_proxy_client
         .get_system_params()
         .await

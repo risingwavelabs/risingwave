@@ -16,4 +16,4 @@ SELECT auction,
 FROM bid
 WHERE (regexp_match(url, '(&|^)channel_id=([^&]*)'))[2] is not null
    or LOWER(channel) in ('apple', 'google', 'facebook', 'baidu')
-WITH ( connector = 'blackhole', type = 'append-only');
+WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

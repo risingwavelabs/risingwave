@@ -17,9 +17,11 @@ pub mod source;
 pub mod split;
 
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+use thiserror::Error;
 use with_options::WithOptions;
 
 use crate::connector_common::{MqttCommon, MqttQualityOfService};
@@ -28,6 +30,15 @@ use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
 use crate::source::SourceProperties;
 
 pub const MQTT_CONNECTOR: &str = "mqtt";
+
+#[derive(Debug, Clone, Error)]
+pub struct MqttError(String);
+
+impl Display for MqttError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]

@@ -15,9 +15,6 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-arrow-array = { workspace = true }
-arrow-array-iceberg = { workspace = true }
-arrow-schema = { workspace = true }
 assert_matches = "1"
 async-recursion = "1"
 async-trait = "0.1"
@@ -37,7 +34,7 @@ parking_lot = { workspace = true }
 parquet = { workspace = true }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.12"
+prost = { workspace = true }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
@@ -63,7 +60,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-metrics = "0.3.0"
-tokio-stream = "0.1"
+tokio-postgres = "0.7"
+tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"

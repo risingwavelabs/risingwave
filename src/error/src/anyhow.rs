@@ -154,4 +154,30 @@ macro_rules! def_anyhow_newtype {
         )*
     };
 }
-pub use def_anyhow_newtype;
+
+/// Define a newtype + it's variant in the specified type.
+/// This is useful when you want to define a new error type,
+/// but also want to define a variant for it in another enum.
+#[macro_export]
+macro_rules! def_anyhow_variant {
+    (
+        $(#[$attr:meta])* $vis:vis $name:ident,
+        $enum_name:ident $variant_name:ident
+        $(, $from:ty => $context:tt)* $(,)?
+    ) => {
+        def_anyhow_newtype! {
+            $(#[$attr])* $vis $name
+            $(, $from => $context)*
+        }
+
+        $(
+            impl From<$from> for $enum_name {
+                fn from(error: $from) -> Self {
+                    $enum_name::$variant_name($name::from(error))
+                }
+            }
+        )*
+    }
+}
+
+pub use {def_anyhow_newtype, def_anyhow_variant};

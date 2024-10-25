@@ -19,19 +19,8 @@ Caused by these errors (recent errors listed first):
   2: invalid IPv4 address
 
 
-statement error
+statement error failed to send requests to UDF service
 create function int_42() returns int as int_42 using link '55.55.55.55:5555';
-----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: failed to check UDF signature
-  2: failed to send requests to UDF service
-  3: status: Unavailable, message: "error trying to connect: tcp connect error: deadline has elapsed", details: [], metadata: MetadataMap { headers: {} }
-  4: transport error
-  5: error trying to connect
-  6: tcp connect error
-  7: deadline has elapsed
 
 
 statement error
@@ -83,5 +72,5 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Failed to get/set session config
-  2: Invalid value `maybe` for `rw_implicit_flush`
+  2: Invalid value `maybe` for `implicit_flush`
   3: Invalid bool

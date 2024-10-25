@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub use anyhow::anyhow;
 use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::BoxedError;
+use risingwave_common::error::{def_anyhow_newtype, def_anyhow_variant, BoxedError};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_dml::error::DmlError;
@@ -29,6 +29,7 @@ use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use thiserror_ext::Construct;
+use tokio_postgres;
 use tonic::Status;
 
 use crate::worker_manager::worker_node_manager::FragmentId;
@@ -113,18 +114,11 @@ pub enum BatchError {
         DmlError,
     ),
 
-    #[error(transparent)]
-    Iceberg(
+    #[error("External system error: {0}")]
+    ExternalSystemError(
         #[from]
         #[backtrace]
-        iceberg::Error,
-    ),
-
-    #[error(transparent)]
-    Parquet(
-        #[from]
-        #[backtrace]
-        ParquetError,
+        BatchExternalSystemError,
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.
@@ -191,4 +185,14 @@ impl From<ConnectorError> for BatchError {
     fn from(value: ConnectorError) -> Self {
         Self::Connector(value.into())
     }
+}
+
+// Define a external system error
+def_anyhow_variant! {
+    pub BatchExternalSystemError,
+    BatchError ExternalSystemError,
+
+    tokio_postgres::Error => "Postgres error",
+    iceberg::Error => "Iceberg error",
+    ParquetError => "Parquet error",
 }

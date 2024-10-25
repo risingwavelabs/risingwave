@@ -64,33 +64,11 @@ fn avro_schema_str_to_risingwave_schema(
     Ok((resolved_schema, rw_schema))
 }
 
-/// Data driven testing for converting Avro Schema to RisingWave Schema, and then converting Avro data into RisingWave data.
-///
-/// The expected results can be automatically updated. To run and update the tests:
-/// ```bash
-/// UPDATE_EXPECT=1 cargo test -p risingwave_connector_codec
-/// ```
-/// Or use Rust Analyzer. Refer to <https://github.com/rust-analyzer/expect-test>.
+/// Refer to [crate level documentation](crate) for the ideas.
 ///
 /// ## Arguments
 /// - `avro_schema`: Avro schema in JSON format.
 /// - `avro_data`: list of Avro data. Refer to [`TestDataEncoding`] for the format.
-///
-/// ## Why not directly test the uppermost layer `AvroParserConfig` and `AvroAccessBuilder`?
-///
-/// Because their interface are not clean enough, and have complex logic like schema registry.
-/// We might need to separate logic to make them clenaer and then we can use it directly for testing.
-///
-/// ## If we reimplement a similar logic here, what are we testing?
-///
-/// Basically unit tests of `avro_schema_to_column_descs`, `convert_to_datum`, i.e., the type mapping.
-///
-/// It makes some sense, as the data parsing logic is generally quite simple (one-liner), and the most
-/// complex and error-prone part is the type mapping.
-///
-/// ## Why test schema mapping and data mapping together?
-///
-/// Because the expected data type for data mapping comes from the schema mapping.
 #[track_caller]
 fn check(
     avro_schema: &str,
@@ -141,7 +119,7 @@ fn check(
     expected_risingwave_data.assert_eq(&format!("{}", data_str.iter().format("\n----\n")));
 }
 
-// This corresponds to legacy `scripts/source/test_data/avro_simple_schema_bin.1`. TODO: remove that file.
+// This corresponds to legacy `e2e_test/source_legacy/basic/scripts/test_data/avro_simple_schema_bin.1`. TODO: remove that file.
 #[test]
 fn test_simple() {
     check(
@@ -883,5 +861,119 @@ fn test_union() {
                     ],
                 ),
             ])"#]],
+    );
+}
+
+#[test]
+fn test_map() {
+    let schema = r#"
+{
+    "type": "record",
+    "namespace": "com.redpanda.examples.avro",
+    "name": "ClickEvent",
+    "fields": [
+        {
+            "name": "map_str",
+            "type": {
+                "type": "map",
+                "values": "string"
+            },
+            "default": {}
+        },
+        {
+            "name": "map_map_int",
+            "type": {
+                "type": "map",
+                "values": {
+                    "type": "map",
+                    "values": "int"
+                }
+            }
+        }
+    ]
+}
+    "#;
+
+    let data = &[
+        // {"map_str": {"a":"1","b":"2"}, "map_map_int": {"m1": {"a":1,"b":2}, "m2": {"c":3,"d":4}}}
+        "0402610278026202790004046d310402610202620400046d32040263060264080000",
+        // {"map_map_int": {}}
+        "0000",
+    ];
+
+    check(
+        schema,
+        data,
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            [
+                map_str(#1): Map(Varchar,Varchar),
+                map_map_int(#2): Map(Varchar,Map(Varchar,Int32)),
+            ]"#]],
+        expect![[r#"
+            Owned([
+                StructValue(
+                    Utf8("a"),
+                    Utf8("x"),
+                ),
+                StructValue(
+                    Utf8("b"),
+                    Utf8("y"),
+                ),
+            ])
+            Owned([
+                StructValue(
+                    Utf8("m1"),
+                    [
+                        StructValue(
+                            Utf8("a"),
+                            Int32(1),
+                        ),
+                        StructValue(
+                            Utf8("b"),
+                            Int32(2),
+                        ),
+                    ],
+                ),
+                StructValue(
+                    Utf8("m2"),
+                    [
+                        StructValue(
+                            Utf8("c"),
+                            Int32(3),
+                        ),
+                        StructValue(
+                            Utf8("d"),
+                            Int32(4),
+                        ),
+                    ],
+                ),
+            ])
+            ----
+            Owned([])
+            Owned([])"#]],
+    );
+
+    check(
+        schema,
+        data,
+        Config {
+            map_handling: Some(MapHandling::Jsonb),
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            [
+                map_str(#1): Jsonb,
+                map_map_int(#2): Jsonb,
+            ]"#]],
+        expect![[r#"
+            Owned(Jsonb({"a": "x", "b": "y"}))
+            Owned(Jsonb({"m1": {"a": 1, "b": 2}, "m2": {"c": 3, "d": 4}}))
+            ----
+            Owned(Jsonb({}))
+            Owned(Jsonb({}))"#]],
     );
 }

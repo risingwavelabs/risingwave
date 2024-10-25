@@ -14,12 +14,12 @@
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
-use risingwave_meta_model_v2::compaction_config::CompactionConfig;
-use risingwave_meta_model_v2::compaction_status::LevelHandlers;
-use risingwave_meta_model_v2::compaction_task::CompactionTask;
-use risingwave_meta_model_v2::hummock_version_delta::FullVersionDelta;
-use risingwave_meta_model_v2::hummock_version_stats::TableStats;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::compaction_config::CompactionConfig;
+use risingwave_meta_model::compaction_status::LevelHandlers;
+use risingwave_meta_model::compaction_task::CompactionTask;
+use risingwave_meta_model::hummock_version_delta::FullVersionDelta;
+use risingwave_meta_model::hummock_version_stats::TableStats;
+use risingwave_meta_model::{
     compaction_config, compaction_status, compaction_task, hummock_pinned_snapshot,
     hummock_pinned_version, hummock_version_delta, hummock_version_stats, CompactionGroupId,
     CompactionTaskId, HummockVersionId, WorkerId,
@@ -221,10 +221,10 @@ impl Transactional<Transaction> for HummockVersionStats {
 impl Transactional<Transaction> for HummockVersionDelta {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_version_delta::ActiveModel {
-            id: Set(self.id.try_into().unwrap()),
-            prev_id: Set(self.prev_id.try_into().unwrap()),
-            max_committed_epoch: Set(self.max_committed_epoch.try_into().unwrap()),
-            safe_epoch: Set(self.visible_table_safe_epoch().try_into().unwrap()),
+            id: Set(self.id.to_u64().try_into().unwrap()),
+            prev_id: Set(self.prev_id.to_u64().try_into().unwrap()),
+            max_committed_epoch: Set(0.into()),
+            safe_epoch: Set(0.into()),
             trivial_move: Set(self.trivial_move),
             full_version_delta: Set(FullVersionDelta::from(&self.into())),
         };
@@ -246,9 +246,11 @@ impl Transactional<Transaction> for HummockVersionDelta {
     }
 
     async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        hummock_version_delta::Entity::delete_by_id(HummockVersionId::try_from(self.id).unwrap())
-            .exec(trx)
-            .await?;
+        hummock_version_delta::Entity::delete_by_id(
+            HummockVersionId::try_from(self.id.to_u64()).unwrap(),
+        )
+        .exec(trx)
+        .await?;
         Ok(())
     }
 }

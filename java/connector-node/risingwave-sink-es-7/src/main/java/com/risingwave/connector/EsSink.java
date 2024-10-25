@@ -46,6 +46,10 @@ import org.slf4j.LoggerFactory;
 public class EsSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error message %s";
+    private static final int INDEX_INDEX = 0;
+    private static final int KEY_INDEX = 1;
+    private static final int DOC_INDEX = 2;
+    private static final int ROUTING_INDEX = 3;
 
     private final EsSinkConfig config;
     private BulkProcessorAdapter bulkProcessor;
@@ -147,38 +151,44 @@ public class EsSink extends SinkWriterBase {
 
         this.config = config;
         this.requestTracker = new RequestTracker();
-
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
-        if (config.getConnector().equals("elasticsearch")) {
+        if (config.getConnector().equals("elasticsearch_v1")) {
             ElasticRestHighLevelClientAdapter client =
                     new ElasticRestHighLevelClientAdapter(host, config);
-            this.bulkProcessor = new ElasticBulkProcessorAdapter(this.requestTracker, client);
-        } else if (config.getConnector().equals("opensearch")) {
+            this.bulkProcessor =
+                    new ElasticBulkProcessorAdapter(this.requestTracker, client, config);
+        } else if (config.getConnector().equals("opensearch_v1")) {
             OpensearchRestHighLevelClientAdapter client =
                     new OpensearchRestHighLevelClientAdapter(host, config);
-            this.bulkProcessor = new OpensearchBulkProcessorAdapter(this.requestTracker, client);
+            this.bulkProcessor =
+                    new OpensearchBulkProcessorAdapter(this.requestTracker, client, config);
         } else {
             throw new RuntimeException("Sink type must be elasticsearch or opensearch");
         }
     }
 
-    private void writeRow(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        final String key = (String) row.get(1);
-        String doc = (String) row.get(2);
+    private void writeRow(SinkRow row)
+            throws JsonMappingException, JsonProcessingException, InterruptedException {
+        final String key = (String) row.get(KEY_INDEX);
+        String doc = (String) row.get(DOC_INDEX);
         final String index;
         if (config.getIndex() == null) {
-            index = (String) row.get(0);
+            index = (String) row.get(INDEX_INDEX);
         } else {
             index = config.getIndex();
+        }
+        String routing = null;
+        if (config.getRoutingColumn() != null) {
+            routing = (String) row.get(ROUTING_INDEX);
         }
         switch (row.getOp()) {
             case INSERT:
             case UPDATE_INSERT:
-                this.bulkProcessor.addRow(index, key, doc);
+                this.bulkProcessor.addRow(index, key, doc, routing);
                 break;
             case DELETE:
             case UPDATE_DELETE:
-                this.bulkProcessor.deleteRow(index, key);
+                this.bulkProcessor.deleteRow(index, key, routing);
                 break;
             default:
                 throw Status.INVALID_ARGUMENT

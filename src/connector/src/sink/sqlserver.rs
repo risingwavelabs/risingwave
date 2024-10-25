@@ -31,7 +31,9 @@ use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use with_options::WithOptions;
 
-use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use super::{
+    SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
@@ -257,7 +259,7 @@ ORDER BY
             self.is_append_only,
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
     }
 }
 
@@ -587,6 +589,7 @@ fn bind_params(
                 ScalarRefImpl::List(_) => return Err(data_type_not_supported("List")),
                 ScalarRefImpl::Int256(_) => return Err(data_type_not_supported("Int256")),
                 ScalarRefImpl::Serial(_) => return Err(data_type_not_supported("Serial")),
+                ScalarRefImpl::Map(_) => return Err(data_type_not_supported("Map")),
             },
             None => match schema[col_idx].data_type {
                 DataType::Boolean => {
@@ -634,6 +637,7 @@ fn bind_params(
                 DataType::Jsonb => return Err(data_type_not_supported("Jsonb")),
                 DataType::Serial => return Err(data_type_not_supported("Serial")),
                 DataType::Int256 => return Err(data_type_not_supported("Int256")),
+                DataType::Map(_) => return Err(data_type_not_supported("Map")),
             },
         };
     }
@@ -667,6 +671,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         DataType::Jsonb => Err(data_type_not_supported("Jsonb")),
         DataType::Serial => Err(data_type_not_supported("Serial")),
         DataType::Int256 => Err(data_type_not_supported("Int256")),
+        DataType::Map(_) => Err(data_type_not_supported("Map")),
     }
 }
 

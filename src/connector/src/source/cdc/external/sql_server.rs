@@ -14,7 +14,7 @@
 
 use std::cmp::Ordering;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -24,7 +24,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde_derive::{Deserialize, Serialize};
-use tiberius::{ColumnType, Config, Query, QueryItem};
+use tiberius::{Config, Query, QueryItem};
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
@@ -90,8 +90,10 @@ impl SqlServerExternalTable {
             &config.username,
             &config.password,
         ));
-        // TODO(kexiang): add ssl support
         // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
+        if config.encrypt == "true" {
+            client_config.encryption(tiberius::EncryptionLevel::Required);
+        }
         client_config.trust_cert();
 
         let mut client = SqlServerClient::new_with_config(client_config).await?;
@@ -99,29 +101,31 @@ impl SqlServerExternalTable {
         let mut column_descs = vec![];
         let mut pk_names = vec![];
         {
-            // With `WHERE 1 = 0`, we only fetch the metadata (column names and types) of the table
             let sql = Query::new(format!(
-                "SELECT * FROM {} WHERE 1 = 0",
-                SqlServerExternalTableReader::get_normalized_table_name(&SchemaTableName {
-                    schema_name: config.schema.clone(),
-                    table_name: config.table.clone(),
-                }),
+                "SELECT
+                    COLUMN_NAME,
+                    DATA_TYPE
+                FROM
+                    INFORMATION_SCHEMA.COLUMNS
+                WHERE
+                    TABLE_SCHEMA = '{}'
+                    AND TABLE_NAME = '{}'",
+                config.schema.clone(),
+                config.table.clone(),
             ));
 
             let mut stream = sql.query(&mut client.inner_client).await?;
             while let Some(item) = stream.try_next().await? {
                 match item {
-                    QueryItem::Metadata(meta) => {
-                        for col in meta.columns() {
-                            column_descs.push(ColumnDesc::named(
-                                col.name(),
-                                ColumnId::placeholder(),
-                                type_to_rw_type(&col.column_type())?,
-                            ));
-                        }
-                    }
+                    QueryItem::Metadata(_) => {}
                     QueryItem::Row(row) => {
-                        unreachable!("Unexpected row: {:?}, `SELECT * FROM {} WHERE 1 = 0` should never return rows", row, config.table.clone());
+                        let col_name: &str = row.try_get(0)?.unwrap();
+                        let col_type: &str = row.try_get(1)?.unwrap();
+                        column_descs.push(ColumnDesc::named(
+                            col_name,
+                            ColumnId::placeholder(),
+                            type_to_rw_type(col_type, col_name)?,
+                        ));
                     }
                 }
             }
@@ -169,35 +173,29 @@ impl SqlServerExternalTable {
     }
 }
 
-fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
-    let dtype = match col_type {
-        ColumnType::Bit => DataType::Boolean,
-        ColumnType::Bitn => DataType::Bytea,
-        ColumnType::Int1 => DataType::Int16,
-        ColumnType::Int2 => DataType::Int16,
-        ColumnType::Int4 => DataType::Int32,
-        ColumnType::Int8 => DataType::Int64,
-        ColumnType::Float4 => DataType::Float32,
-        ColumnType::Float8 => DataType::Float64,
-        ColumnType::Decimaln | ColumnType::Numericn => DataType::Decimal,
-        ColumnType::Daten => DataType::Date,
-        ColumnType::Timen => DataType::Time,
-        ColumnType::Datetime
-        | ColumnType::Datetimen
-        | ColumnType::Datetime2
-        | ColumnType::Datetime4 => DataType::Timestamp,
-        ColumnType::DatetimeOffsetn => DataType::Timestamptz,
-        ColumnType::NVarchar | ColumnType::NChar | ColumnType::NText | ColumnType::Text => {
-            DataType::Varchar
-        }
-        // Null, Guid, Image, Money, Money4, Intn, Bitn, Floatn, Xml, Udt, SSVariant, BigVarBin, BigVarChar, BigBinary, BigChar
+fn type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
+    let dtype = match col_type.to_lowercase().as_str() {
+        "bit" => DataType::Boolean,
+        "binary" | "varbinary" => DataType::Bytea,
+        "tinyint" | "smallint" => DataType::Int16,
+        "integer" | "int" => DataType::Int32,
+        "bigint" => DataType::Int64,
+        "real" => DataType::Float32,
+        "float" => DataType::Float64,
+        "decimal" | "numeric" => DataType::Decimal,
+        "date" => DataType::Date,
+        "time" => DataType::Time,
+        "datetime" | "datetime2" | "smalldatetime" => DataType::Timestamp,
+        "datetimeoffset" => DataType::Timestamptz,
+        "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml"
+        | "uniqueidentifier" => DataType::Varchar,
         mssql_type => {
-            // NOTES: user-defined enum type is classified as `Unknown`
-            tracing::warn!(
-                "Unknown Sql Server data type: {:?}, map to varchar",
-                mssql_type
-            );
-            DataType::Varchar
+            return Err(anyhow!(
+                "Unsupported Sql Server data type: {:?}, column name: {}",
+                mssql_type,
+                col_name
+            )
+            .into());
         }
     };
     Ok(dtype)
@@ -286,8 +284,10 @@ impl SqlServerExternalTableReader {
             &config.username,
             &config.password,
         ));
-        // TODO(kexiang): add ssl support
         // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
+        if config.encrypt == "true" {
+            client_config.encryption(tiberius::EncryptionLevel::Required);
+        }
         client_config.trust_cert();
 
         let client = SqlServerClient::new_with_config(client_config).await?;
@@ -335,7 +335,7 @@ impl SqlServerExternalTableReader {
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
             format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {} OFFSET 0 ROWS FETCH LIMIT {limit} ROWS ONLY",
+                "SELECT {} FROM {} WHERE {} ORDER BY {} OFFSET 0 ROWS FETCH NEXT {limit} ROWS ONLY",
                 self.field_names,
                 Self::get_normalized_table_name(&table_name),
                 filter_expr,

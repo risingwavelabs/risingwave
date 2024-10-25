@@ -319,7 +319,7 @@ impl TestCase {
         let object_to_create = if is_table { "TABLE" } else { "SOURCE" };
         format!(
             r#"CREATE {} {}
-    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
     FORMAT {} ENCODE {} (message = '.test.TestRecord', schema.location = 'file://"#,
             object_to_create, connector_name, connector_format, connector_encode
         )
@@ -568,13 +568,13 @@ impl TestCase {
                 Statement::CreateSchema {
                     schema_name,
                     if_not_exists,
-                    user_specified,
+                    owner,
                 } => {
                     create_schema::handle_create_schema(
                         handler_args,
                         schema_name,
                         if_not_exists,
-                        user_specified,
+                        owner,
                     )
                     .await?;
                 }

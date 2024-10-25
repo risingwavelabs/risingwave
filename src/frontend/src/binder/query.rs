@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{
-    Cte, CteInner, Expr, Fetch, ObjectName, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
+    Cte, CteInner, Expr, Fetch, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
 };
 use thiserror_ext::AsReport;
 
@@ -46,7 +46,7 @@ pub struct BoundQuery {
 
 impl BoundQuery {
     /// The schema returned by this [`BoundQuery`].
-    pub fn schema(&self) -> &Schema {
+    pub fn schema(&self) -> std::borrow::Cow<'_, Schema> {
         self.body.schema()
     }
 
@@ -295,6 +295,7 @@ impl Binder {
                         SetExpr::SetOperation {
                             op: SetOperator::Union,
                             all,
+                            corresponding,
                             left,
                             right,
                         },
@@ -306,6 +307,12 @@ impl Binder {
                         )
                         .into());
                     };
+
+                    // validated in `validate_rcte`
+                    assert!(
+                        !corresponding.is_corresponding(),
+                        "`CORRESPONDING` is not supported in recursive CTE"
+                    );
 
                     let entry = self
                         .context
@@ -343,11 +350,8 @@ impl Binder {
                     }
                     CteInner::ChangeLog(from_table_name) => {
                         self.push_context();
-                        let from_table_relation = self.bind_relation_by_name(
-                            ObjectName::from(vec![from_table_name]),
-                            None,
-                            None,
-                        )?;
+                        let from_table_relation =
+                            self.bind_relation_by_name(from_table_name.clone(), None, None)?;
                         self.pop_context()?;
                         self.context.cte_to_relation.insert(
                             table_name,
@@ -396,6 +400,7 @@ impl Binder {
         let SetExpr::SetOperation {
             op: SetOperator::Union,
             all,
+            corresponding,
             left,
             right,
         } = body
@@ -412,10 +417,18 @@ impl Binder {
             .into());
         }
 
+        if corresponding.is_corresponding() {
+            return Err(ErrorCode::BindError(
+                "`CORRESPONDING` is not supported in recursive CTE".to_string(),
+            )
+            .into());
+        }
+
         Ok((
             SetExpr::SetOperation {
                 op: SetOperator::Union,
                 all,
+                corresponding,
                 left,
                 right,
             },
@@ -468,7 +481,7 @@ impl Binder {
         self.context.cte_to_relation = new_context.cte_to_relation;
 
         Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
-        let schema = base.schema().clone();
+        let schema = base.schema().into_owned();
 
         let recursive_union = RecursiveUnion {
             all,

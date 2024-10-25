@@ -52,6 +52,7 @@ message DataType {
     JSONB = 18;
     SERIAL = 19;
     INT256 = 20;
+    MAP = 21;
   }
   TypeName type_name = 1;
   // Data length for char.
@@ -102,6 +103,7 @@ enum ArrayType {
   JSONB = 16;
   SERIAL = 17;
   INT256 = 18;
+  MAP = 20;
 }
 
 message Array {

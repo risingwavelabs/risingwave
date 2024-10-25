@@ -161,7 +161,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 }
             };
             if !inited {
-                bail!("failed to start cdc connector");
+                bail!("failed to start cdc connector.\nHINT: increase `cdc_source_wait_streaming_start_timeout` session variable to a large value and retry.");
             }
         }
         tracing::info!(?source_id, "cdc connector started");
@@ -209,19 +209,13 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
 impl<T: CdcSourceTypeTrait> CdcSplitReader<T> {
     #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
     async fn into_data_stream(self) {
-        let source_type = T::source_type();
         let mut rx = self.rx;
         let source_id = self.source_id.to_string();
-        let metrics = self.source_ctx.metrics.clone();
 
         while let Some(result) = rx.recv().await {
             match result {
                 Ok(GetEventStreamResponse { events, .. }) => {
                     tracing::trace!("receive {} cdc events ", events.len());
-                    metrics
-                        .connector_source_rows_received
-                        .with_guarded_label_values(&[source_type.as_str_name(), &source_id])
-                        .inc_by(events.len() as u64);
                     let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
                     yield msgs;
                 }

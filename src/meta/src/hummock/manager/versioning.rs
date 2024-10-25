@@ -16,7 +16,6 @@ use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_compaction_group_ids, get_table_compaction_group_id_mapping, BranchedSstInfo,
 };
@@ -25,14 +24,11 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
-    HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
-use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
-};
+use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats, TableStats};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::check_cg_write_limit;
@@ -40,7 +36,6 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::DeleteObjectTracker;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{trigger_write_stop_stats, LocalTableMetrics};
 use crate::hummock::model::CompactionGroup;
@@ -76,7 +71,7 @@ impl ContextInfo {
         for id in self
             .pinned_versions
             .values()
-            .map(|v| v.min_pinned_id)
+            .map(|v| HummockVersionId::new(v.min_pinned_id))
             .chain(self.version_safe_points.iter().cloned())
         {
             min_pinned_version_id = cmp::min(id, min_pinned_version_id);
@@ -86,22 +81,6 @@ impl ContextInfo {
 }
 
 impl Versioning {
-    /// Marks all objects <= `min_pinned_version_id` for deletion.
-    pub(super) fn mark_objects_for_deletion(
-        &self,
-        context_info: &ContextInfo,
-        delete_object_tracker: &DeleteObjectTracker,
-    ) {
-        let min_pinned_version_id = context_info.min_pinned_version_id();
-        delete_object_tracker.add(
-            self.checkpoint
-                .stale_objects
-                .iter()
-                .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
-                .flat_map(|(_, stale_objects)| stale_objects.id.iter().cloned()),
-        );
-    }
-
     pub(super) fn mark_next_time_travel_version_snapshot(&mut self) {
         self.time_travel_snapshot_interval_counter = u64::MAX;
     }
@@ -118,16 +97,6 @@ impl HummockManager {
             .collect_vec()
     }
 
-    pub async fn list_pinned_snapshot(&self) -> Vec<HummockPinnedSnapshot> {
-        self.context_info
-            .read()
-            .await
-            .pinned_snapshots
-            .values()
-            .cloned()
-            .collect_vec()
-    }
-
     pub async fn list_workers(
         &self,
         context_ids: &[HummockContextId],
@@ -136,7 +105,7 @@ impl HummockManager {
         for context_id in context_ids {
             if let Some(worker_node) = self
                 .metadata_manager()
-                .get_worker_by_id(*context_id)
+                .get_worker_by_id(*context_id as _)
                 .await?
             {
                 workers.insert(*context_id, worker_node);
@@ -149,16 +118,17 @@ impl HummockManager {
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
     ///
     /// Note: this method can hurt performance because it will clone a large object.
+    #[cfg(any(test, feature = "test"))]
     pub async fn get_current_version(&self) -> HummockVersion {
-        self.versioning.read().await.current_version.clone()
+        self.on_current_version(|version| version.clone()).await
     }
 
-    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
-        self.versioning
-            .read()
-            .await
-            .current_version
-            .max_committed_epoch
+    pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
+        f(&self.versioning.read().await.current_version)
+    }
+
+    pub async fn get_version_id(&self) -> HummockVersionId {
+        self.on_current_version(|version| version.id).await
     }
 
     /// Gets the mapping from table id to compaction group id
@@ -172,16 +142,14 @@ impl HummockManager {
     #[cfg_attr(coverage, coverage(off))]
     pub async fn list_version_deltas(
         &self,
-        start_id: u64,
+        start_id: HummockVersionId,
         num_limit: u32,
-        committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
         let versioning = self.versioning.read().await;
         let version_deltas = versioning
             .hummock_version_deltas
             .range(start_id..)
             .map(|(_id, delta)| delta)
-            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
             .take(num_limit as _)
             .cloned()
             .collect();
@@ -278,46 +246,6 @@ impl HummockManager {
         }
         Ok(())
     }
-
-    pub fn latest_snapshot(&self) -> HummockSnapshot {
-        let snapshot = self.latest_snapshot.load();
-        HummockSnapshot::clone(&snapshot)
-    }
-
-    /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
-    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> HummockSnapshot {
-        // We only update `max_current_epoch`!
-        let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
-            committed_epoch: snapshot.committed_epoch,
-            current_epoch: max_current_epoch,
-        });
-        assert!(prev_snapshot.current_epoch < max_current_epoch);
-
-        tracing::trace!("new current epoch {}", max_current_epoch);
-        HummockSnapshot {
-            committed_epoch: prev_snapshot.committed_epoch,
-            current_epoch: max_current_epoch,
-        }
-    }
-
-    pub async fn list_change_log_epochs(
-        &self,
-        table_id: u32,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Vec<u64> {
-        let versioning = self.versioning.read().await;
-        if let Some(table_change_log) = versioning
-            .current_version
-            .table_change_log
-            .get(&TableId::new(table_id))
-        {
-            let table_change_log = table_change_log.clone();
-            table_change_log.get_epochs(min_epoch, max_count as usize)
-        } else {
-            vec![]
-        }
-    }
 }
 
 /// Calculates write limits for `target_groups`.
@@ -363,7 +291,7 @@ pub(super) fn calc_new_write_limits(
 /// Note that the result is approximate value. See `estimate_table_stats`.
 fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
     let mut stats = HummockVersionStats {
-        hummock_version_id: version.id,
+        hummock_version_id: version.id.to_u64(),
         table_stats: Default::default(),
     };
     for level in version.get_combined_levels() {
@@ -431,11 +359,13 @@ mod tests {
                 min_pinned_id: 10,
             },
         );
-        assert_eq!(context_info.min_pinned_version_id(), 10);
-        context_info.version_safe_points.push(5);
-        assert_eq!(context_info.min_pinned_version_id(), 5);
+        assert_eq!(context_info.min_pinned_version_id().to_u64(), 10);
+        context_info
+            .version_safe_points
+            .push(HummockVersionId::new(5));
+        assert_eq!(context_info.min_pinned_version_id().to_u64(), 5);
         context_info.version_safe_points.clear();
-        assert_eq!(context_info.min_pinned_version_id(), 10);
+        assert_eq!(context_info.min_pinned_version_id().to_u64(), 10);
         context_info.pinned_versions.clear();
         assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
     }
@@ -553,7 +483,7 @@ mod tests {
         }
 
         let mut version = HummockVersion::default();
-        version.id = 123;
+        version.id = HummockVersionId::new(123);
 
         for cg in 1..3 {
             version.levels.insert(
@@ -571,7 +501,7 @@ mod tests {
             hummock_version_id,
             table_stats,
         } = rebuild_table_stats(&version);
-        assert_eq!(hummock_version_id, version.id);
+        assert_eq!(hummock_version_id, version.id.to_u64());
         assert_eq!(table_stats.len(), 3);
         for (tid, stats) in table_stats {
             assert_eq!(

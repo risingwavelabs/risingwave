@@ -15,7 +15,8 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::is_system_schema;
-use risingwave_pb::user::grant_privilege::Object;
+use risingwave_pb::ddl_service::alter_name_request;
+use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
@@ -58,7 +59,10 @@ pub async fn handle_rename_table(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_table_name(table_id.table_id, &new_table_name)
+        .alter_name(
+            alter_name_request::Object::TableId(table_id.table_id),
+            &new_table_name,
+        )
         .await?;
 
     let stmt_type = match table_type {
@@ -94,7 +98,10 @@ pub async fn handle_rename_index(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_index_name(index_id.index_id, &new_index_name)
+        .alter_name(
+            alter_name_request::Object::IndexId(index_id.index_id),
+            &new_index_name,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_INDEX))
@@ -124,7 +131,7 @@ pub async fn handle_rename_view(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_view_name(view_id, &new_view_name)
+        .alter_name(alter_name_request::Object::ViewId(view_id), &new_view_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_VIEW))
@@ -154,7 +161,10 @@ pub async fn handle_rename_sink(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_sink_name(sink_id.sink_id, &new_sink_name)
+        .alter_name(
+            alter_name_request::Object::SinkId(sink_id.sink_id),
+            &new_sink_name,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SINK))
@@ -185,7 +195,10 @@ pub async fn handle_rename_subscription(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_subscription_name(subscription_id.subscription_id, &new_subscription_name)
+        .alter_name(
+            alter_name_request::Object::SubscriptionId(subscription_id.subscription_id),
+            &new_subscription_name,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SUBSCRIPTION))
@@ -225,7 +238,10 @@ pub async fn handle_rename_source(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_source_name(source_id, &new_source_name)
+        .alter_name(
+            alter_name_request::Object::SourceId(source_id),
+            &new_source_name,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))
@@ -260,7 +276,9 @@ pub async fn handle_rename_schema(
 
         // To rename a schema you must also have the CREATE privilege for the database.
         if let Some(user) = user_reader.get_user_by_name(session.user_name()) {
-            if !user.is_super && !user.check_privilege(&Object::DatabaseId(db_id), AclMode::Create)
+            if !user.is_super
+                && !user
+                    .check_privilege(&grant_privilege::Object::DatabaseId(db_id), AclMode::Create)
             {
                 return Err(ErrorCode::PermissionDenied(
                     "Do not have create privilege on the current database".to_string(),
@@ -276,7 +294,10 @@ pub async fn handle_rename_schema(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_schema_name(schema_id, &new_schema_name)
+        .alter_name(
+            alter_name_request::Object::SchemaId(schema_id),
+            &new_schema_name,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SCHEMA))
@@ -324,7 +345,10 @@ pub async fn handle_rename_database(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_database_name(database_id, &new_database_name)
+        .alter_name(
+            alter_name_request::Object::DatabaseId(database_id),
+            &new_database_name,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_DATABASE))

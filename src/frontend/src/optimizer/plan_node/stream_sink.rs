@@ -26,6 +26,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
@@ -45,7 +46,7 @@ use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProjec
 use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::plan_has_backfill_leaf_nodes;
+use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -211,7 +212,7 @@ impl StreamSink {
         partition_info: Option<PartitionComputeInfo>,
     ) -> Result<Self> {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
-        let (input, sink) = Self::derive_sink_desc(
+        let (input, mut sink) = Self::derive_sink_desc(
             input,
             user_distributed_by,
             name,
@@ -240,8 +241,11 @@ impl StreamSink {
                         if connector == TABLE_SINK && sink.target_table.is_none() {
                             unsupported_sink(TABLE_SINK)
                         } else {
+                            SinkType::set_default_commit_checkpoint_interval(
+                                &mut sink,
+                                &input.ctx().session_ctx().config().sink_decouple(),
+                            )?;
                             SinkType::is_sink_decouple(
-                                &sink,
                                 &input.ctx().session_ctx().config().sink_decouple(),
                             )
                         }
@@ -255,7 +259,12 @@ impl StreamSink {
                 );
             }
         };
-
+        // For file sink, it must have sink_decouple turned on.
+        if !sink_decouple && sink.is_file_sink() {
+            return Err(
+                SinkError::Config(anyhow!("File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
+            );
+        }
         let log_store_type = if sink_decouple {
             SinkLogStoreType::KvLogStore
         } else {
@@ -376,7 +385,7 @@ impl StreamSink {
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let create_type = if input.ctx().session_ctx().config().background_ddl()
-            && plan_has_backfill_leaf_nodes(&input)
+            && plan_can_use_background_ddl(&input)
         {
             CreateType::Background
         } else {

@@ -683,7 +683,7 @@ fn derive_alias(expr: &Expr) -> Option<String> {
         Expr::Value(Value::Interval { .. }) => Some("interval".to_string()),
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),
-        Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
+        Expr::Index { obj, index: _ } => derive_alias(&obj),
         _ => None,
     }
 }
@@ -714,8 +714,8 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Jsonb => "jsonb".to_string(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
-        AstDataType::Struct(_) => {
-            // Note: Postgres doesn't have anonymous structs
+        AstDataType::Struct(_) | AstDataType::Map(_) => {
+            // It doesn't bother to derive aliases for these types.
             return None;
         }
     };

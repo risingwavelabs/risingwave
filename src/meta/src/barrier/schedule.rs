@@ -21,13 +21,13 @@ use anyhow::{anyhow, Context};
 use assert_matches::assert_matches;
 use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::meta::PausedReason;
 use tokio::select;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
 
-use super::notifier::{BarrierInfo, Notifier};
+use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
 use crate::model::ActorId;
@@ -183,6 +183,7 @@ impl BarrierScheduler {
     /// Try to cancel scheduled cmd for create streaming job, return true if cancelled.
     pub fn try_cancel_scheduled_create(&self, table_id: TableId) -> bool {
         let queue = &mut self.inner.queue.lock();
+
         if let Some(idx) = queue.queue.iter().position(|scheduled| {
             if let Command::CreateStreamingJob { info, .. } = &scheduled.command
                 && info.table_fragments.table_id() == table_id
@@ -250,7 +251,7 @@ impl BarrierScheduler {
     /// Returns the barrier info of each command.
     ///
     /// TODO: atomicity of multiple commands is not guaranteed.
-    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<Vec<BarrierInfo>> {
+    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
         let mut contexts = Vec::with_capacity(commands.len());
         let mut scheduleds = Vec::with_capacity(commands.len());
 
@@ -271,13 +272,13 @@ impl BarrierScheduler {
 
         self.push(scheduleds)?;
 
-        let mut infos = Vec::with_capacity(contexts.len());
-
         for (injected_rx, collect_rx) in contexts {
             // Wait for this command to be injected, and record the result.
             tracing::trace!("waiting for injected_rx");
-            let info = injected_rx.await.ok().context("failed to inject barrier")?;
-            infos.push(info);
+            injected_rx
+                .await
+                .ok()
+                .context("failed to inject barrier")??;
 
             tracing::trace!("waiting for collect_rx");
             // Throw the error if it occurs when collecting this barrier.
@@ -287,41 +288,34 @@ impl BarrierScheduler {
                 .context("failed to collect barrier")??;
         }
 
-        Ok(infos)
+        Ok(())
     }
 
     /// Run a command with a `Pause` command before and `Resume` command after it. Used for
     /// configuration change.
     ///
     /// Returns the barrier info of the actual command.
-    pub async fn run_config_change_command_with_pause(
-        &self,
-        command: Command,
-    ) -> MetaResult<BarrierInfo> {
+    pub async fn run_config_change_command_with_pause(&self, command: Command) -> MetaResult<()> {
         self.run_multiple_commands(vec![
             Command::pause(PausedReason::ConfigChange),
             command,
             Command::resume(PausedReason::ConfigChange),
         ])
         .await
-        .map(|i| i[1])
     }
 
     /// Run a command and return when it's completely finished.
     ///
     /// Returns the barrier info of the actual command.
-    pub async fn run_command(&self, command: Command) -> MetaResult<BarrierInfo> {
+    pub async fn run_command(&self, command: Command) -> MetaResult<()> {
         tracing::trace!("run_command: {:?}", command);
-        let ret = self
-            .run_multiple_commands(vec![command])
-            .await
-            .map(|i| i[0]);
+        let ret = self.run_multiple_commands(vec![command]).await;
         tracing::trace!("run_command finished");
         ret
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self, checkpoint: bool) -> MetaResult<HummockSnapshot> {
+    pub async fn flush(&self, checkpoint: bool) -> MetaResult<HummockVersionId> {
         let start = Instant::now();
 
         tracing::debug!("start barrier flush");
@@ -330,8 +324,8 @@ impl BarrierScheduler {
         let elapsed = Instant::now().duration_since(start);
         tracing::debug!("barrier flushed in {:?}", elapsed);
 
-        let snapshot = self.hummock_manager.latest_snapshot();
-        Ok(snapshot)
+        let version_id = self.hummock_manager.get_version_id().await;
+        Ok(version_id)
     }
 }
 

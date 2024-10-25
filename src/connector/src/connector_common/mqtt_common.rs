@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use rumqttc::tokio_rustls::rustls;
+use rumqttc::v5::mqttbytes::v5::ConnectProperties;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{AsyncClient, EventLoop, MqttOptions};
 use serde_derive::Deserialize;
@@ -20,7 +21,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
 use with_options::WithOptions;
 
-use crate::connector_common::common::{load_certs, load_private_key};
+use super::common::{load_certs, load_private_key};
 use crate::deserialize_bool_from_string;
 use crate::error::ConnectorResult;
 
@@ -71,6 +72,10 @@ pub struct MqttCommon {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub inflight_messages: Option<usize>,
 
+    /// The max size of messages received by the MQTT client
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_packet_size: Option<u32>,
+
     /// Path to CA certificate file for verifying the broker's key.
     #[serde(rename = "tls.client_key")]
     pub ca: Option<String>,
@@ -110,6 +115,10 @@ impl MqttCommon {
         options.set_keep_alive(std::time::Duration::from_secs(10));
 
         options.set_clean_start(self.clean_start);
+
+        let mut connect_properties = ConnectProperties::new();
+        connect_properties.max_packet_size = self.max_packet_size;
+        options.set_connect_properties(connect_properties);
 
         if ssl {
             let tls_config = self.get_tls_config()?;

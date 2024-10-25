@@ -7,7 +7,6 @@ source ci/scripts/common.sh
 
 # prepare environment
 export CONNECTOR_LIBS_PATH="./connector-node/libs"
-
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -62,9 +61,11 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/blackhole_sink.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/types.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/sink_into_table/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/file_sink.slt'
 sleep 1
 
 echo "--- testing remote sinks"
+
 # check sink destination postgres
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
@@ -123,8 +124,8 @@ risedev ci-kill
 echo "--- e2e, ci-1cn-1fe, nexmark endless"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe
-sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless_mvs/*.slt'
-sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless_sinks/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/nexmark_endless_mvs/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/nexmark_endless_sinks/*.slt'
 
 echo "--- Kill cluster"
 risedev ci-kill

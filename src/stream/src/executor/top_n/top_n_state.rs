@@ -27,6 +27,7 @@ use super::top_n_cache::CacheKey;
 use super::{serialize_pk_to_cache_key, CacheKeySerde, GroupKey, TopNCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::top_n::top_n_cache::Cache;
 
 /// * For TopN, the storage key is: `[ order_by + remaining columns of pk ]`
 /// * For group TopN, the storage key is: `[ group_key + order_by + remaining columns of pk ]`
@@ -144,8 +145,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         start_key: Option<CacheKey>,
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
-        let cache = &mut topn_cache.high;
+        let high_cache = &mut topn_cache.high;
+        assert!(high_cache.is_empty());
 
+        // TODO(rc): iterate from `start_key`
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
@@ -172,13 +175,13 @@ impl<S: StateStore> ManagedTopNState<S> {
             {
                 continue;
             }
-            cache.insert(topn_row.cache_key, (&topn_row.row).into());
-            if cache.len() == cache_size_limit {
+            high_cache.insert(topn_row.cache_key, (&topn_row.row).into());
+            if high_cache.len() == cache_size_limit {
                 break;
             }
         }
 
-        if WITH_TIES && topn_cache.is_high_cache_full() {
+        if WITH_TIES && topn_cache.high_is_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
                 group_row_count += 1;
@@ -207,9 +210,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         group_key: Option<impl GroupKey>,
         topn_cache: &mut TopNCache<WITH_TIES>,
     ) -> StreamExecutorResult<()> {
-        assert!(topn_cache.low.is_empty());
+        assert!(topn_cache.low.as_ref().map(Cache::is_empty).unwrap_or(true));
         assert!(topn_cache.middle.is_empty());
         assert!(topn_cache.high.is_empty());
+
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
@@ -226,14 +230,12 @@ impl<S: StateStore> ManagedTopNState<S> {
 
         let mut group_row_count = 0;
 
-        if topn_cache.offset > 0 {
+        if let Some(low) = &mut topn_cache.low {
             while let Some(item) = state_table_iter.next().await {
                 group_row_count += 1;
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
-                topn_cache
-                    .low
-                    .insert(topn_row.cache_key, (&topn_row.row).into());
-                if topn_cache.low.len() == topn_cache.offset {
+                low.insert(topn_row.cache_key, (&topn_row.row).into());
+                if low.len() == topn_cache.offset {
                     break;
                 }
             }
@@ -250,7 +252,7 @@ impl<S: StateStore> ManagedTopNState<S> {
                 break;
             }
         }
-        if WITH_TIES && topn_cache.is_middle_cache_full() {
+        if WITH_TIES && topn_cache.middle_is_full() {
             let middle_last_sort_key = topn_cache.middle.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
                 group_row_count += 1;
@@ -269,10 +271,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         }
 
         assert!(
-            topn_cache.high_capacity > 0,
+            topn_cache.high_cache_capacity > 0,
             "topn cache high_capacity should always > 0"
         );
-        while !topn_cache.is_high_cache_full()
+        while !topn_cache.high_is_full()
             && let Some(item) = state_table_iter.next().await
         {
             group_row_count += 1;
@@ -281,7 +283,7 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .high
                 .insert(topn_row.cache_key, (&topn_row.row).into());
         }
-        if WITH_TIES && topn_cache.is_high_cache_full() {
+        if WITH_TIES && topn_cache.high_is_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
                 group_row_count += 1;

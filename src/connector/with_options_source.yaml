@@ -1,5 +1,33 @@
 # THIS FILE IS AUTO_GENERATED. DO NOT EDIT
+# UPDATE WITH: ./risedev generate-with-options
 
+AzblobProperties:
+  fields:
+  - name: azblob.container_name
+    field_type: String
+    required: true
+  - name: azblob.credentials.account_name
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.credentials.account_key
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.endpoint_url
+    field_type: String
+    required: true
+  - name: match_pattern
+    field_type: String
+    required: false
+    default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
 DatagenProperties:
   fields:
   - name: datagen.split.num
@@ -8,12 +36,23 @@ DatagenProperties:
     required: false
   - name: datagen.rows.per.second
     field_type: u64
-    comments: default_rows_per_second =10  when the split_num = 3 and default_rows_per_second =10  there will be three readers that generate respectively 4,3,3 message per second
+    comments: |-
+      default_rows_per_second =10
+      when the split_num = 3 and default_rows_per_second =10
+      there will be three readers that generate respectively 4,3,3 message per second
     required: false
     default: '10'
   - name: fields
     field_type: HashMap<String,String>
-    comments: 'Some connector options of the datagen source''s fields  for example: create datagen source with column v1 int, v2 float  ''fields.v1.kind''=''sequence'',  ''fields.v1.start''=''1'',  ''fields.v1.end''=''1000'',  ''fields.v2.kind''=''random'',  datagen will create v1 by self-incrementing from 1 to 1000  datagen will create v2 by randomly generating from default_min to default_max'
+    comments: |-
+      Some connector options of the datagen source's fields
+      for example: create datagen source with column v1 int, v2 float
+      'fields.v1.kind'='sequence',
+      'fields.v1.start'='1',
+      'fields.v1.end'='1000',
+      'fields.v2.kind'='random',
+      datagen will create v1 by self-incrementing from 1 to 1000
+      datagen will create v2 by randomly generating from default_min to default_max
     required: false
 GcsProperties:
   fields:
@@ -33,6 +72,9 @@ GcsProperties:
     field_type: String
     required: false
     default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -56,19 +98,29 @@ IcebergProperties:
     required: true
   - name: warehouse.path
     field_type: String
+    comments: Path of iceberg warehouse, only applicable in storage catalog.
     required: true
   - name: catalog.name
     field_type: String
+    comments: |-
+      Catalog name, can be omitted for storage catalog, but
+      must be set for other catalogs.
     required: false
   - name: catalog.uri
     field_type: String
+    comments: URI of iceberg catalog, only applicable in rest catalog.
     required: false
   - name: database.name
     field_type: String
     required: false
   - name: table.name
     field_type: String
+    comments: Full name of table, must include schema name.
     required: true
+  - name: s3.path.style.access
+    field_type: bool
+    required: false
+    default: Default::default
   - name: catalog.jdbc.user
     field_type: String
     required: false
@@ -79,13 +131,21 @@ KafkaProperties:
   fields:
   - name: bytes.per.second
     field_type: String
-    comments: This parameter is not intended to be exposed to users.  This parameter specifies only for one parallelism. The parallelism of kafka source  is equal to the parallelism passed into compute nodes. So users need to calculate  how many bytes will be consumed in total across all the parallelism by themselves.
+    comments: |-
+      This parameter is not intended to be exposed to users.
+      This parameter specifies only for one parallelism. The parallelism of kafka source
+      is equal to the parallelism passed into compute nodes. So users need to calculate
+      how many bytes will be consumed in total across all the parallelism by themselves.
     required: false
     alias:
     - kafka.bytes.per.second
   - name: max.num.messages
     field_type: String
-    comments: This parameter is not intended to be exposed to users.  This parameter specifies only for one parallelism. The parallelism of kafka source  is equal to the parallelism passed into compute nodes. So users need to calculate  how many messages will be consumed in total across all the parallelism by themselves.
+    comments: |-
+      This parameter is not intended to be exposed to users.
+      This parameter specifies only for one parallelism. The parallelism of kafka source
+      is equal to the parallelism passed into compute nodes. So users need to calculate
+      how many messages will be consumed in total across all the parallelism by themselves.
     required: false
     alias:
     - kafka.max.num.messages
@@ -100,9 +160,27 @@ KafkaProperties:
     alias:
     - kafka.time.offset
     - scan.startup.timestamp_millis
+  - name: group.id.prefix
+    field_type: String
+    comments: |-
+      Specify a custom consumer group id prefix for the source.
+      Defaults to `rw-consumer`.
+
+      Notes:
+      - Each job (materialized view) will have a separated consumer group and
+      contains a generated suffix in the group id.
+      The consumer group will be `{group_id_prefix}-{fragment_id}`.
+      - The consumer group is solely for monintoring progress in some external
+      Kafka tools, and for authorization. RisingWave does not rely on committed
+      offsets, and does not join the consumer group. It just reports offsets
+      to the group.
+    required: false
   - name: upsert
     field_type: String
-    comments: 'This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which  combine both key and value fields of the Kafka message.  TODO: Currently, `Option<bool>` can not be parsed here.'
+    comments: |-
+      This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which
+      combine both key and value fields of the Kafka message.
+      TODO: Currently, `Option<bool>` can not be parsed here.
     required: false
   - name: properties.bootstrap.server
     field_type: String
@@ -120,7 +198,9 @@ KafkaProperties:
     default: 'Duration :: from_secs (5)'
   - name: properties.security.protocol
     field_type: String
-    comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    comments: |-
+      Security protocol used for RisingWave to communicate with Kafka brokers. Could be
+      PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
     required: false
   - name: properties.ssl.endpoint.identification.algorithm
     field_type: String
@@ -129,13 +209,25 @@ KafkaProperties:
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false
+  - name: properties.ssl.ca.pem
+    field_type: String
+    comments: CA certificate string (PEM format) for verifying the broker's key.
+    required: false
   - name: properties.ssl.certificate.location
     field_type: String
     comments: Path to client's certificate file (PEM).
     required: false
+  - name: properties.ssl.certificate.pem
+    field_type: String
+    comments: Client's public key string (PEM format) used for authentication.
+    required: false
   - name: properties.ssl.key.location
     field_type: String
     comments: Path to client's private key file (PEM).
+    required: false
+  - name: properties.ssl.key.pem
+    field_type: String
+    comments: Client's private key string (PEM format) used for authentication.
     required: false
   - name: properties.ssl.key.password
     field_type: String
@@ -179,11 +271,19 @@ KafkaProperties:
     required: false
   - name: properties.message.max.bytes
     field_type: usize
-    comments: Maximum Kafka protocol request message size. Due to differing framing overhead between  protocol versions the producer is unable to reliably enforce a strict max message limit at  produce time and may exceed the maximum size by one message in protocol ProduceRequests,  the broker will enforce the the topic's max.message.bytes limit
+    comments: |-
+      Maximum Kafka protocol request message size. Due to differing framing overhead between
+      protocol versions the producer is unable to reliably enforce a strict max message limit at
+      produce time and may exceed the maximum size by one message in protocol ProduceRequests,
+      the broker will enforce the the topic's max.message.bytes limit
     required: false
   - name: properties.receive.message.max.bytes
     field_type: usize
-    comments: Maximum Kafka protocol response message size. This serves as a safety precaution to avoid  memory exhaustion in case of protocol hickups. This value must be at least fetch.max.bytes  + 512 to allow for protocol overhead; the value is adjusted automatically unless the  configuration property is explicitly set.
+    comments: |-
+      Maximum Kafka protocol response message size. This serves as a safety precaution to avoid
+      memory exhaustion in case of protocol hickups. This value must be at least fetch.max.bytes
+      + 512 to allow for protocol overhead; the value is adjusted automatically unless the
+      configuration property is explicitly set.
     required: false
   - name: properties.statistics.interval.ms
     field_type: usize
@@ -197,26 +297,48 @@ KafkaProperties:
     required: false
   - name: properties.queued.min.messages
     field_type: usize
-    comments: Minimum number of messages per topic+partition librdkafka tries to maintain in the local  consumer queue.
+    comments: |-
+      Minimum number of messages per topic+partition librdkafka tries to maintain in the local
+      consumer queue.
     required: false
   - name: properties.queued.max.messages.kbytes
     field_type: usize
     required: false
   - name: properties.fetch.wait.max.ms
     field_type: usize
-    comments: Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of  messages.
+    comments: |-
+      Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of
+      messages.
     required: false
   - name: properties.fetch.queue.backoff.ms
     field_type: usize
-    comments: How long to postpone the next fetch request for a topic+partition in case the current fetch  queue thresholds (`queued.min.messages` or `queued.max.messages.kbytes`) have been  exceeded. This property may need to be decreased if the queue thresholds are set low  and the application is experiencing long (~1s) delays between messages. Low values may  increase CPU utilization.
+    comments: |-
+      How long to postpone the next fetch request for a topic+partition in case the current fetch
+      queue thresholds (`queued.min.messages` or `queued.max.messages.kbytes`) have been
+      exceeded. This property may need to be decreased if the queue thresholds are set low
+      and the application is experiencing long (~1s) delays between messages. Low values may
+      increase CPU utilization.
     required: false
   - name: properties.fetch.max.bytes
     field_type: usize
-    comments: Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in  batches by the consumer and if the first message batch in the first non-empty partition of  the Fetch request is larger than this value, then the message batch will still be returned  to ensure the consumer can make progress. The maximum message batch size accepted by the  broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker  topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least  `message.max.bytes` (consumer config).
+    comments: |-
+      Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in
+      batches by the consumer and if the first message batch in the first non-empty partition of
+      the Fetch request is larger than this value, then the message batch will still be returned
+      to ensure the consumer can make progress. The maximum message batch size accepted by the
+      broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker
+      topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
+      `message.max.bytes` (consumer config).
     required: false
   - name: properties.enable.auto.commit
     field_type: bool
-    comments: 'Whether to automatically and periodically commit offsets in the background.   Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the  progress for monitoring. Setting this to false can avoid creating consumer groups.   default: true'
+    comments: |-
+      Whether to automatically and periodically commit offsets in the background.
+
+      Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
+      progress for monitoring. Setting this to false can avoid creating consumer groups.
+
+      default: true
     required: false
   - name: broker.rewrite.endpoints
     field_type: BTreeMap<String,String>
@@ -323,17 +445,26 @@ MongodbCommon:
     required: true
   - name: collection.name
     field_type: String
-    comments: The collection name where data should be written to or read from. For sinks, the format is  `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`  for more information.
+    comments: |-
+      The collection name where data should be written to or read from. For sinks, the format is
+      `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`
+      for more information.
     required: true
 MqttProperties:
   fields:
   - name: url
     field_type: String
-    comments: The url of the broker to connect to. e.g. tcp://localhost.  Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  to denote the protocol for establishing a connection with the broker.  `mqtts://`, `ssl://` will use the native certificates if no ca is specified
+    comments: |-
+      The url of the broker to connect to. e.g. tcp://localhost.
+      Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
+      to denote the protocol for establishing a connection with the broker.
+      `mqtts://`, `ssl://` will use the native certificates if no ca is specified
     required: true
   - name: qos
     field_type: QualityOfService
-    comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
+    comments: |-
+      The quality of service to use when publishing messages. Defaults to at_most_once.
+      Could be at_most_once, at_least_once or exactly_once
     required: false
   - name: username
     field_type: String
@@ -345,16 +476,28 @@ MqttProperties:
     required: false
   - name: client_prefix
     field_type: String
-    comments: Prefix for the mqtt client id.  The client id will be generated as `client_prefix`_`actor_id`_`(executor_id|source_id)`. Defaults to risingwave
+    comments: |-
+      Prefix for the mqtt client id.
+      The client id will be generated as `client_prefix`_`actor_id`_`(executor_id|source_id)`. Defaults to risingwave
     required: false
   - name: clean_start
     field_type: bool
-    comments: '`clean_start = true` removes all the state from queues & instructs the broker  to clean all the client state when client disconnects.   When set `false`, broker will hold the client state and performs pending  operations on the client when reconnection with same `client_id`  happens. Local queue state is also held to retransmit packets after reconnection.'
+    comments: |-
+      `clean_start = true` removes all the state from queues & instructs the broker
+      to clean all the client state when client disconnects.
+
+      When set `false`, broker will hold the client state and performs pending
+      operations on the client when reconnection with same `client_id`
+      happens. Local queue state is also held to retransmit packets after reconnection.
     required: false
     default: Default::default
   - name: inflight_messages
     field_type: usize
     comments: The maximum number of inflight messages. Defaults to 100
+    required: false
+  - name: max_packet_size
+    field_type: u32
+    comments: The max size of messages received by the MQTT client
     required: false
   - name: tls.client_key
     field_type: String
@@ -362,11 +505,15 @@ MqttProperties:
     required: false
   - name: tls.client_cert
     field_type: String
-    comments: Path to client's certificate file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the certificate content.
+    comments: |-
+      Path to client's certificate file (PEM). Required for client authentication.
+      Can be a file path under fs:// or a string with the certificate content.
     required: false
   - name: tls.client_key
     field_type: String
-    comments: Path to client's private key file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the private key content.
+    comments: |-
+      Path to client's private key file (PEM). Required for client authentication.
+      Can be a file path under fs:// or a string with the private key content.
     required: false
   - name: topic
     field_type: String
@@ -374,7 +521,9 @@ MqttProperties:
     required: true
   - name: qos
     field_type: MqttQualityOfService
-    comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
+    comments: |-
+      The quality of service to use when publishing messages. Defaults to at_most_once.
+      Could be at_most_once, at_least_once or exactly_once
     required: false
 NatsProperties:
   fields:
@@ -414,15 +563,88 @@ NatsProperties:
   - name: max_message_size
     field_type: i32
     required: false
+  - name: consumer.deliver_subject
+    field_type: String
+    required: false
+  - name: consumer.name
+    field_type: String
+    required: false
+  - name: consumer.description
+    field_type: String
+    required: false
+  - name: consumer.deliver_policy
+    field_type: String
+    required: false
+  - name: consumer.ack_policy
+    field_type: String
+    required: false
+  - name: consumer.ack_wait.sec
+    field_type: u64
+    required: false
+  - name: consumer.max_deliver
+    field_type: i64
+    required: false
+  - name: consumer.filter_subject
+    field_type: String
+    required: false
+  - name: consumer.filter_subjects
+    field_type: Vec<String>
+    required: false
+    default: Default::default
+  - name: consumer.replay_policy
+    field_type: String
+    required: false
+  - name: consumer.rate_limit
+    field_type: u64
+    required: false
+  - name: consumer.sample_frequency
+    field_type: u8
+    required: false
+  - name: consumer.max_waiting
+    field_type: i64
+    required: false
+  - name: consumer.max_ack_pending
+    field_type: i64
+    required: false
+  - name: consumer.headers_only
+    field_type: bool
+    required: false
+  - name: consumer.max_batch
+    field_type: i64
+    required: false
+  - name: consumer.max_bytes
+    field_type: i64
+    required: false
+  - name: consumer.max_expires.sec
+    field_type: u64
+    required: false
+  - name: consumer.inactive_threshold.sec
+    field_type: u64
+    required: false
+  - name: consumer.num.replicas
+    field_type: usize
+    required: false
+    alias:
+    - consumer.num_replicas
+  - name: consumer.memory_storage
+    field_type: bool
+    required: false
+  - name: consumer.backoff.sec
+    field_type: Vec<u64>
+    required: false
+    default: Default::default
   - name: scan.startup.mode
     field_type: String
     required: false
   - name: scan.startup.timestamp.millis
-    field_type: String
+    field_type: i64
     required: false
     alias:
     - scan.startup.timestamp_millis
   - name: stream
+    field_type: String
+    required: true
+  - name: consumer.durable_name
     field_type: String
     required: true
 NexmarkProperties:
@@ -629,6 +851,9 @@ OpendalS3Properties:
     comments: The following are only supported by `s3_v2` (opendal) source.
     required: false
     default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -640,6 +865,9 @@ PosixFsProperties:
     comments: The regex pattern to match files under root directory.
     required: false
     default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -648,27 +876,55 @@ PubsubProperties:
   fields:
   - name: pubsub.subscription
     field_type: String
-    comments: 'Pub/Sub subscription to consume messages from.   Note that we rely on Pub/Sub to load-balance messages between all Readers pulling from  the same subscription. So one `subscription` (i.e., one `Source`) can only used for one MV  (shared between the actors of its fragment).  Otherwise, different MVs on the same Source will both receive part of the messages.  TODO: check and enforce this on Meta.'
+    comments: |-
+      Pub/Sub subscription to consume messages from.
+
+      Note that we rely on Pub/Sub to load-balance messages between all Readers pulling from
+      the same subscription. So one `subscription` (i.e., one `Source`) can only used for one MV
+      (shared between the actors of its fragment).
+      Otherwise, different MVs on the same Source will both receive part of the messages.
+      TODO: check and enforce this on Meta.
     required: true
   - name: pubsub.emulator_host
     field_type: String
-    comments: use the connector with a pubsub emulator  <https://cloud.google.com/pubsub/docs/emulator>
+    comments: |-
+      use the connector with a pubsub emulator
+      <https://cloud.google.com/pubsub/docs/emulator>
     required: false
   - name: pubsub.credentials
     field_type: String
-    comments: '`credentials` is a JSON string containing the service account credentials.  See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).  The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).'
+    comments: |-
+      `credentials` is a JSON string containing the service account credentials.
+      See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).
+      The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     required: false
   - name: pubsub.start_offset.nanos
     field_type: String
-    comments: '`start_offset` is a numeric timestamp, ideally the publish timestamp of a message  in the subscription. If present, the connector will attempt to seek the subscription  to the timestamp and start consuming from there. Note that the seek operation is  subject to limitations around the message retention policy of the subscription. See  [Seeking to a timestamp](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for  more details.'
+    comments: |-
+      `start_offset` is a numeric timestamp, ideally the publish timestamp of a message
+      in the subscription. If present, the connector will attempt to seek the subscription
+      to the timestamp and start consuming from there. Note that the seek operation is
+      subject to limitations around the message retention policy of the subscription. See
+      [Seeking to a timestamp](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for
+      more details.
     required: false
   - name: pubsub.start_snapshot
     field_type: String
-    comments: '`start_snapshot` is a named pub/sub snapshot. If present, the connector will first seek  to the snapshot before starting consumption. Snapshots are the preferred seeking mechanism  in pub/sub because they guarantee retention of:  - All unacknowledged messages at the time of their creation.  - All messages created after their creation.  Besides retention guarantees, snapshots are also more precise than timestamp-based seeks.  See [Seeking to a snapshot](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for  more details.'
+    comments: |-
+      `start_snapshot` is a named pub/sub snapshot. If present, the connector will first seek
+      to the snapshot before starting consumption. Snapshots are the preferred seeking mechanism
+      in pub/sub because they guarantee retention of:
+      - All unacknowledged messages at the time of their creation.
+      - All messages created after their creation.
+      Besides retention guarantees, snapshots are also more precise than timestamp-based seeks.
+      See [Seeking to a snapshot](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for
+      more details.
     required: false
   - name: pubsub.parallelism
     field_type: u32
-    comments: '`parallelism` is the number of parallel consumers to run for the subscription.  TODO: use system parallelism if not set'
+    comments: |-
+      `parallelism` is the number of parallel consumers to run for the subscription.
+      TODO: use system parallelism if not set
     required: false
 PulsarProperties:
   fields:
@@ -758,6 +1014,17 @@ PulsarProperties:
     field_type: String
     required: false
     default: Default::default
+  - name: subscription.name.prefix
+    field_type: String
+    comments: |-
+      Specify a custom consumer group id prefix for the source.
+      Defaults to `rw-consumer`.
+
+      Notes:
+      - Each job (materialized view) will have multiple subscriptions and
+      contains a generated suffix in the subscription name.
+      The subscription name will be `{subscription_name_prefix}-{fragment_id}-{actor_id}`.
+    required: false
 S3Properties:
   fields:
   - name: s3.region_name

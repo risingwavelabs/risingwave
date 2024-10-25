@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker, RuntimeConfigBuilder,
+    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -570,8 +570,9 @@ pub mod verify {
         fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.actual.try_wait_epoch(epoch)
+            self.actual.try_wait_epoch(epoch, options)
         }
 
         fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
@@ -588,14 +589,6 @@ pub mod verify {
             }
         }
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.actual.seal_epoch(epoch, is_checkpoint)
-        }
-
-        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-            self.actual.clear_shared_buffer(prev_epoch)
-        }
-
         async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
             let expected = if let Some(expected) = &self.expected {
                 Some(expected.new_local(option.clone()).await)
@@ -607,10 +600,6 @@ pub mod verify {
                 expected,
                 _phantom: PhantomData::<()>,
             }
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.actual.validate_read_epoch(epoch)
         }
     }
 
@@ -656,34 +645,31 @@ impl StateStoreImpl {
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
-                .storage();
+                .storage(Engine::Large);
 
             if !opts.meta_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_device_config(
-                        DirectFsDeviceOptionsBuilder::new(&opts.meta_file_cache_dir)
+                    .with_device_options(
+                        DirectFsDeviceOptions::new(&opts.meta_file_cache_dir)
                             .with_capacity(opts.meta_file_cache_capacity_mb * MB)
-                            .with_file_size(opts.meta_file_cache_file_capacity_mb * MB)
-                            .build(),
+                            .with_file_size(opts.meta_file_cache_file_capacity_mb * MB),
                     )
-                    .with_indexer_shards(opts.meta_file_cache_indexer_shards)
-                    .with_flushers(opts.meta_file_cache_flushers)
-                    .with_reclaimers(opts.meta_file_cache_reclaimers)
-                    .with_buffer_threshold(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
-                    .with_clean_region_threshold(
-                        opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
-                    )
-                    .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                    .with_compression(
-                        opts.meta_file_cache_compression
-                            .as_str()
-                            .try_into()
-                            .map_err(HummockError::foyer_error)?,
-                    )
-                    .with_runtime_config(
-                        RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.meta.runtime")
-                            .build(),
+                    .with_recover_mode(opts.meta_file_cache_recover_mode)
+                    .with_compression(opts.meta_file_cache_compression)
+                    .with_runtime_options(opts.meta_file_cache_runtime_config.clone())
+                    .with_large_object_disk_cache_options(
+                        LargeEngineOptions::new()
+                            .with_indexer_shards(opts.meta_file_cache_indexer_shards)
+                            .with_flushers(opts.meta_file_cache_flushers)
+                            .with_reclaimers(opts.meta_file_cache_reclaimers)
+                            .with_buffer_pool_size(
+                                opts.meta_file_cache_flush_buffer_threshold_mb * MB,
+                            ) // 128 MiB
+                            .with_clean_region_threshold(
+                                opts.meta_file_cache_reclaimers
+                                    + opts.meta_file_cache_reclaimers / 2,
+                            )
+                            .with_recover_concurrency(opts.meta_file_cache_recover_concurrency),
                     );
                 if opts.meta_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
@@ -709,34 +695,31 @@ impl StateStoreImpl {
                     // FIXME(MrCroxx): Calculate block weight more accurately.
                     u64::BITS as usize * 2 / 8 + value.raw().len()
                 })
-                .storage();
+                .storage(Engine::Large);
 
             if !opts.data_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_device_config(
-                        DirectFsDeviceOptionsBuilder::new(&opts.data_file_cache_dir)
+                    .with_device_options(
+                        DirectFsDeviceOptions::new(&opts.data_file_cache_dir)
                             .with_capacity(opts.data_file_cache_capacity_mb * MB)
-                            .with_file_size(opts.data_file_cache_file_capacity_mb * MB)
-                            .build(),
+                            .with_file_size(opts.data_file_cache_file_capacity_mb * MB),
                     )
-                    .with_indexer_shards(opts.data_file_cache_indexer_shards)
-                    .with_flushers(opts.data_file_cache_flushers)
-                    .with_reclaimers(opts.data_file_cache_reclaimers)
-                    .with_buffer_threshold(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
-                    .with_clean_region_threshold(
-                        opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
-                    )
-                    .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                    .with_compression(
-                        opts.data_file_cache_compression
-                            .as_str()
-                            .try_into()
-                            .map_err(HummockError::foyer_error)?,
-                    )
-                    .with_runtime_config(
-                        RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.data.runtime")
-                            .build(),
+                    .with_recover_mode(opts.data_file_cache_recover_mode)
+                    .with_compression(opts.data_file_cache_compression)
+                    .with_runtime_options(opts.data_file_cache_runtime_config.clone())
+                    .with_large_object_disk_cache_options(
+                        LargeEngineOptions::new()
+                            .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                            .with_flushers(opts.data_file_cache_flushers)
+                            .with_reclaimers(opts.data_file_cache_reclaimers)
+                            .with_buffer_pool_size(
+                                opts.data_file_cache_flush_buffer_threshold_mb * MB,
+                            ) // 128 MiB
+                            .with_clean_region_threshold(
+                                opts.data_file_cache_reclaimers
+                                    + opts.data_file_cache_reclaimers / 2,
+                            )
+                            .with_recover_concurrency(opts.data_file_cache_recover_concurrency),
                     );
                 if opts.data_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
@@ -1164,7 +1147,11 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreExt: StaticSendSync {
-        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
+        async fn try_wait_epoch(
+            &self,
+            epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
+        ) -> StorageResult<()>;
 
         fn sync(
             &self,
@@ -1172,19 +1159,17 @@ pub mod boxed_state_store {
             table_ids: HashSet<TableId>,
         ) -> BoxFuture<'static, StorageResult<SyncResult>>;
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
-
-        async fn clear_shared_buffer(&self, prev_epoch: u64);
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
     impl<S: StateStore> DynamicDispatchedStateStoreExt for S {
-        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.try_wait_epoch(epoch).await
+        async fn try_wait_epoch(
+            &self,
+            epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
+        ) -> StorageResult<()> {
+            self.try_wait_epoch(epoch, options).await
         }
 
         fn sync(
@@ -1195,20 +1180,8 @@ pub mod boxed_state_store {
             self.sync(epoch, table_ids).boxed()
         }
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.seal_epoch(epoch, is_checkpoint);
-        }
-
-        async fn clear_shared_buffer(&self, prev_epoch: u64) {
-            self.clear_shared_buffer(prev_epoch).await
-        }
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
             Box::new(self.new_local(option).await)
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.validate_read_epoch(epoch)
         }
     }
 
@@ -1281,8 +1254,9 @@ pub mod boxed_state_store {
         fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
+            options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref().try_wait_epoch(epoch)
+            self.deref().try_wait_epoch(epoch, options)
         }
 
         fn sync(
@@ -1293,23 +1267,11 @@ pub mod boxed_state_store {
             self.deref().sync(epoch, table_ids)
         }
 
-        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-            self.deref().clear_shared_buffer(prev_epoch)
-        }
-
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.deref().seal_epoch(epoch, is_checkpoint)
-        }
-
         fn new_local(
             &self,
             option: NewLocalOptions,
         ) -> impl Future<Output = Self::Local> + Send + '_ {
             self.deref().new_local(option)
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.deref().validate_read_epoch(epoch)
         }
     }
 }

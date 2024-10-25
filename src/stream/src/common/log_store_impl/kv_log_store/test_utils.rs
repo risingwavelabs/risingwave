@@ -24,7 +24,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::catalog::PbTable;
 
 use crate::common::log_store_impl::kv_log_store::KvLogStorePkInfo;
-use crate::common::table::test_utils::gen_prost_table_with_dist_key;
+use crate::common::table::test_utils::gen_pbtable_with_dist_key;
 
 pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 pub(crate) const TEST_DATA_SIZE: usize = 10;
@@ -143,7 +143,7 @@ pub(crate) fn gen_multi_vnode_stream_chunks<const MOD_COUNT: usize>(
         .collect_vec();
     let (ops, rows) = gen_sized_test_data(base, max_count);
     for (op, row) in zip_eq(ops, rows) {
-        let vnode = VirtualNode::compute_row(&row, &[TEST_SCHEMA_DIST_KEY_INDEX]);
+        let vnode = VirtualNode::compute_row_for_test(&row, &[TEST_SCHEMA_DIST_KEY_INDEX]);
         let (ops, builder) = &mut data_builder[vnode.to_index() % MOD_COUNT];
         ops.push(op);
         assert!(builder.append_one_row(row).is_none());
@@ -164,7 +164,7 @@ pub(crate) fn gen_test_log_store_table(pk_info: &'static KvLogStorePkInfo) -> Pb
     let order_types = pk_info.pk_orderings.to_vec();
     let pk_index = (0..pk_info.pk_len()).collect();
     let read_prefix_len_hint = 0;
-    gen_prost_table_with_dist_key(
+    gen_pbtable_with_dist_key(
         TEST_TABLE_ID,
         schema,
         order_types,
@@ -177,9 +177,9 @@ pub(crate) fn gen_test_log_store_table(pk_info: &'static KvLogStorePkInfo) -> Pb
 pub(crate) fn calculate_vnode_bitmap<'a>(
     test_data: impl Iterator<Item = (Op, RowRef<'a>)>,
 ) -> Bitmap {
-    let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-    for vnode in
-        test_data.map(|(_, row)| VirtualNode::compute_row(row, &[TEST_SCHEMA_DIST_KEY_INDEX]))
+    let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+    for vnode in test_data
+        .map(|(_, row)| VirtualNode::compute_row_for_test(row, &[TEST_SCHEMA_DIST_KEY_INDEX]))
     {
         builder.set(vnode.to_index(), true);
     }
