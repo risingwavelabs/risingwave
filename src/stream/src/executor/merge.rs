@@ -201,7 +201,7 @@ impl MergeExecutor {
             shared_context,
             metrics.into(),
             barrier_rx,
-            1024,
+            100,
             schema,
         )
     }
@@ -582,7 +582,7 @@ impl SelectReceivers {
 
 /// A wrapper that buffers the `StreamChunk`s from upstream until no more ready items are available.
 /// Besides, any message other than `StreamChunk` will trigger the buffered `StreamChunk`s
-/// to be emitted immediately, as well as the message itself.
+/// to be emitted immediately along with the message itself.
 struct BufferChunks<S: Stream> {
     inner: S,
     chunk_builder: StreamChunkBuilder,
@@ -693,9 +693,8 @@ mod tests {
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
 
-    fn build_test_chunk(epoch: u64) -> StreamChunk {
-        // The number of items in `ops` is the epoch count.
-        let ops = vec![Op::Insert; epoch as usize];
+    fn build_test_chunk(size: u64) -> StreamChunk {
+        let ops = vec![Op::Insert; size as usize];
         StreamChunk::new(ops, vec![])
     }
 
@@ -820,9 +819,7 @@ mod tests {
             let handle = tokio::spawn(async move {
                 for (idx, epoch) in epochs {
                     if idx % 20 == 0 {
-                        tx.send(Message::Chunk(build_test_chunk(idx)))
-                            .await
-                            .unwrap();
+                        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
                     } else {
                         tx.send(Message::Watermark(Watermark {
                             col_idx: (idx as usize / 20 + tx_id) % CHANNEL_NUMBER,
@@ -852,14 +849,17 @@ mod tests {
         );
         let mut merger = merger.boxed().execute();
         for (idx, epoch) in epochs {
-            // expect n chunks
             if idx % 20 == 0 {
-                for _ in 0..CHANNEL_NUMBER {
+                // expect 1 or more chunks with 100 rows in total
+                let mut count = 0usize;
+                while count < 100 {
                     assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
-                        assert_eq!(chunk.ops().len() as u64, idx);
+                        count += chunk.ops().len();
                     });
                 }
+                assert_eq!(count, 100);
             } else if idx as usize / 20 >= CHANNEL_NUMBER - 1 {
+                // expect n watermarks
                 for _ in 0..CHANNEL_NUMBER {
                     assert_matches!(merger.next().await.unwrap().unwrap(), Message::Watermark(watermark) => {
                         assert_eq!(watermark.val, ScalarImpl::Int64((idx - 20 * (CHANNEL_NUMBER as u64 - 1)) as i64));
