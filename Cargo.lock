@@ -1951,12 +1951,6 @@ checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
 
 [[package]]
 name = "base64"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b41b7ea54a0c9d92199de89e20e58d49f02f8e699814ef3fdf266f6f748d15c7"
-
-[[package]]
-name = "base64"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
@@ -4512,20 +4506,21 @@ dependencies = [
 
 [[package]]
 name = "elasticsearch"
-version = "8.5.0-alpha.1"
+version = "8.15.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40d9bd57d914cc66ce878f098f63ed7b5d5b64c30644a5adb950b008f874a6c6"
+checksum = "d99147dd351d320432ec103a20804cbb593d3d08fd2eed0ee86f21a0f5137a3c"
 dependencies = [
- "base64 0.11.0",
+ "base64 0.22.0",
  "bytes",
  "dyn-clone",
  "lazy_static",
  "percent-encoding",
- "reqwest 0.11.20",
- "rustc_version 0.2.3",
+ "reqwest 0.12.4",
+ "rustc_version 0.4.0",
  "serde",
  "serde_json",
- "serde_with 1.14.0",
+ "serde_with 3.8.1",
+ "tokio",
  "url",
  "void",
 ]
@@ -10165,7 +10160,6 @@ version = "0.11.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e9ad3fe7488d7e34558a2033d45a0c90b72d97b4f80705666fea71472e2e6a1"
 dependencies = [
- "async-compression",
  "base64 0.21.7",
  "bytes",
  "encoding_rs",
@@ -10193,7 +10187,6 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-rustls 0.24.1",
- "tokio-util",
  "tower-service",
  "url",
  "wasm-bindgen",
