@@ -619,9 +619,9 @@ impl<S: Stream> std::ops::DerefMut for BufferChunks<S> {
 
 impl<S: Stream> Stream for BufferChunks<S>
 where
-    S: Stream<Item = std::result::Result<Message, StreamExecutorError>> + Unpin,
+    S: Stream<Item = DispatcherMessageStreamItem> + Unpin,
 {
-    type Item = std::result::Result<Message, StreamExecutorError>;
+    type Item = S::Item;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
@@ -632,23 +632,24 @@ where
             match self.inner.poll_next_unpin(cx) {
                 Poll::Pending => {
                     return if let Some(chunk_out) = self.chunk_builder.take() {
-                        Poll::Ready(Some(Ok(Message::Chunk(chunk_out))))
+                        Poll::Ready(Some(Ok(MessageInner::Chunk(chunk_out))))
                     } else {
                         Poll::Pending
                     }
                 }
 
                 Poll::Ready(Some(result)) => {
-                    if let Ok(Message::Chunk(chunk)) = result {
+                    if let Ok(MessageInner::Chunk(chunk)) = result {
                         for row in chunk.records() {
                             if let Some(chunk_out) = self.chunk_builder.append_record(row) {
-                                self.pending_items.push_back(Ok(Message::Chunk(chunk_out)));
+                                self.pending_items
+                                    .push_back(Ok(MessageInner::Chunk(chunk_out)));
                             }
                         }
                     } else {
                         return if let Some(chunk_out) = self.chunk_builder.take() {
                             self.pending_items.push_back(result);
-                            Poll::Ready(Some(Ok(Message::Chunk(chunk_out))))
+                            Poll::Ready(Some(Ok(MessageInner::Chunk(chunk_out))))
                         } else {
                             Poll::Ready(Some(result))
                         };
