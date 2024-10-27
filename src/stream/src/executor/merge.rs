@@ -960,7 +960,7 @@ mod tests {
             ctx.clone(),
             metrics.clone(),
             barrier_rx,
-            1024,
+            100,
             Schema::new(vec![]),
         )
         .boxed()
@@ -997,9 +997,8 @@ mod tests {
         }
 
         // 3. Send a chunk.
-        send!([untouched, old], Message::Chunk(StreamChunk::default()));
-        recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice.
-        recv!().unwrap().as_chunk().unwrap();
+        send!([untouched, old], Message::Chunk(build_test_chunk(1)));
+        assert_eq!(2, recv!().unwrap().as_chunk().unwrap().cardinality()); // We should be able to receive the chunk twice.
         assert_recv_pending!();
 
         send!(
@@ -1012,9 +1011,8 @@ mod tests {
         recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
 
         // 5. Send a chunk.
-        send!([untouched, new], Message::Chunk(StreamChunk::default()));
-        recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice, since old is removed.
-        recv!().unwrap().as_chunk().unwrap();
+        send!([untouched, new], Message::Chunk(build_test_chunk(1)));
+        assert_eq!(2, recv!().unwrap().as_chunk().unwrap().cardinality()); // We should be able to receive the chunk twice.
         assert_recv_pending!();
     }
 
