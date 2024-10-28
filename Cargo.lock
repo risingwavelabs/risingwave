@@ -13734,7 +13734,7 @@ dependencies = [
 [[package]]
 name = "sqlx"
 version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=7188c5462f4608d232a24b2da696e4dff8c036d5#7188c5462f4608d232a24b2da696e4dff8c036d5"
+source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -13746,7 +13746,7 @@ dependencies = [
 [[package]]
 name = "sqlx-core"
 version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=7188c5462f4608d232a24b2da696e4dff8c036d5#7188c5462f4608d232a24b2da696e4dff8c036d5"
+source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
 dependencies = [
  "ahash 0.8.11",
  "atoi",
@@ -13790,7 +13790,7 @@ dependencies = [
 [[package]]
 name = "sqlx-macros"
 version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=7188c5462f4608d232a24b2da696e4dff8c036d5#7188c5462f4608d232a24b2da696e4dff8c036d5"
+source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -13802,7 +13802,7 @@ dependencies = [
 [[package]]
 name = "sqlx-macros-core"
 version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=7188c5462f4608d232a24b2da696e4dff8c036d5#7188c5462f4608d232a24b2da696e4dff8c036d5"
+source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
 dependencies = [
  "dotenvy",
  "either",
@@ -13827,7 +13827,7 @@ dependencies = [
 [[package]]
 name = "sqlx-mysql"
 version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=7188c5462f4608d232a24b2da696e4dff8c036d5#7188c5462f4608d232a24b2da696e4dff8c036d5"
+source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -13873,7 +13873,7 @@ dependencies = [
 [[package]]
 name = "sqlx-postgres"
 version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=7188c5462f4608d232a24b2da696e4dff8c036d5#7188c5462f4608d232a24b2da696e4dff8c036d5"
+source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -13916,9 +13916,8 @@ dependencies = [
 [[package]]
 name = "sqlx-sqlite"
 version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=7188c5462f4608d232a24b2da696e4dff8c036d5#7188c5462f4608d232a24b2da696e4dff8c036d5"
+source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
 dependencies = [
- "async-channel 2.2.1",
  "atoi",
  "chrono",
  "flume",

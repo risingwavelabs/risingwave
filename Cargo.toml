@@ -350,10 +350,11 @@ getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae
 # tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
-# NOTE(kwannoel): patch sqlx to use a version compatible with madsim.
-# If we can merge in: https://github.com/madsim-rs/sqlx/pull/2,
-# we can change it to patch madsim version instead.
-sqlx = { git = "https://github.com/risingwavelabs/sqlx.git", rev = "7188c5462f4608d232a24b2da696e4dff8c036d5" }
+
+# sqlx version: v0.7.4
+# patch diffs: https://github.com/madsim-rs/sqlx/pull/3
+sqlx = { git = "https://github.com/risingwavelabs/sqlx.git", rev = "ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a" }
+
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
