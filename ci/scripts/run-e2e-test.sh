@@ -48,6 +48,13 @@ cluster_start() {
     # Give it a while to make sure the single-node is ready.
     sleep 10
   else
+    # Initialize backends.
+    if [[ $mode == *"mysql-backend" ]]; then
+      mysql -h mysql -P 3306 -u root -p123456 -e "DROP DATABASE IF EXISTS metadata; CREATE DATABASE metadata;"
+    elif [[ $mode == *"pg-backend" ]]; then
+      PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata; CREATE DATABASE metadata;"
+    fi
+
     risedev ci-start "$mode"
   fi
 }
@@ -63,13 +70,6 @@ cluster_stop() {
     stop_single_node
   else
     risedev ci-kill
-  fi
-
-  # Clean up meta store database.
-  if [[ $mode == *"mysql-backend" ]]; then
-    mysql -h mysql -P 3306 -u root -p123456 -e "DROP DATABASE IF EXISTS metadata; CREATE DATABASE metadata;"
-  elif [[ $mode == *"pg-backend" ]]; then
-    PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata; CREATE DATABASE metadata;"
   fi
 }
 
