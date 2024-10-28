@@ -273,7 +273,7 @@ pub struct FragmentDesc {
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,
     pub parallelism: i64,
-    pub vnode_count: i64,
+    pub vnode_count: i32,
 }
 
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
