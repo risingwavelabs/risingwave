@@ -1,11 +1,11 @@
 control substitution on
 
 system ok
-mysql -e "DROP DATABASE IF EXISTS mysql_tvf; CREATE DATABASE msql_tvf;"
+mysql -e "DROP DATABASE IF EXISTS tvf; CREATE DATABASE tvf;"
 
 system ok
 mysql -e "
-USE mysql_tvf;
+USE tvf;
 CREATE TABLE test (
     id bigint primary key,
     v1 bool,
@@ -36,5 +36,5 @@ INSERT INTO test SELECT
 "
 
 query II
-select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'mysql_tvf', 'select * from test where id > 90;');
+select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test where id > 90;');
 ----
