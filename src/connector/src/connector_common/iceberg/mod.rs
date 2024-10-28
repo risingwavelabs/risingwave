@@ -131,7 +131,7 @@ impl IcebergCommon {
                     "To create an iceberg engine table, NIMTABLE_DATA_DIRECTORY needed to be set"
                 );
             };
-            let warehouse_path = format!("s3://{}/{}/nimtable", s3_bucket, data_directory);
+            let warehouse_path = format!("s3://{}/{}/nimtable/{}", s3_bucket, data_directory, self.database_name.clone().unwrap());
 
             let (bucket, _) = {
                 let url = Url::parse(&warehouse_path)
