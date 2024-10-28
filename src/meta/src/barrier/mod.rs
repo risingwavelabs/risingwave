@@ -59,7 +59,7 @@ use crate::barrier::creating_job::{CompleteJobType, CreatingStreamingJobControl}
 use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
-use crate::barrier::schedule::ScheduledBarriers;
+use crate::barrier::schedule::{PeriodicBarriers, ScheduledBarriers};
 use crate::barrier::state::BarrierWorkerState;
 use crate::error::MetaErrorInner;
 use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
@@ -68,7 +68,7 @@ use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
     MetadataManager,
 };
-use crate::model::ActorId;
+use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -133,7 +133,6 @@ enum BarrierManagerStatus {
 struct Scheduled {
     command: Command,
     notifiers: Vec<Notifier>,
-    send_latency_timer: HistogramTimer,
     span: tracing::Span,
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
@@ -156,8 +155,11 @@ pub(crate) enum BarrierManagerRequest {
     GetDdlProgress(Sender<HashMap<u32, DdlProgress>>),
 }
 
-#[derive(Clone)]
 struct GlobalBarrierWorkerContextImpl {
+    scheduled_barriers: ScheduledBarriers,
+
+    status: Arc<ArcSwap<BarrierManagerStatus>>,
+
     metadata_manager: MetadataManager,
 
     hummock_manager: HummockManagerRef,
@@ -194,7 +196,7 @@ impl GlobalBarrierManager {
         )
         .await;
         let manager = Self {
-            status: barrier_worker.status.clone(),
+            status: barrier_worker.context.status.clone(),
             hummock_manager: barrier_worker.context.hummock_manager.clone(),
             request_tx,
             metadata_manager: barrier_worker.context.metadata_manager.clone(),
@@ -204,11 +206,15 @@ impl GlobalBarrierManager {
     }
 }
 
-trait GlobalBarrierWorkerContext: Clone + Send + Sync + 'static {
+trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn commit_epoch(
         &self,
         commit_info: CommitEpochInfo,
     ) -> impl Future<Output = MetaResult<HummockVersionStats>> + Send + '_;
+
+    async fn next_scheduled(&self) -> Scheduled;
+    fn abort_and_mark_blocked(&self, recovery_reason: RecoveryReason);
+    fn mark_ready(&self);
 
     fn post_collect_command<'a>(
         &'a self,
@@ -230,7 +236,6 @@ trait GlobalBarrierWorkerContext: Clone + Send + Sync + 'static {
 
     async fn reload_runtime_info(
         &self,
-        pre_apply_drop_cancel: impl Fn() -> bool,
     ) -> MetaResult<(
         ActiveStreamingWorkerNodes,
         InflightGraphInfo,
@@ -238,7 +243,7 @@ trait GlobalBarrierWorkerContext: Clone + Send + Sync + 'static {
         Option<TracedEpoch>,
         HashMap<WorkerId, Vec<StreamActor>>,
         HashMap<ActorId, Vec<SplitImpl>>,
-        CreateMviewProgressTracker,
+        HashMap<TableId, (String, TableFragments)>,
         HummockVersionStats,
     )>;
 }
@@ -247,6 +252,23 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> MetaResult<HummockVersionStats> {
         self.hummock_manager.commit_epoch(commit_info).await?;
         Ok(self.hummock_manager.get_version_stats().await)
+    }
+
+    async fn next_scheduled(&self) -> Scheduled {
+        self.scheduled_barriers.next_scheduled().await
+    }
+
+    fn abort_and_mark_blocked(&self, recovery_reason: RecoveryReason) {
+        self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+
+        // Mark blocked and abort buffered schedules, they might be dirty already.
+        self.scheduled_barriers
+            .abort_and_mark_blocked("cluster is under recovering");
+    }
+
+    fn mark_ready(&self) {
+        self.scheduled_barriers.mark_ready();
+        self.set_status(BarrierManagerStatus::Running);
     }
 
     async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
@@ -272,7 +294,6 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     async fn reload_runtime_info(
         &self,
-        pre_apply_drop_cancel: impl Fn() -> bool,
     ) -> MetaResult<(
         ActiveStreamingWorkerNodes,
         InflightGraphInfo,
@@ -280,10 +301,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         Option<TracedEpoch>,
         HashMap<WorkerId, Vec<StreamActor>>,
         HashMap<ActorId, Vec<SplitImpl>>,
-        CreateMviewProgressTracker,
+        HashMap<TableId, (String, TableFragments)>,
         HummockVersionStats,
     )> {
-        self.reload_runtime_info_impl(pre_apply_drop_cancel).await
+        self.reload_runtime_info_impl().await
     }
 }
 
@@ -301,14 +322,12 @@ struct GlobalBarrierWorker<C> {
     enable_recovery: bool,
 
     /// The queue of scheduled barriers.
-    scheduled_barriers: schedule::ScheduledBarriers,
+    periodic_barriers: PeriodicBarriers,
 
     /// The max barrier nums in flight
     in_flight_barrier_nums: usize,
 
-    context: C,
-
-    status: Arc<ArcSwap<BarrierManagerStatus>>,
+    context: Arc<C>,
 
     env: MetaSrvEnv,
 
@@ -555,7 +574,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         .map(|(command, _)| command.barrier_info.prev_epoch()),
                     task.creating_job_epochs.clone(),
                 );
-                match task.complete_barrier(&self.context, self.env.clone()).await {
+                match task
+                    .complete_barrier(&*self.context, self.env.clone())
+                    .await
+                {
                     Ok(hummock_version_stats) => {
                         self.checkpoint_control
                             .ack_completed(BarrierCompleteOutput {
@@ -666,20 +688,23 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             None,
         );
 
-        let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
+        let active_streaming_nodes =
+            ActiveStreamingWorkerNodes::uninitialized(metadata_manager.clone());
 
         let tracker = CreateMviewProgressTracker::default();
 
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
 
-        let context = GlobalBarrierWorkerContextImpl {
+        let context = Arc::new(GlobalBarrierWorkerContextImpl {
+            scheduled_barriers,
+            status,
             metadata_manager,
             hummock_manager,
             source_manager,
             scale_controller,
             sink_manager,
             env: env.clone(),
-        };
+        });
 
         let control_stream_manager = ControlStreamManager::new(env.clone());
         let checkpoint_control = CheckpointControl::new(
@@ -688,12 +713,20 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             context.hummock_manager.get_version_stats().await,
         );
 
+        let checkpoint_frequency = env.system_params_reader().await.checkpoint_frequency() as _;
+        let interval =
+            Duration::from_millis(env.system_params_reader().await.barrier_interval_ms() as u64);
+        let periodic_barriers = PeriodicBarriers::new(interval, checkpoint_frequency);
+        tracing::info!(
+            "Starting barrier scheduler with: checkpoint_frequency={:?}",
+            checkpoint_frequency,
+        );
+
         Self {
             enable_recovery,
-            scheduled_barriers,
+            periodic_barriers,
             in_flight_barrier_nums,
             context,
-            status,
             env,
             checkpoint_control,
             completing_task: CompletingTask::None,
@@ -736,14 +769,8 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(mut self, shutdown_rx: Receiver<()>) {
-        // Initialize the barrier manager.
-        let interval = Duration::from_millis(
-            self.env.system_params_reader().await.barrier_interval_ms() as u64,
-        );
-        self.scheduled_barriers.set_min_interval(interval);
         tracing::info!(
-            "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",
-            interval,
+            "Starting barrier manager with: enable_recovery={}, in_flight_barrier_nums={}",
             self.enable_recovery,
             self.in_flight_barrier_nums,
         );
@@ -769,7 +796,6 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
-            self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap));
             let span = tracing::info_span!("bootstrap_recovery");
             crate::telemetry::report_event(
                 risingwave_pb::telemetry::TelemetryEventStage::Recovery,
@@ -783,10 +809,10 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
 
-            self.recovery(paused_reason, None).instrument(span).await;
+            self.recovery(paused_reason, None, RecoveryReason::Bootstrap)
+                .instrument(span)
+                .await;
         }
-
-        self.set_status(BarrierManagerStatus::Running);
 
         self.run_inner(shutdown_rx).await
     }
@@ -834,56 +860,14 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
 
                 changed_worker = self.active_streaming_nodes.changed() => {
-                    if cfg!(debug_assertions)
-                        && let Some(context) = (&self.context as &dyn std::any::Any).downcast_ref::<GlobalBarrierWorkerContextImpl>() {
-                        info!("downcast to GlobalBarrierWorkerContext success");
-                        use risingwave_pb::common::WorkerNode;
-                        match context
-                            .metadata_manager
-                            .list_active_streaming_compute_nodes()
-                            .await
-                        {
-                            Ok(worker_nodes) => {
-                                let ignore_irrelevant_info = |node: &WorkerNode| {
-                                    (
-                                        node.id,
-                                        WorkerNode {
-                                            id: node.id,
-                                            r#type: node.r#type,
-                                            host: node.host.clone(),
-                                            parallelism: node.parallelism,
-                                            property: node.property.clone(),
-                                            resource: node.resource.clone(),
-                                            ..Default::default()
-                                        },
-                                    )
-                                };
-                                let worker_nodes: HashMap<_, _> =
-                                    worker_nodes.iter().map(ignore_irrelevant_info).collect();
-                                let curr_worker_nodes: HashMap<_, _> = self
-                                    .active_streaming_nodes
-                                    .current()
-                                    .values()
-                                    .map(ignore_irrelevant_info)
-                                    .collect();
-                                if worker_nodes != curr_worker_nodes {
-                                    warn!(
-                                        ?worker_nodes,
-                                        ?curr_worker_nodes,
-                                        "different to global snapshot"
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
-                            }
-                        }
+                    if cfg!(debug_assertions) {
+                        self.active_streaming_nodes.validate_change().await;
                     }
 
                     info!(?changed_worker, "worker changed");
 
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node, &self.checkpoint_control.state.inflight_subscription_info, &self.context).await;
+                        self.control_stream_manager.add_worker(node, &self.checkpoint_control.state.inflight_subscription_info, &*self.context).await;
                     }
                 }
 
@@ -892,8 +876,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     match notification {
                         // Handle barrier interval and checkpoint frequency changes.
                         LocalNotification::SystemParamsChange(p) => {
-                            self.scheduled_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
-                            self.scheduled_barriers
+                            self.periodic_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
+                            self.periodic_barriers
                                 .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
                         },
                         // Handle adhoc recovery triggered by user.
@@ -906,7 +890,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 complete_result = self
                     .completing_task
                     .next_completed_barrier(
-                        &mut self.scheduled_barriers,
+                        &mut self.periodic_barriers,
                         &mut self.checkpoint_control,
                         &mut self.control_stream_manager,
                         &self.context,
@@ -940,7 +924,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                     }
                 }
-                scheduled = self.scheduled_barriers.next_barrier(),
+                scheduled = self.periodic_barriers.next_barrier(&*self.context),
                     if self
                         .checkpoint_control
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
@@ -965,7 +949,6 @@ impl CheckpointControl {
         let Scheduled {
             mut command,
             mut notifiers,
-            send_latency_timer,
             checkpoint,
             span,
         } = scheduled;
@@ -1064,8 +1047,6 @@ impl CheckpointControl {
         });
         span.record("epoch", barrier_info.curr_epoch.value().0);
 
-        send_latency_timer.observe_duration();
-
         for creating_job in &mut self.creating_streaming_job_controls.values_mut() {
             creating_job.on_new_command(control_stream_manager, &command, &barrier_info)?;
         }
@@ -1108,17 +1089,11 @@ impl CheckpointControl {
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Set barrier manager status.
-    fn set_status(&self, new_status: BarrierManagerStatus) {
-        self.status.store(Arc::new(new_status));
-    }
 
     async fn failure_recovery(&mut self, err: MetaError) {
         self.clear_on_err(&err).await;
 
         if self.enable_recovery {
-            self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
-                err.clone(),
-            )));
             let span = tracing::info_span!(
                 "failure_recovery",
                 error = %err.as_report(),
@@ -1133,10 +1108,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 None,
             );
 
+            let reason = RecoveryReason::Failover(err.clone());
+
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
-            self.recovery(None, Some(err)).instrument(span).await;
-            self.set_status(BarrierManagerStatus::Running);
+            self.recovery(None, Some(err), reason)
+                .instrument(span)
+                .await;
         } else {
             panic!("failed to execute barrier: {}", err.as_report());
         }
@@ -1146,7 +1124,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         let err = MetaErrorInner::AdhocRecovery.into();
         self.clear_on_err(&err).await;
 
-        self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
         let span = tracing::info_span!(
             "adhoc_recovery",
             error = %err.as_report(),
@@ -1163,8 +1140,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         // No need to clean dirty tables for barrier recovery,
         // The foreground stream job should cleanup their own tables.
-        self.recovery(None, Some(err)).instrument(span).await;
-        self.set_status(BarrierManagerStatus::Running);
+        self.recovery(None, Some(err), RecoveryReason::Adhoc)
+            .instrument(span)
+            .await;
     }
 }
 
@@ -1179,6 +1157,10 @@ pub struct CompleteBarrierTask {
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    fn set_status(&self, new_status: BarrierManagerStatus) {
+        self.status.store(Arc::new(new_status));
+    }
+
     fn collect_creating_job_commit_epoch_info(
         commit_info: &mut CommitEpochInfo,
         epoch: u64,
@@ -1354,7 +1336,7 @@ impl CheckpointControl {
 
     fn next_complete_barrier_task(
         &mut self,
-        mut context: Option<(&mut ScheduledBarriers, &mut ControlStreamManager)>,
+        mut context: Option<(&mut PeriodicBarriers, &mut ControlStreamManager)>,
     ) -> Option<CompleteBarrierTask> {
         // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
         let mut creating_jobs_task = vec![];
@@ -1492,10 +1474,10 @@ impl CheckpointControl {
 impl CompletingTask {
     pub(super) fn next_completed_barrier<'a>(
         &'a mut self,
-        scheduled_barriers: &mut ScheduledBarriers,
+        scheduled_barriers: &mut PeriodicBarriers,
         checkpoint_control: &mut CheckpointControl,
         control_stream_manager: &mut ControlStreamManager,
-        context: &impl GlobalBarrierWorkerContext,
+        context: &Arc<impl GlobalBarrierWorkerContext>,
         env: &MetaSrvEnv,
     ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
         // If there is no completing barrier, try to start completing the earliest barrier if
@@ -1513,7 +1495,7 @@ impl CompletingTask {
                     let context = context.clone();
                     let env = env.clone();
                     let join_handle =
-                        tokio::spawn(async move { task.complete_barrier(&context, env).await });
+                        tokio::spawn(async move { task.complete_barrier(&*context, env).await });
                     *self = CompletingTask::Completing {
                         command_prev_epoch,
                         join_handle,
