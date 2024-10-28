@@ -133,34 +133,29 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             Ok(client)
         }
 
-        let client_weak = match SHARED_KAFKA_CLIENT
+        let client_arc = match SHARED_KAFKA_CLIENT
             .entry_by_ref(&properties.connection)
             .and_try_compute_with::<_, _, ConnectorError>(|maybe_entry| async {
                 if let Some(entry) = maybe_entry {
                     let entry_value = entry.into_value();
                     if entry_value.upgrade().is_some() {
                         // return if the client is already built
+                        tracing::info!("reuse existing kafka client for {}", broker_address);
                         return Ok(Op::Nop);
                     }
                 }
                 let client_arc = Arc::new(
                     build_kafka_client(&config, &properties, broker_rewrite_map.clone()).await?,
                 );
+                tracing::info!("build new kafka client for {}", broker_address);
                 Ok(Op::Put(Arc::downgrade(&client_arc)))
             })
             .await?
         {
             CompResult::Unchanged(entry)
             | CompResult::Inserted(entry)
-            | CompResult::ReplacedWith(entry) => entry.into_value(),
+            | CompResult::ReplacedWith(entry) => entry.into_value().upgrade().unwrap(),
             CompResult::Removed(_) | CompResult::StillNone(_) => unreachable!(),
-        };
-
-        let client_arc: Arc<KafkaClientType>;
-        if let Some(client_arc_upgrade) = client_weak.upgrade() {
-            client_arc = client_arc_upgrade;
-        } else {
-            unreachable!()
         };
 
         Ok(Self {
