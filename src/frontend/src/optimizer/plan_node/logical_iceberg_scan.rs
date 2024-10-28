@@ -14,7 +14,9 @@
 
 use std::rc::Rc;
 
+use iceberg::expr::Predicate as IcebergPredicate;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::types::ScalarImpl;
 
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
@@ -24,6 +26,7 @@ use super::{
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
+use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
@@ -102,11 +105,103 @@ impl ExprRewritable for LogicalIcebergScan {}
 impl ExprVisitable for LogicalIcebergScan {}
 
 impl PredicatePushdown for LogicalIcebergScan {
+    /// NOTE(kwannoel):
+    /// 1. We expect it to be constant folded
+    /// 2. We don't convert `inputRefs` of type boolean directly to IcebergPredicates.
+    /// 3. The leaf nodes are always logical comparison operators:
+    ///    `Equal`, `NotEqual`, `GreaterThan`,
+    ///    `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`.
+    /// 4. For leaf nodes, their LHS is always an `inputRef`
+    ///    and their RHS is always a `Literal` to be compatible with Iceberg.
     fn predicate_pushdown(
         &self,
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
+        fn rw_expr_to_iceberg_predicate(expr: &ExprImpl) -> Option<IcebergPredicate> {
+            match expr {
+                ExprImpl::Literal(l) => match l.get_data() {
+                    Some(ScalarImpl::Bool(b)) => {
+                        if *b {
+                            Some(IcebergPredicate::AlwaysTrue)
+                        } else {
+                            Some(IcebergPredicate::AlwaysFalse)
+                        }
+                    }
+                    _ => None,
+                },
+                ExprImpl::FunctionCall(f) => {
+                    let args = f.inputs();
+                    match f.func_type() {
+                        ExprType::Not => {
+                            let arg = rw_expr_to_iceberg_predicate(&args[0])?;
+                            Some(IcebergPredicate::negate(arg))
+                        }
+                        ExprType::And => {
+                            let arg0 = rw_expr_to_iceberg_predicate(&args[0])?;
+                            let arg1 = rw_expr_to_iceberg_predicate(&args[1])?;
+                            Some(IcebergPredicate::and(arg0, arg1))
+                        }
+                        ExprType::Or => {
+                            let arg0 = rw_expr_to_iceberg_predicate(&args[0])?;
+                            let arg1 = rw_expr_to_iceberg_predicate(&args[1])?;
+                            Some(IcebergPredicate::or(arg0, arg1))
+                        }
+                        ExprType::Equal => match [&args[0], &args[1]] {
+                            [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
+                                todo!()
+                            }
+                            [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
+                                todo!()
+                            }
+                            _ => None,
+                        },
+                        ExprType::NotEqual => {
+                            todo!()
+                        }
+                        ExprType::GreaterThan => {
+                            todo!()
+                        }
+                        ExprType::GreaterThanOrEqual => {
+                            todo!()
+                        }
+                        ExprType::LessThan => {
+                            todo!()
+                        }
+                        ExprType::LessThanOrEqual => {
+                            todo!()
+                        }
+                        ExprType::IsNull => {
+                            todo!()
+                        }
+                        ExprType::IsNotNull => {
+                            todo!()
+                        }
+                        ExprType::In => {
+                            todo!()
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        }
+        fn rw_predicate_to_iceberg_predicate(predicate: Condition) -> IcebergPredicate {
+            if predicate.always_true() {
+                return IcebergPredicate::AlwaysTrue;
+            }
+            let mut conjunctions = predicate.conjunctions;
+            let mut ignored_conjunctions: Vec<ExprImpl> = Vec::with_capacity(conjunctions.len());
+            let rw_condition_root = conjunctions.pop().unwrap();
+            let iceberg_condition_root = rw_expr_to_iceberg_predicate(&rw_condition_root);
+            for rw_condition in conjunctions {
+                match rw_expr_to_iceberg_predicate(&rw_condition) {
+                    Some(iceberg_predicate) => ignored_conjunctions.push(rw_condition),
+                    None => {}
+                }
+            }
+            todo!()
+        }
         // No pushdown.
         LogicalFilter::create(self.clone().into(), predicate)
     }
