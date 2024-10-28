@@ -368,10 +368,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         debug!(?node_to_collect, "inject initial barrier");
                         while !node_to_collect.is_empty() {
                             let (worker_id, result) = control_stream_manager
-                                .next_complete_barrier_response()
+                                .next_collect_barrier_response()
                                 .await;
                             let resp = result?;
-                            assert_eq!(resp.epoch, barrier_info.prev_epoch.value().0);
+                            assert_eq!(resp.epoch, barrier_info.prev_epoch());
                             assert!(node_to_collect.remove(&worker_id));
                         }
                         debug!("collected initial barrier");

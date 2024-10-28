@@ -942,7 +942,7 @@ impl CommandContext {
                 .get(worker_node)
                 .await?;
             let request = WaitEpochCommitRequest {
-                epoch: self.barrier_info.prev_epoch.value().0,
+                epoch: self.barrier_info.prev_epoch(),
                 table_id: table_id.table_id,
             };
             client.wait_epoch_commit(request).await

@@ -207,7 +207,7 @@ impl ControlStreamManager {
         Some((worker_id, result))
     }
 
-    pub(super) async fn next_complete_barrier_response(
+    pub(super) async fn next_collect_barrier_response(
         &mut self,
     ) -> (WorkerId, MetaResult<BarrierCompleteResponse>) {
         use streaming_control_stream_response::Response;
@@ -356,7 +356,7 @@ impl ControlStreamManager {
                     let barrier = Barrier {
                         epoch: Some(risingwave_pb::data::Epoch {
                             curr: barrier_info.curr_epoch.value().0,
-                            prev: barrier_info.prev_epoch.value().0,
+                            prev: barrier_info.prev_epoch(),
                         }),
                         mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
                         tracing_context: TracingContext::from_span(barrier_info.curr_epoch.span())
@@ -406,7 +406,7 @@ impl ControlStreamManager {
                 // Record failure in event log.
                 use risingwave_pb::meta::event_log;
                 let event = event_log::EventInjectBarrierFail {
-                    prev_epoch: barrier_info.prev_epoch.value().0,
+                    prev_epoch: barrier_info.prev_epoch(),
                     cur_epoch: barrier_info.curr_epoch.value().0,
                     error: e.to_report_string(),
                 };
@@ -465,7 +465,7 @@ impl<C> GlobalBarrierWorker<C> {
         // Record failure in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventCollectBarrierFail {
-            prev_epoch: barrier_info.prev_epoch.value().0,
+            prev_epoch: barrier_info.prev_epoch(),
             cur_epoch: barrier_info.curr_epoch.value().0,
             error: error.to_report_string(),
         };

@@ -182,7 +182,7 @@ impl GlobalBarrierManager {
         scale_controller: ScaleControllerRef,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
-        let barrier_manager = GlobalBarrierWorker::new(
+        let barrier_worker = GlobalBarrierWorker::new(
             scheduled_barriers,
             env,
             metadata_manager,
@@ -194,12 +194,12 @@ impl GlobalBarrierManager {
         )
         .await;
         let manager = Self {
-            status: barrier_manager.status.clone(),
-            hummock_manager: barrier_manager.context.hummock_manager.clone(),
+            status: barrier_worker.status.clone(),
+            hummock_manager: barrier_worker.context.hummock_manager.clone(),
             request_tx,
-            metadata_manager: barrier_manager.context.metadata_manager.clone(),
+            metadata_manager: barrier_worker.context.metadata_manager.clone(),
         };
-        let (join_handle, shutdown_tx) = barrier_manager.start();
+        let (join_handle, shutdown_tx) = barrier_worker.start();
         (Arc::new(manager), join_handle, shutdown_tx)
     }
 }
@@ -419,12 +419,12 @@ impl CheckpointControl {
         }
 
         tracing::trace!(
-            prev_epoch = command_ctx.barrier_info.prev_epoch.value().0,
+            prev_epoch = command_ctx.barrier_info.prev_epoch(),
             ?creating_jobs_to_wait,
             "enqueue command"
         );
         self.command_ctx_queue.insert(
-            command_ctx.barrier_info.prev_epoch.value().0,
+            command_ctx.barrier_info.prev_epoch(),
             EpochNode {
                 enqueue_time: timer,
                 state: BarrierEpochState {
@@ -550,7 +550,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 let (command_prev_epoch, creating_job_epochs) = (
                     task.command_context
                         .as_ref()
-                        .map(|(command, _)| command.barrier_info.prev_epoch.value().0),
+                        .map(|(command, _)| command.barrier_info.prev_epoch()),
                     task.creating_job_epochs.clone(),
                 );
                 match task.complete_barrier(&self.context, self.env.clone()).await {
@@ -922,7 +922,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                     }
                 },
-                (worker_id, resp_result) = self.control_stream_manager.next_complete_barrier_response() => {
+                (worker_id, resp_result) = self.control_stream_manager.next_collect_barrier_response() => {
                     if let  Err(e) = resp_result.and_then(|resp| self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager)) {
                         {
                             let failed_barrier = self.checkpoint_control.barrier_wait_collect_from_worker(worker_id as _);
@@ -1035,7 +1035,7 @@ impl CheckpointControl {
                 CreatingStreamingJobControl::new(
                     info.clone(),
                     snapshot_backfill_info.clone(),
-                    barrier_info.prev_epoch.value().0,
+                    barrier_info.prev_epoch(),
                     &self.hummock_version_stats,
                     mutation,
                 ),
@@ -1310,7 +1310,7 @@ impl CompleteBarrierTask {
         // Record barrier latency in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventBarrierComplete {
-            prev_epoch: command_ctx.barrier_info.prev_epoch.value().0,
+            prev_epoch: command_ctx.barrier_info.prev_epoch(),
             cur_epoch: command_ctx.barrier_info.curr_epoch.value().0,
             duration_sec,
             command: command_ctx.command.to_string(),
@@ -1456,7 +1456,7 @@ impl CheckpointControl {
                     self.collect_backfill_pinned_upstream_log_epoch(),
                 );
                 self.completing_barrier = Some((
-                    node.command_ctx.barrier_info.prev_epoch.value().0,
+                    node.command_ctx.barrier_info.prev_epoch(),
                     node.command_ctx.command.should_pause_inject_barrier(),
                 ));
                 task = Some(CompleteBarrierTask {
@@ -1510,7 +1510,7 @@ impl CompletingTask {
                     let command_prev_epoch = task
                         .command_context
                         .as_ref()
-                        .map(|(command, _)| command.barrier_info.prev_epoch.value().0);
+                        .map(|(command, _)| command.barrier_info.prev_epoch());
                     let context = context.clone();
                     let env = env.clone();
                     let join_handle =
@@ -1786,7 +1786,7 @@ fn collect_commit_epoch_info(
         mv_log_store_truncate_epoch.into_iter(),
     );
 
-    let epoch = command_ctx.barrier_info.prev_epoch.value().0;
+    let epoch = command_ctx.barrier_info.prev_epoch();
     let tables_to_commit = command_ctx
         .table_ids_to_commit
         .iter()

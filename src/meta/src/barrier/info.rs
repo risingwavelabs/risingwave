@@ -30,6 +30,12 @@ pub(super) struct BarrierInfo {
     pub kind: BarrierKind,
 }
 
+impl BarrierInfo {
+    pub(super) fn prev_epoch(&self) -> u64 {
+        self.prev_epoch.value().0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum CommandFragmentChanges {
     NewFragment(InflightFragmentInfo),
