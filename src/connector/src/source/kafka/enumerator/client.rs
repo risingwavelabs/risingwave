@@ -19,7 +19,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use moka::future::Cache as MokaCache;
-use moka::ops::compute::{CompResult, Op};
+use moka::ops::compute::Op;
 use prometheus::core::{AtomicI64, GenericGauge};
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
@@ -133,36 +133,33 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             Ok(client)
         }
 
-        let client_arc = match SHARED_KAFKA_CLIENT
+        let mut client_arc: Option<Arc<KafkaClientType>> = None;
+        SHARED_KAFKA_CLIENT
             .entry_by_ref(&properties.connection)
             .and_try_compute_with::<_, _, ConnectorError>(|maybe_entry| async {
                 if let Some(entry) = maybe_entry {
                     let entry_value = entry.into_value();
-                    if entry_value.upgrade().is_some() {
+                    if let Some(client) = entry_value.upgrade() {
                         // return if the client is already built
                         tracing::info!("reuse existing kafka client for {}", broker_address);
+                        client_arc = Some(client);
                         return Ok(Op::Nop);
                     }
                 }
-                let client_arc = Arc::new(
+                let new_client_arc = Arc::new(
                     build_kafka_client(&config, &properties, broker_rewrite_map.clone()).await?,
                 );
                 tracing::info!("build new kafka client for {}", broker_address);
-                Ok(Op::Put(Arc::downgrade(&client_arc)))
+                client_arc = Some(new_client_arc.clone());
+                Ok(Op::Put(Arc::downgrade(&new_client_arc)))
             })
-            .await?
-        {
-            CompResult::Unchanged(entry)
-            | CompResult::Inserted(entry)
-            | CompResult::ReplacedWith(entry) => entry.into_value().upgrade().unwrap(),
-            CompResult::Removed(_) | CompResult::StillNone(_) => unreachable!(),
-        };
+            .await?;
 
         Ok(Self {
             context,
             broker_address,
             topic,
-            client: client_arc,
+            client: client_arc.unwrap(),
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
             sync_call_timeout: properties.common.sync_call_timeout,
