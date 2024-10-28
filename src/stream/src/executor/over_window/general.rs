@@ -51,7 +51,7 @@ struct ExecutorInner<S: StateStore> {
 
     schema: Schema,
     calls: Vec<WindowFuncCall>,
-    partition_key_indices: Vec<usize>,
+    deduped_part_key_indices: Vec<usize>,
     order_key_indices: Vec<usize>,
     order_key_data_types: Vec<DataType>,
     order_key_order_types: Vec<OrderType>,
@@ -88,9 +88,10 @@ impl<S: StateStore> Execute for OverWindowExecutor<S> {
 }
 
 impl<S: StateStore> ExecutorInner<S> {
+    /// Get deduplicated partition key from a full row, which happened to be the prefix of table PK.
     fn get_partition_key(&self, full_row: impl Row) -> OwnedRow {
         full_row
-            .project(&self.partition_key_indices)
+            .project(&self.deduped_part_key_indices)
             .into_owned_row()
     }
 
@@ -162,13 +163,22 @@ impl<S: StateStore> OverWindowExecutor<S> {
             &input_info.pk_indices,
         );
 
+        let deduped_part_key_indices = {
+            let mut dedup = HashSet::new();
+            args.partition_key_indices
+                .iter()
+                .filter(|i| dedup.insert(**i))
+                .copied()
+                .collect()
+        };
+
         Self {
             input: args.input,
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
                 schema: args.schema,
                 calls: args.calls,
-                partition_key_indices: args.partition_key_indices,
+                deduped_part_key_indices,
                 order_key_indices: args.order_key_indices,
                 order_key_data_types,
                 order_key_order_types: args.order_key_order_types,
@@ -262,7 +272,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         chunk: StreamChunk,
         metrics: &'a OverWindowMetrics,
     ) {
-        // partition key => changes happened in the partition.
+        // (deduped) partition key => changes happened in the partition.
         let mut deltas: BTreeMap<DefaultOrdered<OwnedRow>, PartitionDelta> = BTreeMap::new();
         // input pk of update records of which the order key is changed.
         let mut key_change_updated_pks = HashSet::new();
@@ -416,11 +426,14 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 .over_window_range_cache_right_miss_count
                 .inc_by(stats.right_miss_count);
             metrics
+                .over_window_accessed_entry_count
+                .inc_by(stats.accessed_entry_count);
+            metrics
                 .over_window_compute_count
                 .inc_by(stats.compute_count);
             metrics
-                .over_window_same_result_count
-                .inc_by(stats.same_result_count);
+                .over_window_same_output_count
+                .inc_by(stats.same_output_count);
 
             // Update recently accessed range for later shrinking cache.
             if !this.cache_policy.is_full()

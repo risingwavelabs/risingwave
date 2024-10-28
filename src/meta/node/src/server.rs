@@ -148,14 +148,15 @@ pub async fn rpc_serve(
             )
             .await
         }
-        MetaStoreBackend::Sql { endpoint } => {
+        MetaStoreBackend::Sql { endpoint, config } => {
             let is_sqlite = DbBackend::Sqlite.is_prefix_of(&endpoint);
             let mut options = sea_orm::ConnectOptions::new(endpoint);
             options
-                .max_connections(10)
-                .connect_timeout(Duration::from_secs(10))
-                .idle_timeout(Duration::from_secs(30))
-                .acquire_timeout(Duration::from_secs(30));
+                .max_connections(config.max_connections)
+                .min_connections(config.min_connections)
+                .connect_timeout(Duration::from_secs(config.connection_timeout_sec))
+                .idle_timeout(Duration::from_secs(config.idle_timeout_sec))
+                .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
 
             if is_sqlite {
                 // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,

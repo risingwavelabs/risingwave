@@ -24,9 +24,13 @@ message InjectBarrierRequest {
 
 message BarrierCompleteResponse {
   message CreateMviewProgress {
+    // Note: ideally we should use `executor_id`, but `actor_id` is ok-ish.
+    // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
     uint32 backfill_actor_id = 1;
     bool done = 2;
+    // MV backfill snapshot read epoch (0 for Done / Source backfill)
     uint64 consumed_epoch = 3;
+    // MV backfill snapshot read rows / Source backfilled rows
     uint64 consumed_rows = 4;
     uint32 pending_barrier_num = 5;
   }

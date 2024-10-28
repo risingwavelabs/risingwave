@@ -11,6 +11,7 @@ import sys
 MAIN_CRON_TEST_MAP = {
     "test-notify": ["noelkwan", "noelkwan"],
     "test-notify-2": ["noelkwan", "noelkwan"],
+    "test-notify-timeout": ["noelkwan", "noelkwan"],
     "docslt": ["tianxiao"],
     "e2e-test-release": ["zhi", "Eric"],
     "e2e-meta-backup-test-release": ["zhi", "Eric"],
@@ -30,8 +31,8 @@ MAIN_CRON_TEST_MAP = {
     "recovery-test-deterministic": ["runji", "noelkwan"],
     "background-ddl-arrangement-backfill-recovery-test-deterministic": ["runji", "noelkwan"],
     "background-ddl-recovery-test-deterministic": ["runji", "noelkwan"],
-    "e2e-iceberg-sink-test": ["zilin"],
-    "e2e-iceberg-sink-v2-test": ["zilin"],
+    "e2e-iceberg-sink-test": ["zilin", "xinhao"],
+    "e2e-iceberg-sink-v2-test": ["zilin", "xinhao"],
     "e2e-java-binding-tests": ["yiming"],
     "s3-source-check-aws": ["bohan"],
     "s3-source-check-aws-json-parser": ["bohan"],
@@ -54,8 +55,9 @@ MAIN_CRON_TEST_MAP = {
     "e2e-redis-sink-tests": ["xinhao"],
     "e2e-starrocks-sink-tests": ["xinhao"],
     "e2e-cassandra-sink-tests": ["xinhao"],
-    "e2e-clickhouse-sink-tests": ["bohan","xinhao"],
+    "e2e-clickhouse-sink-tests": ["bohan", "xinhao"],
     "e2e-pulsar-sink-tests": ["bohan"],
+    "e2e-mqtt-sink-tests": ["xinhao"],
     "connector-node-integration-test": ["siyuan"],
 }
 
@@ -110,7 +112,15 @@ def get_failed_tests(get_test_status, test_map):
     failed_test_map = {}
     for test in test_map.keys():
         test_status = get_test_status(test)
-        if test_status == "hard_failed" or test_status == "soft_failed":
+        if test_status == "hard_failed" or test_status == "soft_failed" or test_status == "errored":
+            print(f"{test} failed with outcome: {test_status}")
+            failed_test_map[test] = test_map[test]
+        elif test_status == "passed":
+            print(f"{test} passed with outcome: {test_status}")
+        elif test_status is None or test_status == "":
+            print(f"{test} no outcome, skipping")
+        else:
+            print(f"{test} failed with unknown outcome: {test_status}")
             failed_test_map[test] = test_map[test]
     return failed_test_map
 
@@ -188,14 +198,14 @@ def run_test_1():
 
 def main():
     test_map = get_test_map()
+    print("--- Getting failed tests")
     failed_test_map = get_failed_tests(get_buildkite_test_status, test_map)
     message = generate_test_status_message(failed_test_map)
     if message == "":
-        print("All tests passed, no need to notify")
+        print("--- Tests passed, no need to notify")
         return
     else:
-        print("Some tests failed, notify users")
-        print(message)
+        print("--- Some tests failed, notify users")
         cmd = format_cmd(message)
         print(cmd)
         subprocess.run(cmd, shell=True)

@@ -33,7 +33,6 @@ user create_compaction_group_for_mv
 user datestyle
 user enable_join_ordering
 user enable_share_plan
-user enable_shared_source
 user enable_two_phase_agg
 user extra_float_digits
 user force_split_distinct_agg
@@ -61,6 +60,7 @@ user streaming_max_parallelism
 user streaming_over_window_cache_policy
 user streaming_parallelism
 user streaming_use_arrangement_backfill
+user streaming_use_shared_source
 user streaming_use_snapshot_backfill
 user synchronize_seqscans
 user timezone
