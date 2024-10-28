@@ -858,7 +858,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
 
                 changed_worker = self.active_streaming_nodes.changed() => {
-                    if cfg!(debug_assertions) {
+                    #[cfg(debug_assertions)]
+                    {
                         self.active_streaming_nodes.validate_change().await;
                     }
 
