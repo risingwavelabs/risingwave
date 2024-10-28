@@ -30,7 +30,7 @@ hyper = { version = "0.14", features = ["tcp", "client"] }                    # 
 hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = { workspace = true }
-madsim = "0.2.30"
+madsim = "0.2.31"
 opendal = { workspace = true, features = [
     "executors-tokio",
     "services-azblob",
@@ -47,7 +47,6 @@ prometheus = { version = "0.13", features = ["process"] }
 reqwest = "0.12.2" # required by opendal
 risingwave_common = { workspace = true }
 risingwave_jni_core = { workspace = true, optional = true }
-rustls = "0.23.5"
 spin = "0.9"
 thiserror = "1"
 thiserror-ext = { workspace = true }

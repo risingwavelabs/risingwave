@@ -764,7 +764,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 35
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
@@ -1178,6 +1178,13 @@ steps:
     if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
     command: |
       bash -c 'echo test && exit -1'
+
+  # Notification test.
+  - key: "test-notify-timeout"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
+    command: |
+      bash -c 'echo test && sleep 300'
+    timeout_in_minutes: 1
 
   - wait: true
     continue_on_failure: true

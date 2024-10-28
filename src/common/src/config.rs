@@ -195,6 +195,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::full_gc_object_limit")]
     pub full_gc_object_limit: u64,
 
+    /// Duration in seconds to retain garbage collection history data.
+    #[serde(default = "default::meta::gc_history_retention_time_sec")]
+    pub gc_history_retention_time_sec: u64,
+
     /// Max number of inflight time travel query.
     #[serde(default = "default::meta::max_inflight_time_travel_query")]
     pub max_inflight_time_travel_query: u64,
@@ -381,6 +385,10 @@ pub struct MetaConfig {
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
+
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub meta_store_config: MetaStoreConfig,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -1039,8 +1047,7 @@ pub struct StreamingDeveloperConfig {
     /// Enable arrangement backfill
     /// If false, the arrangement backfill will be disabled,
     /// even if session variable set.
-    /// If true, it will be enabled by default, but session variable
-    /// can override it.
+    /// If true, it's decided by session variable `streaming_use_arrangement_backfill` (default true)
     pub enable_arrangement_backfill: bool,
 
     #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
@@ -1060,6 +1067,13 @@ pub struct StreamingDeveloperConfig {
     /// A flag to allow disabling the auto schema change handling
     #[serde(default = "default::developer::stream_enable_auto_schema_change")]
     pub enable_auto_schema_change: bool,
+
+    #[serde(default = "default::developer::enable_shared_source")]
+    /// Enable shared source
+    /// If false, the shared source will be disabled,
+    /// even if session variable set.
+    /// If true, it's decided by session variable `streaming_use_shared_source` (default true)
+    pub enable_shared_source: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1353,6 +1367,10 @@ pub mod default {
 
         pub fn min_sst_retention_time_sec() -> u64 {
             3600 * 3
+        }
+
+        pub fn gc_history_retention_time_sec() -> u64 {
+            3600 * 6
         }
 
         pub fn full_gc_interval_sec() -> u64 {
@@ -1956,6 +1974,10 @@ pub mod default {
             true
         }
 
+        pub fn enable_shared_source() -> bool {
+            true
+        }
+
         pub fn stream_high_join_amplification_threshold() -> usize {
             2048
         }
@@ -2253,6 +2275,34 @@ pub mod default {
             }
         }
     }
+
+    pub mod meta_store_config {
+        const DEFAULT_MAX_CONNECTIONS: u32 = 10;
+        const DEFAULT_MIN_CONNECTIONS: u32 = 1;
+        const DEFAULT_CONNECTION_TIMEOUT_SEC: u64 = 10;
+        const DEFAULT_IDLE_TIMEOUT_SEC: u64 = 30;
+        const DEFAULT_ACQUIRE_TIMEOUT_SEC: u64 = 30;
+
+        pub fn max_connections() -> u32 {
+            DEFAULT_MAX_CONNECTIONS
+        }
+
+        pub fn min_connections() -> u32 {
+            DEFAULT_MIN_CONNECTIONS
+        }
+
+        pub fn connection_timeout_sec() -> u64 {
+            DEFAULT_CONNECTION_TIMEOUT_SEC
+        }
+
+        pub fn idle_timeout_sec() -> u64 {
+            DEFAULT_IDLE_TIMEOUT_SEC
+        }
+
+        pub fn acquire_timeout_sec() -> u64 {
+            DEFAULT_ACQUIRE_TIMEOUT_SEC
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2465,6 +2515,25 @@ pub struct CompactionConfig {
     pub enable_emergency_picker: bool,
     #[serde(default = "default::compaction_config::max_level")]
     pub max_level: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct MetaStoreConfig {
+    /// Maximum number of connections for the meta store connection pool.
+    #[serde(default = "default::meta_store_config::max_connections")]
+    pub max_connections: u32,
+    /// Minimum number of connections for the meta store connection pool.
+    #[serde(default = "default::meta_store_config::min_connections")]
+    pub min_connections: u32,
+    /// Connection timeout in seconds for a meta store connection.
+    #[serde(default = "default::meta_store_config::connection_timeout_sec")]
+    pub connection_timeout_sec: u64,
+    /// Idle timeout in seconds for a meta store connection.
+    #[serde(default = "default::meta_store_config::idle_timeout_sec")]
+    pub idle_timeout_sec: u64,
+    /// Acquire timeout in seconds for a meta store connection.
+    #[serde(default = "default::meta_store_config::acquire_timeout_sec")]
+    pub acquire_timeout_sec: u64,
 }
 
 #[cfg(test)]

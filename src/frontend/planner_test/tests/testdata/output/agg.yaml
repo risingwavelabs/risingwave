@@ -492,7 +492,7 @@
         └─BatchGroupTopN { order: [t.v3 ASC, t.v1 ASC], limit: 1, offset: 0, group_key: [t.v1, t.v3] }
           └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
             └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
-- name: distinct on
+- name: distinct on order by distinct columns
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select distinct on (v1, v3) v1, v2 from t order by v1, v3;
@@ -508,7 +508,7 @@
         └─BatchGroupTopN { order: [t.v1 ASC, t.v3 ASC], limit: 1, offset: 0, group_key: [t.v1, t.v3] }
           └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
             └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
-- name: distinct on
+- name: distinct on order by part of the distinct columns
   sql: |
     create table t (v1 int, v2 int);
     select distinct on (v1) v1, v2 from t order by v1;
@@ -516,7 +516,15 @@
     LogicalTopN { order: [t.v1 ASC], limit: 1, offset: 0, group_key: [t.v1] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- name: distinct on
+- name: distinct on order by distinct columns and additional sorting columns
+  sql: |
+    create table t (id int, ts timestamp, foo int, bar varchar);
+    select distinct on (id) * from t order by id, ts desc;
+  logical_plan: |-
+    LogicalTopN { order: [t.id ASC, t.ts DESC], limit: 1, offset: 0, group_key: [t.id] }
+    └─LogicalProject { exprs: [t.id, t.ts, t.foo, t.bar] }
+      └─LogicalScan { table: t, columns: [t.id, t.ts, t.foo, t.bar, t._row_id] }
+- name: distinct on with expression
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select distinct on(v1) v2 + v3 from t order by v1;

@@ -326,7 +326,7 @@ pub(super) mod handlers {
         let object_dependencies = srv
             .metadata_manager
             .catalog_controller
-            .list_object_dependencies()
+            .list_all_object_dependencies()
             .await
             .map_err(err)?;
 

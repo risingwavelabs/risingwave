@@ -74,7 +74,7 @@ impl BarrierWorkerState {
         self.in_flight_prev_epoch.as_ref()
     }
 
-    /// Returns the epoch pair for the next barrier, and updates the state.
+    /// Returns the `BarrierInfo` for the next barrier, and updates the state.
     pub fn next_barrier_info(
         &mut self,
         command: Option<&Command>,

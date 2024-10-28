@@ -228,7 +228,7 @@ impl CreatingStreamingJobStatus {
                 ))
             }
             CreatingStreamingJobStatus::ConsumingLogStore { .. } => {
-                let prev_epoch = barrier_info.prev_epoch.value().0;
+                let prev_epoch = barrier_info.prev_epoch();
                 if start_consume_upstream {
                     assert!(barrier_info.kind.is_checkpoint());
                     *self = CreatingStreamingJobStatus::Finishing(prev_epoch);

@@ -329,7 +329,7 @@ impl StreamManagerService for StreamServiceImpl {
         let dependencies = self
             .metadata_manager
             .catalog_controller
-            .list_object_dependencies()
+            .list_created_object_dependencies()
             .await?;
 
         Ok(Response::new(ListObjectDependenciesResponse {

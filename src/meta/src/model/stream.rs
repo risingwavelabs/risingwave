@@ -18,8 +18,10 @@ use std::ops::AddAssign;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId};
+use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{SourceId, WorkerId};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -346,7 +348,7 @@ impl TableFragments {
     }
 
     /// Returns actor ids that need to be tracked when creating MV.
-    pub fn tracking_progress_actor_ids(&self) -> Vec<ActorId> {
+    pub fn tracking_progress_actor_ids(&self) -> Vec<(ActorId, BackfillUpstreamType)> {
         let mut actor_ids = vec![];
         for fragment in self.fragments.values() {
             if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0 {
@@ -360,7 +362,12 @@ impl TableFragments {
                     | FragmentTypeFlag::SourceScan as u32))
                 != 0
             {
-                actor_ids.extend(fragment.actors.iter().map(|actor| actor.actor_id));
+                actor_ids.extend(fragment.actors.iter().map(|actor| {
+                    (
+                        actor.actor_id,
+                        BackfillUpstreamType::from_fragment_type_mask(fragment.fragment_type_mask),
+                    )
+                }));
             }
         }
         actor_ids
@@ -551,6 +558,37 @@ impl TableFragments {
         }
     }
 
+    /// Retrieve the **complete** internal tables map of the whole graph.
+    ///
+    /// Compared to [`crate::stream::StreamFragmentGraph::incomplete_internal_tables`],
+    /// the table catalogs returned here are complete, with all fields filled.
+    pub fn internal_tables(&self) -> BTreeMap<u32, Table> {
+        self.collect_tables_inner(true)
+    }
+
+    /// `internal_tables()` with additional table in `Materialize` node.
+    pub fn all_tables(&self) -> BTreeMap<u32, Table> {
+        self.collect_tables_inner(false)
+    }
+
+    fn collect_tables_inner(&self, internal_tables_only: bool) -> BTreeMap<u32, Table> {
+        let mut tables = BTreeMap::new();
+        for fragment in self.fragments.values() {
+            stream_graph_visitor::visit_stream_node_tables_inner(
+                &mut fragment.actors[0].nodes.clone().unwrap(),
+                internal_tables_only,
+                true,
+                |table, _| {
+                    let table_id = table.id;
+                    tables
+                        .try_insert(table_id, table.clone())
+                        .unwrap_or_else(|_| panic!("duplicated table id `{}`", table_id));
+                },
+            );
+        }
+        tables
+    }
+
     /// Returns the internal table ids without the mview table.
     pub fn internal_table_ids(&self) -> Vec<u32> {
         self.fragments
@@ -577,5 +615,38 @@ impl TableFragments {
             });
         });
         self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackfillUpstreamType {
+    MView,
+    Values,
+    Source,
+}
+
+impl BackfillUpstreamType {
+    pub fn from_fragment_type_mask(mask: u32) -> Self {
+        let is_mview = (mask & FragmentTypeFlag::StreamScan as u32) != 0;
+        let is_values = (mask & FragmentTypeFlag::Values as u32) != 0;
+        let is_source = (mask & FragmentTypeFlag::SourceScan as u32) != 0;
+
+        // Note: in theory we can have multiple backfill executors in one fragment, but currently it's not possible.
+        // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
+        debug_assert!(
+            is_mview as u8 + is_values as u8 + is_source as u8 == 1,
+            "a backfill fragment should either be mview, value or source, found {:?}",
+            mask
+        );
+
+        if is_mview {
+            BackfillUpstreamType::MView
+        } else if is_values {
+            BackfillUpstreamType::Values
+        } else if is_source {
+            BackfillUpstreamType::Source
+        } else {
+            unreachable!("invalid fragment type mask: {}", mask);
+        }
     }
 }
