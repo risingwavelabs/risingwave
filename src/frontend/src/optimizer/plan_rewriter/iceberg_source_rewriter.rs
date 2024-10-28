@@ -18,17 +18,26 @@ use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
-use super::{BoxedRule, Rule};
+use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{LogicalIcebergScan, LogicalJoin, LogicalSource};
 use crate::optimizer::PlanRef;
 use crate::utils::{Condition, FRONTEND_RUNTIME};
 
-pub struct SourceToIcebergScanRule {}
-impl Rule for SourceToIcebergScanRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let source: &LogicalSource = plan.as_logical_source()?;
+#[derive(Debug, Clone, Default)]
+pub struct IcebergSourceRewriter {}
+
+impl IcebergSourceRewriter {
+    pub fn rewrite(plan: &PlanRef) -> Result<PlanRef> {
+        Self::rewrite_logical_source(plan)
+    }
+
+    fn rewrite_logical_source(plan: &PlanRef) -> Result<PlanRef> {
+        let source: &LogicalSource = match plan.as_logical_source() {
+            Some(s) => s,
+            None => return Ok(plan.clone()),
+        };
         if source.core.is_iceberg_connector() {
             let s = if let ConnectorProperties::Iceberg(prop) = ConnectorProperties::extract(
                 source
@@ -39,20 +48,16 @@ impl Rule for SourceToIcebergScanRule {
                     .with_properties
                     .clone(),
                 false,
-            )
-            .unwrap()
-            {
+            )? {
                 IcebergSplitEnumerator::new_inner(*prop, SourceEnumeratorContext::dummy().into())
             } else {
-                return None;
+                return Ok(plan.clone());
             };
             let delete_column_names = std::thread::spawn(move || {
-                FRONTEND_RUNTIME
-                    .block_on(s.get_all_delete_column_names())
-                    .unwrap()
+                FRONTEND_RUNTIME.block_on(s.get_all_delete_column_names())
             })
             .join()
-            .unwrap();
+            .unwrap()?;
             // data file scan
             let data_iceberg_scan = LogicalIcebergScan::new(source, IcebergScanType::DataScan);
             // equality delete scan
@@ -116,15 +121,9 @@ impl Rule for SourceToIcebergScanRule {
                 risingwave_pb::plan_common::JoinType::LeftAnti,
                 on,
             );
-            Some(join.into())
+            Ok(join.into())
         } else {
-            None
+            Ok(plan.clone())
         }
-    }
-}
-
-impl SourceToIcebergScanRule {
-    pub fn create() -> BoxedRule {
-        Box::new(SourceToIcebergScanRule {})
     }
 }

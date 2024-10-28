@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 
 use super::plan_node::RewriteExprsRecursive;
+use super::plan_rewriter::IcebergSourceRewriter;
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
 use crate::expr::NowProcTimeFinder;
@@ -458,10 +459,7 @@ static LOGICAL_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLoc
 static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Rewrite Source For Batch",
-        vec![
-            SourceToKafkaScanRule::create(),
-            SourceToIcebergScanRule::create(),
-        ],
+        vec![SourceToKafkaScanRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -704,6 +702,7 @@ impl LogicalOptimizer {
 
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
+        plan = IcebergSourceRewriter::rewrite(&plan)?;
 
         plan = plan.optimize_by_rules(&REWRITE_SOURCE_FOR_BATCH);
         plan = plan.optimize_by_rules(&GROUPING_SETS);
