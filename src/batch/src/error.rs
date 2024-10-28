@@ -17,6 +17,7 @@
 use std::sync::Arc;
 
 pub use anyhow::anyhow;
+use mysql_async::{Error as MySqlError, FromValueError as MySqlValueConversionError};
 use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{def_anyhow_newtype, def_anyhow_variant, BoxedError};
@@ -29,7 +30,7 @@ use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use thiserror_ext::Construct;
-use tokio_postgres;
+use tokio_postgres::Error as PostgresError;
 use tonic::Status;
 
 use crate::worker_manager::worker_node_manager::FragmentId;
@@ -192,7 +193,9 @@ def_anyhow_variant! {
     pub BatchExternalSystemError,
     BatchError ExternalSystemError,
 
-    tokio_postgres::Error => "Postgres error",
+    PostgresError => "Postgres error",
     iceberg::Error => "Iceberg error",
     ParquetError => "Parquet error",
+    MySqlError => "MySQL error",
+    MySqlValueConversionError => "MySQL value conversion error"
 }

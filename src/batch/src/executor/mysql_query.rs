@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use mysql_async;
@@ -53,57 +53,55 @@ impl Executor for MySqlQueryExecutor {
         self.do_execute().boxed()
     }
 }
-// pub fn mysql_row_to_owned_row(
-//     row: tokio_mysql::Row,
-//     schema: &Schema,
-// ) -> Result<OwnedRow, BatchError> {
-//     let mut datums = vec![];
-//     for i in 0..schema.fields.len() {
-//         let rw_field = &schema.fields[i];
-//         let name = rw_field.name.as_str();
-//         let datum = mysql_cell_to_scalar_impl(&row, &rw_field.data_type, i, name)?;
-//         datums.push(datum);
-//     }
-//     Ok(OwnedRow::new(datums))
-// }
+pub fn mysql_row_to_owned_row(
+    mut row: mysql_async::Row,
+    schema: &Schema,
+) -> Result<OwnedRow, BatchError> {
+    let mut datums = vec![];
+    for i in 0..schema.fields.len() {
+        let rw_field = &schema.fields[i];
+        let name = rw_field.name.as_str();
+        let datum = mysql_cell_to_scalar_impl(&mut row, &rw_field.data_type, i, name)?;
+        datums.push(datum);
+    }
+    Ok(OwnedRow::new(datums))
+}
 
-// TODO(kwannoel): Support more types, see mysql connector's ScalarAdapter.
-// fn mysql_cell_to_scalar_impl(
-//     row: &tokio_mysql::Row,
-//     data_type: &DataType,
-//     i: usize,
-//     name: &str,
-// ) -> Result<Datum, BatchError> {
-//     let datum = match data_type {
-//         DataType::Boolean
-//         | DataType::Int16
-//         | DataType::Int32
-//         | DataType::Int64
-//         | DataType::Float32
-//         | DataType::Float64
-//         | DataType::Date
-//         | DataType::Time
-//         | DataType::Timestamp
-//         | DataType::Timestamptz
-//         | DataType::Jsonb
-//         | DataType::Interval
-//         | DataType::Varchar
-//         | DataType::Bytea => {
-//             // ScalarAdapter is also fine. But ScalarImpl is more efficient
-//             row.try_get::<_, Option<ScalarImpl>>(i)?
-//         }
-//         DataType::Decimal => {
-//             // Decimal is more efficient than PgNumeric in ScalarAdapter
-//             let val = row.try_get::<_, Option<Decimal>>(i)?;
-//             val.map(ScalarImpl::from)
-//         }
-//         _ => {
-//             tracing::warn!(name, ?data_type, "unsupported data type, set to null");
-//             None
-//         }
-//     };
-//     Ok(datum)
-// }
+fn mysql_cell_to_scalar_impl(
+    row: &mut mysql_async::Row,
+    data_type: &DataType,
+    i: usize,
+    name: &str,
+) -> Result<Datum, BatchError> {
+    let datum = match data_type {
+        DataType::Boolean => {
+            let val = row.take_opt::<Option<bool>, _>(i);
+            match val {
+                None => bail!("missing value for column {}, at index {}", name, i),
+                Some(Ok(Some(val))) => Some(ScalarImpl::from(val)),
+                Some(Ok(None)) => None,
+                Some(Err(e)) => return Err(e.into()),
+            }
+        }
+        // | DataType::Int16
+        // | DataType::Int32
+        // | DataType::Int64
+        // | DataType::Float32
+        // | DataType::Float64
+        // | DataType::Decimal,
+        // | DataType::Date
+        // | DataType::Time
+        // | DataType::Timestamp
+        // | DataType::Varchar => {
+        //     // ScalarAdapter is also fine. But ScalarImpl is more efficient
+        //     row.try_get::<_, Option<ScalarImpl>>(i)?
+        // }
+        _ => {
+            bail!("unsupported data type: {}", data_type)
+        }
+    };
+    Ok(datum)
+}
 
 impl MySqlQueryExecutor {
     pub fn new(
@@ -143,27 +141,31 @@ impl MySqlQueryExecutor {
         let mut conn = pool
             .get_conn()
             .await
-            .context("failed to connect to mysql in binder")?;
+            .context("failed to connect to mysql in batch executor")?;
 
-        // let params: &[&str] = &[];
-        // let row_stream = client
-        //     .query_raw(&self.query, params)
-        //     .await
-        //     .context("mysql_query received error from remote server")?;
-        // let mut builder = DataChunkBuilder::new(self.schema.data_types(), 1024);
-        // tracing::debug!("mysql_query_executor: query executed, start deserializing rows");
-        // // deserialize the rows
-        // #[for_await]
-        // for row in row_stream {
-        //     let row = row?;
-        //     let owned_row = mysql_row_to_owned_row(row, &self.schema)?;
-        //     if let Some(chunk) = builder.append_one_row(owned_row) {
-        //         yield chunk;
-        //     }
-        // }
-        // if let Some(chunk) = builder.consume_all() {
-        //     yield chunk;
-        // }
+        let query = self.query;
+        let mut query_iter = conn
+            .query_iter(query)
+            .await
+            .context("failed to execute my_sql_query in batch executor")?;
+        let Some(row_stream) = query_iter.stream::<mysql_async::Row>().await? else {
+            bail!("failed to get row stream from mysql query")
+        };
+
+        let mut builder = DataChunkBuilder::new(self.schema.data_types(), 1024);
+        tracing::debug!("mysql_query_executor: query executed, start deserializing rows");
+        // deserialize the rows
+        #[for_await]
+        for row in row_stream {
+            let mut row = row?;
+            let owned_row = mysql_row_to_owned_row(row, &self.schema)?;
+            if let Some(chunk) = builder.append_one_row(owned_row) {
+                yield chunk;
+            }
+        }
+        if let Some(chunk) = builder.consume_all() {
+            yield chunk;
+        }
         return Ok(());
     }
 }
