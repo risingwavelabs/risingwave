@@ -52,7 +52,7 @@ cluster_start() {
     if [[ $mode == *"mysql-backend" ]]; then
       mysql -h mysql -P 3306 -u root -p123456 -e "DROP DATABASE IF EXISTS metadata; CREATE DATABASE metadata;"
     elif [[ $mode == *"pg-backend" ]]; then
-      PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata; CREATE DATABASE metadata;"
+      PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata;" -c "CREATE DATABASE metadata;"
     fi
 
     risedev ci-start "$mode"
