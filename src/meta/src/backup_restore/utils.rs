@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
-use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
+use risingwave_common::config::{MetaBackend, MetaStoreConfig, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use sea_orm::DbBackend;
@@ -32,21 +32,25 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
         MetaBackend::Mem => MetaStoreBackend::Mem,
         MetaBackend::Sql => MetaStoreBackend::Sql {
             endpoint: opts.sql_endpoint,
+            config: MetaStoreConfig::default(),
         },
         MetaBackend::Sqlite => MetaStoreBackend::Sql {
             endpoint: format!("sqlite://{}?mode=rwc", opts.sql_endpoint),
+            config: MetaStoreConfig::default(),
         },
         MetaBackend::Postgres => MetaStoreBackend::Sql {
             endpoint: format!(
                 "postgres://{}:{}@{}/{}",
                 opts.sql_username, opts.sql_password, opts.sql_endpoint, opts.sql_database
             ),
+            config: MetaStoreConfig::default(),
         },
         MetaBackend::Mysql => MetaStoreBackend::Sql {
             endpoint: format!(
                 "mysql://{}:{}@{}/{}",
                 opts.sql_username, opts.sql_password, opts.sql_endpoint, opts.sql_database
             ),
+            config: MetaStoreConfig::default(),
         },
     };
     match meta_store_backend {
@@ -54,19 +58,21 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
             let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
             Ok(SqlMetaStore::new(conn))
         }
-        MetaStoreBackend::Sql { endpoint } => {
+        MetaStoreBackend::Sql { endpoint, config } => {
             let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
-                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
                 // here we forcibly specify the number of connections as 1.
                 1
             } else {
-                10
+                config.max_connections
             };
             let mut options = sea_orm::ConnectOptions::new(endpoint);
             options
                 .max_connections(max_connection)
-                .connect_timeout(Duration::from_secs(10))
-                .idle_timeout(Duration::from_secs(30));
+                .min_connections(config.min_connections)
+                .connect_timeout(Duration::from_secs(config.connection_timeout_sec))
+                .idle_timeout(Duration::from_secs(config.idle_timeout_sec))
+                .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
             let conn = sea_orm::Database::connect(options)
                 .await
                 .map_err(|e| BackupError::MetaStorage(e.into()))?;

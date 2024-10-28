@@ -1,0 +1,18 @@
+- name: test json output format (logical)
+  sql: |
+    CREATE TABLE t (v1 int);
+    explain (logical, format json) SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - explain_output
+- name: test json output format (batch)
+  sql: |
+    CREATE TABLE t (v1 int);
+    explain (physical, format json) SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - explain_output
+- name: test json output format (stream)
+  sql: |
+    CREATE TABLE t (v1 int);
+    explain (physical, format json) create materialized view m1 as SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - explain_output

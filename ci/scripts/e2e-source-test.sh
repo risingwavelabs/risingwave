@@ -38,7 +38,8 @@ apt-get -y install jq
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-inline-source-test
-risedev slt './e2e_test/source_inline/**/*.slt'
+risedev slt './e2e_test/source_inline/**/*.slt' -j16
+risedev slt './e2e_test/source_inline/**/*.slt.serial'
 echo "--- Kill cluster"
 risedev ci-kill
 
@@ -137,9 +138,6 @@ risedev slt './e2e_test/source_legacy/cdc/cdc.check_new_rows.slt'
 
 # drop relations
 risedev slt './e2e_test/source_legacy/cdc/cdc_share_stream_drop.slt'
-
-echo "--- postgres_query tvf test"
-risedev slt './e2e_test/source_legacy/tvf/postgres_query.slt'
 
 echo "--- Kill cluster"
 risedev ci-kill
