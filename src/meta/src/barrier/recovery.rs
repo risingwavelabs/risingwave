@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
@@ -31,7 +32,7 @@ use risingwave_pb::stream_plan::{AddMutation, StreamActor};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, error, info, warn, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use super::{CheckpointControl, GlobalBarrierWorker, GlobalBarrierWorkerContext, TracedEpoch};
 use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightSubscriptionInfo};
@@ -89,6 +90,7 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
+    // FIXME: didn't consider Values here
     async fn recover_background_mv_progress(&self) -> MetaResult<CreateMviewProgressTracker> {
         let mgr = &self.metadata_manager;
         let mviews = mgr
@@ -369,10 +371,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         debug!(?node_to_collect, "inject initial barrier");
                         while !node_to_collect.is_empty() {
                             let (worker_id, result) = control_stream_manager
-                                .next_complete_barrier_response()
+                                .next_collect_barrier_response()
                                 .await;
                             let resp = result?;
-                            assert_eq!(resp.epoch, barrier_info.prev_epoch.value().0);
+                            assert_eq!(resp.epoch, barrier_info.prev_epoch());
                             assert!(node_to_collect.remove(&worker_id));
                         }
                         debug!("collected initial barrier");
@@ -586,7 +588,7 @@ impl GlobalBarrierWorkerContextImpl {
                 info!("integrity check passed");
             }
             Err(_) => {
-                error!("integrity check failed");
+                bail!("integrity check failed");
             }
         }
 
