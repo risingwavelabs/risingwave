@@ -550,6 +550,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     if self_paused {
                         self_paused = false;
+                        // command_paused has a higher priority.
                         if !command_paused {
                             stream.resume_stream();
                         }

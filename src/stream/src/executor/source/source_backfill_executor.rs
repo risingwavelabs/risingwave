@@ -463,6 +463,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 * WAIT_BARRIER_MULTIPLE_TIMES;
             let mut last_barrier_time = Instant::now();
             let mut self_paused = false;
+            let mut command_paused = false;
 
             // The main logic of the loop is in handle_upstream_row and handle_backfill_row.
             'backfill_loop: while let Some(either) = backfill_stream.next().await {
@@ -503,11 +504,16 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 last_barrier_time = Instant::now();
 
                                 if self_paused {
-                                    backfill_stream = select_with_strategy(
-                                        input.by_ref().map(Either::Left),
-                                        paused_reader.take().expect("no paused reader to resume"),
-                                        select_strategy,
-                                    );
+                                    // command_paused has a higher priority.
+                                    if !command_paused {
+                                        backfill_stream = select_with_strategy(
+                                            input.by_ref().map(Either::Left),
+                                            paused_reader
+                                                .take()
+                                                .expect("no paused reader to resume"),
+                                            select_strategy,
+                                        );
+                                    }
                                     self_paused = false;
                                 }
 
@@ -515,9 +521,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 if let Some(ref mutation) = barrier.mutation.as_deref() {
                                     match mutation {
                                         Mutation::Pause => {
+                                            command_paused = true;
                                             pause_reader!();
                                         }
                                         Mutation::Resume => {
+                                            command_paused = false;
                                             backfill_stream = select_with_strategy(
                                                 input.by_ref().map(Either::Left),
                                                 paused_reader

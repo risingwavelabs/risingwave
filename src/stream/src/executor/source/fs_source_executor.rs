@@ -376,6 +376,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
+        let mut command_paused = false;
 
         let source_output_row_count = self
             .metrics
@@ -394,7 +395,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     Message::Barrier(barrier) => {
                         last_barrier_time = Instant::now();
                         if self_paused {
-                            stream.resume_stream();
+                            // command_paused has a higher priority.
+                            if !command_paused {
+                                stream.resume_stream();
+                            }
                             self_paused = false;
                         }
                         let epoch = barrier.epoch;
@@ -405,8 +409,14 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                     self.apply_split_change(&source_desc, &mut stream, actor_splits)
                                         .await?
                                 }
-                                Mutation::Pause => stream.pause_stream(),
-                                Mutation::Resume => stream.resume_stream(),
+                                Mutation::Pause => {
+                                    command_paused = true;
+                                    stream.pause_stream()
+                                }
+                                Mutation::Resume => {
+                                    command_paused = false;
+                                    stream.resume_stream()
+                                }
                                 Mutation::Update(UpdateMutation { actor_splits, .. }) => {
                                     self.apply_split_change(
                                         &source_desc,
