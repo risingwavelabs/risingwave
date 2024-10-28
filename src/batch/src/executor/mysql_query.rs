@@ -67,6 +67,18 @@ pub fn mysql_row_to_owned_row(
     Ok(OwnedRow::new(datums))
 }
 
+macro_rules! mysql_value_to_scalar {
+    ($row:ident, $i:ident, $name:ident, $ty:ty, $variant:ident) => {{
+        let val = $row.take_opt::<Option<$ty>, _>($i);
+        match val {
+            None => bail!("missing value for column {}, at index {}", $name, $i),
+            Some(Ok(Some(val))) => Some(ScalarImpl::$variant(val)),
+            Some(Ok(None)) => None,
+            Some(Err(e)) => return Err(e.into()),
+        }
+    }};
+}
+
 fn mysql_cell_to_scalar_impl(
     row: &mut mysql_async::Row,
     data_type: &DataType,
@@ -74,15 +86,7 @@ fn mysql_cell_to_scalar_impl(
     name: &str,
 ) -> Result<Datum, BatchError> {
     let datum = match data_type {
-        DataType::Boolean => {
-            let val = row.take_opt::<Option<bool>, _>(i);
-            match val {
-                None => bail!("missing value for column {}, at index {}", name, i),
-                Some(Ok(Some(val))) => Some(ScalarImpl::from(val)),
-                Some(Ok(None)) => None,
-                Some(Err(e)) => return Err(e.into()),
-            }
-        }
+        DataType::Boolean => mysql_value_to_scalar!(row, i, name, bool, Bool),
         // | DataType::Int16
         // | DataType::Int32
         // | DataType::Int64
