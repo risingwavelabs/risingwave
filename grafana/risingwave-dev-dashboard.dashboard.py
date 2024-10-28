@@ -933,7 +933,7 @@ def section_streaming(outer_panels):
                 ),
                 panels.timeseries_rowsps(
                     "Backfill Snapshot Read Throughput(rows)",
-                    "Total number of rows that have been read from the backfill snapshot",
+                    "Rows/sec that we read from the backfill snapshot",
                     [
                         panels.target(
                             f"rate({table_metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
@@ -945,6 +945,23 @@ def section_streaming(outer_panels):
                             "table_id={{table_id}} actor={{actor_id}} {{stage}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Backfill Snapshot Read Throughput(rows) by MV",
+                    "Rows/sec that we read from the backfill snapshot by materialized view",
+                    [
+                        panels.target(
+                            f"""
+                                sum by (table_id) (
+                                  rate({metric('stream_backfill_snapshot_read_row_count', node_filter_enabled=False, table_id_filter_enabled=True)}[$__rate_interval])
+                                )
+                                * on(table_id) group_left(table_name) (
+                                  group({metric('table_info', node_filter_enabled=False)}) by (table_name, table_id)
+                                )
+                            """,
+                            "table_name={{table_name}} table_id={{table_id}}",
+                        )
                     ],
                 ),
                 panels.timeseries_rowsps(

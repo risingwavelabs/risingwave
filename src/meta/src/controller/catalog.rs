@@ -673,25 +673,42 @@ impl CatalogController {
         Ok(tables)
     }
 
-    pub async fn list_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+    pub async fn list_all_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        self.list_object_dependencies(true).await
+    }
+
+    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        self.list_object_dependencies(false).await
+    }
+
+    async fn list_object_dependencies(
+        &self,
+        include_creating: bool,
+    ) -> MetaResult<Vec<PbObjectDependencies>> {
         let inner = self.inner.read().await;
 
-        let dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
-            .select_only()
-            .columns([
-                object_dependency::Column::Oid,
-                object_dependency::Column::UsedBy,
-            ])
-            .join(
-                JoinType::InnerJoin,
-                object_dependency::Relation::Object1.def(),
-            )
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+        let dependencies: Vec<(ObjectId, ObjectId)> = {
+            let filter = if include_creating {
+                Expr::value(true)
+            } else {
+                streaming_job::Column::JobStatus.eq(JobStatus::Created)
+            };
+            ObjectDependency::find()
+                .select_only()
+                .columns([
+                    object_dependency::Column::Oid,
+                    object_dependency::Column::UsedBy,
+                ])
+                .join(
+                    JoinType::InnerJoin,
+                    object_dependency::Relation::Object1.def(),
+                )
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         let mut obj_dependencies = dependencies
             .into_iter()
             .map(|(oid, used_by)| PbObjectDependencies {
@@ -722,20 +739,24 @@ impl CatalogController {
             }
         }));
 
-        let sink_dependencies: Vec<(SinkId, TableId)> = Sink::find()
-            .select_only()
-            .columns([sink::Column::SinkId, sink::Column::TargetTable])
-            .join(JoinType::InnerJoin, sink::Relation::Object.def())
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(
+        let sink_dependencies: Vec<(SinkId, TableId)> = {
+            let filter = if include_creating {
+                sink::Column::TargetTable.is_not_null()
+            } else {
                 streaming_job::Column::JobStatus
                     .eq(JobStatus::Created)
-                    .and(sink::Column::TargetTable.is_not_null()),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+                    .and(sink::Column::TargetTable.is_not_null())
+            };
+            Sink::find()
+                .select_only()
+                .columns([sink::Column::SinkId, sink::Column::TargetTable])
+                .join(JoinType::InnerJoin, sink::Relation::Object.def())
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
             PbObjectDependencies {
                 object_id: table_id as _,
@@ -743,22 +764,26 @@ impl CatalogController {
             }
         }));
 
-        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = Subscription::find()
-            .select_only()
-            .columns([
-                subscription::Column::SubscriptionId,
-                subscription::Column::DependentTableId,
-            ])
-            .join(JoinType::InnerJoin, subscription::Relation::Object.def())
-            .filter(
+        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = {
+            let filter = if include_creating {
+                subscription::Column::DependentTableId.is_not_null()
+            } else {
                 subscription::Column::SubscriptionState
                     .eq(Into::<i32>::into(SubscriptionState::Created))
-                    .and(subscription::Column::DependentTableId.is_not_null()),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+                    .and(subscription::Column::DependentTableId.is_not_null())
+            };
+            Subscription::find()
+                .select_only()
+                .columns([
+                    subscription::Column::SubscriptionId,
+                    subscription::Column::DependentTableId,
+                ])
+                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         obj_dependencies.extend(subscription_dependencies.into_iter().map(
             |(subscription_id, table_id)| PbObjectDependencies {
                 object_id: subscription_id as _,

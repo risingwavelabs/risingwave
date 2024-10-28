@@ -35,8 +35,8 @@ use risingwave_common::types::{
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select, SelectItem, SetExpr,
-    TableFactor, TableWithJoins,
+    CompatibleSourceSchema, ConnectorSchema, Expr, Ident, ObjectName, OrderByExpr, Query, Select,
+    SelectItem, SetExpr, TableFactor, TableWithJoins,
 };
 use thiserror_ext::AsReport;
 
@@ -232,6 +232,22 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
         offset: None,
         fetch: None,
     }
+}
+
+pub fn gen_query_from_table_name_order_by(from_name: ObjectName, pk_names: Vec<String>) -> Query {
+    let mut query = gen_query_from_table_name(from_name);
+    query.order_by = pk_names
+        .into_iter()
+        .map(|pk| {
+            let expr = Expr::Identifier(Ident::with_quote_unchecked('"', pk));
+            OrderByExpr {
+                expr,
+                asc: None,
+                nulls_first: None,
+            }
+        })
+        .collect();
+    query
 }
 
 pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {

@@ -31,8 +31,8 @@ MAIN_CRON_TEST_MAP = {
     "recovery-test-deterministic": ["runji", "noelkwan"],
     "background-ddl-arrangement-backfill-recovery-test-deterministic": ["runji", "noelkwan"],
     "background-ddl-recovery-test-deterministic": ["runji", "noelkwan"],
-    "e2e-iceberg-sink-test": ["zilin"],
-    "e2e-iceberg-sink-v2-test": ["zilin"],
+    "e2e-iceberg-sink-test": ["zilin", "xinhao"],
+    "e2e-iceberg-sink-v2-test": ["zilin", "xinhao"],
     "e2e-java-binding-tests": ["yiming"],
     "s3-source-check-aws": ["bohan"],
     "s3-source-check-aws-json-parser": ["bohan"],
@@ -55,8 +55,9 @@ MAIN_CRON_TEST_MAP = {
     "e2e-redis-sink-tests": ["xinhao"],
     "e2e-starrocks-sink-tests": ["xinhao"],
     "e2e-cassandra-sink-tests": ["xinhao"],
-    "e2e-clickhouse-sink-tests": ["bohan","xinhao"],
+    "e2e-clickhouse-sink-tests": ["bohan", "xinhao"],
     "e2e-pulsar-sink-tests": ["bohan"],
+    "e2e-mqtt-sink-tests": ["xinhao"],
     "connector-node-integration-test": ["siyuan"],
 }
 
