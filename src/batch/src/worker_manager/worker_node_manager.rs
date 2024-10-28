@@ -418,6 +418,7 @@ mod tests {
                     is_serving: true,
                     is_streaming: true,
                     internal_rpc_host_addr: "".to_string(),
+                    node_label: None,
                 }),
                 transactional_id: Some(1),
                 ..Default::default()
@@ -433,6 +434,7 @@ mod tests {
                     is_serving: true,
                     is_streaming: false,
                     internal_rpc_host_addr: "".to_string(),
+                    node_label: None,
                 }),
                 transactional_id: Some(2),
                 ..Default::default()
