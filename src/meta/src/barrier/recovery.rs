@@ -92,7 +92,9 @@ impl GlobalBarrierWorkerContextImpl {
     }
 
     // FIXME: didn't consider Values here
-    async fn recover_background_mv_progress(&self) -> MetaResult<CreateMviewProgressTracker> {
+    async fn recover_background_mv_progress(
+        &self,
+    ) -> MetaResult<HashMap<TableId, (String, TableFragments)>> {
         let mgr = &self.metadata_manager;
         let mviews = mgr
             .catalog_controller
@@ -110,14 +112,9 @@ impl GlobalBarrierWorkerContextImpl {
             mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
         }
 
-        let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
 
-        Ok(CreateMviewProgressTracker::recover(
-            mview_map,
-            version_stats,
-            mgr.clone(),
-        ))
+        Ok(mview_map)
     }
 }
 
@@ -163,7 +160,7 @@ impl GlobalBarrierWorkerContextImpl {
         Option<TracedEpoch>,
         HashMap<WorkerId, Vec<StreamActor>>,
         HashMap<ActorId, Vec<SplitImpl>>,
-        CreateMviewProgressTracker,
+        HashMap<TableId, (String, TableFragments)>,
         HummockVersionStats,
     )> {
         {
@@ -175,7 +172,7 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // Mview progress needs to be recovered.
                     tracing::info!("recovering mview progress");
-                    let tracker = self
+                    let background_mview_progress = self
                         .recover_background_mv_progress()
                         .await
                         .context("recover mview progress should not fail")?;
@@ -288,7 +285,7 @@ impl GlobalBarrierWorkerContextImpl {
                         prev_epoch,
                         node_actors,
                         source_split_assignments,
-                        tracker,
+                        background_mview_progress,
                         self.hummock_manager.get_version_stats().await,
                     ))
                 }
@@ -321,7 +318,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 prev_epoch,
                 node_actors,
                 source_split_assignments,
-                tracker,
+                background_mview_progress,
                 version_stats,
             ) = self.context.reload_runtime_info().await?;
 
@@ -388,7 +385,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         BarrierWorkerState::new(new_epoch, info, subscription_info, paused_reason),
                         active_streaming_nodes,
                         control_stream_manager,
-                        tracker,
+                        CreateMviewProgressTracker::recover(
+                            background_mview_progress,
+                            &version_stats,
+                        ),
                         version_stats,
                     )
                 }

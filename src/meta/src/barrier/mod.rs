@@ -68,7 +68,7 @@ use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
     MetadataManager,
 };
-use crate::model::ActorId;
+use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -243,7 +243,7 @@ trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         Option<TracedEpoch>,
         HashMap<WorkerId, Vec<StreamActor>>,
         HashMap<ActorId, Vec<SplitImpl>>,
-        CreateMviewProgressTracker,
+        HashMap<TableId, (String, TableFragments)>,
         HummockVersionStats,
     )>;
 }
@@ -301,7 +301,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         Option<TracedEpoch>,
         HashMap<WorkerId, Vec<StreamActor>>,
         HashMap<ActorId, Vec<SplitImpl>>,
-        CreateMviewProgressTracker,
+        HashMap<TableId, (String, TableFragments)>,
         HummockVersionStats,
     )> {
         self.reload_runtime_info_impl().await
