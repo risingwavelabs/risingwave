@@ -72,6 +72,12 @@ where
 {
     set_panic_hook();
 
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .inspect_err(|e| {
+            tracing::error!(?e, "Failed to install default crypto provider.");
+        })
+        .unwrap();
     risingwave_variables::init_server_start_time();
 
     // `TOKIO` will be read by tokio. Duplicate `RW` for compatibility.
