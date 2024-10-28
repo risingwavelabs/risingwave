@@ -790,7 +790,7 @@ steps:
     timeout_in_minutes: 30
     retry: *auto-retry
 
-  - label: "end-to-end test (parallel, postgres backend)"
+  - label: "end-to-end test (postgres backend)"
     command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe-pg-backend"
     if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
     depends_on:
@@ -806,7 +806,7 @@ steps:
     timeout_in_minutes: 30
     retry: *auto-retry
 
-  - label: "end-to-end test (parallel, mysql backend)"
+  - label: "end-to-end test (mysql backend)"
     command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe-mysql-backend"
     if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
     depends_on:
