@@ -65,8 +65,8 @@ impl IcebergProperties {
         if let Some(jdbc_password) = self.jdbc_password.clone() {
             java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
         }
-        // TODO: support path_style_access and java_catalog_props for iceberg source
-        self.common.load_table_v2(&None, &java_catalog_props).await
+        // TODO: support java_catalog_props for iceberg source
+        self.common.load_table_v2(&java_catalog_props).await
     }
 
     pub async fn load_table_v2_with_metadata(
@@ -82,7 +82,7 @@ impl IcebergProperties {
         }
         // TODO: support path_style_access and java_catalog_props for iceberg source
         self.common
-            .load_table_v2_with_metadata(table_meta, &None, &java_catalog_props)
+            .load_table_v2_with_metadata(table_meta, &java_catalog_props)
             .await
     }
 }

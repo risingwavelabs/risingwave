@@ -117,6 +117,10 @@ IcebergProperties:
     field_type: String
     comments: Full name of table, must include schema name.
     required: true
+  - name: s3.path.style.access
+    field_type: bool
+    required: false
+    default: Default::default
   - name: catalog.jdbc.user
     field_type: String
     required: false
