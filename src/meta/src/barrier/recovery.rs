@@ -34,7 +34,9 @@ use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, info, warn, Instrument};
 
-use super::{CheckpointControl, GlobalBarrierWorker, GlobalBarrierWorkerContext, TracedEpoch};
+use super::{
+    CheckpointControl, GlobalBarrierWorker, GlobalBarrierWorkerContext, RecoveryReason, TracedEpoch,
+};
 use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightSubscriptionInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
@@ -136,21 +138,24 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
-    pub async fn recovery(&mut self, paused_reason: Option<PausedReason>, err: Option<MetaError>) {
-        // Mark blocked and abort buffered schedules, they might be dirty already.
-        self.scheduled_barriers
-            .abort_and_mark_blocked("cluster is under recovering");
+    pub async fn recovery(
+        &mut self,
+        paused_reason: Option<PausedReason>,
+        err: Option<MetaError>,
+        recovery_reason: RecoveryReason,
+    ) {
+        self.context.abort_and_mark_blocked(recovery_reason);
         // Clear all control streams to release resources (connections to compute nodes) first.
         self.control_stream_manager.clear();
 
-        self.recovery_inner(paused_reason, err).await
+        self.recovery_inner(paused_reason, err).await;
+        self.context.mark_ready();
     }
 }
 
 impl GlobalBarrierWorkerContextImpl {
     pub(super) async fn reload_runtime_info_impl(
         &self,
-        pre_apply_drop_cancel: impl Fn() -> bool,
     ) -> MetaResult<(
         ActiveStreamingWorkerNodes,
         InflightGraphInfo,
@@ -177,7 +182,7 @@ impl GlobalBarrierWorkerContextImpl {
                     tracing::info!("recovered mview progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = pre_apply_drop_cancel();
+                    let _ = self.scheduled_barriers.pre_apply_drop_cancel();
 
                     let mut active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
@@ -213,7 +218,7 @@ impl GlobalBarrierWorkerContextImpl {
                             })?
                     };
 
-                    if pre_apply_drop_cancel() {
+                    if self.scheduled_barriers.pre_apply_drop_cancel() {
                         info = self.resolve_graph_info().await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "resolve actor info failed");
                         })?
@@ -318,10 +323,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 source_split_assignments,
                 tracker,
                 version_stats,
-            ) = self
-                .context
-                .reload_runtime_info(|| self.scheduled_barriers.pre_apply_drop_cancel())
-                .await?;
+            ) = self.context.reload_runtime_info().await?;
 
             let mut control_stream_manager = ControlStreamManager::new(self.env.clone());
             let reset_start_time = Instant::now();
@@ -329,7 +331,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 .reset(
                     &subscription_info,
                     active_streaming_nodes.current(),
-                    &self.context,
+                    &*self.context,
                 )
                 .await
                 .inspect_err(|err| {
@@ -369,9 +371,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         )?;
                         debug!(?node_to_collect, "inject initial barrier");
                         while !node_to_collect.is_empty() {
-                            let (worker_id, result) = control_stream_manager
-                                .next_collect_barrier_response()
-                                .await;
+                            let (worker_id, result) =
+                                control_stream_manager.next_collect_barrier_response().await;
                             let resp = result?;
                             assert_eq!(resp.epoch, barrier_info.prev_epoch());
                             assert!(node_to_collect.remove(&worker_id));
@@ -402,7 +403,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         .expect("Retry until recovery success.");
 
         recovery_timer.observe_duration();
-        self.scheduled_barriers.mark_ready();
 
         let create_mview_tracker: CreateMviewProgressTracker;
         let state: BarrierWorkerState;
