@@ -398,13 +398,16 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let input_schema_len = table.get_data_types().len() - self.calls.len();
         let calls = self.calls;
 
+        // return values
         let mut part_changes = BTreeMap::new();
+        let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
+
+        // stats
         let mut accessed_entry_count = 0;
         let mut compute_count = 0;
         let mut same_output_count = 0;
 
-        // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
-        // into the cache.
+        // Find affected ranges, this also ensures that all rows in the affected ranges are loaded into the cache.
         let (part_with_delta, affected_ranges) =
             self.find_affected_ranges(table, &mut delta).await?;
 
@@ -423,8 +426,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 );
             }
         }
-
-        let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
 
         for AffectedRange {
             first_frame_start,
@@ -595,12 +596,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         'a: 'delta,
         's: 'delta,
     {
-        self.ensure_delta_in_cache(table, delta).await?;
-        let delta = &*delta; // let's make it immutable
-
         if delta.is_empty() {
             return Ok((DeltaBTreeMap::new(self.range_cache.inner(), delta), vec![]));
         }
+
+        self.ensure_delta_in_cache(table, delta).await?;
+        let delta = &*delta; // let's make it immutable
 
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
