@@ -64,10 +64,7 @@ use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
-use crate::{
-    deserialize_bool_from_string, deserialize_optional_bool_from_string,
-    deserialize_optional_string_seq_from_string,
-};
+use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
 
@@ -81,13 +78,6 @@ pub struct IcebergConfig {
 
     #[serde(flatten)]
     common: IcebergCommon,
-
-    #[serde(
-        rename = "s3.path.style.access",
-        default,
-        deserialize_with = "deserialize_optional_bool_from_string"
-    )]
-    pub path_style_access: Option<bool>,
 
     #[serde(
         rename = "primary_key",
@@ -175,21 +165,21 @@ impl IcebergConfig {
 
     pub async fn create_catalog(&self) -> Result<CatalogRef> {
         self.common
-            .create_catalog(&self.path_style_access, &self.java_catalog_props)
+            .create_catalog(&self.java_catalog_props)
             .await
             .map_err(Into::into)
     }
 
     pub async fn load_table(&self) -> Result<Table> {
         self.common
-            .load_table(&self.path_style_access, &self.java_catalog_props)
+            .load_table(&self.java_catalog_props)
             .await
             .map_err(Into::into)
     }
 
     pub async fn create_catalog_v2(&self) -> Result<Arc<dyn CatalogV2>> {
         self.common
-            .create_catalog_v2(&self.path_style_access, &self.java_catalog_props)
+            .create_catalog_v2(&self.java_catalog_props)
             .await
             .map_err(Into::into)
     }
@@ -1018,10 +1008,10 @@ mod test {
                 catalog_name: Some("demo".to_string()),
                 database_name: Some("demo_db".to_string()),
                 table_name: "demo_table".to_string(),
+                path_style_access: Some(true),
             },
             r#type: "upsert".to_string(),
             force_append_only: false,
-            path_style_access: Some(true),
             primary_key: Some(vec!["v1".to_string()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
