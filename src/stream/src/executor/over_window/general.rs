@@ -152,7 +152,11 @@ pub(super) struct Calls {
     pub(super) end_is_unbounded: bool,
     /// Deduplicated indices of all arguments of all calls.
     pub(super) all_arg_indices: Vec<usize>,
-    pub(super) rank_funcs_only: bool,
+
+    // TODO(rc): The following flags are used to optimize for `row_number`, `rank` and `dense_rank`.
+    // We should try our best to remove these flags while maintaining the performance in the future.
+    pub(super) numbering_only: bool,
+    pub(super) has_rank: bool,
 }
 
 impl Calls {
@@ -181,7 +185,8 @@ impl Calls {
             .dedup()
             .collect();
 
-        let rank_funcs_only = calls.iter().all(|call| call.kind.is_rank());
+        let numbering_only = calls.iter().all(|call| call.kind.is_numbering());
+        let has_rank = calls.iter().any(|call| call.kind.is_rank());
 
         Self {
             calls,
@@ -190,7 +195,8 @@ impl Calls {
             start_is_unbounded,
             end_is_unbounded,
             all_arg_indices,
-            rank_funcs_only,
+            numbering_only,
+            has_rank,
         }
     }
 

@@ -397,7 +397,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     )> {
         let calls = self.calls;
         let input_schema_len = table.get_data_types().len() - calls.len();
-        let rank_funcs_only = calls.rank_funcs_only;
+        let numbering_only = calls.numbering_only;
+        let has_rank = calls.has_rank;
 
         // return values
         let mut part_changes = BTreeMap::new();
@@ -414,7 +415,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         let snapshot = part_with_delta.snapshot();
         let delta = part_with_delta.delta();
-        let last_delta_key = delta.last_key_value().map(|(k, _)| k);
+        let last_delta_key = delta.last_key_value().map(|(k, _)| k.as_normal_expect());
 
         // Generate delete changes first, because deletes are skipped during iteration over
         // `part_with_delta` in the next step.
@@ -517,9 +518,18 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 if !old_output.is_empty() && old_output == output {
                     same_output_count += 1;
 
-                    if rank_funcs_only && key >= last_delta_key {
-                        // there won't be any more changes after this point, we can stop early
-                        should_continue = false;
+                    if numbering_only {
+                        if has_rank {
+                            // It's possible that an `Insert` doesn't affect it's ties but affects
+                            // all the following rows, so we need to check the `order_key`.
+                            if key.as_normal_expect().order_key > last_delta_key.order_key {
+                                // there won't be any more changes after this point, we can stop early
+                                should_continue = false;
+                            }
+                        } else if key.as_normal_expect() >= last_delta_key {
+                            // there won't be any more changes after this point, we can stop early
+                            should_continue = false;
+                        }
                     }
                 }
 
