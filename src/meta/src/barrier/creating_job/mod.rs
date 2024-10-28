@@ -187,7 +187,7 @@ impl CreatingStreamingJobControl {
             vec![],
         )?;
         barrier_control.enqueue_epoch(
-            barrier_info.prev_epoch.value().0,
+            barrier_info.prev_epoch(),
             node_to_collect,
             barrier_info.kind.is_checkpoint(),
         );
@@ -210,7 +210,7 @@ impl CreatingStreamingJobControl {
         if start_consume_upstream {
             info!(
                 table_id = self.info.table_fragments.table_id().table_id,
-                prev_epoch = barrier_info.prev_epoch.value().0,
+                prev_epoch = barrier_info.prev_epoch(),
                 "start consuming upstream"
             );
         }
