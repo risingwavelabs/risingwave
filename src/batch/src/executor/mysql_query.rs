@@ -15,14 +15,15 @@
 use anyhow::{anyhow, Context};
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
-use mysql_async;
 use mysql_async::prelude::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
+use {chrono, mysql_async};
 
 use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
@@ -72,7 +73,7 @@ macro_rules! mysql_value_to_scalar {
         let val = $row.take_opt::<Option<$ty>, _>($i);
         match val {
             None => bail!("missing value for column {}, at index {}", $name, $i),
-            Some(Ok(Some(val))) => Some(ScalarImpl::$variant(val)),
+            Some(Ok(Some(val))) => Some(ScalarImpl::$variant(val.into())),
             Some(Ok(None)) => None,
             Some(Err(e)) => return Err(e.into()),
         }
@@ -87,19 +88,18 @@ fn mysql_cell_to_scalar_impl(
 ) -> Result<Datum, BatchError> {
     let datum = match data_type {
         DataType::Boolean => mysql_value_to_scalar!(row, i, name, bool, Bool),
-        // | DataType::Int16
-        // | DataType::Int32
-        // | DataType::Int64
-        // | DataType::Float32
-        // | DataType::Float64
-        // | DataType::Decimal,
-        // | DataType::Date
-        // | DataType::Time
-        // | DataType::Timestamp
-        // | DataType::Varchar => {
-        //     // ScalarAdapter is also fine. But ScalarImpl is more efficient
-        //     row.try_get::<_, Option<ScalarImpl>>(i)?
-        // }
+        DataType::Int16 => mysql_value_to_scalar!(row, i, name, i16, Int16),
+        DataType::Int32 => mysql_value_to_scalar!(row, i, name, i32, Int32),
+        DataType::Int64 => mysql_value_to_scalar!(row, i, name, i64, Int64),
+        DataType::Float32 => mysql_value_to_scalar!(row, i, name, f32, Float32),
+        DataType::Float64 => mysql_value_to_scalar!(row, i, name, f64, Float64),
+        DataType::Decimal => mysql_value_to_scalar!(row, i, name, RustDecimal, Decimal),
+        DataType::Date => mysql_value_to_scalar!(row, i, name, chrono::NaiveDate, Date),
+        DataType::Time => mysql_value_to_scalar!(row, i, name, chrono::NaiveTime, Time),
+        DataType::Timestamp => {
+            mysql_value_to_scalar!(row, i, name, chrono::NaiveDateTime, Timestamp)
+        }
+        DataType::Varchar => mysql_value_to_scalar!(row, i, name, String, Utf8),
         _ => {
             bail!("unsupported data type: {}", data_type)
         }
