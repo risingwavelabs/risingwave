@@ -1672,6 +1672,6 @@ impl Compaction {
 pub struct CompactionGroupStatistic {
     pub group_id: CompactionGroupId,
     pub group_size: u64,
-    pub table_statistic: HashMap<StateTableId, u64>,
+    pub table_statistic: BTreeMap<StateTableId, u64>,
     pub compaction_group_config: CompactionGroup,
 }

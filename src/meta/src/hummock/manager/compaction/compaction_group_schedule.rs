@@ -784,7 +784,6 @@ impl HummockManager {
         let is_huge_hybrid_group =
             group.group_size > group_max_size && group.table_statistic.len() > 1; // avoid split single table group
         if is_huge_hybrid_group {
-            assert!(group.table_statistic.keys().is_sorted());
             let mut accumulated_size = 0;
             let mut table_ids = Vec::default();
             for (table_id, table_size) in &group.table_statistic {
@@ -792,6 +791,7 @@ impl HummockManager {
                 table_ids.push(*table_id);
                 // split if the accumulated size is greater than half of the group size
                 // avoid split a small table to dedicated compaction group and trigger multiple merge
+                assert!(table_ids.is_sorted());
                 if accumulated_size * 2 > group_max_size {
                     let ret = self
                         .move_state_tables_to_dedicated_compaction_group(
