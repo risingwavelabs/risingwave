@@ -21,12 +21,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use moka::ops::compute::Op;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
-use risingwave_connector::connector_common::KafkaConnection;
 use risingwave_connector::error::ConnectorResult;
-use risingwave_connector::source::kafka::{SharedKafkaItem, SHARED_KAFKA_CLIENT};
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
@@ -113,7 +110,6 @@ pub async fn create_source_worker_handle(
     let current_splits_ref = splits.clone();
 
     let connector_properties = extract_prop_from_new_source(source)?;
-    let share_client_entry = get_kafka_connection(&connector_properties);
     let enable_scale_in = connector_properties.enable_split_scale_in();
     let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = dispatch_source_prop!(connector_properties, prop, {
@@ -147,7 +143,6 @@ pub async fn create_source_worker_handle(
         sync_call_tx,
         splits,
         enable_scale_in,
-        share_client_entry,
     })
 }
 
@@ -268,7 +263,6 @@ pub struct ConnectorSourceWorkerHandle {
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
     enable_scale_in: bool,
-    pub share_client_entry: Option<KafkaConnection>,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -1038,46 +1032,6 @@ impl SourceManager {
         for source_id in source_ids {
             if let Some(handle) = core.managed_sources.remove(&source_id) {
                 handle.handle.abort();
-                // remove the shared kafka client entry if it exists
-                if let Some(entry) = handle.share_client_entry {
-                    SHARED_KAFKA_CLIENT
-                        .entry_by_ref(&entry)
-                        .and_compute_with(|maybe_item| async {
-                            if let Some(item) = maybe_item {
-                                match item.into_value().as_ref() {
-                                    Ok(item_val) => {
-                                        let share_item = SharedKafkaItem {
-                                            client: item_val.client.clone(),
-                                            ref_count: item_val.ref_count - 1,
-                                        };
-                                        tracing::info!(
-                                            "drop source {} shared kafka client to {} (ref count: {})",
-                                            &source_id,
-                                            &entry.brokers,
-                                            share_item.ref_count
-                                        );
-                                        if share_item.ref_count == 0 {
-                                            tracing::info!(
-                                                "source shared kafka client to {} is freed, ref count drop to 0.",
-                                                &entry.brokers
-                                            );
-                                            Op::Remove
-                                        } else {
-                                            Op::Put(Arc::new(Ok(share_item)))
-                                        }
-                                    },
-                                    Err(_) => Op::Nop,
-                                }
-                            } else {
-                                tracing::warn!(
-                                    "source worker's shared kafka client to {} is not found.",
-                                    &entry.brokers
-                                );
-                                Op::Nop
-                            }
-                        })
-                        .await;
-                }
             }
         }
     }
@@ -1095,8 +1049,6 @@ impl SourceManager {
         let source_id = source.id;
 
         let connector_properties = extract_prop_from_existing_source(&source)?;
-
-        let share_client_entry = get_kafka_connection(&connector_properties);
 
         let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1137,7 +1089,6 @@ impl SourceManager {
                 sync_call_tx,
                 splits,
                 enable_scale_in,
-                share_client_entry,
             },
         );
         Ok(())
@@ -1227,16 +1178,6 @@ pub fn build_actor_split_impls(
             )
         })
         .collect()
-}
-
-fn get_kafka_connection(connector_properties: &ConnectorProperties) -> Option<KafkaConnection> {
-    {
-        // for kafka source: get the hash of connection props as shared source entry (on meta)
-        if let ConnectorProperties::Kafka(kafka_props) = connector_properties {
-            return Some(kafka_props.connection.clone());
-        }
-        None
-    }
 }
 
 #[cfg(test)]
