@@ -233,6 +233,7 @@ mod tests {
             is_serving: true,
             is_streaming: false,
             internal_rpc_host_addr: "".to_string(),
+            node_label: None,
         };
 
         let count_same_vnode_mapping = |wm1: &WorkerSlotMapping, wm2: &WorkerSlotMapping| {

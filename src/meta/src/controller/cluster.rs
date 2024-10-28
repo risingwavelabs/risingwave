@@ -962,6 +962,7 @@ mod tests {
             is_serving: true,
             is_unschedulable: false,
             internal_rpc_host_addr: "".to_string(),
+            label: None,
         };
         let hosts = mock_worker_hosts_for_test(worker_count);
         let mut worker_ids = vec![];
@@ -1053,6 +1054,7 @@ mod tests {
             is_serving: true,
             is_unschedulable: false,
             internal_rpc_host_addr: "".to_string(),
+            label: None,
         };
         let worker_id = cluster_ctl
             .add_worker(
