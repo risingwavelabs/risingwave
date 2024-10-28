@@ -12,24 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use mysql_async::prelude::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use rust_decimal::Decimal as RustDecimal;
-use thiserror_ext::AsReport;
 use {chrono, mysql_async};
 
 use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
-/// `MySqlQuery` executor. Runs a query against a MySql database.
+/// `MySqlQuery` executor. Runs a query against a `MySql` database.
 pub struct MySqlQueryExecutor {
     schema: Schema,
     host: String,
@@ -161,7 +160,7 @@ impl MySqlQueryExecutor {
         // deserialize the rows
         #[for_await]
         for row in row_stream {
-            let mut row = row?;
+            let row = row?;
             let owned_row = mysql_row_to_owned_row(row, &self.schema)?;
             if let Some(chunk) = builder.append_one_row(owned_row) {
                 yield chunk;
