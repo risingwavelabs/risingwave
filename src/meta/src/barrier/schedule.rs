@@ -405,12 +405,11 @@ impl ScheduledBarriers {
                 let mut queue = self.inner.queue.lock();
                 if let Some(item) = queue.queue.pop_front() {
                     item.send_latency_timer.observe_duration();
-                    let checkpoint = item.command.need_checkpoint();
                     break Scheduled {
                         command: item.command,
                         notifiers: item.notifiers,
                         span: item.span,
-                        checkpoint,
+                        checkpoint: item.checkpoint,
                     };
                 }
             }
