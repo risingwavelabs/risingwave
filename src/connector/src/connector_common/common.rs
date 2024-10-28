@@ -322,12 +322,6 @@ impl RdKafkaPropertiesCommon {
 }
 
 impl KafkaConnection {
-    pub fn get_hash(&self) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
-
     pub(crate) fn set_security_properties(&self, config: &mut ClientConfig) {
         // AWS_MSK_IAM
         if self.is_aws_msk_iam() {
