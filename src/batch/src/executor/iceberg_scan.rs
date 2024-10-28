@@ -186,13 +186,10 @@ impl IcebergScanExecutor {
                 .build();
             let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
-            let mut record_batch_stream = reader
-                .read(Box::pin(file_scan_stream))
-                .map_err(BatchError::Iceberg)?
-                .enumerate();
+            let mut record_batch_stream = reader.read(Box::pin(file_scan_stream))?.enumerate();
 
             while let Some((index, record_batch)) = record_batch_stream.next().await {
-                let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+                let record_batch = record_batch?;
 
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
                 let (mut columns, visibility) = chunk.into_parts();
@@ -238,8 +235,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             source_node.with_properties.clone(),
             source_node.secret_refs.clone(),
         );
-        let config = ConnectorProperties::extract(options_with_secret.clone(), false)
-            .map_err(BatchError::connector)?;
+        let config = ConnectorProperties::extract(options_with_secret.clone(), false)?;
 
         let split_list = source_node
             .split
@@ -312,12 +308,10 @@ impl PositionDeleteFilter {
 
         let reader = table.reader_builder().with_batch_size(batch_size).build();
 
-        let mut record_batch_stream = reader
-            .read(Box::pin(position_delete_file_scan_stream))
-            .map_err(BatchError::Iceberg)?;
+        let mut record_batch_stream = reader.read(Box::pin(position_delete_file_scan_stream))?;
 
         while let Some(record_batch) = record_batch_stream.next().await {
-            let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+            let record_batch = record_batch?;
             let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
             for row in chunk.rows() {
                 // The schema is fixed. `0` must be `file_path`, `1` must be `pos`.

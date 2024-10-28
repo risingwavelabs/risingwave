@@ -58,6 +58,7 @@ public class DbzConnectorConfig {
 
     /* Sql Server configs */
     public static final String SQL_SERVER_SCHEMA_NAME = "schema.name";
+    public static final String SQL_SERVER_ENCRYPT = "database.encrypt";
 
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
@@ -172,6 +173,13 @@ public class DbzConnectorConfig {
             }
 
             dbzProps.putAll(mysqlProps);
+
+            if (isCdcSourceJob) {
+                // remove table filtering for the shared MySQL source, since we
+                // allow user to ingest tables in different database
+                LOG.info("Disable table filtering for the shared MySQL source");
+                dbzProps.remove("table.include.list");
+            }
 
         } else if (source == SourceTypeE.POSTGRES) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);

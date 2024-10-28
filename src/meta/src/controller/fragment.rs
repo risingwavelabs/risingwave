@@ -19,23 +19,26 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::{VnodeCountCompat, WorkerSlotId};
+use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-use risingwave_meta_model_migration::{Alias, SelectStatement};
-use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::fragment::DistributionType;
-use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
-use risingwave_meta_model_v2::{
+use risingwave_common::util::worker_util::WorkerNodeId;
+use risingwave_meta_model::actor::ActorStatus;
+use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
+use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ActorUpstreamActors,
     ConnectorSplits, ExprContext, FragmentId, I32Array, JobStatus, ObjectId, SinkId, SourceId,
     StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
+use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
-use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+use risingwave_pb::meta::table_fragments::fragment::{
+    FragmentDistributionType, PbFragmentDistributionType,
+};
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbTableFragments,
@@ -57,12 +60,34 @@ use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
-use crate::manager::{
-    ActorInfos, FragmentParallelismInfo, InflightFragmentInfo, LocalNotification,
-};
+use crate::manager::LocalNotification;
 use crate::model::{TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
+
+#[derive(Clone, Debug)]
+pub struct InflightFragmentInfo {
+    pub actors: HashMap<ActorId, WorkerNodeId>,
+    pub state_table_ids: HashSet<TableId>,
+    pub is_injectable: bool,
+}
+
+pub struct ActorInfos {
+    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+}
+
+impl ActorInfos {
+    pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
+        Self { fragment_infos }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FragmentParallelismInfo {
+    pub distribution_type: FragmentDistributionType,
+    pub actor_count: usize,
+    pub vnode_count: usize,
+}
 
 impl CatalogControllerInner {
     /// List all fragment vnode mapping info for all CREATED streaming jobs.
@@ -471,7 +496,7 @@ impl CatalogController {
             actors: pb_actors,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
-            maybe_vnode_count: Some(vnode_count as _),
+            maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
         };
 
         Ok((pb_fragment, pb_actor_status, pb_actor_splits))
@@ -695,11 +720,14 @@ impl CatalogController {
 
     pub async fn get_max_parallelism_by_id(&self, job_id: ObjectId) -> MetaResult<usize> {
         let inner = self.inner.read().await;
-        let job = StreamingJob::find_by_id(job_id)
+        let max_parallelism: i32 = StreamingJob::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::MaxParallelism)
+            .into_tuple()
             .one(&inner.db)
             .await?
             .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
-        Ok(job.max_parallelism as usize)
+        Ok(max_parallelism as usize)
     }
 
     /// Get all actor ids in the target streaming jobs.
@@ -927,16 +955,10 @@ impl CatalogController {
 
         for (actor_id, worker_id, fragment_id, type_mask, state_table_ids) in actor_info {
             let state_table_ids = state_table_ids.into_inner();
-            match fragment_infos.entry(fragment_id as crate::model::FragmentId) {
+            match fragment_infos.entry(fragment_id) {
                 Entry::Occupied(mut entry) => {
                     let info: &mut InflightFragmentInfo = entry.get_mut();
-                    debug_assert_eq!(
-                        info.state_table_ids,
-                        state_table_ids
-                            .into_iter()
-                            .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
-                            .collect()
-                    );
+                    debug_assert_eq!(info.state_table_ids, state_table_ids.into_iter().collect());
                     assert!(info.actors.insert(actor_id as _, worker_id as _).is_none());
                     assert_eq!(
                         info.is_injectable,
@@ -944,10 +966,7 @@ impl CatalogController {
                     );
                 }
                 Entry::Vacant(entry) => {
-                    let state_table_ids = state_table_ids
-                        .into_iter()
-                        .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
-                        .collect();
+                    let state_table_ids = state_table_ids.into_iter().collect();
                     entry.insert(InflightFragmentInfo {
                         actors: HashMap::from_iter([(actor_id as _, worker_id as _)]),
                         state_table_ids,
@@ -1481,12 +1500,12 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use itertools::Itertools;
-    use risingwave_common::hash::{ActorMapping, VirtualNode};
+    use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCount};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-    use risingwave_meta_model_v2::actor::ActorStatus;
-    use risingwave_meta_model_v2::fragment::DistributionType;
-    use risingwave_meta_model_v2::{
+    use risingwave_meta_model::actor::ActorStatus;
+    use risingwave_meta_model::fragment::DistributionType;
+    use risingwave_meta_model::{
         actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
         ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId, VnodeBitmap,
     };
@@ -1611,7 +1630,7 @@ mod tests {
                 .values()
                 .flat_map(|m| m.keys().map(|x| *x as _))
                 .collect(),
-            maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as _),
+            maybe_vnode_count: VnodeCount::for_test().to_protobuf(),
         };
 
         let pb_actor_status = (0..actor_count)

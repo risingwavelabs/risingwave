@@ -12,36 +12,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 
-use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
-use risingwave_backup::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
+use risingwave_backup::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Secret, Sink, Source, Subscription, Table, View,
-};
-use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::SystemParams;
-use risingwave_pb::user::UserInfo;
+use risingwave_meta_model as model;
+use risingwave_pb::hummock::PbHummockVersionDelta;
+use sea_orm::{DbErr, EntityTrait, QueryOrder, TransactionTrait};
 
-use crate::manager::model::SystemParamsModel;
-use crate::model::{ClusterId, MetadataModel};
-use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
+use crate::controller::SqlMetaStore;
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
-pub struct MetaSnapshotV1Builder<S> {
-    snapshot: MetaSnapshotV1,
-    meta_store: S,
+fn map_db_err(e: DbErr) -> BackupError {
+    BackupError::MetaStorage(e.into())
 }
 
-impl<S: MetaStore> MetaSnapshotV1Builder<S> {
-    pub fn new(meta_store: S) -> Self {
+macro_rules! define_set_metadata {
+    ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
+        async fn set_metadata(
+            metadata: &mut MetadataV2,
+            txn: &sea_orm::DatabaseTransaction,
+        ) -> BackupResult<()> {
+          $(
+              metadata.$name = $mod_path::$mod_name::Entity::find()
+                                    .all(txn)
+                                    .await
+                                    .map_err(map_db_err)?;
+          )*
+          Ok(())
+        }
+    };
+}
+
+risingwave_backup::for_all_metadata_models_v2!(define_set_metadata);
+
+pub struct MetaSnapshotV2Builder {
+    snapshot: MetaSnapshotV2,
+    meta_store: SqlMetaStore,
+}
+
+impl MetaSnapshotV2Builder {
+    pub fn new(meta_store: SqlMetaStore) -> Self {
         Self {
-            snapshot: MetaSnapshotV1::default(),
+            snapshot: MetaSnapshotV2::default(),
             meta_store,
         }
     }
@@ -57,27 +74,34 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
         // We have ensure the required delta logs for replay is available, see
         // `HummockManager::delete_version_deltas`.
         let hummock_version = hummock_version_builder.await;
-        // Caveat: snapshot impl of etcd meta store doesn't prevent it from expiration.
-        // So expired snapshot read may return error. If that happens,
-        // tune auto-compaction-mode and auto-compaction-retention on demand.
-        let meta_store_snapshot = self.meta_store.snapshot().await;
-        let default_cf = self.build_default_cf(&meta_store_snapshot).await?;
-        // hummock_version and version_stats is guaranteed to exist in a initialized cluster.
+        let txn = self
+            .meta_store
+            .conn
+            .begin_with_config(
+                Some(sea_orm::IsolationLevel::Serializable),
+                Some(sea_orm::AccessMode::ReadOnly),
+            )
+            .await
+            .map_err(map_db_err)?;
+        let version_deltas = model::prelude::HummockVersionDelta::find()
+            .order_by_asc(model::hummock_version_delta::Column::Id)
+            .all(&txn)
+            .await
+            .map_err(map_db_err)?
+            .into_iter()
+            .map_into::<PbHummockVersionDelta>()
+            .map(|pb_delta| HummockVersionDelta::from_persisted_protobuf(&pb_delta));
         let hummock_version = {
             let mut redo_state = hummock_version;
-            let hummock_version_deltas: BTreeMap<_, _> =
-                HummockVersionDelta::list_at_snapshot::<S>(&meta_store_snapshot)
-                    .await?
-                    .into_iter()
-                    .map(|d| (d.id, d))
-                    .collect();
-            for version_delta in hummock_version_deltas.values() {
+            let mut max_log_id = None;
+            for version_delta in version_deltas {
                 if version_delta.prev_id == redo_state.id {
-                    redo_state.apply_version_delta(version_delta);
+                    redo_state.apply_version_delta(&version_delta);
                 }
+                max_log_id = Some(version_delta.id);
             }
-            if let Some((max_log_id, _)) = hummock_version_deltas.last_key_value() {
-                if *max_log_id != redo_state.id {
+            if let Some(max_log_id) = max_log_id {
+                if max_log_id != redo_state.id {
                     return Err(BackupError::Other(anyhow::anyhow!(format!(
                         "inconsistent hummock version: expected {}, actual {}",
                         max_log_id, redo_state.id
@@ -86,172 +110,19 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
             }
             redo_state
         };
-        let version_stats = HummockVersionStats::list_at_snapshot::<S>(&meta_store_snapshot)
-            .await?
-            .into_iter()
-            .next()
-            .unwrap_or_else(HummockVersionStats::default);
-        let compaction_groups =
-            crate::hummock::model::CompactionGroup::list_at_snapshot::<S>(&meta_store_snapshot)
-                .await?
-                .iter()
-                .map(MetadataModel::to_protobuf)
-                .collect();
-        let table_fragments =
-            crate::model::TableFragments::list_at_snapshot::<S>(&meta_store_snapshot)
-                .await?
-                .iter()
-                .map(MetadataModel::to_protobuf)
-                .collect();
-        let user_info = UserInfo::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-
-        let database = Database::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let schema = Schema::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let table = Table::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let index = Index::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let sink = Sink::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let source = Source::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let view = View::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let function = Function::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let connection = Connection::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let system_param = SystemParams::get_at_snapshot::<S>(&meta_store_snapshot)
-            .await?
-            .ok_or_else(|| anyhow!("system params not found in meta store"))?;
-
-        // tracking_id is always created in meta store
-        let cluster_id = ClusterId::from_snapshot::<S>(&meta_store_snapshot)
-            .await?
-            .ok_or_else(|| anyhow!("cluster id not found in meta store"))?
-            .into();
-        let subscription = Subscription::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let secret = Secret::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-
-        self.snapshot.metadata = ClusterMetadata {
-            default_cf,
+        let mut metadata = MetadataV2 {
             hummock_version,
-            version_stats,
-            compaction_groups,
-            database,
-            schema,
-            table,
-            index,
-            sink,
-            source,
-            view,
-            table_fragments,
-            user_info,
-            function,
-            connection,
-            system_param,
-            cluster_id,
-            subscription,
-            secret,
+            ..Default::default()
         };
+        set_metadata(&mut metadata, &txn).await?;
+
+        txn.commit().await.map_err(map_db_err)?;
+        self.snapshot.metadata = metadata;
         Ok(())
     }
 
-    pub fn finish(self) -> BackupResult<MetaSnapshotV1> {
+    pub fn finish(self) -> BackupResult<MetaSnapshotV2> {
         // Any sanity check goes here.
         Ok(self.snapshot)
-    }
-
-    async fn build_default_cf(
-        &self,
-        snapshot: &S::Snapshot,
-    ) -> BackupResult<HashMap<Vec<u8>, Vec<u8>>> {
-        // It's fine any lazy initialized value is not found in meta store.
-        let default_cf =
-            HashMap::from_iter(snapshot.list_cf(DEFAULT_COLUMN_FAMILY).await?.into_iter());
-        Ok(default_cf)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use assert_matches::assert_matches;
-    use itertools::Itertools;
-    use risingwave_backup::error::BackupError;
-    use risingwave_backup::meta_snapshot_v1::MetaSnapshotV1;
-    use risingwave_common::system_param::system_params_for_test;
-    use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_hummock_sdk::HummockVersionId;
-    use risingwave_pb::hummock::HummockVersionStats;
-
-    use crate::backup_restore::meta_snapshot_builder;
-    use crate::manager::model::SystemParamsModel;
-    use crate::model::{ClusterId, MetadataModel};
-    use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
-
-    type MetaSnapshot = MetaSnapshotV1;
-    type MetaSnapshotBuilder<S> = meta_snapshot_builder::MetaSnapshotV1Builder<S>;
-
-    #[tokio::test]
-    async fn test_snapshot_builder() {
-        let meta_store = MemStore::new();
-
-        let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
-        let mut hummock_version = HummockVersion::default();
-        hummock_version.id = HummockVersionId::new(1);
-        let get_ckpt_builder = |v: &HummockVersion| {
-            let v_ = v.clone();
-            async move { v_ }
-        };
-        let hummock_version_stats = HummockVersionStats {
-            hummock_version_id: hummock_version.id.to_u64(),
-            ..Default::default()
-        };
-        hummock_version_stats.insert(&meta_store).await.unwrap();
-        let err = builder
-            .build(1, get_ckpt_builder(&hummock_version))
-            .await
-            .unwrap_err();
-        let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!("system params not found in meta store", err.to_string());
-
-        system_params_for_test().insert(&meta_store).await.unwrap();
-
-        let err = builder
-            .build(1, get_ckpt_builder(&hummock_version))
-            .await
-            .unwrap_err();
-        let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!("cluster id not found in meta store", err.to_string());
-
-        ClusterId::new()
-            .put_at_meta_store(&meta_store)
-            .await
-            .unwrap();
-
-        let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
-        builder
-            .build(1, get_ckpt_builder(&hummock_version))
-            .await
-            .unwrap();
-
-        let dummy_key = vec![0u8, 1u8, 2u8];
-        let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
-        meta_store
-            .put_cf(DEFAULT_COLUMN_FAMILY, dummy_key.clone(), vec![100])
-            .await
-            .unwrap();
-        builder
-            .build(1, get_ckpt_builder(&hummock_version))
-            .await
-            .unwrap();
-        let snapshot = builder.finish().unwrap();
-        let encoded = snapshot.encode().unwrap();
-        let decoded = MetaSnapshot::decode(&encoded).unwrap();
-        assert_eq!(snapshot, decoded);
-        assert_eq!(snapshot.id, 1);
-        assert_eq!(
-            snapshot.metadata.default_cf.keys().cloned().collect_vec(),
-            vec![dummy_key.clone()]
-        );
-        assert_eq!(
-            snapshot.metadata.default_cf.values().cloned().collect_vec(),
-            vec![vec![100]]
-        );
-        assert_eq!(snapshot.metadata.hummock_version.id.to_u64(), 1);
-        assert_eq!(snapshot.metadata.version_stats.hummock_version_id, 1);
     }
 }

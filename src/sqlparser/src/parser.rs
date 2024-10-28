@@ -2042,31 +2042,40 @@ impl Parser<'_> {
 
     pub fn parse_create_schema(&mut self) -> PResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
-        let (schema_name, user_specified) = if self.parse_keyword(Keyword::AUTHORIZATION) {
-            let user_specified = self.parse_object_name()?;
-            (user_specified.clone(), Some(user_specified))
+        let (schema_name, owner) = if self.parse_keyword(Keyword::AUTHORIZATION) {
+            let owner = self.parse_object_name()?;
+            (owner.clone(), Some(owner))
         } else {
             let schema_name = self.parse_object_name()?;
-            let user_specified = if self.parse_keyword(Keyword::AUTHORIZATION) {
+            let owner = if self.parse_keyword(Keyword::AUTHORIZATION) {
                 Some(self.parse_object_name()?)
             } else {
                 None
             };
-            (schema_name, user_specified)
+            (schema_name, owner)
         };
         Ok(Statement::CreateSchema {
             schema_name,
             if_not_exists,
-            user_specified,
+            owner,
         })
     }
 
     pub fn parse_create_database(&mut self) -> PResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let db_name = self.parse_object_name()?;
+        let _ = self.parse_keyword(Keyword::WITH);
+        let owner = if self.parse_keyword(Keyword::OWNER) {
+            let _ = self.consume_token(&Token::Eq);
+            Some(self.parse_object_name()?)
+        } else {
+            None
+        };
+
         Ok(Statement::CreateDatabase {
             db_name,
             if_not_exists,
+            owner,
         })
     }
 
@@ -2634,22 +2643,30 @@ impl Parser<'_> {
                 self.next_token();
                 column_inner_field = Some(inner_field);
 
-                if let Token::Word(w) = self.peek_token().token {
-                    match w.keyword {
-                        Keyword::BYTEA => {
-                            header_inner_expect_type = Some(DataType::Bytea);
-                            self.next_token();
-                        }
-                        Keyword::VARCHAR => {
-                            header_inner_expect_type = Some(DataType::Varchar);
-                            self.next_token();
-                        }
-                        _ => {
-                            // default to bytea
-                            header_inner_expect_type = Some(DataType::Bytea);
-                        }
-                    }
-                }
+                // `verify` rejects `DataType::Custom` so that a following `INCLUDE` (or even `WITH`)
+                // will not be misrecognized as a DataType.
+                //
+                // For example, the following look structurally the same because `INCLUDE` is not a
+                // reserved keyword. (`AS` is reserved.)
+                // * `INCLUDE header 'foo' varchar`
+                // * `INCLUDE header 'foo' INCLUDE`
+                //
+                // To be honest `bytea` shall be a `DataType::Custom` rather than a keyword, and the
+                // logic here shall be:
+                // ```
+                // match dt {
+                //     DataType::Custom(name) => allowed.contains(name.real_value()),
+                //     _ => true,
+                // }
+                // ```
+                // An allowlist is better than a denylist, as the following token may be other than
+                // `INCLUDE` or `WITH` in the future.
+                //
+                // If this sounds too complicated - it means we should have designed this extension
+                // syntax differently to make ambiguity handling easier.
+                header_inner_expect_type =
+                    opt(parser_v2::data_type.verify(|dt| !matches!(dt, DataType::Custom(_))))
+                        .parse_next(self)?;
             }
 
             let mut column_alias = None;
@@ -3998,6 +4015,7 @@ impl Parser<'_> {
             Keyword::LOGICAL,
             Keyword::PHYSICAL,
             Keyword::DISTSQL,
+            Keyword::FORMAT,
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> PResult<()> {
@@ -4021,6 +4039,15 @@ impl Parser<'_> {
                 Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                 Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
                 Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
+                Keyword::FORMAT => {
+                    options.explain_format = {
+                        match parser.expect_one_of_keywords(&[Keyword::TEXT, Keyword::JSON])? {
+                            Keyword::TEXT => ExplainFormat::Text,
+                            Keyword::JSON => ExplainFormat::Json,
+                            _ => unreachable!("{}", keyword),
+                        }
+                    }
+                }
                 _ => unreachable!("{}", keyword),
             };
             Ok(())
@@ -4133,7 +4160,7 @@ impl Parser<'_> {
                 parser_err!("Expected 'changelog' but found '{}'", changelog);
             }
             self.expect_keyword(Keyword::FROM)?;
-            Ok(CteInner::ChangeLog(self.parse_identifier()?))
+            Ok(CteInner::ChangeLog(self.parse_object_name()?))
         }
     }
 

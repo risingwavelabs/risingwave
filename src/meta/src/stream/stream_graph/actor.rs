@@ -20,9 +20,10 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{ActorId, ActorMapping, WorkerSlotId};
+use risingwave_common::hash::{ActorId, ActorMapping, IsSingleton, VnodeCount, WorkerSlotId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -34,7 +35,8 @@ use risingwave_pb::stream_plan::{
 
 use super::id::GlobalFragmentIdsExt;
 use super::Locations;
-use crate::manager::{IdGenManagerImpl, MetaSrvEnv, StreamingClusterInfo, StreamingJob};
+use crate::controller::cluster::StreamingClusterInfo;
+use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::{DispatcherId, FragmentId};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, EdgeId, EitherFragment, StreamFragmentEdge,
@@ -681,9 +683,22 @@ impl ActorGraphBuilder {
         // Fill the vnode count for each internal table, based on schedule result.
         let mut fragment_graph = fragment_graph;
         for (id, fragment) in fragment_graph.building_fragments_mut() {
-            let vnode_count = distributions[id].vnode_count();
+            let fragment_vnode_count = distributions[id].vnode_count();
             visit_tables(fragment, |table, _| {
-                table.maybe_vnode_count = Some(vnode_count as _);
+                // There are special cases where a hash-distributed fragment contains singleton
+                // internal tables, e.g., the state table of `Source` executors.
+                let vnode_count = if table.is_singleton() {
+                    if fragment_vnode_count > 1 {
+                        tracing::info!(
+                            table.name,
+                            "found singleton table in hash-distributed fragment"
+                        );
+                    }
+                    1
+                } else {
+                    fragment_vnode_count
+                };
+                table.maybe_vnode_count = VnodeCount::set(vnode_count).to_protobuf();
             })
         }
 
@@ -711,7 +726,12 @@ impl ActorGraphBuilder {
             .map(|(id, worker_slot_id)| (id.as_global_id(), worker_slot_id))
             .collect();
 
-        let worker_locations = self.cluster_info.worker_nodes.clone();
+        let worker_locations = self
+            .cluster_info
+            .worker_nodes
+            .iter()
+            .map(|(id, node)| (*id as WorkerId, node.clone()))
+            .collect();
 
         Locations {
             actor_locations,
@@ -721,7 +741,7 @@ impl ActorGraphBuilder {
 
     /// Build a stream graph by duplicating each fragment as parallel actors. Returns
     /// [`ActorGraphBuildResult`] that will be further used to build actors on the compute nodes.
-    pub async fn generate_graph(
+    pub fn generate_graph(
         self,
         env: &MetaSrvEnv,
         job: &StreamingJob,
@@ -733,10 +753,7 @@ impl ActorGraphBuilder {
             .values()
             .map(|d| d.parallelism())
             .sum::<usize>() as u64;
-        let id_gen = match env.id_gen_manager() {
-            IdGenManagerImpl::Kv(mgr) => GlobalActorIdGen::new(mgr, actor_len).await?,
-            IdGenManagerImpl::Sql(mgr) => GlobalActorIdGen::new_v2(mgr, actor_len),
-        };
+        let id_gen = GlobalActorIdGen::new(env.id_gen_manager(), actor_len);
 
         // Build the actor graph and get the final state.
         let ActorGraphBuildStateInner {

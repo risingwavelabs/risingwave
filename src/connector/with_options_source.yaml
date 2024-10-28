@@ -117,6 +117,10 @@ IcebergProperties:
     field_type: String
     comments: Full name of table, must include schema name.
     required: true
+  - name: s3.path.style.access
+    field_type: bool
+    required: false
+    default: Default::default
   - name: catalog.jdbc.user
     field_type: String
     required: false
@@ -562,9 +566,6 @@ NatsProperties:
   - name: consumer.deliver_subject
     field_type: String
     required: false
-  - name: consumer.durable_name
-    field_type: String
-    required: false
   - name: consumer.name
     field_type: String
     required: false
@@ -641,6 +642,9 @@ NatsProperties:
     alias:
     - scan.startup.timestamp_millis
   - name: stream
+    field_type: String
+    required: true
+  - name: consumer.durable_name
     field_type: String
     required: true
 NexmarkProperties:

@@ -25,10 +25,10 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
-use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::*;
-use risingwave_meta_model_v2::table::TableType;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
@@ -66,18 +66,33 @@ use tracing::info;
 use super::utils::{check_subscription_name_duplicate, get_fragment_ids_by_jobs};
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
-    build_relation_group, check_connection_name_duplicate, check_database_name_duplicate,
-    check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
-    check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
-    ensure_user_id, extract_external_table_name_from_definition, get_referring_objects,
+    build_relation_group_for_delete, check_connection_name_duplicate,
+    check_database_name_duplicate, check_function_signature_duplicate,
+    check_relation_name_duplicate, check_schema_name_duplicate, check_secret_name_duplicate,
+    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
+    extract_external_table_name_from_definition, get_referring_objects,
     get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
     resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
+
+pub type Catalog = (
+    Vec<PbDatabase>,
+    Vec<PbSchema>,
+    Vec<PbTable>,
+    Vec<PbSource>,
+    Vec<PbSink>,
+    Vec<PbSubscription>,
+    Vec<PbIndex>,
+    Vec<PbView>,
+    Vec<PbFunction>,
+    Vec<PbConnection>,
+    Vec<PbSecret>,
+);
 
 pub type CatalogControllerRef = Arc<CatalogController>;
 
@@ -107,7 +122,7 @@ pub struct ReleaseContext {
 
 impl CatalogController {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env.meta_store().as_sql().clone();
+        let meta_store = env.meta_store();
         let catalog_controller = Self {
             env,
             inner: RwLock::new(CatalogControllerInner {
@@ -657,25 +672,42 @@ impl CatalogController {
         Ok(tables)
     }
 
-    pub async fn list_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+    pub async fn list_all_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        self.list_object_dependencies(true).await
+    }
+
+    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        self.list_object_dependencies(false).await
+    }
+
+    async fn list_object_dependencies(
+        &self,
+        include_creating: bool,
+    ) -> MetaResult<Vec<PbObjectDependencies>> {
         let inner = self.inner.read().await;
 
-        let dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
-            .select_only()
-            .columns([
-                object_dependency::Column::Oid,
-                object_dependency::Column::UsedBy,
-            ])
-            .join(
-                JoinType::InnerJoin,
-                object_dependency::Relation::Object1.def(),
-            )
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+        let dependencies: Vec<(ObjectId, ObjectId)> = {
+            let filter = if include_creating {
+                Expr::value(true)
+            } else {
+                streaming_job::Column::JobStatus.eq(JobStatus::Created)
+            };
+            ObjectDependency::find()
+                .select_only()
+                .columns([
+                    object_dependency::Column::Oid,
+                    object_dependency::Column::UsedBy,
+                ])
+                .join(
+                    JoinType::InnerJoin,
+                    object_dependency::Relation::Object1.def(),
+                )
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         let mut obj_dependencies = dependencies
             .into_iter()
             .map(|(oid, used_by)| PbObjectDependencies {
@@ -706,20 +738,24 @@ impl CatalogController {
             }
         }));
 
-        let sink_dependencies: Vec<(SinkId, TableId)> = Sink::find()
-            .select_only()
-            .columns([sink::Column::SinkId, sink::Column::TargetTable])
-            .join(JoinType::InnerJoin, sink::Relation::Object.def())
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(
+        let sink_dependencies: Vec<(SinkId, TableId)> = {
+            let filter = if include_creating {
+                sink::Column::TargetTable.is_not_null()
+            } else {
                 streaming_job::Column::JobStatus
                     .eq(JobStatus::Created)
-                    .and(sink::Column::TargetTable.is_not_null()),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+                    .and(sink::Column::TargetTable.is_not_null())
+            };
+            Sink::find()
+                .select_only()
+                .columns([sink::Column::SinkId, sink::Column::TargetTable])
+                .join(JoinType::InnerJoin, sink::Relation::Object.def())
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
             PbObjectDependencies {
                 object_id: table_id as _,
@@ -727,22 +763,26 @@ impl CatalogController {
             }
         }));
 
-        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = Subscription::find()
-            .select_only()
-            .columns([
-                subscription::Column::SubscriptionId,
-                subscription::Column::DependentTableId,
-            ])
-            .join(JoinType::InnerJoin, subscription::Relation::Object.def())
-            .filter(
+        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = {
+            let filter = if include_creating {
+                subscription::Column::DependentTableId.is_not_null()
+            } else {
                 subscription::Column::SubscriptionState
                     .eq(Into::<i32>::into(SubscriptionState::Created))
-                    .and(subscription::Column::DependentTableId.is_not_null()),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+                    .and(subscription::Column::DependentTableId.is_not_null())
+            };
+            Subscription::find()
+                .select_only()
+                .columns([
+                    subscription::Column::SubscriptionId,
+                    subscription::Column::DependentTableId,
+                ])
+                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         obj_dependencies.extend(subscription_dependencies.into_iter().map(
             |(subscription_id, table_id)| PbObjectDependencies {
                 object_id: subscription_id as _,
@@ -877,7 +917,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let relation_group = build_relation_group(
+        let relation_group = build_relation_group_for_delete(
             dirty_mview_objs
                 .into_iter()
                 .chain(dirty_mview_internal_table_objs.into_iter())
@@ -2291,7 +2331,7 @@ impl CatalogController {
 
         // notify about them.
         self.notify_users_update(user_infos).await;
-        let relation_group = build_relation_group(to_drop_objects);
+        let relation_group = build_relation_group_for_delete(to_drop_objects);
 
         let version = self
             .notify_frontend(NotificationOperation::Delete, relation_group)
@@ -3042,6 +3082,30 @@ impl CatalogController {
 
         Ok(table_ids)
     }
+
+    /// Returns column ids of versioned tables.
+    /// Being versioned implies using `ColumnAwareSerde`.
+    pub async fn get_versioned_table_schemas(&self) -> MetaResult<HashMap<TableId, Vec<i32>>> {
+        let res = self
+            .list_all_state_tables()
+            .await?
+            .into_iter()
+            .filter_map(|t| {
+                if t.version.is_some() {
+                    let ret = (
+                        t.id.try_into().unwrap(),
+                        t.columns
+                            .iter()
+                            .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                            .collect_vec(),
+                    );
+                    return Some(ret);
+                }
+                None
+            })
+            .collect();
+        Ok(res)
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.
@@ -3442,7 +3506,6 @@ async fn update_internal_tables(
 }
 
 #[cfg(test)]
-#[cfg(not(madsim))]
 mod tests {
 
     use super::*;
@@ -3453,7 +3516,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_database = PbDatabase {
             name: "db1".to_string(),
             owner: TEST_OWNER_ID as _,
@@ -3485,7 +3548,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_func() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_schema = PbSchema {
             database_id: TEST_DATABASE_ID as _,
             name: "schema1".to_string(),
@@ -3518,7 +3581,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_view() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
@@ -3543,7 +3606,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let test_data_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
             ..Default::default()
@@ -3591,7 +3654,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_alter_relation_rename() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_source = PbSource {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,

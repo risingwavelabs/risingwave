@@ -37,7 +37,8 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
-use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
+use crate::controller::cluster::StreamingClusterInfo;
+use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::TableFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
@@ -437,9 +438,8 @@ fn make_cluster_info() -> StreamingClusterInfo {
 }
 
 #[tokio::test]
-#[cfg(not(madsim))]
 async fn test_graph_builder() -> MetaResult<()> {
-    let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
+    let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
@@ -447,8 +447,8 @@ async fn test_graph_builder() -> MetaResult<()> {
     let expr_context = ExprContext {
         time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
     };
-    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job).await?;
-    let internal_tables = fragment_graph.internal_tables();
+    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
+    let internal_tables = fragment_graph.incomplete_internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
         job.id(),
@@ -456,9 +456,8 @@ async fn test_graph_builder() -> MetaResult<()> {
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
-    let ActorGraphBuildResult { graph, .. } = actor_graph_builder
-        .generate_graph(&env, &job, expr_context)
-        .await?;
+    let ActorGraphBuildResult { graph, .. } =
+        actor_graph_builder.generate_graph(&env, &job, expr_context)?;
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();

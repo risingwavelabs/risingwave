@@ -14,6 +14,7 @@
 
 use await_tree::InstrumentAwait;
 use futures::{Stream, StreamExt, TryStreamExt};
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
@@ -86,5 +87,23 @@ impl StreamService for StreamServiceImpl {
         let (tx, rx) = unbounded_channel();
         self.mgr.handle_new_control_stream(tx, stream, init_request);
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
+    }
+
+    async fn get_min_uncommitted_sst_id(
+        &self,
+        _request: Request<GetMinUncommittedSstIdRequest>,
+    ) -> Result<Response<GetMinUncommittedSstIdResponse>, Status> {
+        let min_uncommitted_sst_id = if let Some(hummock) = self.mgr.env.state_store().as_hummock()
+        {
+            hummock
+                .min_uncommitted_sst_id()
+                .await
+                .unwrap_or(HummockSstableObjectId::MAX)
+        } else {
+            HummockSstableObjectId::MAX
+        };
+        Ok(Response::new(GetMinUncommittedSstIdResponse {
+            min_uncommitted_sst_id,
+        }))
     }
 }

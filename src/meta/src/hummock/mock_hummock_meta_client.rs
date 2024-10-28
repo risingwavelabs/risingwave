@@ -171,20 +171,20 @@ impl HummockMetaClient for MockHummockMetaClient {
             .chain(table_ids.iter().cloned())
             .collect::<BTreeSet<_>>();
 
-        let new_table_fragment_info = if commit_table_ids
+        let new_table_fragment_infos = if commit_table_ids
             .iter()
             .all(|table_id| table_ids.contains(table_id))
         {
-            NewTableFragmentInfo::None
+            vec![]
         } else {
-            NewTableFragmentInfo::Normal {
+            vec![NewTableFragmentInfo::Normal {
                 mv_table_id: None,
                 internal_table_ids: commit_table_ids
                     .iter()
                     .cloned()
                     .map(TableId::from)
                     .collect_vec(),
-            }
+            }]
         };
 
         let sst_to_context = sync_result
@@ -215,13 +215,12 @@ impl HummockMetaClient for MockHummockMetaClient {
                 sstables: sync_result.uncommitted_ssts,
                 new_table_watermarks: new_table_watermark,
                 sst_to_context,
-                new_table_fragment_info,
+                new_table_fragment_infos,
                 change_log_delta: table_change_log,
-                committed_epoch: epoch,
                 tables_to_commit: commit_table_ids
                     .iter()
                     .cloned()
-                    .map(TableId::from)
+                    .map(|table_id| (TableId::new(table_id), epoch))
                     .collect(),
             })
             .await
@@ -285,12 +284,13 @@ impl HummockMetaClient for MockHummockMetaClient {
         let _compactor_rx = self
             .hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id);
+            .add_compactor(context_id as _);
 
         let (request_sender, mut request_receiver) =
             unbounded_channel::<SubscribeCompactionEventRequest>();
 
-        self.compact_context_id.store(context_id, Ordering::Release);
+        self.compact_context_id
+            .store(context_id as _, Ordering::Release);
 
         let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
 

@@ -29,8 +29,8 @@ members = [
     "src/license",
     "src/meta",
     "src/meta/dashboard",
-    "src/meta/model_v2",
-    "src/meta/model_v2/migration",
+    "src/meta/model",
+    "src/meta/model/migration",
     "src/meta/node",
     "src/meta/service",
     "src/object_store",
@@ -70,7 +70,7 @@ exclude = ["e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
-version = "2.1.0-alpha"
+version = "2.2.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -123,7 +123,6 @@ aws-endpoint = "0.60"
 aws-types = "1"
 axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
 axum-extra = "0.9"
-etcd-client = { package = "madsim-etcd-client", version = "0.6" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
@@ -229,8 +228,8 @@ risingwave_mem_table_spill_test = { path = "./src/stream/spill_test" }
 risingwave_meta = { path = "./src/meta" }
 risingwave_meta_dashboard = { path = "./src/meta/dashboard" }
 risingwave_meta_service = { path = "./src/meta/service" }
-risingwave_meta_model_migration = { path = "src/meta/model_v2/migration" }
-risingwave_meta_model_v2 = { path = "./src/meta/model_v2" }
+risingwave_meta_model = { path = "src/meta/model" }
+risingwave_meta_model_migration = { path = "src/meta/model/migration" }
 risingwave_meta_node = { path = "./src/meta/node" }
 risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
@@ -355,7 +354,6 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 # If we can merge in: https://github.com/madsim-rs/sqlx/pull/2,
 # we can change it to patch madsim version instead.
 sqlx = { git = "https://github.com/kwannoel/sqlx.git", rev = "ddf222f56cf99f865231a5383053645c6ea05ba3" }
-madsim = { git = "https://github.com/madsim-rs/madsim.git", rev = "f0ffd24864245aea236833f1ff3638f75bd51700" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }

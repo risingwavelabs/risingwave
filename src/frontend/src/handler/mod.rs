@@ -384,19 +384,18 @@ pub async fn handle(
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
-        } => create_database::handle_create_database(handler_args, db_name, if_not_exists).await,
+            owner,
+        } => {
+            create_database::handle_create_database(handler_args, db_name, if_not_exists, owner)
+                .await
+        }
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
-            user_specified,
+            owner,
         } => {
-            create_schema::handle_create_schema(
-                handler_args,
-                schema_name,
-                if_not_exists,
-                user_specified,
-            )
-            .await
+            create_schema::handle_create_schema(handler_args, schema_name, if_not_exists, owner)
+                .await
         }
         Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
         Statement::DeclareCursor { stmt } => {
