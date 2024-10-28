@@ -18,7 +18,7 @@ CREATE TABLE test (
     v8 date,
     v9 time,
     v10 timestamp,
-    v11 varchar,
+    v11 varchar(255)
 );
 INSERT INTO test SELECT
   1 as id,
