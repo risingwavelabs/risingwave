@@ -22,7 +22,7 @@ CREATE TABLE test (
 );
 INSERT INTO test SELECT
   1 as id,
-  true as v1,
+  1 as v1,
   1 as v2,
   1 as v3,
   1 as v4,

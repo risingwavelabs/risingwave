@@ -86,15 +86,7 @@ fn mysql_cell_to_scalar_impl(
     name: &str,
 ) -> Result<Datum, BatchError> {
     let datum = match data_type {
-        DataType::Boolean => {
-            let val = row.take_opt::<Option<u8>, _>(i);
-            match val {
-                None => bail!("missing value for column {}, at index {}", name, i),
-                Some(Ok(Some(val))) => Some(ScalarImpl::Bool(val != 0)),
-                Some(Ok(None)) => None,
-                Some(Err(e)) => return Err(e.into()),
-            }
-        }
+        DataType::Boolean => mysql_value_to_scalar!(row, i, name, bool, Bool),
         DataType::Int16 => mysql_value_to_scalar!(row, i, name, i16, Int16),
         DataType::Int32 => mysql_value_to_scalar!(row, i, name, i32, Int32),
         DataType::Int64 => mysql_value_to_scalar!(row, i, name, i64, Int64),
