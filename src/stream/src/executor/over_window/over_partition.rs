@@ -395,21 +395,27 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         BTreeMap<StateKey, Record<OwnedRow>>,
         Option<RangeInclusive<StateKey>>,
     )> {
-        let input_schema_len = table.get_data_types().len() - self.calls.len();
         let calls = self.calls;
+        let input_schema_len = table.get_data_types().len() - calls.len();
+        let numbering_only = calls.numbering_only;
+        let has_rank = calls.has_rank;
 
+        // return values
         let mut part_changes = BTreeMap::new();
+        let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
+
+        // stats
         let mut accessed_entry_count = 0;
         let mut compute_count = 0;
         let mut same_output_count = 0;
 
-        // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
-        // into the cache.
+        // Find affected ranges, this also ensures that all rows in the affected ranges are loaded into the cache.
         let (part_with_delta, affected_ranges) =
             self.find_affected_ranges(table, &mut delta).await?;
 
         let snapshot = part_with_delta.snapshot();
         let delta = part_with_delta.delta();
+        let last_delta_key = delta.last_key_value().map(|(k, _)| k.as_normal_expect());
 
         // Generate delete changes first, because deletes are skipped during iteration over
         // `part_with_delta` in the next step.
@@ -423,8 +429,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 );
             }
         }
-
-        let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
 
         for AffectedRange {
             first_frame_start,
@@ -440,6 +444,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             assert!(first_curr_key.is_normal());
             assert!(last_curr_key.is_normal());
             assert!(last_frame_end.is_normal());
+
+            let last_delta_key = last_delta_key.unwrap();
 
             if let Some(accessed_range) = accessed_range.as_mut() {
                 let min_start = first_frame_start
@@ -503,12 +509,28 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 let (key, row) = curr_key_cursor
                     .key_value()
                     .expect("cursor must be valid until `last_curr_key`");
+                let mut should_continue = true;
+
                 let output = states.slide_no_evict_hint()?;
                 compute_count += 1;
 
                 let old_output = &row.as_inner()[input_schema_len..];
                 if !old_output.is_empty() && old_output == output {
                     same_output_count += 1;
+
+                    if numbering_only {
+                        if has_rank {
+                            // It's possible that an `Insert` doesn't affect it's ties but affects
+                            // all the following rows, so we need to check the `order_key`.
+                            if key.as_normal_expect().order_key > last_delta_key.order_key {
+                                // there won't be any more changes after this point, we can stop early
+                                should_continue = false;
+                            }
+                        } else if key.as_normal_expect() >= last_delta_key {
+                            // there won't be any more changes after this point, we can stop early
+                            should_continue = false;
+                        }
+                    }
                 }
 
                 let new_row = OwnedRow::new(
@@ -541,7 +563,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
                 curr_key_cursor.move_next();
 
-                key != last_curr_key
+                should_continue && key != last_curr_key
             } {}
         }
 
@@ -595,12 +617,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         'a: 'delta,
         's: 'delta,
     {
-        self.ensure_delta_in_cache(table, delta).await?;
-        let delta = &*delta; // let's make it immutable
-
         if delta.is_empty() {
             return Ok((DeltaBTreeMap::new(self.range_cache.inner(), delta), vec![]));
         }
+
+        self.ensure_delta_in_cache(table, delta).await?;
+        let delta = &*delta; // let's make it immutable
 
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();

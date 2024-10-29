@@ -233,8 +233,7 @@ impl TrackingJob {
                 Ok(())
             }
             TrackingJob::Recovered(recovered) => {
-                recovered
-                    .metadata_manager
+                metadata_manager
                     .catalog_controller
                     .finish_streaming_job(recovered.id, None)
                     .await?;
@@ -268,7 +267,6 @@ impl std::fmt::Debug for TrackingJob {
 
 pub struct RecoveredTrackingJob {
     pub id: ObjectId,
-    pub metadata_manager: MetadataManager,
 }
 
 /// The command tracking by the [`CreateMviewProgressTracker`].
@@ -303,8 +301,7 @@ impl CreateMviewProgressTracker {
     /// 2. `Backfill` position.
     pub fn recover(
         mview_map: HashMap<TableId, (String, TableFragments)>,
-        version_stats: HummockVersionStats,
-        metadata_manager: MetadataManager,
+        version_stats: &HummockVersionStats,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
@@ -323,11 +320,10 @@ impl CreateMviewProgressTracker {
                 backfill_upstream_types,
                 table_fragments.dependent_table_ids(),
                 definition,
-                &version_stats,
+                version_stats,
             );
             let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
                 id: creating_table_id.table_id as i32,
-                metadata_manager: metadata_manager.clone(),
             });
             progress_map.insert(creating_table_id, (progress, tracking_job));
         }
