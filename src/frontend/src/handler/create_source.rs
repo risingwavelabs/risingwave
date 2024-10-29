@@ -162,9 +162,9 @@ async fn extract_avro_table_schema(
         if let risingwave_connector::parser::EncodingProperties::Avro(avro_props) =
             &parser_config.encoding_config
             && matches!(avro_props.schema_location, SchemaLocation::File { .. })
-            && !format_encode_options
+            && format_encode_options
                 .get("with_deprecated_file_header")
-                .is_some_and(|v| v == "true")
+                .is_none_or(|v| v != "true")
         {
             bail_not_implemented!(issue = 12871, "avro without schema registry");
         }

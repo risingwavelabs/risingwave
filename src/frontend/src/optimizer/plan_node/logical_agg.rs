@@ -440,7 +440,6 @@ impl LogicalAgg {
     ///  `MergeProject`       z
     ///  /        \
     /// x          y
-
     fn build_approx_percentile_aggs(
         &self,
         input: PlanRef,

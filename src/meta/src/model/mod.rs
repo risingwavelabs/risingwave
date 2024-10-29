@@ -202,7 +202,7 @@ impl<'a, K: Ord, V: Clone> BTreeMapTransactionValueGuard<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'a, K, V> {
+impl<K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'_, K, V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
