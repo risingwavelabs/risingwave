@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
+use either::Either;
 
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
@@ -134,6 +135,19 @@ impl Relation {
                 with_ordinality: _,
             } => table_function
                 .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
+            Relation::Share(share) => {
+                match &mut share.input {
+                    BoundShareInput::Query(query) => {
+                        match query {
+                            Either::Left(query) => query
+                                .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                            Either::Right(_) => vec![],
+                        }
+                    }
+                    BoundShareInput::ChangeLog(change_log) => change_log
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                }
+            }
             _ => vec![],
         }
     }
