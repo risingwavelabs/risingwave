@@ -4,6 +4,7 @@
 set -euo pipefail
 
 buildkite-agent meta-data get SCOUT_REPORT > scout.report
+report=$(cat scout.report)
 cat >> step.yaml << EOF
 steps:
   - label: "docker scout slack notification"
