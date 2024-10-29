@@ -68,7 +68,7 @@ export interface Relation {
   databaseName?: string
 }
 
-export class StreamingJobInfo {
+export class StreamingJob {
   jobId!: number
   objType!: string
   name!: string
@@ -101,7 +101,7 @@ export class StreamingJobInfo {
   }
 }
 
-export interface StreamingJob extends Relation {
+export interface StreamingRelation extends Relation {
   dependentRelations: number[]
 }
 
@@ -124,14 +124,14 @@ export function relationTypeTitleCase(x: Relation) {
   return _.startCase(_.toLower(relationType(x)))
 }
 
-export function relationIsStreamingJob(x: Relation): x is StreamingJob {
+export function relationIsStreamingJob(x: Relation): x is StreamingRelation {
   const type = relationType(x)
   return type !== "UNKNOWN" && type !== "SOURCE" && type !== "INTERNAL"
 }
 
 export async function getStreamingJobs() {
   let jobs = plainToInstance(
-    StreamingJobInfo,
+    StreamingJob,
     (await api.get("/streaming_jobs")) as any[]
   )
   jobs = sortBy(jobs, (x) => x.jobId)
