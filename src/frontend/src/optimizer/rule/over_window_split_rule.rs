@@ -36,7 +36,7 @@ impl Rule for OverWindowSplitRule {
             .iter()
             .enumerate()
             .map(|(idx, func)| {
-                let func_seq = if func.kind.is_rank() {
+                let func_seq = if func.kind.is_numbering() {
                     rank_func_seq += 1;
                     rank_func_seq
                 } else {

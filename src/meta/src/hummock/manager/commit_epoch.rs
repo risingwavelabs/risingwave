@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -319,7 +320,8 @@ impl HummockManager {
                 self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
             }
             if !table_stats_change.is_empty() {
-                self.collect_table_write_throughput(table_stats_change);
+                self.collect_table_write_throughput(table_stats_change)
+                    .await;
             }
         }
         if !modified_compaction_groups.is_empty() {
@@ -333,13 +335,30 @@ impl HummockManager {
         Ok(())
     }
 
-    fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
+    async fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
+        let params = self.env.system_params_reader().await;
+        let barrier_interval_ms = params.barrier_interval_ms() as u64;
+        let checkpoint_secs = {
+            std::cmp::max(
+                1,
+                params.checkpoint_frequency() * barrier_interval_ms / 1000,
+            )
+        };
+
         let mut table_infos = self.history_table_throughput.write();
+        let max_table_stat_throuput_window_seconds = std::cmp::max(
+            self.env.opts.table_stat_throuput_window_seconds_for_split,
+            self.env.opts.table_stat_throuput_window_seconds_for_merge,
+        );
+
+        let max_sample_size = (max_table_stat_throuput_window_seconds as f64
+            / checkpoint_secs as f64)
+            .ceil() as usize;
         for (table_id, stat) in table_stats {
             let throughput = (stat.total_value_size + stat.total_key_size) as u64;
             let entry = table_infos.entry(table_id).or_default();
             entry.push_back(throughput);
-            if entry.len() > self.env.opts.table_info_statistic_history_times {
+            if entry.len() > max_sample_size {
                 entry.pop_front();
             }
         }
