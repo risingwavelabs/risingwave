@@ -1955,7 +1955,7 @@ impl DdlController {
                     objs.src_object_id as ObjectId,
                     objs.dst_object_id as ObjectId,
                 );
-                (ObjectType::Index, src_id, dst_id)
+                (ObjectType::Subscription, src_id, dst_id)
             }
         };
 
