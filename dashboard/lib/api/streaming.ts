@@ -15,7 +15,7 @@
  *
  */
 
-import { plainToInstance } from "class-transformer"
+import { Expose, plainToInstance } from "class-transformer"
 import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import {
@@ -69,15 +69,18 @@ export interface Relation {
 }
 
 export class StreamingJob {
-  jobId!: number
-  objType!: string
+  @Expose({ name: "jobId" })
+  id!: number
+  @Expose({ name: "objType" })
+  _objType!: string
   name!: string
   jobStatus!: string
-  parallelism!: any
+  @Expose({ name: "parallelism" })
+  _parallelism!: any
   maxParallelism!: number
 
-  parallelismDisplay() {
-    const parallelism = this.parallelism
+  get parallelism() {
+    const parallelism = this._parallelism
     if (typeof parallelism === "string") {
       // `Adaptive`
       return parallelism
@@ -92,11 +95,11 @@ export class StreamingJob {
     }
   }
 
-  typeDisplay() {
-    if (this.objType == "Table") {
+  get type() {
+    if (this._objType == "Table") {
       return "Table / MV"
     } else {
-      return this.objType
+      return this._objType
     }
   }
 }
@@ -134,7 +137,7 @@ export async function getStreamingJobs() {
     StreamingJob,
     (await api.get("/streaming_jobs")) as any[]
   )
-  jobs = sortBy(jobs, (x) => x.jobId)
+  jobs = sortBy(jobs, (x) => x.id)
   return jobs
 }
 

@@ -215,7 +215,7 @@ export default function Streaming() {
   const [tableFragments, setTableFragments] = useState<TableFragments>()
 
   const job = useMemo(
-    () => streamingJobList?.find((j) => j.jobId === jobId),
+    () => streamingJobList?.find((j) => j.id === jobId),
     [streamingJobList, jobId]
   )
 
@@ -245,7 +245,7 @@ export default function Streaming() {
     if (streamingJobList) {
       if (!jobId) {
         if (streamingJobList.length > 0) {
-          setJobId(streamingJobList[0].jobId)
+          setJobId(streamingJobList[0].id)
         }
       }
     }
@@ -423,7 +423,7 @@ export default function Streaming() {
               onChange={(event) => {
                 const id = streamingJobList?.find(
                   (x) => x.name == event.target.value
-                )?.jobId
+                )?.id
                 if (id) {
                   setJobId(id)
                 }
@@ -434,8 +434,8 @@ export default function Streaming() {
             <datalist id="relationList">
               {streamingJobList &&
                 streamingJobList.map((r) => (
-                  <option value={r.name} key={r.jobId}>
-                    ({r.jobId}) {r.name}
+                  <option value={r.name} key={r.id}>
+                    ({r.id}) {r.name}
                   </option>
                 ))}
             </datalist>
@@ -445,8 +445,8 @@ export default function Streaming() {
             >
               {streamingJobList &&
                 streamingJobList.map((r) => (
-                  <option value={r.jobId} key={r.name}>
-                    ({r.jobId}) {r.name}
+                  <option value={r.id} key={r.name}>
+                    ({r.id}) {r.name}
                   </option>
                 ))}
             </Select>
@@ -459,7 +459,7 @@ export default function Streaming() {
                   <Tbody>
                     <Tr>
                       <Td fontWeight="medium">Type</Td>
-                      <Td isNumeric>{job.typeDisplay()}</Td>
+                      <Td isNumeric>{job.type}</Td>
                     </Tr>
                     <Tr>
                       <Td fontWeight="medium">Status</Td>
@@ -467,7 +467,7 @@ export default function Streaming() {
                     </Tr>
                     <Tr>
                       <Td fontWeight="medium">Parallelism</Td>
-                      <Td isNumeric>{job.parallelismDisplay()}</Td>
+                      <Td isNumeric>{job.parallelism}</Td>
                     </Tr>
                     <Tr>
                       <Td fontWeight="medium" paddingEnd={0}>
