@@ -138,6 +138,21 @@ impl TableCatalogBuilder {
             Some(w) => w,
             None => FixedBitSet::with_capacity(self.columns.len()),
         };
+
+        // If `dist_key_in_pk` is set, check if it matches with `distribution_key`.
+        // Note that we cannot derive in the opposite direction, because there can be a column
+        // appearing multiple times in the PK.
+        if let Some(dist_key_in_pk) = &self.dist_key_in_pk {
+            let derived_dist_key = dist_key_in_pk
+                .iter()
+                .map(|idx| self.pk[*idx].column_index)
+                .collect_vec();
+            assert_eq!(
+                derived_dist_key, distribution_key,
+                "dist_key mismatch with dist_key_in_pk"
+            );
+        }
+
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -380,9 +395,12 @@ pub fn infer_kv_log_store_table_catalog_inner(
 /// since that plan node maps to `backfill` executor, which supports recovery.
 /// Some other leaf nodes like `StreamValues` do not support recovery, and they
 /// cannot use background ddl.
-pub(crate) fn plan_can_use_backgronud_ddl(plan: &PlanRef) -> bool {
+pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
     if plan.inputs().is_empty() {
-        if plan.as_stream_source_scan().is_some() {
+        if plan.as_stream_source_scan().is_some()
+            || plan.as_stream_now().is_some()
+            || plan.as_stream_source().is_some()
+        {
             true
         } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
@@ -392,7 +410,7 @@ pub(crate) fn plan_can_use_backgronud_ddl(plan: &PlanRef) -> bool {
         }
     } else {
         assert!(!plan.inputs().is_empty());
-        plan.inputs().iter().all(plan_can_use_backgronud_ddl)
+        plan.inputs().iter().all(plan_can_use_background_ddl)
     }
 }
 

@@ -27,7 +27,7 @@ env_scripts = [
 
   set_env ENABLE_TELEMETRY "false"
   set_env RW_TELEMETRY_TYPE "test"
-  set_env RW_SECRET_STORE_PRIVATE_KEY_HEX "0123456789abcdef"
+  set_env RW_SECRET_STORE_PRIVATE_KEY_HEX "0123456789abcdef0123456789abcdef"
   set_env RW_TEMP_SECRET_FILE_DIR "${PREFIX_SECRET}"
 
   is_sanitizer_enabled = get_env ENABLE_SANITIZER

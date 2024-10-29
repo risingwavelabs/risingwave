@@ -312,7 +312,9 @@ impl MetaOpts {
             object_store_config: ObjectStoreConfig::default(),
             max_trivial_move_task_count_per_loop: 256,
             max_get_task_probe_times: 5,
-            secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
+            secret_store_private_key: Some(
+                hex::decode("0123456789abcdef0123456789abcdef").unwrap(),
+            ),
             temp_secret_file_dir: "./secrets".to_string(),
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,

@@ -1228,8 +1228,21 @@ fn derive_partitions(
     table_desc: &TableDesc,
     vnode_mapping: &WorkerSlotMapping,
 ) -> SchedulerResult<HashMap<WorkerSlotId, TablePartitionInfo>> {
+    let vnode_mapping = if table_desc.vnode_count != vnode_mapping.len() {
+        // The vnode count mismatch occurs only in special cases where a hash-distributed fragment
+        // contains singleton internal tables. e.g., the state table of `Source` executors.
+        // In this case, we reduce the vnode mapping to a single vnode as only `SINGLETON_VNODE` is used.
+        assert!(
+            table_desc.vnode_count == 1,
+            "fragment vnode count {} does not match table vnode count {}",
+            vnode_mapping.len(),
+            table_desc.vnode_count,
+        );
+        &WorkerSlotMapping::new_single(vnode_mapping.iter().next().unwrap())
+    } else {
+        vnode_mapping
+    };
     let vnode_count = vnode_mapping.len();
-    assert_eq!(vnode_count, table_desc.vnode_count);
 
     let mut partitions: HashMap<WorkerSlotId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 

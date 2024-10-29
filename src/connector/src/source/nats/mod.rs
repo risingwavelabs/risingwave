@@ -100,7 +100,7 @@ pub struct NatsProperties {
     #[serde(rename = "stream")]
     pub stream: String,
 
-    #[serde(rename = "durable_consumer_name")]
+    #[serde(rename = "consumer.durable_name")]
     pub durable_consumer_name: String,
 
     #[serde(flatten)]
@@ -120,9 +120,6 @@ impl NatsProperties {
 pub struct NatsPropertiesConsumer {
     #[serde(rename = "consumer.deliver_subject")]
     pub deliver_subject: Option<String>,
-
-    #[serde(rename = "consumer.durable_name")]
-    pub durable_name: Option<String>,
 
     #[serde(rename = "consumer.name")]
     pub name: Option<String>,
@@ -216,9 +213,6 @@ impl NatsPropertiesConsumer {
     pub fn set_config(&self, c: &mut Config) {
         if let Some(v) = &self.name {
             c.name = Some(v.clone())
-        }
-        if let Some(v) = &self.durable_name {
-            c.durable_name = Some(v.clone())
         }
         if let Some(v) = &self.description {
             c.description = Some(v.clone())
@@ -353,10 +347,7 @@ mod test {
             props.nats_properties_consumer.name,
             Some("foobar".to_string())
         );
-        assert_eq!(
-            props.nats_properties_consumer.durable_name,
-            Some("durable_foobar".to_string())
-        );
+        assert_eq!(props.durable_consumer_name, "durable_foobar".to_string());
         assert_eq!(
             props.nats_properties_consumer.description,
             Some("A description".to_string())

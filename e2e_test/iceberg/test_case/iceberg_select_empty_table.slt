@@ -36,6 +36,7 @@ WITH (
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
+    s3.path.style.access = 'true',
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
     database.name = 'demo_db',

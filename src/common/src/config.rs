@@ -421,6 +421,10 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
+
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub meta_store_config: MetaStoreConfig,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -2335,6 +2339,34 @@ pub mod default {
             }
         }
     }
+
+    pub mod meta_store_config {
+        const DEFAULT_MAX_CONNECTIONS: u32 = 10;
+        const DEFAULT_MIN_CONNECTIONS: u32 = 1;
+        const DEFAULT_CONNECTION_TIMEOUT_SEC: u64 = 10;
+        const DEFAULT_IDLE_TIMEOUT_SEC: u64 = 30;
+        const DEFAULT_ACQUIRE_TIMEOUT_SEC: u64 = 30;
+
+        pub fn max_connections() -> u32 {
+            DEFAULT_MAX_CONNECTIONS
+        }
+
+        pub fn min_connections() -> u32 {
+            DEFAULT_MIN_CONNECTIONS
+        }
+
+        pub fn connection_timeout_sec() -> u64 {
+            DEFAULT_CONNECTION_TIMEOUT_SEC
+        }
+
+        pub fn idle_timeout_sec() -> u64 {
+            DEFAULT_IDLE_TIMEOUT_SEC
+        }
+
+        pub fn acquire_timeout_sec() -> u64 {
+            DEFAULT_ACQUIRE_TIMEOUT_SEC
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2547,6 +2579,25 @@ pub struct CompactionConfig {
     pub enable_emergency_picker: bool,
     #[serde(default = "default::compaction_config::max_level")]
     pub max_level: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct MetaStoreConfig {
+    /// Maximum number of connections for the meta store connection pool.
+    #[serde(default = "default::meta_store_config::max_connections")]
+    pub max_connections: u32,
+    /// Minimum number of connections for the meta store connection pool.
+    #[serde(default = "default::meta_store_config::min_connections")]
+    pub min_connections: u32,
+    /// Connection timeout in seconds for a meta store connection.
+    #[serde(default = "default::meta_store_config::connection_timeout_sec")]
+    pub connection_timeout_sec: u64,
+    /// Idle timeout in seconds for a meta store connection.
+    #[serde(default = "default::meta_store_config::idle_timeout_sec")]
+    pub idle_timeout_sec: u64,
+    /// Acquire timeout in seconds for a meta store connection.
+    #[serde(default = "default::meta_store_config::acquire_timeout_sec")]
+    pub acquire_timeout_sec: u64,
 }
 
 #[cfg(test)]
