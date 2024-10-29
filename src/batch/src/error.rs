@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 pub use anyhow::anyhow;
-use mysql_async::{Error as MySqlError, FromValueError as MySqlValueConversionError};
+use mysql_async::Error as MySqlError;
 use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{def_anyhow_newtype, def_anyhow_variant, BoxedError};
@@ -197,5 +197,4 @@ def_anyhow_variant! {
     iceberg::Error => "Iceberg error",
     ParquetError => "Parquet error",
     MySqlError => "MySQL error",
-    MySqlValueConversionError => "MySQL value conversion error"
 }

@@ -24,7 +24,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use rust_decimal::Decimal as RustDecimal;
 use {chrono, mysql_async};
 
-use crate::error::BatchError;
+use crate::error::{BatchError, BatchExternalSystemError};
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
@@ -74,7 +74,16 @@ macro_rules! mysql_value_to_scalar {
             None => bail!("missing value for column {}, at index {}", $name, $i),
             Some(Ok(Some(val))) => Some(ScalarImpl::$variant(val.into())),
             Some(Ok(None)) => None,
-            Some(Err(e)) => return Err(e.into()),
+            Some(Err(e)) => {
+                let e: anyhow::Error = anyhow::Error::new(e.clone()).context(format!(
+                    "failed to deserialize column {} at index {} as value of rust_type: {}",
+                    $name,
+                    $i,
+                    stringify!($ty),
+                ));
+                let e = BatchExternalSystemError(e);
+                return Err(e.into());
+            }
         }
     }};
 }
