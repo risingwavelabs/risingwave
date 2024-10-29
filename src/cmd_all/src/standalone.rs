@@ -482,6 +482,7 @@ mod test {
                             total_memory_bytes: 34359738368,
                             reserved_memory_bytes: None,
                             parallelism: 10,
+                            node_label: "default",
                             role: Both,
                             metrics_level: None,
                             data_file_cache_dir: None,
