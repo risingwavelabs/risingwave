@@ -9770,8 +9770,7 @@ checksum = "658fa1faf7a4cc5f057c9ee5ef560f717ad9d8dc66d975267f709624d6e1ab88"
 [[package]]
 name = "quanta"
 version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e5167a477619228a0b284fac2674e3c388cba90631d7b7de620e6f1fcd08da5"
+source = "git+https://github.com/tabVersion/quanta.git?rev=da62f4f04516fcfc72f686869026bad87b712f37#da62f4f04516fcfc72f686869026bad87b712f37"
 dependencies = [
  "crossbeam-utils",
  "libc",
@@ -16554,8 +16553,3 @@ dependencies = [
  "libc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "quanta"
-version = "0.11.0"
-source = "git+https://github.com/madsim-rs/quanta.git?rev=948bdc3#948bdc3d4cd3fcfe3d52d03dd83deee96d97d770"
