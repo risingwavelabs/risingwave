@@ -355,12 +355,7 @@ impl DdlController {
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
-            hummock_version_id: self
-                .barrier_manager
-                .hummock_manager()
-                .get_version_id()
-                .await
-                .to_u64(),
+            hummock_version_id: self.barrier_manager.get_hummock_version_id().await.to_u64(),
         }))
     }
 
@@ -1041,11 +1036,14 @@ impl DdlController {
         streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
 
         // create internal table catalogs and refill table id.
-        let internal_tables = fragment_graph.internal_tables().into_values().collect_vec();
+        let incomplete_internal_tables = fragment_graph
+            .incomplete_internal_tables()
+            .into_values()
+            .collect_vec();
         let table_id_map = self
             .metadata_manager
             .catalog_controller
-            .create_internal_table_catalog(&streaming_job, internal_tables)
+            .create_internal_table_catalog(&streaming_job, incomplete_internal_tables)
             .await?;
         fragment_graph.refill_internal_table_ids(table_id_map);
 
@@ -1056,6 +1054,16 @@ impl DdlController {
                     fragment_graph,
                     ..
                 } = replace_table_info;
+
+                // Ensure the max parallelism unchanged before replacing table.
+                let original_max_parallelism = self
+                    .metadata_manager
+                    .get_job_max_parallelism(streaming_job.id().into())
+                    .await?;
+                let fragment_graph = PbStreamFragmentGraph {
+                    max_parallelism: original_max_parallelism as _,
+                    ..fragment_graph
+                };
 
                 let fragment_graph =
                     StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1102,7 +1110,7 @@ impl DdlController {
 
         self.metadata_manager
             .catalog_controller
-            .prepare_streaming_job(table_fragments.to_protobuf(), streaming_job, false)
+            .prepare_streaming_job(&table_fragments, streaming_job, false)
             .await?;
 
         // create streaming jobs.
@@ -1196,6 +1204,16 @@ impl DdlController {
                 panic!("additional replace table event only occurs when dropping sink into table")
             };
 
+            // Ensure the max parallelism unchanged before replacing table.
+            let original_max_parallelism = self
+                .metadata_manager
+                .get_job_max_parallelism(streaming_job.id().into())
+                .await?;
+            let fragment_graph = PbStreamFragmentGraph {
+                max_parallelism: original_max_parallelism as _,
+                ..fragment_graph
+            };
+
             let fragment_graph =
                 StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
             streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
@@ -1235,7 +1253,7 @@ impl DdlController {
 
                 self.metadata_manager
                     .catalog_controller
-                    .prepare_streaming_job(table_fragments.to_protobuf(), &streaming_job, true)
+                    .prepare_streaming_job(&table_fragments, &streaming_job, true)
                     .await?;
 
                 self.stream_manager
@@ -1344,6 +1362,16 @@ impl DdlController {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
+        // Ensure the max parallelism unchanged before replacing table.
+        let original_max_parallelism = self
+            .metadata_manager
+            .get_job_max_parallelism(streaming_job.id().into())
+            .await?;
+        let fragment_graph = PbStreamFragmentGraph {
+            max_parallelism: original_max_parallelism as _,
+            ..fragment_graph
+        };
+
         // 1. build fragment graph.
         let fragment_graph = StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
         streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
@@ -1435,7 +1463,7 @@ impl DdlController {
 
             self.metadata_manager
                 .catalog_controller
-                .prepare_streaming_job(table_fragments.to_protobuf(), &streaming_job, true)
+                .prepare_streaming_job(&table_fragments, &streaming_job, true)
                 .await?;
 
             self.stream_manager
@@ -1563,7 +1591,6 @@ impl DdlController {
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
-        let internal_tables = fragment_graph.internal_tables();
         let expr_context = stream_ctx.to_expr_context();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
@@ -1646,6 +1673,7 @@ impl DdlController {
             table_parallelism,
             max_parallelism.get(),
         );
+        let internal_tables = table_fragments.internal_tables();
 
         if let Some(mview_fragment) = table_fragments.mview_fragment() {
             stream_job.set_table_vnode_count(mview_fragment.vnode_count());

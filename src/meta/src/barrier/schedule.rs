@@ -29,7 +29,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
 
 use super::notifier::Notifier;
-use super::{Command, Scheduled};
+use super::{Command, GlobalBarrierWorkerContext, NewBarrier, Scheduled};
 use crate::hummock::HummockManagerRef;
 use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
@@ -158,12 +158,7 @@ impl BarrierScheduler {
     pub fn new_pair(
         hummock_manager: HummockManagerRef,
         metrics: Arc<MetaMetrics>,
-        checkpoint_frequency: usize,
     ) -> (Self, ScheduledBarriers) {
-        tracing::info!(
-            "Starting barrier scheduler with: checkpoint_frequency={:?}",
-            checkpoint_frequency,
-        );
         let inner = Arc::new(Inner {
             queue: Mutex::new(ScheduledQueue::new()),
             changed_tx: watch::channel(()).0,
@@ -175,13 +170,7 @@ impl BarrierScheduler {
                 inner: inner.clone(),
                 hummock_manager,
             },
-            ScheduledBarriers {
-                num_uncheckpointed_barrier: 0,
-                force_checkpoint: false,
-                checkpoint_frequency,
-                inner,
-                min_interval: None,
-            },
+            ScheduledBarriers { inner },
         )
     }
 
@@ -314,9 +303,13 @@ impl BarrierScheduler {
 }
 
 /// The receiver side of the barrier scheduling queue.
-/// Held by the [`super::GlobalBarrierManager`] to execute these commands.
 pub struct ScheduledBarriers {
-    min_interval: Option<Interval>,
+    inner: Arc<Inner>,
+}
+
+/// Held by the [`super::GlobalBarrierWorker`] to execute these commands.
+pub(super) struct PeriodicBarriers {
+    min_interval: Interval,
 
     /// Force checkpoint in next barrier.
     force_checkpoint: bool,
@@ -324,40 +317,45 @@ pub struct ScheduledBarriers {
     /// The numbers of barrier (checkpoint = false) since the last barrier (checkpoint = true)
     num_uncheckpointed_barrier: usize,
     checkpoint_frequency: usize,
-    inner: Arc<Inner>,
 }
 
-impl ScheduledBarriers {
-    pub(super) fn set_min_interval(&mut self, min_interval: Duration) {
-        let set_new_interval = match &self.min_interval {
-            None => true,
-            Some(prev_min_interval) => min_interval != prev_min_interval.period(),
-        };
-        if set_new_interval {
-            let mut min_interval = tokio::time::interval(min_interval);
-            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            self.min_interval = Some(min_interval);
+impl PeriodicBarriers {
+    pub(super) fn new(min_interval: Duration, checkpoint_frequency: usize) -> PeriodicBarriers {
+        Self {
+            min_interval: tokio::time::interval(min_interval),
+            force_checkpoint: false,
+            num_uncheckpointed_barrier: 0,
+            checkpoint_frequency,
         }
     }
 
-    pub(super) async fn next_barrier(&mut self) -> Scheduled {
+    pub(super) fn set_min_interval(&mut self, min_interval: Duration) {
+        let set_new_interval = min_interval != self.min_interval.period();
+        if set_new_interval {
+            let mut min_interval = tokio::time::interval(min_interval);
+            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            self.min_interval = min_interval;
+        }
+    }
+
+    pub(super) async fn next_barrier(
+        &mut self,
+        context: &impl GlobalBarrierWorkerContext,
+    ) -> NewBarrier {
         let checkpoint = self.try_get_checkpoint();
         let scheduled = select! {
             biased;
-            item = self.inner.next_scheduled() => {
-                if let Some(min_interval) = &mut self.min_interval {
-                    min_interval.reset();
-                }
-                let checkpoint = item.command.need_checkpoint() || checkpoint;
-                item.send_latency_timer.observe_duration();
-                Scheduled {
-                    command: Some((item.database_id, item.command, item.notifiers)),
-                    span: item.span,
+            scheduled = context.next_scheduled() => {
+                self.min_interval.reset();
+                let checkpoint = scheduled.command.need_checkpoint() || checkpoint;
+                NewBarrier {
+                    command: Some((scheduled.database_id, scheduled.command, scheduled.notifiers)),
+                    span: scheduled.span,
                     checkpoint,
                 }
             },
-            _ = self.min_interval.as_mut().expect("should have set min interval").tick() => {
-                Scheduled {
+            _ = self.min_interval.tick() => {
+                NewBarrier {
                     command: None,
                     span: tracing_span(),
                     checkpoint,
@@ -369,14 +367,20 @@ impl ScheduledBarriers {
     }
 }
 
-impl Inner {
-    async fn next_scheduled(&self) -> ScheduledQueueItem {
+impl ScheduledBarriers {
+    pub(super) async fn next_scheduled(&self) -> Scheduled {
         loop {
-            let mut rx = self.changed_tx.subscribe();
+            let mut rx = self.inner.changed_tx.subscribe();
             {
-                let mut queue = self.queue.lock();
-                if let Some(scheduled) = queue.queue.pop_front() {
-                    break scheduled;
+                let mut queue = self.inner.queue.lock();
+                if let Some(item) = queue.queue.pop_front() {
+                    item.send_latency_timer.observe_duration();
+                    break Scheduled {
+                        database_id: item.database_id,
+                        command: item.command,
+                        notifiers: item.notifiers,
+                        span: item.span,
+                    };
                 }
             }
             rx.changed().await.unwrap();
@@ -432,7 +436,9 @@ impl ScheduledBarriers {
         }
         (dropped_actors, cancel_table_ids)
     }
+}
 
+impl PeriodicBarriers {
     /// Whether the barrier(checkpoint = true) should be injected.
     fn try_get_checkpoint(&self) -> bool {
         self.num_uncheckpointed_barrier + 1 >= self.checkpoint_frequency || self.force_checkpoint

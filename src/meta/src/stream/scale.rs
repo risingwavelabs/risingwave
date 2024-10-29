@@ -52,7 +52,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use crate::barrier::{Command, Reschedule};
 use crate::controller::scale::RescheduleWorkingSet;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableParallelism};
 use crate::serving::{
     to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
 };
@@ -1291,12 +1291,6 @@ impl ScaleController {
 
         for (fragment_id, _) in reschedules {
             let mut actors_to_create: HashMap<_, Vec<_>> = HashMap::new();
-            let fragment_type_mask = ctx
-                .fragment_map
-                .get(&fragment_id)
-                .unwrap()
-                .fragment_type_mask;
-            let injectable = TableFragments::is_injectable(fragment_type_mask);
 
             if let Some(actor_worker_maps) = fragment_actors_to_create.get(&fragment_id).cloned() {
                 for (actor_id, worker_id) in actor_worker_maps {
@@ -1431,7 +1425,6 @@ impl ScaleController {
                     upstream_dispatcher_mapping,
                     downstream_fragment_ids,
                     actor_splits,
-                    injectable,
                     newly_created_actors: vec![],
                 },
             );

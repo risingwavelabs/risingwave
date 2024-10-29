@@ -1136,6 +1136,22 @@ impl fmt::Display for ExplainType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ExplainFormat {
+    Text,
+    Json,
+}
+
+impl fmt::Display for ExplainFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExplainFormat::Text => f.write_str("TEXT"),
+            ExplainFormat::Json => f.write_str("JSON"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExplainOptions {
     /// Display additional information regarding the plan.
     pub verbose: bool,
@@ -1143,6 +1159,8 @@ pub struct ExplainOptions {
     pub trace: bool,
     // explain's plan type
     pub explain_type: ExplainType,
+    // explain's plan format
+    pub explain_format: ExplainFormat,
 }
 
 impl Default for ExplainOptions {
@@ -1151,6 +1169,7 @@ impl Default for ExplainOptions {
             verbose: false,
             trace: false,
             explain_type: ExplainType::Physical,
+            explain_format: ExplainFormat::Text,
         }
     }
 }
@@ -1170,6 +1189,9 @@ impl fmt::Display for ExplainOptions {
             }
             if self.explain_type == default.explain_type {
                 option_strs.push(self.explain_type.to_string());
+            }
+            if self.explain_format == default.explain_format {
+                option_strs.push(self.explain_format.to_string());
             }
             write!(f, "{}", option_strs.iter().format(","))
         }
@@ -1508,12 +1530,13 @@ pub enum Statement {
     CreateSchema {
         schema_name: ObjectName,
         if_not_exists: bool,
-        user_specified: Option<ObjectName>,
+        owner: Option<ObjectName>,
     },
     /// CREATE DATABASE
     CreateDatabase {
         db_name: ObjectName,
         if_not_exists: bool,
+        owner: Option<ObjectName>,
     },
     /// GRANT privileges ON objects TO grantees
     Grant {
@@ -1707,12 +1730,16 @@ impl fmt::Display for Statement {
             Statement::CreateDatabase {
                 db_name,
                 if_not_exists,
+                owner,
             } => {
                 write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
                     write!(f, " IF NOT EXISTS")?;
                 }
                 write!(f, " {}", db_name)?;
+                if let Some(owner) = owner {
+                    write!(f, " WITH OWNER = {}", owner)?;
+                }
                 Ok(())
             }
             Statement::CreateFunction {
@@ -2036,7 +2063,7 @@ impl fmt::Display for Statement {
             Statement::CreateSchema {
                 schema_name,
                 if_not_exists,
-                user_specified,
+                owner,
             } => {
                 write!(
                     f,
@@ -2044,7 +2071,7 @@ impl fmt::Display for Statement {
                     if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     name = schema_name
                 )?;
-                if let Some(user) = user_specified {
+                if let Some(user) = owner {
                     write!(f, " AUTHORIZATION {}", user)?;
                 }
                 Ok(())

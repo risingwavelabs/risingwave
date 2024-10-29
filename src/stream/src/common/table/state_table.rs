@@ -29,7 +29,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::{IsSingleton, VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -363,6 +363,7 @@ where
 
         let distribution =
             TableDistribution::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
+        assert_eq!(distribution.is_singleton(), table_catalog.is_singleton());
 
         let pk_data_types = pk_indices
             .iter()
@@ -643,16 +644,16 @@ where
     pub async fn get_encoded_row(&self, pk: impl Row) -> StreamExecutorResult<Option<Bytes>> {
         assert!(pk.len() <= self.pk_indices.len());
 
-        if self.prefix_hint_len != 0 {
-            debug_assert_eq!(self.prefix_hint_len, pk.len());
-        }
-
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode_by_pk(&pk));
 
         let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
             Some(serialized_pk.slice(VirtualNode::SIZE..))
         } else {
+            #[cfg(debug_assertions)]
+            if self.prefix_hint_len != 0 {
+                warn!("prefix_hint_len is not equal to pk.len(), may not be able to utilize bloom filter");
+            }
             None
         };
 

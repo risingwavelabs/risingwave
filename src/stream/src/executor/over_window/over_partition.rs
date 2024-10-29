@@ -28,14 +28,12 @@ use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{Datum, Sentinelled};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
-use risingwave_expr::window_function::{
-    create_window_state, RangeFrameBounds, RowsFrameBounds, StateKey, WindowFuncCall, WindowStates,
-};
+use risingwave_expr::window_function::{create_window_state, StateKey, WindowStates};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use static_assertions::const_assert;
 
-use super::general::RowConverter;
+use super::general::{Calls, RowConverter};
 use crate::common::table::state_table::StateTable;
 use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::over_window::frame_finder::*;
@@ -70,13 +68,13 @@ const MAGIC_CACHE_SIZE: usize = 1024;
 const MAGIC_JITTER_PREVENTION: usize = MAGIC_CACHE_SIZE / 8;
 
 pub(super) fn shrink_partition_cache(
-    this_partition_key: &OwnedRow,
+    deduped_part_key: &OwnedRow,
     range_cache: &mut PartitionCache,
     cache_policy: CachePolicy,
     recently_accessed_range: RangeInclusive<StateKey>,
 ) {
     tracing::trace!(
-        this_partition_key=?this_partition_key,
+        partition=?deduped_part_key,
         cache_policy=?cache_policy,
         recently_accessed_range=?recently_accessed_range,
         "find the range to retain in the range cache"
@@ -218,7 +216,7 @@ pub(super) fn shrink_partition_cache(
     };
 
     tracing::trace!(
-        this_partition_key=?this_partition_key,
+        partition=?deduped_part_key,
         retain_range=?(&start..=&end),
         "retain range in the range cache"
     );
@@ -247,8 +245,9 @@ pub(super) struct OverPartitionStats {
     pub right_miss_count: u64,
 
     // stats for window function state computation
+    pub accessed_entry_count: u64,
     pub compute_count: u64,
-    pub same_result_count: u64,
+    pub same_output_count: u64,
 }
 
 /// [`AffectedRange`] represents a range of keys that are affected by a delta.
@@ -289,16 +288,11 @@ impl<'a> AffectedRange<'a> {
 /// By putting this type inside `private` module, we can avoid misuse of the internal fields and
 /// methods.
 pub(super) struct OverPartition<'a, S: StateStore> {
-    this_partition_key: &'a OwnedRow,
+    deduped_part_key: &'a OwnedRow,
     range_cache: &'a mut PartitionCache,
     cache_policy: CachePolicy,
 
-    /// The `ROWS` frame that is the union of all `ROWS` frames of all window functions in this
-    /// over window executor.
-    super_rows_frame_bounds: RowsFrameBounds,
-    range_frames: Vec<&'a RangeFrameBounds>,
-    start_is_unbounded: bool,
-    end_is_unbounded: bool,
+    calls: &'a Calls,
     row_conv: RowConverter<'a>,
 
     stats: OverPartitionStats,
@@ -311,39 +305,18 @@ const MAGIC_BATCH_SIZE: usize = 512;
 impl<'a, S: StateStore> OverPartition<'a, S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        this_partition_key: &'a OwnedRow,
+        deduped_part_key: &'a OwnedRow,
         cache: &'a mut PartitionCache,
         cache_policy: CachePolicy,
-        calls: &'a [WindowFuncCall],
+        calls: &'a Calls,
         row_conv: RowConverter<'a>,
     ) -> Self {
-        let rows_frames = calls
-            .iter()
-            .filter_map(|call| call.frame.bounds.as_rows())
-            .collect::<Vec<_>>();
-        // TODO(rc): maybe should avoid repeated merging
-        let super_rows_frame_bounds = merge_rows_frames(&rows_frames);
-        let range_frames = calls
-            .iter()
-            .filter_map(|call| call.frame.bounds.as_range())
-            .collect::<Vec<_>>();
-
-        let start_is_unbounded = calls
-            .iter()
-            .any(|call| call.frame.bounds.start_is_unbounded());
-        let end_is_unbounded = calls
-            .iter()
-            .any(|call| call.frame.bounds.end_is_unbounded());
-
         Self {
-            this_partition_key,
+            deduped_part_key,
             range_cache: cache,
             cache_policy,
 
-            super_rows_frame_bounds,
-            range_frames,
-            start_is_unbounded,
-            end_is_unbounded,
+            calls,
             row_conv,
 
             stats: Default::default(),
@@ -417,24 +390,32 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     pub async fn build_changes(
         &mut self,
         table: &StateTable<S>,
-        calls: &[WindowFuncCall],
         mut delta: PartitionDelta,
     ) -> StreamExecutorResult<(
         BTreeMap<StateKey, Record<OwnedRow>>,
         Option<RangeInclusive<StateKey>>,
     )> {
+        let calls = self.calls;
         let input_schema_len = table.get_data_types().len() - calls.len();
-        let mut part_changes = BTreeMap::new();
-        let mut compute_count = 0;
-        let mut same_result_count = 0;
+        let numbering_only = calls.numbering_only;
+        let has_rank = calls.has_rank;
 
-        // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
-        // into the cache.
+        // return values
+        let mut part_changes = BTreeMap::new();
+        let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
+
+        // stats
+        let mut accessed_entry_count = 0;
+        let mut compute_count = 0;
+        let mut same_output_count = 0;
+
+        // Find affected ranges, this also ensures that all rows in the affected ranges are loaded into the cache.
         let (part_with_delta, affected_ranges) =
             self.find_affected_ranges(table, &mut delta).await?;
 
         let snapshot = part_with_delta.snapshot();
         let delta = part_with_delta.delta();
+        let last_delta_key = delta.last_key_value().map(|(k, _)| k.as_normal_expect());
 
         // Generate delete changes first, because deletes are skipped during iteration over
         // `part_with_delta` in the next step.
@@ -448,8 +429,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 );
             }
         }
-
-        let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
 
         for AffectedRange {
             first_frame_start,
@@ -465,6 +444,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             assert!(first_curr_key.is_normal());
             assert!(last_curr_key.is_normal());
             assert!(last_frame_end.is_normal());
+
+            let last_delta_key = last_delta_key.unwrap();
 
             if let Some(accessed_range) = accessed_range.as_mut() {
                 let min_start = first_frame_start
@@ -507,6 +488,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                                 .into(),
                         );
                     }
+                    accessed_entry_count += 1;
                     cursor.move_next();
 
                     key != last_frame_end
@@ -527,12 +509,28 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 let (key, row) = curr_key_cursor
                     .key_value()
                     .expect("cursor must be valid until `last_curr_key`");
-                let output = states.slide_no_evict_hint()?;
+                let mut should_continue = true;
 
+                let output = states.slide_no_evict_hint()?;
                 compute_count += 1;
+
                 let old_output = &row.as_inner()[input_schema_len..];
                 if !old_output.is_empty() && old_output == output {
-                    same_result_count += 1;
+                    same_output_count += 1;
+
+                    if numbering_only {
+                        if has_rank {
+                            // It's possible that an `Insert` doesn't affect it's ties but affects
+                            // all the following rows, so we need to check the `order_key`.
+                            if key.as_normal_expect().order_key > last_delta_key.order_key {
+                                // there won't be any more changes after this point, we can stop early
+                                should_continue = false;
+                            }
+                        } else if key.as_normal_expect() >= last_delta_key {
+                            // there won't be any more changes after this point, we can stop early
+                            should_continue = false;
+                        }
+                    }
                 }
 
                 let new_row = OwnedRow::new(
@@ -565,12 +563,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
                 curr_key_cursor.move_next();
 
-                key != last_curr_key
+                should_continue && key != last_curr_key
             } {}
         }
 
+        self.stats.accessed_entry_count += accessed_entry_count;
         self.stats.compute_count += compute_count;
-        self.stats.same_result_count += same_result_count;
+        self.stats.same_output_count += same_output_count;
 
         Ok((part_changes, accessed_range))
     }
@@ -618,18 +617,18 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         'a: 'delta,
         's: 'delta,
     {
-        self.ensure_delta_in_cache(table, delta).await?;
-        let delta = &*delta; // let's make it immutable
-
         if delta.is_empty() {
             return Ok((DeltaBTreeMap::new(self.range_cache.inner(), delta), vec![]));
         }
+
+        self.ensure_delta_in_cache(table, delta).await?;
+        let delta = &*delta; // let's make it immutable
 
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
 
         let range_frame_logical_curr =
-            calc_logical_curr_for_range_frames(&self.range_frames, delta_first, delta_last);
+            calc_logical_curr_for_range_frames(&self.calls.range_frames, delta_first, delta_last);
 
         loop {
             // TERMINATEABILITY: `extend_cache_leftward_by_n` and `extend_cache_rightward_by_n` keep
@@ -654,17 +653,17 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
             if need_extend_leftward {
                 self.stats.left_miss_count += 1;
-                tracing::trace!(partition=?self.this_partition_key, "partition cache left extension triggered");
+                tracing::trace!(partition=?self.deduped_part_key, "partition cache left extension triggered");
                 let left_most = self.cache_real_first_key().unwrap_or(delta_first).clone();
                 self.extend_cache_leftward_by_n(table, &left_most).await?;
             }
             if need_extend_rightward {
                 self.stats.right_miss_count += 1;
-                tracing::trace!(partition=?self.this_partition_key, "partition cache right extension triggered");
+                tracing::trace!(partition=?self.deduped_part_key, "partition cache right extension triggered");
                 let right_most = self.cache_real_last_key().unwrap_or(delta_last).clone();
                 self.extend_cache_rightward_by_n(table, &right_most).await?;
             }
-            tracing::trace!(partition=?self.this_partition_key, "partition cache extended");
+            tracing::trace!(partition=?self.deduped_part_key, "partition cache extended");
         }
     }
 
@@ -684,7 +683,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             // ensure everything is in the cache
             self.extend_cache_to_boundary(table).await?;
         } else {
-            // TODO(rc): later we should extend cache using `self.super_rows_frame_bounds` and
+            // TODO(rc): later we should extend cache using `self.calls.super_rows_frame_bounds` and
             // `range_frame_logical_curr` as hints.
 
             // ensure the cache covers all delta (if possible)
@@ -750,13 +749,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let first_key = part_with_delta.first_key().unwrap();
         let last_key = part_with_delta.last_key().unwrap();
 
-        let first_curr_key = if self.end_is_unbounded || delta_first_key == first_key {
+        let first_curr_key = if self.calls.end_is_unbounded || delta_first_key == first_key {
             // If the frame end is unbounded, or, the first key is in delta, then the frame corresponding
             // to the first key is always affected.
             first_key
         } else {
             let mut key = find_first_curr_for_rows_frame(
-                &self.super_rows_frame_bounds,
+                &self.calls.super_rows_frame_bounds,
                 part_with_delta,
                 delta_first_key,
             );
@@ -764,7 +763,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             if let Some((logical_first_curr, _)) = range_frame_logical_curr {
                 let logical_curr = logical_first_curr.as_normal_expect(); // otherwise should go `end_is_unbounded` branch
                 let new_key = find_left_for_range_frames(
-                    &self.range_frames,
+                    &self.calls.range_frames,
                     part_with_delta,
                     logical_curr,
                     cache_key_pk_len,
@@ -775,12 +774,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             key
         };
 
-        let last_curr_key = if self.start_is_unbounded || delta_last_key == last_key {
+        let last_curr_key = if self.calls.start_is_unbounded || delta_last_key == last_key {
             // similar to `first_curr_key`
             last_key
         } else {
             let mut key = find_last_curr_for_rows_frame(
-                &self.super_rows_frame_bounds,
+                &self.calls.super_rows_frame_bounds,
                 part_with_delta,
                 delta_last_key,
             );
@@ -788,7 +787,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             if let Some((_, logical_last_curr)) = range_frame_logical_curr {
                 let logical_curr = logical_last_curr.as_normal_expect(); // otherwise should go `start_is_unbounded` branch
                 let new_key = find_right_for_range_frames(
-                    &self.range_frames,
+                    &self.calls.range_frames,
                     part_with_delta,
                     logical_curr,
                     cache_key_pk_len,
@@ -829,18 +828,18 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
 
         let range_frame_logical_boundary = calc_logical_boundary_for_range_frames(
-            &self.range_frames,
+            &self.calls.range_frames,
             first_curr_key.as_normal_expect(),
             last_curr_key.as_normal_expect(),
         );
 
-        let first_frame_start = if self.start_is_unbounded || first_curr_key == first_key {
+        let first_frame_start = if self.calls.start_is_unbounded || first_curr_key == first_key {
             // If the frame start is unbounded, or, the first curr key is the first key, then the first key
             // always need to be included in the affected range.
             first_key
         } else {
             let mut key = find_frame_start_for_rows_frame(
-                &self.super_rows_frame_bounds,
+                &self.calls.super_rows_frame_bounds,
                 part_with_delta,
                 first_curr_key,
             );
@@ -848,7 +847,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             if let Some((logical_first_start, _)) = range_frame_logical_boundary.as_ref() {
                 let logical_boundary = logical_first_start.as_normal_expect(); // otherwise should go `end_is_unbounded` branch
                 let new_key = find_left_for_range_frames(
-                    &self.range_frames,
+                    &self.calls.range_frames,
                     part_with_delta,
                     logical_boundary,
                     cache_key_pk_len,
@@ -860,12 +859,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         };
         assert!(first_frame_start <= first_curr_key);
 
-        let last_frame_end = if self.end_is_unbounded || last_curr_key == last_key {
+        let last_frame_end = if self.calls.end_is_unbounded || last_curr_key == last_key {
             // similar to `first_frame_start`
             last_key
         } else {
             let mut key = find_frame_end_for_rows_frame(
-                &self.super_rows_frame_bounds,
+                &self.calls.super_rows_frame_bounds,
                 part_with_delta,
                 last_curr_key,
             );
@@ -873,7 +872,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             if let Some((_, logical_last_end)) = range_frame_logical_boundary.as_ref() {
                 let logical_boundary = logical_last_end.as_normal_expect(); // otherwise should go `end_is_unbounded` branch
                 let new_key = find_right_for_range_frames(
-                    &self.range_frames,
+                    &self.calls.range_frames,
                     part_with_delta,
                     logical_boundary,
                     cache_key_pk_len,
@@ -921,16 +920,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             return Ok(());
         }
 
-        tracing::trace!(partition=?self.this_partition_key, "loading the whole partition into cache");
+        tracing::trace!(partition=?self.deduped_part_key, "loading the whole partition into cache");
 
         let mut new_cache = PartitionCache::new(); // shouldn't use `new_empty_partition_cache` here because we don't want sentinels
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let table_iter = table
-            .iter_with_prefix(
-                self.this_partition_key,
-                sub_range,
-                PrefetchOptions::default(),
-            )
+            .iter_with_prefix(self.deduped_part_key, sub_range, PrefetchOptions::default())
             .await?;
 
         #[for_await]
@@ -965,7 +960,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         {
             // completely not overlapping, for the sake of simplicity, we re-init the cache
             tracing::debug!(
-                partition=?self.this_partition_key,
+                partition=?self.deduped_part_key,
                 cache_first=?cache_real_first_key,
                 cache_last=?cache_real_last_key,
                 range=?range,
@@ -981,7 +976,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Included(self.row_conv.state_key_to_table_sub_pk(range.end())?),
             );
             tracing::debug!(
-                partition=?self.this_partition_key,
+                partition=?self.deduped_part_key,
                 table_sub_range=?table_sub_range,
                 "cache is empty, just loading the given range"
             );
@@ -1003,7 +998,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 ),
             );
             tracing::trace!(
-                partition=?self.this_partition_key,
+                partition=?self.deduped_part_key,
                 table_sub_range=?table_sub_range,
                 "loading the left half of given range"
             );
@@ -1022,7 +1017,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Included(self.row_conv.state_key_to_table_sub_pk(range.end())?),
             );
             tracing::trace!(
-                partition=?self.this_partition_key,
+                partition=?self.deduped_part_key,
                 table_sub_range=?table_sub_range,
                 "loading the right half of given range"
             );
@@ -1135,7 +1130,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     ) -> StreamExecutorResult<()> {
         let stream = table
             .iter_with_prefix(
-                self.this_partition_key,
+                self.deduped_part_key,
                 &table_sub_range,
                 PrefetchOptions::default(),
             )
@@ -1167,7 +1162,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             );
             let rev_stream = table
                 .rev_iter_with_prefix(
-                    self.this_partition_key,
+                    self.deduped_part_key,
                     &sub_range,
                     PrefetchOptions::default(),
                 )
@@ -1211,7 +1206,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             );
             let stream = table
                 .iter_with_prefix(
-                    self.this_partition_key,
+                    self.deduped_part_key,
                     &sub_range,
                     PrefetchOptions::default(),
                 )

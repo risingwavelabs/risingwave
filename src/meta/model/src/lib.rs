@@ -36,6 +36,7 @@ pub mod database;
 pub mod fragment;
 pub mod function;
 pub mod hummock_epoch_to_version;
+pub mod hummock_gc_history;
 pub mod hummock_pinned_snapshot;
 pub mod hummock_pinned_version;
 pub mod hummock_sequence;

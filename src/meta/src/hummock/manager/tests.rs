@@ -1192,7 +1192,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize
     );
     assert_eq!(
@@ -1213,7 +1214,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
@@ -1242,7 +1244,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
@@ -1270,7 +1273,8 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(
         hummock_manager
             .extend_objects_to_delete_from_scan(&all_object_ids)
-            .await,
+            .await
+            .unwrap(),
         orphan_sst_num as usize + 3
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
@@ -1498,13 +1502,13 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
     assert_eq!(original_groups, vec![2, 3]);
 
     let err = hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(100, &[0], 0)
+        .move_state_tables_to_dedicated_compaction_group(100, &[0], None)
         .await
         .unwrap_err();
     assert_eq!("compaction group error: invalid group 100", err.to_string());
 
     let err = hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(2, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(2, &[100], None)
         .await
         .unwrap_err();
     assert_eq!(
@@ -1540,7 +1544,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
 
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let err = hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100, 101], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100, 101], None)
         .await
         .unwrap_err();
     assert_eq!(
@@ -1556,7 +1560,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
         .unwrap();
 
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100, 101], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100, 101], None)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1625,7 +1629,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_triv
 
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], None)
         .await
         .unwrap();
 
@@ -1727,7 +1731,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .unwrap();
 
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], None)
         .await
         .unwrap();
 
@@ -1899,7 +1903,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
     let base_level: usize = 6;
 
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(2, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(2, &[100], None)
         .await
         .unwrap();
 
@@ -2000,7 +2004,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         get_manual_compact_task(hummock_manager.clone(), compaction_group_id, 0).await;
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], None)
         .await
         .unwrap();
 
@@ -2095,7 +2099,7 @@ async fn test_move_tables_between_compaction_group() {
     assert!(sst_ids.contains(&14));
 
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(2, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(2, &[100], None)
         .await
         .unwrap();
     let compaction_group_id =
@@ -2234,7 +2238,7 @@ async fn test_partition_level() {
         .move_state_tables_to_dedicated_compaction_group(
             compaction_group_id,
             &[100],
-            env.opts.partition_vnode_count,
+            Some(env.opts.partition_vnode_count),
         )
         .await
         .unwrap();
@@ -2355,7 +2359,7 @@ async fn test_unregister_moved_table() {
 
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let new_compaction_group_id = hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], None)
         .await
         .unwrap()
         .0;
@@ -2483,7 +2487,7 @@ async fn test_merge_compaction_group_task_expired() {
 
     // will cancel the task
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], 0)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], None)
         .await
         .unwrap();
 
@@ -2526,9 +2530,15 @@ async fn test_merge_compaction_group_task_expired() {
         .unwrap()
         .unwrap();
 
+    let created_tables = HashSet::from_iter(vec![100, 101, 102]);
+
     // will cancel the task2
     hummock_manager
-        .merge_compaction_group(left_compaction_group_id, right_compaction_group_id)
+        .merge_compaction_group_for_test(
+            left_compaction_group_id,
+            right_compaction_group_id,
+            created_tables,
+        )
         .await
         .unwrap();
 

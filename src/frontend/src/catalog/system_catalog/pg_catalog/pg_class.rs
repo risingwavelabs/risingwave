@@ -27,6 +27,7 @@ use risingwave_frontend_macro::system_catalog;
         WHEN relation_type = 'view' THEN 'v'
         WHEN relation_type = 'materialized view' THEN 'm'
     END relkind,
+    0::int2 AS relpages,
     0 AS relam,
     0 AS reltablespace,
     ARRAY[]::varchar[] AS reloptions,
@@ -45,6 +46,7 @@ struct PgClass {
     // r = ordinary table, i = index, S = sequence, t = TOAST table, v = view, m = materialized view,
     // c = composite type, f = foreign table, p = partitioned table, I = partitioned index
     relkind: String,
+    relpages: i16,
     relam: i32,
     reltablespace: i32,
     reloptions: Vec<String>,
