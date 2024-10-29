@@ -521,18 +521,28 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 if let Some(ref mutation) = barrier.mutation.as_deref() {
                                     match mutation {
                                         Mutation::Pause => {
-                                            command_paused = true;
-                                            pause_reader!();
+                                            // pause_reader should not be invoked consecutively more than once.
+                                            if !command_paused {
+                                                pause_reader!();
+                                                command_paused = true;
+                                            } else {
+                                                tracing::warn!(command_paused, "unexpected pause");
+                                            }
                                         }
                                         Mutation::Resume => {
-                                            command_paused = false;
-                                            backfill_stream = select_with_strategy(
-                                                input.by_ref().map(Either::Left),
-                                                paused_reader
-                                                    .take()
-                                                    .expect("no paused reader to resume"),
-                                                select_strategy,
-                                            );
+                                            // pause_reader.take should not be invoked consecutively more than once.
+                                            if command_paused {
+                                                backfill_stream = select_with_strategy(
+                                                    input.by_ref().map(Either::Left),
+                                                    paused_reader
+                                                        .take()
+                                                        .expect("no paused reader to resume"),
+                                                    select_strategy,
+                                                );
+                                                command_paused = false;
+                                            } else {
+                                                tracing::warn!(command_paused, "unexpected resume");
+                                            }
                                         }
                                         Mutation::SourceChangeSplit(actor_splits) => {
                                             tracing::info!(
@@ -649,6 +659,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         let chunk = msg?;
 
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
+                            assert!(!command_paused, "command_paused should be false");
+                            // pause_reader should not be invoked consecutively more than once.
+                            if !self_paused {
+                                pause_reader!();
+                            } else {
+                                tracing::warn!(self_paused, "unexpected self pause");
+                            }
                             // Exceeds the max wait barrier time, the source will be paused.
                             // Currently we can guarantee the
                             // source is not paused since it received stream
@@ -659,7 +676,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 self.info.identity,
                                 last_barrier_time.elapsed()
                             );
-                            pause_reader!();
 
                             // Only update `max_wait_barrier_time_ms` to capture
                             // `barrier_interval_ms`
