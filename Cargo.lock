@@ -9770,7 +9770,7 @@ checksum = "658fa1faf7a4cc5f057c9ee5ef560f717ad9d8dc66d975267f709624d6e1ab88"
 [[package]]
 name = "quanta"
 version = "0.12.3"
-source = "git+https://github.com/tabVersion/quanta.git?rev=da62f4f04516fcfc72f686869026bad87b712f37#da62f4f04516fcfc72f686869026bad87b712f37"
+source = "git+https://github.com/tabVersion/quanta.git?rev=bb6c780894d06c0ec3f487d58c72920665b5cb0a#bb6c780894d06c0ec3f487d58c72920665b5cb0a"
 dependencies = [
  "crossbeam-utils",
  "libc",
