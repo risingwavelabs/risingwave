@@ -26,7 +26,6 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 #![feature(custom_test_frameworks)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
-#![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(const_option)]
 #![feature(anonymous_lifetime_in_impl_trait)]

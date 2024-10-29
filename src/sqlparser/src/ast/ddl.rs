@@ -731,7 +731,7 @@ impl fmt::Display for ColumnOption {
 
 fn display_constraint_name(name: &'_ Option<Ident>) -> impl fmt::Display + '_ {
     struct ConstraintName<'a>(&'a Option<Ident>);
-    impl<'a> fmt::Display for ConstraintName<'a> {
+    impl fmt::Display for ConstraintName<'_> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             if let Some(name) = self.0 {
                 write!(f, "CONSTRAINT {} ", name)?;

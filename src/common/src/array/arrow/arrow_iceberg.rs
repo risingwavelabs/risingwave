@@ -138,8 +138,9 @@ impl ToArrow for IcebergArrowConvert {
 impl FromArrow for IcebergArrowConvert {}
 
 /// Iceberg sink with `create_table_if_not_exists` option will use this struct to convert the
-/// iceberg data type to arrow data type. Specifically, it will add the field id to the
-/// arrow field metadata, because iceberg-rust and icelake need the field id to be set.
+/// iceberg data type to arrow data type. 
+/// 
+/// Specifically, it will add the field id to the arrow field metadata, because iceberg-rust and icelake need the field id to be set.
 ///
 /// Note: this is different from [`IcebergArrowConvert`], which is used to read from/write to
 /// an _existing_ iceberg table. In that case, we just need to make sure the data is compatible to the existing schema.
