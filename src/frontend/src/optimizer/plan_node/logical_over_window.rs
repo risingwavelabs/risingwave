@@ -278,7 +278,7 @@ impl LogicalOverWindow {
         let rewritten_selected_items = over_window_builder.rewrite_selected_items(select_exprs)?;
 
         for window_func in &window_functions {
-            if window_func.kind.is_rank() && window_func.order_by.sort_exprs.is_empty() {
+            if window_func.kind.is_numbering() && window_func.order_by.sort_exprs.is_empty() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "window rank function without order by: {:?}",
                     window_func

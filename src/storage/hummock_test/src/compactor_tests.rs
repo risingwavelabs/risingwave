@@ -2076,7 +2076,11 @@ pub(crate) mod tests {
         }
 
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2116,14 +2120,20 @@ pub(crate) mod tests {
         )
         .await;
 
+        let created_tables = HashSet::from_iter(vec![table_id_1.table_id(), table_id_2.table_id()]);
+
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
 
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2167,7 +2177,7 @@ pub(crate) mod tests {
 
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
 
@@ -2184,7 +2194,11 @@ pub(crate) mod tests {
 
         // try split
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2207,7 +2221,7 @@ pub(crate) mod tests {
         epoch += millisec_interval_epoch;
 
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
 
@@ -2303,7 +2317,11 @@ pub(crate) mod tests {
 
         // try split
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2345,7 +2363,7 @@ pub(crate) mod tests {
 
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
     }

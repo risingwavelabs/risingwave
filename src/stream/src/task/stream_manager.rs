@@ -321,6 +321,7 @@ impl StreamActorManager {
         upstream_node: &StreamNode,
         actor_context: &ActorContextRef,
         shared_context: &Arc<SharedContext>,
+        chunk_size: usize,
     ) -> StreamResult<MergeExecutorInput> {
         let info = Self::get_executor_info(
             upstream_node,
@@ -337,6 +338,7 @@ impl StreamActorManager {
             actor_context.clone(),
             info,
             upstream_merge,
+            chunk_size,
         )
     }
 
@@ -352,8 +354,13 @@ impl StreamActorManager {
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
-        let upstream =
-            self.create_snapshot_backfill_input(upstream_node, actor_context, shared_context)?;
+        let chunk_size = env.config().developer.chunk_size;
+        let upstream = self.create_snapshot_backfill_input(
+            upstream_node,
+            actor_context,
+            shared_context,
+            chunk_size,
+        )?;
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
 
@@ -387,7 +394,7 @@ impl StreamActorManager {
             output_indices,
             actor_context.clone(),
             progress,
-            env.config().developer.chunk_size,
+            chunk_size,
             node.rate_limit.map(|x| x as _),
             barrier_rx,
             self.streaming_metrics.clone(),
@@ -404,10 +411,7 @@ impl StreamActorManager {
             troubled_info.identity = format!("{} (troubled)", info.identity);
             Ok((
                 info,
-                TroublemakerExecutor::new(
-                    (troubled_info, executor).into(),
-                    env.config().developer.chunk_size,
-                ),
+                TroublemakerExecutor::new((troubled_info, executor).into(), chunk_size),
             )
                 .into())
         } else {
