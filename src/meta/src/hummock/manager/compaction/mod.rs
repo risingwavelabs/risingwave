@@ -41,6 +41,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -87,6 +88,7 @@ use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{
     build_compact_task_level_type_metrics_label, trigger_local_table_stat, trigger_sst_stat,
 };
+use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
 use crate::manager::META_NODE_ID;
@@ -1157,6 +1159,11 @@ impl HummockManager {
                     compact_status.report_compact_task(&compact_task);
                 }
                 None => {
+                    // When the group_id is not found in the compaction_statuses, it means the group has been removed.
+                    // The task is invalid and should be canceled.
+                    // e.g.
+                    // 1. The group is removed by the user unregistering the tables
+                    // 2. The group is removed by the group scheduling algorithm
                     compact_task.task_status = TaskStatus::InvalidGroupCanceled;
                 }
             }
@@ -1171,6 +1178,7 @@ impl HummockManager {
                 .iter()
                 .map(|level| level.level_idx)
                 .collect();
+
             let is_success = if let TaskStatus::Success = compact_task.task_status {
                 if let Err(e) = self
                     .report_compaction_sanity_check(&task.object_timestamps)
@@ -1197,6 +1205,7 @@ impl HummockManager {
                             compact_task_to_string(&compact_task)
                         );
                     }
+
                     input_exist
                 }
             } else {
@@ -1479,7 +1488,7 @@ impl HummockManager {
                         .table_vnode_partition
                         .insert(table_id, default_partition_count);
                 } else if (compact_table_size > compact_task_table_size_partition_threshold_low
-                    || (write_throughput > self.env.opts.table_write_throughput_threshold
+                    || (write_throughput > self.env.opts.table_high_write_throughput_threshold
                         && compact_table_size > compaction_config.target_file_size_base))
                     && hybrid_vnode_count > 0
                 {
@@ -1659,4 +1668,12 @@ impl Compaction {
             })
             .collect()
     }
+}
+
+#[derive(Clone, Default)]
+pub struct CompactionGroupStatistic {
+    pub group_id: CompactionGroupId,
+    pub group_size: u64,
+    pub table_statistic: BTreeMap<StateTableId, u64>,
+    pub compaction_group_config: CompactionGroup,
 }

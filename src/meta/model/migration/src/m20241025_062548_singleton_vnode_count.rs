@@ -12,8 +12,16 @@ impl MigrationTrait for Migration {
                 UpdateStatement::new()
                     .table(Table::Table)
                     .values([(Table::VnodeCount, Expr::value(1))])
-                    .and_where(Expr::col(Table::DistributionKey).eq(Expr::value("[]")))
-                    .and_where(Expr::col(Table::DistKeyInPk).eq(Expr::value("[]")))
+                    .and_where(
+                        Expr::col(Table::DistributionKey)
+                            .cast_as(Alias::new("varchar"))
+                            .eq(Expr::value("[]")),
+                    )
+                    .and_where(
+                        Expr::col(Table::DistKeyInPk)
+                            .cast_as(Alias::new("varchar"))
+                            .eq(Expr::value("[]")),
+                    )
                     .and_where(Expr::col(Table::VnodeColIndex).is_null())
                     .to_owned(),
             )
