@@ -584,16 +584,12 @@ mod tests {
 
         {
             // Test different table vnode count
-
-            let full_key_filter_key_extractor =
-                Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
-
             let table_partition_vnode =
                 BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
 
             let table_id_to_vnode = HashMap::from_iter(vec![(1, 64), (2, 128), (3, 256)]);
             let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
-                full_key_filter_key_extractor,
+                FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
                 table_id_to_vnode,
             ));
 

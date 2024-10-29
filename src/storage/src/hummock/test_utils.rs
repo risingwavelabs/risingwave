@@ -244,7 +244,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         VirtualNode::COUNT_FOR_TEST,
     )]);
     let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
-        Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+        FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
         table_id_to_vnode,
     ));
 

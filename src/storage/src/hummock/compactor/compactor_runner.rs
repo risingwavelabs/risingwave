@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::compact_task::CompactTask;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -40,7 +41,7 @@ use tokio::sync::oneshot::Receiver;
 use super::iterator::MonitoredCompactorIterator;
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
-use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
+use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits_for_task,
     metrics_report_for_task, optimize_by_copy_block,
@@ -302,7 +303,7 @@ pub fn partition_overlapping_sstable_infos(
 
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
-pub async fn compact(
+pub async fn compact_with_agent(
     compactor_context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
@@ -556,6 +557,93 @@ pub async fn compact(
         (compact_task, table_stats, object_timestamps),
         memory_detector,
     )
+}
+
+/// Handles a compaction task and reports its status to hummock manager.
+/// Always return `Ok` and let hummock manager handle errors.
+pub async fn compact(
+    compactor_context: CompactorContext,
+    compact_task: CompactTask,
+    shutdown_rx: Receiver<()>,
+    object_id_getter: Box<dyn GetObjectId>,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
+) -> (
+    (
+        CompactTask,
+        HashMap<u32, TableStats>,
+        HashMap<HummockSstableObjectId, u64>,
+    ),
+    Option<MemoryTracker>,
+) {
+    let existing_table_ids: HashSet<u32> =
+        HashSet::from_iter(compact_task.existing_table_ids.clone());
+    let compact_table_ids = Vec::from_iter(
+        compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|sst| sst.table_ids.clone())
+            .filter(|table_id| existing_table_ids.contains(table_id))
+            .sorted()
+            .unique(),
+    );
+
+    let compaction_catalog_agent_ref = match compaction_catalog_manager_ref
+        .acquire(compact_table_ids.clone())
+        .await
+    {
+        Ok(compaction_catalog_agent_ref) => {
+            let acquire_table_ids: HashSet<StateTableId> =
+                compaction_catalog_agent_ref.table_ids().collect();
+            if acquire_table_ids.len() != compact_table_ids.len() {
+                let diff = compact_table_ids
+                    .into_iter()
+                    .collect::<HashSet<_>>()
+                    .symmetric_difference(&acquire_table_ids)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                tracing::warn!(
+                    dif= ?diff,
+                    "Some table ids are not acquired."
+                );
+                return (
+                    compact_done(
+                        compact_task,
+                        compactor_context.clone(),
+                        vec![],
+                        TaskStatus::ExecuteFailed,
+                    ),
+                    None,
+                );
+            }
+
+            compaction_catalog_agent_ref
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e.as_report(),
+                "Failed to acquire compaction catalog agent"
+            );
+            return (
+                compact_done(
+                    compact_task,
+                    compactor_context.clone(),
+                    vec![],
+                    TaskStatus::ExecuteFailed,
+                ),
+                None,
+            );
+        }
+    };
+
+    compact_with_agent(
+        compactor_context,
+        compact_task,
+        shutdown_rx,
+        object_id_getter,
+        compaction_catalog_agent_ref,
+    )
+    .await
 }
 
 /// Fills in the compact task and tries to report the task result to meta node.

@@ -57,7 +57,9 @@ pub(crate) mod tests {
         CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
         FixedLengthFilterKeyExtractor, MultiFilterKeyExtractor,
     };
-    use risingwave_storage::hummock::compactor::compactor_runner::{compact, CompactorRunner};
+    use risingwave_storage::hummock::compactor::compactor_runner::{
+        compact_with_agent, CompactorRunner,
+    };
     use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
     use risingwave_storage::hummock::compactor::{
         CompactionExecutor, CompactorContext, DummyCompactionFilter, TaskProgress,
@@ -285,7 +287,7 @@ pub(crate) mod tests {
         {
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats, object_timestamps), _) = compact(
+            let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
@@ -605,7 +607,7 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats, object_timestamps), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -801,7 +803,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats, object_timestamps), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -910,19 +912,15 @@ pub(crate) mod tests {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         multi_filter_key_extractor.register(
             existing_table_id,
-            Arc::new(FilterKeyExtractorImpl::FixedLength(
-                FixedLengthFilterKeyExtractor::new(TABLE_PREFIX_LEN + key_prefix.len()),
+            FilterKeyExtractorImpl::FixedLength(FixedLengthFilterKeyExtractor::new(
+                TABLE_PREFIX_LEN + key_prefix.len(),
             )),
         );
 
         let table_id_to_vnode =
             HashMap::from_iter([(existing_table_id, VirtualNode::COUNT_FOR_TEST)]);
-
-        let filter_key_extractor =
-            Arc::new(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor));
-
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
-            filter_key_extractor,
+            FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
         ));
 
@@ -1002,7 +1000,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats, object_timestamps), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1187,7 +1185,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats, object_timestamps), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -2013,7 +2011,7 @@ pub(crate) mod tests {
 
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats, object_timestamps), _) = compact(
+            let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
                 compact_ctx,
                 compact_task.clone(),
                 rx,
@@ -2238,7 +2236,7 @@ pub(crate) mod tests {
 
                 // 3. compact
                 let (_tx, rx) = tokio::sync::oneshot::channel();
-                let ((result_task, task_stats, object_timestamps), _) = compact(
+                let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
                     compact_ctx.clone(),
                     compact_task.clone(),
                     rx,

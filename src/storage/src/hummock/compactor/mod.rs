@@ -15,9 +15,7 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
-use itertools::Itertools;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_pb::compactor::{dispatch_compaction_task_request, DispatchCompactionTaskRequest};
 use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
@@ -36,7 +34,7 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -518,54 +516,15 @@ pub fn start_compactor(
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
-                                    let existing_table_ids: HashSet<u32> = HashSet::from_iter(compact_task.existing_table_ids.clone());
-                                    let compact_table_ids = Vec::from_iter(
-                                        compact_task
-                                            .input_ssts
-                                            .iter()
-                                            .flat_map(|level| level.table_infos.iter())
-                                            .flat_map(|sst| sst.table_ids.clone())
-                                            .filter(|table_id| existing_table_ids.contains(table_id))
-                                            .sorted()
-                                            .unique(),
-                                    );
 
-                                     let ((compact_task, table_stats, object_timestamps), _memory_tracker) = match compaction_catalog_manager_ref.acquire(compact_table_ids.clone()).await {
-                                        Ok(compaction_catalog_agent_ref) => {
-                                            let acquire_table_ids: HashSet<StateTableId> = compaction_catalog_agent_ref.table_ids().collect();
-                                            if acquire_table_ids.len() != compact_table_ids.len() {
-                                                let diff = compact_table_ids.into_iter().collect::<HashSet<_>>()
-                                                    .symmetric_difference(&acquire_table_ids)
-                                                    .cloned()
-                                                    .collect::<Vec<_>>();
-                                                tracing::warn!(
-                                                    dif= ?diff,
-                                                    "Some table ids are not acquired."
-                                                );
-                                                let task_status = TaskStatus::ExecuteFailed;
-                                                (
-                                                    compact_done(compact_task, context.clone(), vec![], task_status),
-                                                    None,
-                                                )
-                                            } else {
-                                                compactor_runner::compact(
-                                                    context.clone(),
-                                                    compact_task,
-                                                    rx,
-                                                    Box::new(sstable_object_id_manager.clone()),
-                                                    compaction_catalog_agent_ref,
-                                                ).await
-                                            }
-                                        },
-                                        Err(e) => {
-                                            tracing::error!(error = %e.as_report(), "Failed to acquire catalog");
-                                            let task_status = TaskStatus::ExecuteFailed;
-                                            (
-                                                compact_done(compact_task, context.clone(), vec![], task_status),
-                                                None,
-                                            )
-                                        }
-                                    };
+                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact(
+                                        context.clone(),
+                                        compact_task,
+                                        rx,
+                                        Box::new(sstable_object_id_manager.clone()),
+                                        compaction_catalog_manager_ref.clone(),
+                                    )
+                                    .await;
 
                                     shutdown.lock().unwrap().remove(&task_id);
                                     running_task_parallelism.fetch_sub(parallelism as u32, Ordering::SeqCst);
@@ -764,7 +723,7 @@ pub fn start_shared_compactor(
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
                                     let compaction_catalog_agent_ref = CompactionCatalogManager::build_compaction_catalog_agent(table_id_to_catalog);
-                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact(
+                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact_with_agent(
                                         context.clone(),
                                         compact_task,
                                         rx,

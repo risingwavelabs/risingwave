@@ -32,7 +32,7 @@ use risingwave_meta::hummock::test_utils::{setup_compute_env, setup_compute_env_
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgentRef;
-use risingwave_storage::hummock::compactor::compactor_runner::compact;
+use risingwave_storage::hummock::compactor::compactor_runner::compact_with_agent;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions, StateStoreRead};
@@ -201,7 +201,7 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let ((result_task, task_stats, object_timestamps), _) = compact(
+    let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
         compact_ctx,
         compact_task.clone(),
         rx,

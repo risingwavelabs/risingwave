@@ -185,11 +185,11 @@ impl SchemaFilterKeyExtractor {
 
 #[derive(Default)]
 pub struct MultiFilterKeyExtractor {
-    id_to_filter_key_extractor: HashMap<u32, Arc<FilterKeyExtractorImpl>>,
+    id_to_filter_key_extractor: HashMap<u32, FilterKeyExtractorImpl>,
 }
 
 impl MultiFilterKeyExtractor {
-    pub fn register(&mut self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
+    pub fn register(&mut self, table_id: u32, filter_key_extractor: FilterKeyExtractorImpl) {
         self.id_to_filter_key_extractor
             .insert(table_id, filter_key_extractor);
     }
@@ -320,7 +320,7 @@ impl CompactionCatalogManager {
                 Some(table_catalog) => {
                     multi_filter_key_extractor.register(
                         *table_id,
-                        Arc::new(FilterKeyExtractorImpl::from_table(table_catalog.as_ref())),
+                        FilterKeyExtractorImpl::from_table(table_catalog.as_ref()),
                     );
                     table_id_to_vnode.insert(*table_id, table_catalog.vnode_count());
                     false
@@ -346,7 +346,7 @@ impl CompactionCatalogManager {
             for table_id in table_ids {
                 if let Some(table) = state_tables.remove(&table_id) {
                     let table_id = table.id;
-                    let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(&table));
+                    let key_extractor = FilterKeyExtractorImpl::from_table(&table);
                     let vnode = table.vnode_count();
                     guard.insert(table_id, Arc::new(table));
                     multi_filter_key_extractor.register(table_id, key_extractor);
@@ -356,7 +356,7 @@ impl CompactionCatalogManager {
         }
 
         Ok(Arc::new(CompactionCatalogAgent::new(
-            Arc::new(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor)),
+            FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
         )))
     }
@@ -370,13 +370,13 @@ impl CompactionCatalogManager {
         for (table_id, table_catalog) in table_catalogs {
             multi_filter_key_extractor.register(
                 table_id,
-                Arc::new(FilterKeyExtractorImpl::from_table(table_catalog.as_ref())),
+                FilterKeyExtractorImpl::from_table(table_catalog.as_ref()),
             );
             table_id_to_vnode.insert(table_id, table_catalog.vnode_count());
         }
 
         Arc::new(CompactionCatalogAgent::new(
-            Arc::new(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor)),
+            FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
         ))
     }
@@ -386,13 +386,13 @@ impl CompactionCatalogManager {
 /// The `CompactionCatalogAgent` belongs to a compaction task call, which we will build from the `table_ids` contained in a compact task and use it during the compaction.
 /// The `CompactionCatalogAgent` can act as a agent for the `CompactionCatalogManager`, providing `extract` and `vnode_count` capabilities.
 pub struct CompactionCatalogAgent {
-    filter_key_extractor_manager: Arc<FilterKeyExtractorImpl>,
+    filter_key_extractor_manager: FilterKeyExtractorImpl,
     table_id_to_vnode: HashMap<StateTableId, usize>,
 }
 
 impl CompactionCatalogAgent {
     pub fn new(
-        filter_key_extractor_manager: Arc<FilterKeyExtractorImpl>,
+        filter_key_extractor_manager: FilterKeyExtractorImpl,
         table_id_to_vnode: HashMap<StateTableId, usize>,
     ) -> Self {
         Self {
@@ -403,16 +403,14 @@ impl CompactionCatalogAgent {
 
     pub fn dummy() -> Self {
         Self {
-            filter_key_extractor_manager: Arc::new(FilterKeyExtractorImpl::Dummy(
-                DummyFilterKeyExtractor,
-            )),
+            filter_key_extractor_manager: FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor),
             table_id_to_vnode: Default::default(),
         }
     }
 
     pub fn for_test(table_ids: Vec<StateTableId>) -> Arc<Self> {
         let full_key_filter_key_extractor =
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
+            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor);
 
         let table_id_to_vnode = table_ids
             .into_iter()
@@ -456,7 +454,6 @@ pub type CompactionCatalogAgentRef = Arc<CompactionCatalogAgent>;
 #[cfg(test)]
 mod tests {
     use std::mem;
-    use std::sync::Arc;
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
@@ -615,7 +612,7 @@ mod tests {
             let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
             multi_filter_key_extractor.register(
                 1,
-                Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
+                FilterKeyExtractorImpl::Schema(schema_filter_key_extractor),
             );
             let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
             let schema = vec![DataType::Int64, DataType::Varchar];
@@ -652,7 +649,7 @@ mod tests {
             let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
             multi_filter_key_extractor.register(
                 2,
-                Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
+                FilterKeyExtractorImpl::Schema(schema_filter_key_extractor),
             );
             let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
             let schema = vec![DataType::Int64, DataType::Varchar];

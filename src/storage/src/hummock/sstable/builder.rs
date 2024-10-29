@@ -138,7 +138,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         table_id_to_vnode: HashMap<StateTableId, usize>,
     ) -> Self {
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
             table_id_to_vnode,
         ));
 
@@ -835,18 +835,12 @@ pub(super) mod tests {
             .clone()
             .create_sst_writer(object_id, writer_opts);
         let mut filter = MultiFilterKeyExtractor::default();
-        filter.register(
-            1,
-            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
-        );
+        filter.register(1, FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor));
         filter.register(
             2,
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
         );
-        filter.register(
-            3,
-            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
-        );
+        filter.register(3, FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor));
 
         let table_id_to_vnode = HashMap::from_iter(vec![
             (1, VirtualNode::COUNT_FOR_TEST),
@@ -855,7 +849,7 @@ pub(super) mod tests {
         ]);
 
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
-            Arc::new(FilterKeyExtractorImpl::Multi(filter)),
+            FilterKeyExtractorImpl::Multi(filter),
             table_id_to_vnode,
         ));
 
