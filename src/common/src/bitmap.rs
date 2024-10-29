@@ -325,7 +325,7 @@ impl Bitmap {
 
     /// Returns the length of vector to store `num_bits` bits.
     fn vec_len(num_bits: usize) -> usize {
-        (num_bits + BITS - 1) / BITS
+        num_bits.div_ceil(BITS)
     }
 
     /// Returns the number of valid bits in the bitmap,
