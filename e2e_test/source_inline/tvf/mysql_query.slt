@@ -8,7 +8,7 @@ mysql -e "
 USE tvf;
 CREATE TABLE test (
     id bigint primary key,
-    v1 bit,
+    v1 bool,
     v2 smallint,
     v3 integer,
     v4 bigint,
@@ -21,7 +21,7 @@ CREATE TABLE test (
     v11 varchar(255)
 );
 INSERT INTO test SELECT
-  1 as id,
+  true as id,
   1 as v1,
   1 as v2,
   1 as v3,
