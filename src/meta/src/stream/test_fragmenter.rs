@@ -21,7 +21,9 @@ use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::worker_node::Property;
-use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode};
+use risingwave_pb::common::{
+    PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode, WorkerType,
+};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::ddl_service::TableJobType;
@@ -431,6 +433,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
                 parallelism: 8,
                 ..Default::default()
             }),
+            r#type: WorkerType::ComputeNode.into(),
             ..Default::default()
         },
     ))

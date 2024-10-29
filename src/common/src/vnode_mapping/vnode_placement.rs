@@ -206,7 +206,7 @@ mod tests {
 
     use risingwave_common::hash::WorkerSlotMapping;
     use risingwave_pb::common::worker_node::Property;
-    use risingwave_pb::common::WorkerNode;
+    use risingwave_pb::common::{WorkerNode, WorkerType};
 
     use crate::hash::VirtualNode;
 
@@ -252,6 +252,7 @@ mod tests {
         property.parallelism = 1;
         let worker_1 = WorkerNode {
             id: 1,
+            r#type: WorkerType::ComputeNode.into(),
             property: Some(property),
             ..Default::default()
         };
@@ -269,6 +270,7 @@ mod tests {
         let worker_2 = WorkerNode {
             id: 2,
             property: Some(property),
+            r#type: WorkerType::ComputeNode.into(),
             ..Default::default()
         };
 
@@ -288,6 +290,7 @@ mod tests {
         property.parallelism = 60;
         let worker_3 = WorkerNode {
             id: 3,
+            r#type: WorkerType::ComputeNode.into(),
             property: Some(property),
             ..Default::default()
         };
