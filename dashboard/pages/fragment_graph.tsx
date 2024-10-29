@@ -50,7 +50,6 @@ import {
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
 import {
-  formatParallelism,
   getFragmentsByJobId,
   getRelationIdInfos,
   getStreamingJobs,
@@ -460,19 +459,21 @@ export default function Streaming() {
                   <Tbody>
                     <Tr>
                       <Td fontWeight="medium">Type</Td>
-                      <Td isNumeric>{job.objType}</Td>
+                      <Td isNumeric>{job.typeDisplay()}</Td>
                     </Tr>
                     <Tr>
                       <Td fontWeight="medium">Status</Td>
                       <Td isNumeric>{job.jobStatus}</Td>
                     </Tr>
                     <Tr>
-                      <Td fontWeight="medium">Max Parallelism</Td>
-                      <Td isNumeric>{job.maxParallelism}</Td>
+                      <Td fontWeight="medium">Parallelism</Td>
+                      <Td isNumeric>{job.parallelismDisplay()}</Td>
                     </Tr>
                     <Tr>
-                      <Td fontWeight="medium">Parallelism</Td>
-                      <Td isNumeric>{formatParallelism(job.parallelism)}</Td>
+                      <Td fontWeight="medium" paddingEnd={0}>
+                        Max Parallelism
+                      </Td>
+                      <Td isNumeric>{job.maxParallelism}</Td>
                     </Tr>
                   </Tbody>
                 </Table>

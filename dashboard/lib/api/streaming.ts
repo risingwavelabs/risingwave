@@ -15,6 +15,7 @@
  *
  */
 
+import { plainToInstance } from "class-transformer"
 import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import {
@@ -67,24 +68,36 @@ export interface Relation {
   databaseName?: string
 }
 
-export interface StreamingJobInfo {
-  jobId: number
-  objType: string
-  name: string
-  jobStatus: string
-  parallelism: any
-  maxParallelism: number
-}
+export class StreamingJobInfo {
+  jobId!: number
+  objType!: string
+  name!: string
+  jobStatus!: string
+  parallelism!: any
+  maxParallelism!: number
 
-export function formatParallelism(parallelism: any) {
-  if (typeof parallelism === "string") {
-    return parallelism
-  } else if (typeof parallelism === "object") {
-    let key = Object.keys(parallelism)[0]
-    let value = parallelism[key]
-    return `${key} (${value})`
-  } else {
-    return JSON.stringify(parallelism)
+  parallelismDisplay() {
+    const parallelism = this.parallelism
+    if (typeof parallelism === "string") {
+      // `Adaptive`
+      return parallelism
+    } else if (typeof parallelism === "object") {
+      // `Fixed (64)`
+      let key = Object.keys(parallelism)[0]
+      let value = parallelism[key]
+      return `${key} (${value})`
+    } else {
+      // fallback
+      return JSON.stringify(parallelism)
+    }
+  }
+
+  typeDisplay() {
+    if (this.objType == "Table") {
+      return "Table / MV"
+    } else {
+      return this.objType
+    }
   }
 }
 
@@ -117,7 +130,10 @@ export function relationIsStreamingJob(x: Relation): x is StreamingJob {
 }
 
 export async function getStreamingJobs() {
-  let jobs: StreamingJobInfo[] = await api.get("/streaming_jobs")
+  let jobs = plainToInstance(
+    StreamingJobInfo,
+    (await api.get("/streaming_jobs")) as any[]
+  )
   jobs = sortBy(jobs, (x) => x.jobId)
   return jobs
 }
